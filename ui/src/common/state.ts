@@ -91,7 +91,9 @@ export enum TrackKindPriority {
   'MAIN_THREAD' = 0,
   'RENDER_THREAD' = 1,
   'GPU_COMPLETION' = 2,
-  'ORDINARY' = 3
+  'CHROME_IO_THREAD' = 3,
+  'CHROME_COMPOSITOR' = 4,
+  'ORDINARY' = 5
 }
 
 export type FlamegraphStateViewingOption =
@@ -512,7 +514,8 @@ export function isAdbTarget(target: RecordingTarget):
 }
 
 export function hasActiveProbes(config: RecordConfig) {
-  const fieldsWithEmptyResult = new Set<string>(['hpBlockClient']);
+  const fieldsWithEmptyResult =
+      new Set<string>(['hpBlockClient', 'allAtraceApps']);
   let key: keyof RecordConfig;
   for (key in config) {
     if (typeof (config[key]) === 'boolean' && config[key] === true &&
