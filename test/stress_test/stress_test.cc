@@ -178,8 +178,7 @@ void TestHarness::RunConfig(const char* cfg_name,
   traced.args.env = env_;
   if (!verbose) {
     traced.args.out_fd = OpenLogFile(result_dir + "/traced.log");
-    traced.args.stderr_mode = traced.args.stdout_mode =
-        base::Subprocess::OutputMode::kFd;
+    traced.args.stderr_mode = traced.args.stdout_mode = base::Subprocess::kFd;
   }
   traced.Start();
   g_sig->pids_to_kill.emplace_back(traced.pid());
@@ -196,7 +195,7 @@ void TestHarness::RunConfig(const char* cfg_name,
       producer.args.out_fd =
           OpenLogFile(result_dir + "/producer." + std::to_string(i) + ".log");
       producer.args.stderr_mode = producer.args.stdout_mode =
-          base::Subprocess::OutputMode::kFd;
+          base::Subprocess::kFd;
     }
     producer.args.env = env_;
     producer.Start();
@@ -214,7 +213,7 @@ void TestHarness::RunConfig(const char* cfg_name,
   if (!verbose) {
     consumer.args.out_fd = OpenLogFile(result_dir + "/perfetto.log");
     consumer.args.stderr_mode = consumer.args.stdout_mode =
-        base::Subprocess::OutputMode::kFd;
+        base::Subprocess::kFd;
   }
   remove(trace_file_path.c_str());
   consumer.Start();

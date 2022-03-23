@@ -21,7 +21,8 @@ action_foreach("configs") {
   script = "../../tools/protoc_helper.py"
 
   deps = [
-    "../../protos/perfetto/trace:non_minimal_source_set",
+    "../../protos/perfetto/config:merged_config",
+    "../../protos/perfetto/trace:merged_trace",
     protoc_target,
   ]
 

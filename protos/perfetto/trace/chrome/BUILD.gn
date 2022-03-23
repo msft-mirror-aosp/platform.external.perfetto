@@ -22,7 +22,7 @@ perfetto_proto_library("@TYPE@") {
   ]
 }
 
-perfetto_proto_library("minimal_complete_@TYPE@") {
+perfetto_proto_library("minimal_complete_lite") {
   proto_generators = [ "lite" ]
   deps = [
     ":@TYPE@",

@@ -1,5 +1,3 @@
-camera/index
-cros/index
 chrome/index
 dynamic/index
 fuchsia/index
@@ -14,6 +12,3 @@ span_join/index
 startup/index
 tables/index
 track_event/index
-network/index
-performance/index
-io/index
