@@ -45,28 +45,17 @@ class Hash {
   void Update(const char* data, size_t size) {
     for (size_t i = 0; i < size; i++) {
       result_ ^= static_cast<uint8_t>(data[i]);
-      // Note: Arithmetic overflow of unsigned integers is well defined in C++
-      // standard unlike signed integers.
-      // https://stackoverflow.com/a/41280273
       result_ *= kFnv1a64Prime;
     }
   }
 
-  uint64_t digest() const { return result_; }
+  uint64_t digest() { return result_; }
 
  private:
   static constexpr uint64_t kFnv1a64OffsetBasis = 0xcbf29ce484222325;
   static constexpr uint64_t kFnv1a64Prime = 0x100000001b3;
 
   uint64_t result_ = kFnv1a64OffsetBasis;
-};
-
-// This is for using already-hashed key into std::unordered_map and avoid the
-// cost of re-hashing. Example:
-// unordered_map<uint64_t, Value, AlreadyHashed> my_map.
-template <typename T>
-struct AlreadyHashed {
-  size_t operator()(const T& x) const { return static_cast<size_t>(x); }
 };
 
 }  // namespace base

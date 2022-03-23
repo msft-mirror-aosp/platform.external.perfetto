@@ -167,17 +167,12 @@ void TrackRegistry::InitializeInstance() {
   if (uint64_t start_time = GetProcessStartTime()) {
     base::Hash hash;
     hash.Update(start_time);
-    hash.Update(Platform::GetCurrentProcessId());
+    hash.Update(base::GetProcessId());
     Track::process_uuid = hash.digest();
   } else {
     // Fall back to a randomly generated identifier.
     Track::process_uuid = static_cast<uint64_t>(base::Uuidv4().lsb());
   }
-}
-
-void TrackRegistry::ResetForTesting() {
-  delete instance_;
-  instance_ = nullptr;
 }
 
 void TrackRegistry::UpdateTrack(Track track,

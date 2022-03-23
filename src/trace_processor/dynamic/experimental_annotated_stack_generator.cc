@@ -104,7 +104,7 @@ Table::Schema ExperimentalAnnotatedStackGenerator::CreateSchema() {
   return schema;
 }
 
-base::Status ExperimentalAnnotatedStackGenerator::ValidateConstraints(
+util::Status ExperimentalAnnotatedStackGenerator::ValidateConstraints(
     const QueryConstraints& qc) {
   const auto& cs = qc.constraints();
   int column = static_cast<int>(GetConstraintColumnIndex(context_));
@@ -113,15 +113,13 @@ base::Status ExperimentalAnnotatedStackGenerator::ValidateConstraints(
     return c.column == column && c.op == SQLITE_INDEX_CONSTRAINT_EQ;
   };
   bool has_id_cs = std::find_if(cs.begin(), cs.end(), id_fn) != cs.end();
-  return has_id_cs ? base::OkStatus()
-                   : base::ErrStatus("Failed to find required constraints");
+  return has_id_cs ? util::OkStatus()
+                   : util::ErrStatus("Failed to find required constraints");
 }
 
-base::Status ExperimentalAnnotatedStackGenerator::ComputeTable(
+std::unique_ptr<Table> ExperimentalAnnotatedStackGenerator::ComputeTable(
     const std::vector<Constraint>& cs,
-    const std::vector<Order>&,
-    const BitVector&,
-    std::unique_ptr<Table>& table_return) {
+    const std::vector<Order>&) {
   const auto& cs_table = context_->storage->stack_profile_callsite_table();
   const auto& f_table = context_->storage->stack_profile_frame_table();
   const auto& m_table = context_->storage->stack_profile_mapping_table();
@@ -134,17 +132,12 @@ base::Status ExperimentalAnnotatedStackGenerator::ComputeTable(
         return c.col_idx == constraint_col && c.op == FilterOp::kEq;
       });
   PERFETTO_DCHECK(constraint_it != cs.end());
-  if (constraint_it == cs.end() ||
-      constraint_it->value.type != SqlValue::Type::kLong) {
-    return base::ErrStatus("invalid input callsite id");
-  }
 
-  uint32_t start_id = static_cast<uint32_t>(constraint_it->value.AsLong());
+  auto start_id = static_cast<uint32_t>(constraint_it->value.AsLong());
   base::Optional<uint32_t> start_row =
       cs_table.id().IndexOf(CallsiteId(start_id));
-  if (!start_row) {
-    return base::ErrStatus("callsite with id %" PRIu32 " not found", start_id);
-  }
+  if (!start_row)
+    return nullptr;
 
   // Iteratively walk the parent_id chain to construct the list of callstack
   // entries, each pointing at a frame.
@@ -270,14 +263,13 @@ base::Status ExperimentalAnnotatedStackGenerator::ComputeTable(
   for (uint32_t i = 0; i < base_rowmap.size(); i++)
     start_id_vals->Append(start_id);
 
-  table_return.reset(new Table(
+  return std::unique_ptr<Table>(new Table(
       cs_table.Apply(std::move(base_rowmap))
           .ExtendWithColumn("annotation", std::move(annotation_vals),
                             TypedColumn<StringPool::Id>::default_flags())
           .ExtendWithColumn("start_id", std::move(start_id_vals),
                             TypedColumn<uint32_t>::default_flags() |
                                 TypedColumn<uint32_t>::kHidden)));
-  return base::OkStatus();
 }
 
 uint32_t ExperimentalAnnotatedStackGenerator::EstimateRowCount() {
