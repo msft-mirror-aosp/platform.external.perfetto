@@ -17,7 +17,6 @@ import {
   base64Encode,
   binaryDecode,
   binaryEncode,
-  sqliteString,
   utf8Decode,
   utf8Encode,
 } from './string_utils';
@@ -73,9 +72,4 @@ test('string_utils.binaryEncodeAndDecode', () => {
   const encodedThroughJson = JSON.parse(JSON.stringify(encodedStr));
   expect(binaryDecode(encodedStr)).toEqual(buf);
   expect(binaryDecode(encodedThroughJson)).toEqual(buf);
-});
-
-test('string_utils.sqliteString', () => {
-  expect(sqliteString('that\'s it')).toEqual('\'that\'\'s it\'');
-  expect(sqliteString('no quotes')).toEqual('\'no quotes\'');
 });

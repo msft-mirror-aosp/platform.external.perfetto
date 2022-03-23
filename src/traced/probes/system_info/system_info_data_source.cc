@@ -42,7 +42,6 @@ const char kProcessor[] = "processor";
 const ProbesDataSource::Descriptor SystemInfoDataSource::descriptor = {
     /* name */ "linux.system_info",
     /* flags */ Descriptor::kFlagsNone,
-    /* fill_descriptor_func */ nullptr,
 };
 
 SystemInfoDataSource::SystemInfoDataSource(
