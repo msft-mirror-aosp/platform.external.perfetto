@@ -20,6 +20,5 @@ SELECT
   trace_id,
   jank,
   ts,
-  dur,
-  jank_budget
+  dur
 FROM scroll_jank;

@@ -61,10 +61,6 @@ struct DataSourceState {
   // doing extra pointr arithmetic.
   bool trace_lambda_enabled = false;
 
-  // The overall TracingMuxerImpl instance id, which gets incremented by
-  // ResetForTesting.
-  uint32_t muxer_id_for_testing = 0;
-
   // The central buffer id that all TraceWriter(s) created by this data source
   // must target.
   BufferId buffer_id = 0;
@@ -118,9 +114,6 @@ struct DataSourceStateStorage {
 
 // Per-DataSource-type global state.
 struct DataSourceStaticState {
-  // System-wide unique id of the data source.
-  uint64_t id = 0;
-
   // Unique index of the data source, assigned at registration time.
   uint32_t index = kMaxDataSources;
 
@@ -152,12 +145,11 @@ struct DataSourceStaticState {
 
 // Per-DataSource-instance thread-local state.
 struct DataSourceInstanceThreadLocalState {
+  using IncrementalStatePointer = std::unique_ptr<void, void (*)(void*)>;
 
   void Reset() {
     trace_writer.reset();
     incremental_state.reset();
-    data_source_custom_tls.reset();
-    muxer_id_for_testing = 0;
     backend_id = 0;
     backend_connection_id = 0;
     buffer_id = 0;
@@ -167,11 +159,8 @@ struct DataSourceInstanceThreadLocalState {
   }
 
   std::unique_ptr<TraceWriterBase> trace_writer;
-  using ObjectWithDeleter = std::unique_ptr<void, void (*)(void*)>;
-  ObjectWithDeleter incremental_state = {nullptr, [](void*) {}};
-  ObjectWithDeleter data_source_custom_tls = {nullptr, [](void*) {}};
+  IncrementalStatePointer incremental_state = {nullptr, [](void*) {}};
   uint32_t incremental_state_generation;
-  uint32_t muxer_id_for_testing;
   TracingBackendId backend_id;
   uint32_t backend_connection_id;
   BufferId buffer_id;

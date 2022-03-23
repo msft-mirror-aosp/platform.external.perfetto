@@ -90,7 +90,7 @@ class SqliteTable : public sqlite3_vtab {
       kSame = 1,
     };
 
-    explicit Cursor(SqliteTable* table);
+    Cursor(SqliteTable* table);
     virtual ~Cursor();
 
     // Methods to be implemented by derived table classes.

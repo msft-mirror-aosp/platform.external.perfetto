@@ -43,16 +43,14 @@ uint32_t ExperimentalCounterDurGenerator::EstimateRowCount() {
   return counter_table_->row_count();
 }
 
-base::Status ExperimentalCounterDurGenerator::ValidateConstraints(
+util::Status ExperimentalCounterDurGenerator::ValidateConstraints(
     const QueryConstraints&) {
-  return base::OkStatus();
+  return util::OkStatus();
 }
 
-base::Status ExperimentalCounterDurGenerator::ComputeTable(
+std::unique_ptr<Table> ExperimentalCounterDurGenerator::ComputeTable(
     const std::vector<Constraint>&,
-    const std::vector<Order>&,
-    const BitVector&,
-    std::unique_ptr<Table>& table_return) {
+    const std::vector<Order>&) {
   if (!dur_column_) {
     dur_column_.reset(
         new NullableVector<int64_t>(ComputeDurColumn(*counter_table_)));
@@ -66,8 +64,7 @@ base::Status ExperimentalCounterDurGenerator::ComputeTable(
                 .ExtendWithColumn("delta", std::move(delta_column_.get()),
                                   TypedColumn<int64_t>::default_flags());
 
-  table_return.reset(new Table(t.Copy()));
-  return base::OkStatus();
+  return std::unique_ptr<Table>(new Table(t.Copy()));
 }
 
 // static
