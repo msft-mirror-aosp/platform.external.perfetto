@@ -24,9 +24,9 @@ def perfetto_deps():
     _add_repo_if_not_existing(
         http_archive,
         name = "com_google_protobuf",
-        strip_prefix = "protobuf-3.9.0",
-        url = "https://github.com/google/protobuf/archive/v3.9.0.tar.gz",
-        sha256 = "2ee9dcec820352671eb83e081295ba43f7a4157181dad549024d7070d079cf65",
+        strip_prefix = "protobuf-3.10.1",
+        url = "https://github.com/protocolbuffers/protobuf/archive/v3.10.1.tar.gz",
+        sha256 = "6adf73fd7f90409e479d6ac86529ade2d45f50494c5c10f539226693cb8fe4f7",
     )
 
     _add_repo_if_not_existing(
@@ -72,6 +72,15 @@ def perfetto_deps():
         commit = "dfa0646a03b4e1707469e04dc931b09774968fe6",
         build_file = "//bazel:zlib.BUILD",
         shallow_since = "1557160162 -0700",
+    )
+
+    _add_repo_if_not_existing(
+        http_archive,
+        name = "perfetto_dep_llvm_demangle",
+        url = "https://storage.googleapis.com/perfetto/llvm-project-3b4c59c156919902c785ce3cbae0eee2ee53064d.tgz",
+        sha256 = "f4a52e7f36edd7cacc844d5ae0e5f60b6f57c5afc40683e99f295886c9ce8ff4",
+        strip_prefix = "llvm-project",
+        build_file = "//bazel:llvm_demangle.BUILD",
     )
 
     # Without this protobuf.bzl fails. This seems a bug in protobuf_deps().
