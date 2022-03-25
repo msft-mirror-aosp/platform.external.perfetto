@@ -23,6 +23,7 @@
 #include "perfetto/protozero/message_handle.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/tracing/internal/compile_time_hash.h"
+#include "perfetto/tracing/platform.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 #include "protos/perfetto/trace/track_event/counter_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_descriptor.gen.h"
@@ -36,6 +37,8 @@ namespace perfetto {
 namespace internal {
 class TrackRegistry;
 }
+class Flow;
+class TerminatingFlow;
 
 // Track events are recorded on a timeline track, which maintains the relative
 // time ordering of all events on that track. Each thread has its own default
@@ -104,11 +107,21 @@ struct PERFETTO_EXPORT Track {
   static Track FromPointer(const void* ptr, Track parent = MakeProcessTrack()) {
     // Using pointers as global TrackIds isn't supported as pointers are
     // per-proccess and the same pointer value can be used in different
-    // processes.
+    // processes. If you hit this check but are providing no |parent| track,
+    // verify that Tracing::Initialize() was called for the current process.
     PERFETTO_DCHECK(parent.uuid != Track().uuid);
 
     return Track(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr)),
                  parent);
+  }
+
+  // Construct a track using |ptr| as identifier within thread-scope.
+  // Shorthand for `Track::FromPointer(ptr, ThreadTrack::Current())`
+  // Usage: TRACE_EVENT_BEGIN("...", "...", perfetto::Track::ThreadScoped(this))
+  static Track ThreadScoped(
+      const void* ptr,
+      Track parent = MakeThreadTrack(base::GetThreadId())) {
+    return Track::FromPointer(ptr, parent);
   }
 
  protected:
@@ -132,6 +145,8 @@ struct PERFETTO_EXPORT Track {
 
  private:
   friend class internal::TrackRegistry;
+  friend class Flow;
+  friend class TerminatingFlow;
   static uint64_t process_uuid;
 };
 
@@ -147,7 +162,8 @@ struct PERFETTO_EXPORT ProcessTrack : public Track {
   protos::gen::TrackDescriptor Serialize() const;
 
  private:
-  ProcessTrack() : Track(MakeProcessTrack()), pid(base::GetProcessId()) {}
+  ProcessTrack()
+      : Track(MakeProcessTrack()), pid(Platform::GetCurrentProcessId()) {}
 };
 
 // A thread track is associated with a specific thread of execution. Currently
@@ -297,6 +313,7 @@ class PERFETTO_EXPORT TrackRegistry {
   ~TrackRegistry();
 
   static void InitializeInstance();
+  static void ResetForTesting();
   static TrackRegistry* Get() { return instance_; }
 
   void EraseTrack(Track);
