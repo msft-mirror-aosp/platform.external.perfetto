@@ -423,6 +423,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //include/perfetto/ext/trace_processor:demangle
+perfetto_filegroup(
+    name = "include_perfetto_ext_trace_processor_demangle",
+    srcs = [
+        "include/perfetto/ext/trace_processor/demangle.h",
+    ],
+)
+
 # GN target: //include/perfetto/ext/trace_processor:export_json
 perfetto_filegroup(
     name = "include_perfetto_ext_trace_processor_export_json",
@@ -971,6 +979,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/importers/common/args_tracker.cc",
         "src/trace_processor/importers/common/args_tracker.h",
+        "src/trace_processor/importers/common/args_translation_table.cc",
+        "src/trace_processor/importers/common/args_translation_table.h",
         "src/trace_processor/importers/common/chunked_trace_reader.h",
         "src/trace_processor/importers/common/clock_tracker.cc",
         "src/trace_processor/importers/common/clock_tracker.h",
@@ -1104,8 +1114,10 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/actual_power_by_category.sql",
         "src/trace_processor/metrics/sql/chrome/actual_power_by_rail_mode.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_event_metadata.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_histogram_hashes.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_processes.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_thread_slice.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_user_event_hashes.sql",
         "src/trace_processor/metrics/sql/chrome/cpu_time_by_category.sql",
         "src/trace_processor/metrics/sql/chrome/cpu_time_by_rail_mode.sql",
         "src/trace_processor/metrics/sql/chrome/estimated_power_by_category.sql",
@@ -1130,6 +1142,7 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/touch_jank.sql",
         "src/trace_processor/metrics/sql/experimental/blink_gc_metric.sql",
         "src/trace_processor/metrics/sql/experimental/chrome_dropped_frames.sql",
+        "src/trace_processor/metrics/sql/experimental/chrome_long_latency.sql",
         "src/trace_processor/metrics/sql/experimental/frame_times.sql",
         "src/trace_processor/metrics/sql/experimental/media_metric.sql",
         "src/trace_processor/metrics/sql/experimental/reported_by_page.sql",
@@ -1327,6 +1340,20 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/util/status_macros.h",
     ],
+)
+
+# GN target: //src/trace_processor:demangle
+perfetto_cc_library(
+    name = "src_trace_processor_demangle",
+    srcs = [
+        "src/trace_processor/demangle.cc",
+    ],
+    hdrs = [
+        ":include_perfetto_base_base",
+        ":include_perfetto_ext_base_base",
+        ":include_perfetto_ext_trace_processor_demangle",
+    ],
+    linkstatic = True,
 )
 
 # GN target: //src/trace_processor:export_json
@@ -1529,6 +1556,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/track_event_tokenizer.h",
         "src/trace_processor/importers/proto/track_event_tracker.cc",
         "src/trace_processor/importers/proto/track_event_tracker.h",
+        "src/trace_processor/importers/proto/translation_table_module.cc",
+        "src/trace_processor/importers/proto/translation_table_module.h",
         "src/trace_processor/importers/syscalls/syscall_tracker.h",
         "src/trace_processor/importers/systrace/systrace_line.h",
         "src/trace_processor/timestamped_trace_piece.h",
@@ -2716,11 +2745,14 @@ perfetto_proto_library(
         "protos/perfetto/metrics/chrome/blink_gc_metric.proto",
         "protos/perfetto/metrics/chrome/dropped_frames.proto",
         "protos/perfetto/metrics/chrome/frame_times.proto",
+        "protos/perfetto/metrics/chrome/histogram_hashes.proto",
+        "protos/perfetto/metrics/chrome/long_latency.proto",
         "protos/perfetto/metrics/chrome/media_metric.proto",
         "protos/perfetto/metrics/chrome/reported_by_page.proto",
         "protos/perfetto/metrics/chrome/scroll_jank.proto",
         "protos/perfetto/metrics/chrome/test_chrome_metric.proto",
         "protos/perfetto/metrics/chrome/touch_jank.proto",
+        "protos/perfetto/metrics/chrome/user_event_hashes.proto",
     ],
     visibility = [
         PERFETTO_CONFIG.proto_library_visibility,
@@ -3686,7 +3718,8 @@ perfetto_cc_library(
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib + [
         ":cc_amalgamated_sql_metrics",
-    ],
+    ] +
+           PERFETTO_CONFIG.deps.demangle_wrapper,
     linkstatic = True,
 )
 
@@ -3784,7 +3817,8 @@ perfetto_cc_binary(
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib + [
         ":cc_amalgamated_sql_metrics",
-    ],
+    ] +
+           PERFETTO_CONFIG.deps.demangle_wrapper,
 )
 
 # GN target: //src/traced/probes:traced_probes
@@ -3968,7 +4002,8 @@ perfetto_cc_binary(
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib + [
         ":cc_amalgamated_sql_metrics",
-    ],
+    ] +
+           PERFETTO_CONFIG.deps.demangle_wrapper,
 )
 
 # Content from BUILD.extras
