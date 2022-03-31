@@ -111,6 +111,7 @@ const METRICS = [
   'android_jank',
   'android_camera',
   'chrome_dropped_frames',
+  'chrome_long_latency',
   'trace_metadata',
   'android_trusty_workqueues',
 ];
@@ -543,7 +544,7 @@ export class TraceController extends Controller<States> {
     const sliceResult = await engine.query(`select
            bucket,
            upid,
-           sum(utid_sum) / cast(${stepSecNs} as float) as load
+           ifnull(sum(utid_sum) / cast(${stepSecNs} as float), 0) as load
          from thread
          inner join (
            select

@@ -16,6 +16,7 @@ import * as m from 'mithril';
 import {QueryResponse} from 'src/common/queries';
 
 import {Actions} from '../common/actions';
+import {isEmptyData} from '../common/aggregation_data';
 import {LogExists, LogExistsKey} from '../common/logs';
 import {DEFAULT_PIVOT_TABLE_ID} from '../common/pivot_table_common';
 
@@ -45,7 +46,7 @@ import {ThreadStatePanel} from './thread_state_panel';
 const UP_ICON = 'keyboard_arrow_up';
 const DOWN_ICON = 'keyboard_arrow_down';
 const DRAG_HANDLE_HEIGHT_PX = 28;
-const DEFAULT_DETAILS_HEIGHT_PX = 230 + DRAG_HANDLE_HEIGHT_PX;
+const DEFAULT_DETAILS_HEIGHT_PX = 280 + DRAG_HANDLE_HEIGHT_PX;
 
 function getFullScreenHeight() {
   const panelContainer =
@@ -364,7 +365,7 @@ export class DetailsPanel implements m.ClassComponent {
     }
 
     for (const [key, value] of globals.aggregateDataStore.entries()) {
-      if (value.columns.length > 0 && value.columns[0].data.length > 0) {
+      if (!isEmptyData(value)) {
         detailsPanels.push({
           key: value.tabName,
           name: value.tabName,
