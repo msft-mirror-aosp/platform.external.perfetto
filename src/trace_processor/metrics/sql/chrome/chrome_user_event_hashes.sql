@@ -1,5 +1,5 @@
 --
--- Copyright 2021 The Android Open Source Project
+-- Copyright 2022 The Android Open Source Project
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,17 +12,15 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
---
 
--- Cold/warm starts emitted launching slices on API level 28-.
-INSERT INTO launches(id, ts, ts_end, dur, package)
-SELECT
-  ROW_NUMBER() OVER(ORDER BY ts) AS id,
-  launching_events.ts AS ts,
-  launching_events.ts_end AS ts_end,
-  launching_events.ts_end - launching_events.ts AS dur,
-  package_name AS package
-FROM launching_events
-ORDER BY ts;
+DROP VIEW IF EXISTS chrome_user_event_hashes_output;
 
--- TODO(lalitm): add handling of hot starts using frame timings.
+CREATE VIEW chrome_user_event_hashes_output AS
+SELECT ChromeUserEventHashes(
+  'action_hash', (
+    SELECT RepeatedField(int_value)
+    FROM args
+    WHERE key = 'chrome_user_event.action_hash'
+    ORDER BY int_value
+  )
+);
