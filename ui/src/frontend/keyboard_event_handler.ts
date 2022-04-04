@@ -42,8 +42,10 @@ export function handleKey(e: KeyboardEvent, down: boolean) {
   const selection = globals.state.currentSelection;
   const noModifiers = !(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey);
   const ctrlOrMeta = (e.ctrlKey || e.metaKey) && !(e.altKey || e.shiftKey);
+  // No other modifiers other than possibly Shift.
+  const maybeShift = !(e.ctrlKey || e.metaKey || e.altKey);
 
-  if (down && 'm' === key && noModifiers) {
+  if (down && 'm' === key && maybeShift) {
     if (selection && selection.kind === 'AREA') {
       globals.dispatch(Actions.toggleMarkCurrentArea({persistent: e.shiftKey}));
     } else if (selection) {
@@ -56,10 +58,10 @@ export function handleKey(e: KeyboardEvent, down: boolean) {
   if (down && 'b' === key && ctrlOrMeta) {
     globals.dispatch(Actions.toggleSidebar({}));
   }
-  if (down && '?' === key && noModifiers) {
+  if (down && '?' === key && maybeShift) {
     toggleHelp();
   }
-  if (down && 'enter' === key && noModifiers) {
+  if (down && 'enter' === key && maybeShift) {
     e.preventDefault();
     executeSearch(e.shiftKey);
   }
@@ -144,7 +146,7 @@ function focusOtherFlow(direction: Direction) {
 }
 
 // Select the slice connected to the flow in focus
-function moveByFocusedFlow(direction: Direction) {
+function moveByFocusedFlow(direction: Direction): void {
   if (!globals.state.currentSelection ||
       globals.state.currentSelection.kind !== 'CHROME_SLICE') {
     return;
@@ -166,8 +168,12 @@ function moveByFocusedFlow(direction: Direction) {
       const uiTrackId =
           globals.state.uiTrackIdByTraceTrackId[flowPoint.trackId];
       if (uiTrackId) {
-        globals.makeSelection(Actions.selectChromeSlice(
-            {id: flowPoint.sliceId, trackId: uiTrackId, table: 'slice'}));
+        globals.makeSelection(Actions.selectChromeSlice({
+          id: flowPoint.sliceId,
+          trackId: uiTrackId,
+          table: 'slice',
+          scroll: true
+        }));
       }
     }
   }
@@ -233,7 +239,7 @@ function lockSliceSpan(persistent = false) {
   }
 }
 
-function findCurrentSelection() {
+export function findCurrentSelection() {
   const selection = globals.state.currentSelection;
   if (selection === null) return;
 

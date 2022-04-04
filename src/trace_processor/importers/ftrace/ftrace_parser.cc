@@ -22,6 +22,7 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/ftrace/binder_tracker.h"
 #include "src/trace_processor/importers/proto/async_track_set_tracker.h"
+#include "src/trace_processor/importers/proto/metadata_tracker.h"
 #include "src/trace_processor/importers/syscalls/syscall_tracker.h"
 #include "src/trace_processor/importers/systrace/systrace_parser.h"
 #include "src/trace_processor/storage/stats.h"
@@ -166,6 +167,7 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       cros_ec_arg_num_id_(context->storage->InternString("ec_num")),
       cros_ec_arg_ec_id_(context->storage->InternString("ec_delta")),
       cros_ec_arg_sample_ts_id_(context->storage->InternString("sample_ts")),
+      ufs_clkgating_id_(context->storage->InternString("UFS clkgating (OFF/REQ_OFF/REQ_ON/ON)")),
       ufs_command_count_id_(context->storage->InternString("UFS Command Count")) {
   // Build the lookup table for the strings inside ftrace events (e.g. the
   // name of ftrace event fields and the names of their args).
@@ -357,6 +359,31 @@ void FtraceParser::ParseFtraceStats(ConstBytes blob) {
       storage->SetIndexedStats(stats::ftrace_cpu_oldest_event_ts_begin + phase,
                                cpu, static_cast<int64_t>(oldest_event_ts));
     }
+  }
+
+  // Compute atrace + ftrace setup errors. We do two things here:
+  // 1. We add up all the errors and put the counter in the stats table (which
+  //    can hold only numerals). This will raise an orange flag in the UI.
+  // 2. We concatenate together all the errors in a string and put that in the
+  //    medatata table.
+  // Both will be reported in the 'Info & stats' page in the UI.
+  if (is_start) {
+    std::string error_str;
+    for (auto it = evt.failed_ftrace_events(); it; ++it) {
+      storage->IncrementStats(stats::ftrace_setup_errors, 1);
+      error_str += "Ftrace event failed: " + it->as_std_string() + "\n";
+    }
+    for (auto it = evt.unknown_ftrace_events(); it; ++it) {
+      storage->IncrementStats(stats::ftrace_setup_errors, 1);
+      error_str += "Ftrace event unknown: " + it->as_std_string() + "\n";
+    }
+    if (evt.atrace_errors().size > 0) {
+      storage->IncrementStats(stats::ftrace_setup_errors, 1);
+      error_str += "Atrace failures: " + evt.atrace_errors().ToStdString();
+    }
+    auto error_str_id = storage->InternString(base::StringView(error_str));
+    context_->metadata_tracker->SetMetadata(metadata::ftrace_setup_errors,
+                                            Variadic::String(error_str_id));
   }
 }
 
@@ -707,6 +734,10 @@ util::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
       }
       case FtraceEvent::kWakeupSourceDeactivateFieldNumber: {
         ParseWakeSourceDeactivate(ts, data);
+        break;
+      }
+      case FtraceEvent::kUfshcdClkGatingFieldNumber: {
+        ParseUfshcdClkGating(ts, data);
         break;
       }
       default:
@@ -1960,11 +1991,37 @@ void FtraceParser::ParseCrosEcSensorhubData(int64_t timestamp,
       args_inserter);
 }
 
+void FtraceParser::ParseUfshcdClkGating(int64_t timestamp,
+                                      protozero::ConstBytes blob) {
+  protos::pbzero::UfshcdClkGatingFtraceEvent::Decoder evt(blob.data, blob.size);
+  int32_t clk_state = 0;
+
+  switch (evt.state()) {
+      case 1:
+          // Change ON state to 3
+          clk_state = 3;
+          break;
+      case 2:
+          // Change REQ_OFF state to 1
+          clk_state = 1;
+          break;
+      case 3:
+          // Change REQ_ON state to 2
+          clk_state = 2;
+          break;
+  }
+  TrackId track = context_->track_tracker->InternGlobalCounterTrack(
+      ufs_clkgating_id_);
+  context_->event_tracker->PushCounter(timestamp, static_cast<double>(clk_state),
+                                       track);
+}
+
 void FtraceParser::ParseUfshcdCommand(int64_t timestamp,
                                       protozero::ConstBytes blob) {
   protos::pbzero::UfshcdCommandFtraceEvent::Decoder evt(blob.data, blob.size);
   uint32_t num = evt.doorbell() > 0 ?
-      static_cast<uint32_t>(PERFETTO_POPCOUNT(evt.doorbell())) : 1;
+      static_cast<uint32_t>(PERFETTO_POPCOUNT(evt.doorbell())) :
+      (evt.str_t() == 1 ? 0 : 1);
 
   TrackId track = context_->track_tracker->InternGlobalCounterTrack(
       ufs_command_count_id_);
