@@ -973,9 +973,23 @@ message AndroidNetworkMetric {
 
   // Packet retransmission rate.
   optional double retransmission_rate = 3;
+
+  // Kfree Skb rate (i.e. kfree_skb count divided by the packet count from all
+  // net devices).
+  optional double kfree_skb_rate = 4;
 }
 
 // End of protos/perfetto/metrics/android/network_metric.proto
+
+// Begin of protos/perfetto/metrics/android/other_traces.proto
+
+message AndroidOtherTracesMetric {
+  // Uuids of other traces being finalized while the current trace was being
+  // recorded.
+  repeated string finalized_traces_uuid = 1;
+}
+
+// End of protos/perfetto/metrics/android/other_traces.proto
 
 // Begin of protos/perfetto/metrics/android/package_list.proto
 
@@ -1477,7 +1491,7 @@ message TraceAnalysisStats {
 
 // Root message for all Perfetto-based metrics.
 //
-// Next id: 45
+// Next id: 46
 message TraceMetrics {
   reserved 4, 10, 13, 14, 16, 19;
 
@@ -1595,6 +1609,9 @@ message TraceMetrics {
 
   // Metrics for the Trusty team.
   optional AndroidTrustyWorkqueues android_trusty_workqueues = 44;
+
+  // Summary of other concurrent trace recording.
+  optional AndroidOtherTracesMetric android_other_traces = 45;
 
   // Demo extensions.
   extensions 450 to 499;
