@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,19 +18,10 @@ syntax = "proto2";
 
 package perfetto.protos;
 
-message UnsymbolizedFrames {
-  message Frame {
-    optional string module = 1;
-    optional string build_id = 2;
-    optional int64 address = 3;
-
-    // In some cases (Chrome/Webview) the ID that should be used to query
-    // symbols in Google's internal tera-scale symbolization service is !=
-    // `build_id` and requires some mangling.
-    // This field is == 'build_id` for non-chromium cases, and is the breakpad
-    // module ID (with lowercase hex digics) for chromium cases.
-    optional string google_lookup_id = 4;
-  }
-
-  repeated Frame frames = 1;
+// The list of Chrome performance mark hashes in trace track events.
+// Use cases include translating performance mark hashes to site and mark
+// names by getting this list, and prepending a translation table to the trace.
+message ChromePerformanceMarkHashes {
+  repeated int64 site_hash = 1;
+  repeated int64 mark_hash = 2;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,19 +18,8 @@ syntax = "proto2";
 
 package perfetto.protos;
 
-message UnsymbolizedFrames {
-  message Frame {
-    optional string module = 1;
-    optional string build_id = 2;
-    optional int64 address = 3;
-
-    // In some cases (Chrome/Webview) the ID that should be used to query
-    // symbols in Google's internal tera-scale symbolization service is !=
-    // `build_id` and requires some mangling.
-    // This field is == 'build_id` for non-chromium cases, and is the breakpad
-    // module ID (with lowercase hex digics) for chromium cases.
-    optional string google_lookup_id = 4;
-  }
-
-  repeated Frame frames = 1;
+message AndroidOtherTracesMetric {
+  // Uuids of other traces being finalized while the current trace was being
+  // recorded.
+  repeated string finalized_traces_uuid = 1;
 }
