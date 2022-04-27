@@ -115,6 +115,8 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       cpu_freq_name_id_(context->storage->InternString("cpufreq")),
       gpu_freq_name_id_(context->storage->InternString("gpufreq")),
       cpu_idle_name_id_(context->storage->InternString("cpuidle")),
+      suspend_resume_name_id_(
+          context->storage->InternString("Suspend/Resume Latency")),
       kfree_skb_name_id_(context->storage->InternString("Kfree Skb IP Prot")),
       ion_total_id_(context->storage->InternString("mem.ion")),
       ion_change_id_(context->storage->InternString("mem.ion_change")),
@@ -167,6 +169,7 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       cros_ec_arg_num_id_(context->storage->InternString("ec_num")),
       cros_ec_arg_ec_id_(context->storage->InternString("ec_delta")),
       cros_ec_arg_sample_ts_id_(context->storage->InternString("sample_ts")),
+      ufs_clkgating_id_(context->storage->InternString("UFS clkgating (OFF/REQ_OFF/REQ_ON/ON)")),
       ufs_command_count_id_(context->storage->InternString("UFS Command Count")) {
   // Build the lookup table for the strings inside ftrace events (e.g. the
   // name of ftrace event fields and the names of their args).
@@ -733,6 +736,14 @@ util::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
       }
       case FtraceEvent::kWakeupSourceDeactivateFieldNumber: {
         ParseWakeSourceDeactivate(ts, data);
+        break;
+      }
+      case FtraceEvent::kUfshcdClkGatingFieldNumber: {
+        ParseUfshcdClkGating(ts, data);
+        break;
+      }
+      case FtraceEvent::kSuspendResumeFieldNumber: {
+        ParseSuspendResume(ts, data);
         break;
       }
       default:
@@ -1986,11 +1997,37 @@ void FtraceParser::ParseCrosEcSensorhubData(int64_t timestamp,
       args_inserter);
 }
 
+void FtraceParser::ParseUfshcdClkGating(int64_t timestamp,
+                                      protozero::ConstBytes blob) {
+  protos::pbzero::UfshcdClkGatingFtraceEvent::Decoder evt(blob.data, blob.size);
+  int32_t clk_state = 0;
+
+  switch (evt.state()) {
+      case 1:
+          // Change ON state to 3
+          clk_state = 3;
+          break;
+      case 2:
+          // Change REQ_OFF state to 1
+          clk_state = 1;
+          break;
+      case 3:
+          // Change REQ_ON state to 2
+          clk_state = 2;
+          break;
+  }
+  TrackId track = context_->track_tracker->InternGlobalCounterTrack(
+      ufs_clkgating_id_);
+  context_->event_tracker->PushCounter(timestamp, static_cast<double>(clk_state),
+                                       track);
+}
+
 void FtraceParser::ParseUfshcdCommand(int64_t timestamp,
                                       protozero::ConstBytes blob) {
   protos::pbzero::UfshcdCommandFtraceEvent::Decoder evt(blob.data, blob.size);
   uint32_t num = evt.doorbell() > 0 ?
-      static_cast<uint32_t>(PERFETTO_POPCOUNT(evt.doorbell())) : 1;
+      static_cast<uint32_t>(PERFETTO_POPCOUNT(evt.doorbell())) :
+      (evt.str_t() == 1 ? 0 : 1);
 
   TrackId track = context_->track_tracker->InternGlobalCounterTrack(
       ufs_command_count_id_);
@@ -2043,6 +2080,29 @@ void FtraceParser::ParseWakeSourceDeactivate(int64_t timestamp,
 
   TrackId end_id = context_->async_track_set_tracker->End(async_track, 0);
   context_->slice_tracker->End(timestamp, end_id);
+}
+
+void FtraceParser::ParseSuspendResume(int64_t timestamp,
+                                      protozero::ConstBytes blob) {
+  protos::pbzero::SuspendResumeFtraceEvent::Decoder evt(blob.data, blob.size);
+
+  auto async_track = context_->async_track_set_tracker->InternGlobalTrackSet(
+      suspend_resume_name_id_);
+
+  base::StackString<64> str("%s(%" PRIu32 ")",
+                            evt.action().ToStdString().c_str(), evt.val());
+  StringId slice_name_id = context_->storage->InternString(str.string_view());
+
+  if (evt.start()) {
+    TrackId start_id = context_->async_track_set_tracker->Begin(
+        async_track, static_cast<int64_t>(evt.val()));
+    context_->slice_tracker->Begin(timestamp, start_id, suspend_resume_name_id_,
+                                   slice_name_id);
+  } else {
+    TrackId end_id = context_->async_track_set_tracker->End(
+        async_track, static_cast<int64_t>(evt.val()));
+    context_->slice_tracker->End(timestamp, end_id);
+  }
 }
 
 }  // namespace trace_processor
