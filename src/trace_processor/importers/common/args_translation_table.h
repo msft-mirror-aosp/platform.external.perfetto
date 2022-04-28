@@ -44,10 +44,38 @@ class ArgsTranslationTable {
                                    uint64_t value,
                                    ArgsTracker::BoundInserter& inserter);
 
-  void AddChromeHistogramTranslationRule(uint64_t hash, base::StringView name);
+  void AddChromeHistogramTranslationRule(uint64_t hash, base::StringView name) {
+    chrome_histogram_hash_to_name_.Insert(hash, name.ToStdString());
+  }
+  void AddChromeUserEventTranslationRule(uint64_t hash,
+                                         base::StringView action) {
+    chrome_user_event_hash_to_action_.Insert(hash, action.ToStdString());
+  }
+  void AddChromePerformanceMarkSiteTranslationRule(uint64_t hash,
+                                                   base::StringView name) {
+    chrome_performance_mark_site_hash_to_name_.Insert(hash, name.ToStdString());
+  }
+  void AddChromePerformanceMarkMarkTranslationRule(uint64_t hash,
+                                                   base::StringView name) {
+    chrome_performance_mark_mark_hash_to_name_.Insert(hash, name.ToStdString());
+  }
 
   base::Optional<base::StringView> TranslateChromeHistogramHashForTesting(
-      uint64_t hash) const;
+      uint64_t hash) const {
+    return TranslateChromeHistogramHash(hash);
+  }
+  base::Optional<base::StringView> TranslateChromeUserEventHashForTesting(
+      uint64_t hash) const {
+    return TranslateChromeUserEventHash(hash);
+  }
+  base::Optional<base::StringView>
+  TranslateChromePerformanceMarkSiteHashForTesting(uint64_t hash) const {
+    return TranslateChromePerformanceMarkSiteHash(hash);
+  }
+  base::Optional<base::StringView>
+  TranslateChromePerformanceMarkMarkHashForTesting(uint64_t hash) const {
+    return TranslateChromePerformanceMarkMarkHash(hash);
+  }
 
  private:
   static constexpr char kChromeHistogramHashKey[] =
@@ -55,11 +83,44 @@ class ArgsTranslationTable {
   static constexpr char kChromeHistogramNameKey[] =
       "chrome_histogram_sample.name";
 
+  static constexpr char kChromeUserEventHashKey[] =
+      "chrome_user_event.action_hash";
+  static constexpr char kChromeUserEventActionKey[] =
+      "chrome_user_event.action";
+
+  static constexpr char kChromePerformanceMarkSiteHashKey[] =
+      "chrome_hashed_performance_mark.site_hash";
+  static constexpr char kChromePerformanceMarkSiteKey[] =
+      "chrome_hashed_performance_mark.site";
+
+  static constexpr char kChromePerformanceMarkMarkHashKey[] =
+      "chrome_hashed_performance_mark.mark_hash";
+  static constexpr char kChromePerformanceMarkMarkKey[] =
+      "chrome_hashed_performance_mark.mark";
+
   TraceStorage* storage_;
+  StringId interned_chrome_histogram_hash_key_;
   StringId interned_chrome_histogram_name_key_;
+  StringId interned_chrome_user_event_hash_key_;
+  StringId interned_chrome_user_event_action_key_;
+  StringId interned_chrome_performance_mark_site_hash_key_;
+  StringId interned_chrome_performance_mark_site_key_;
+  StringId interned_chrome_performance_mark_mark_hash_key_;
+  StringId interned_chrome_performance_mark_mark_key_;
   base::FlatHashMap<uint64_t, std::string> chrome_histogram_hash_to_name_;
+  base::FlatHashMap<uint64_t, std::string> chrome_user_event_hash_to_action_;
+  base::FlatHashMap<uint64_t, std::string>
+      chrome_performance_mark_site_hash_to_name_;
+  base::FlatHashMap<uint64_t, std::string>
+      chrome_performance_mark_mark_hash_to_name_;
 
   base::Optional<base::StringView> TranslateChromeHistogramHash(
+      uint64_t hash) const;
+  base::Optional<base::StringView> TranslateChromeUserEventHash(
+      uint64_t hash) const;
+  base::Optional<base::StringView> TranslateChromePerformanceMarkSiteHash(
+      uint64_t hash) const;
+  base::Optional<base::StringView> TranslateChromePerformanceMarkMarkHash(
       uint64_t hash) const;
 };
 
