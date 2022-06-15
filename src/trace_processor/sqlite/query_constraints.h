@@ -19,7 +19,6 @@
 
 #include <sqlite3.h>
 
-#include <limits>
 #include <vector>
 
 #include "perfetto/ext/base/scoped_file.h"
@@ -58,11 +57,10 @@ class QueryConstraints {
 
   using SqliteString = base::ScopedResource<char*, FreeSqliteString, nullptr>;
 
-  explicit QueryConstraints(
-      uint64_t cols_used = std::numeric_limits<uint64_t>::max());
+  QueryConstraints();
   ~QueryConstraints();
   QueryConstraints(QueryConstraints&&) noexcept;
-  QueryConstraints& operator=(QueryConstraints&&) noexcept;
+  QueryConstraints& operator=(QueryConstraints&&);
 
   // Two QueryConstraints with the same constraint and orderby vectors
   // are equal.
@@ -91,20 +89,12 @@ class QueryConstraints {
 
   std::vector<Constraint>* mutable_constraints() { return &constraints_; }
 
-  uint64_t cols_used() const { return cols_used_; }
-
  private:
   QueryConstraints(const QueryConstraints&) = delete;
   QueryConstraints& operator=(const QueryConstraints&) = delete;
 
   std::vector<OrderBy> order_by_;
   std::vector<Constraint> constraints_;
-
-  // Stores information about which column is used by this query.
-  // If the lowest bit of is set, the first column is used. The second lowest
-  // bit corresponds to the second column etc. If the most significant bit is
-  // set, that means that any column after the first 63 columns could be used.
-  uint64_t cols_used_ = std::numeric_limits<uint64_t>::max();
 };
 
 }  // namespace trace_processor

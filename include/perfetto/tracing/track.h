@@ -23,7 +23,6 @@
 #include "perfetto/protozero/message_handle.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/tracing/internal/compile_time_hash.h"
-#include "perfetto/tracing/platform.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 #include "protos/perfetto/trace/track_event/counter_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_descriptor.gen.h"
@@ -37,8 +36,6 @@ namespace perfetto {
 namespace internal {
 class TrackRegistry;
 }
-class Flow;
-class TerminatingFlow;
 
 // Track events are recorded on a timeline track, which maintains the relative
 // time ordering of all events on that track. Each thread has its own default
@@ -107,21 +104,11 @@ struct PERFETTO_EXPORT Track {
   static Track FromPointer(const void* ptr, Track parent = MakeProcessTrack()) {
     // Using pointers as global TrackIds isn't supported as pointers are
     // per-proccess and the same pointer value can be used in different
-    // processes. If you hit this check but are providing no |parent| track,
-    // verify that Tracing::Initialize() was called for the current process.
+    // processes.
     PERFETTO_DCHECK(parent.uuid != Track().uuid);
 
     return Track(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr)),
                  parent);
-  }
-
-  // Construct a track using |ptr| as identifier within thread-scope.
-  // Shorthand for `Track::FromPointer(ptr, ThreadTrack::Current())`
-  // Usage: TRACE_EVENT_BEGIN("...", "...", perfetto::Track::ThreadScoped(this))
-  static Track ThreadScoped(
-      const void* ptr,
-      Track parent = MakeThreadTrack(base::GetThreadId())) {
-    return Track::FromPointer(ptr, parent);
   }
 
  protected:
@@ -145,8 +132,6 @@ struct PERFETTO_EXPORT Track {
 
  private:
   friend class internal::TrackRegistry;
-  friend class Flow;
-  friend class TerminatingFlow;
   static uint64_t process_uuid;
 };
 
@@ -162,8 +147,7 @@ struct PERFETTO_EXPORT ProcessTrack : public Track {
   protos::gen::TrackDescriptor Serialize() const;
 
  private:
-  ProcessTrack()
-      : Track(MakeProcessTrack()), pid(Platform::GetCurrentProcessId()) {}
+  ProcessTrack() : Track(MakeProcessTrack()), pid(base::GetProcessId()) {}
 };
 
 // A thread track is associated with a specific thread of execution. Currently
@@ -258,13 +242,6 @@ class CounterTrack : public Track {
                         unit_multiplier_, is_incremental_);
   }
 
-  constexpr CounterTrack set_is_incremental(bool is_incremental = true) const {
-    return CounterTrack(uuid, parent_uuid, name_, category_, unit_, unit_name_,
-                        unit_multiplier_, is_incremental);
-  }
-
-  constexpr bool is_incremental() const { return is_incremental_; }
-
   void Serialize(protos::pbzero::TrackDescriptor*) const;
   protos::gen::TrackDescriptor Serialize() const;
 
@@ -285,12 +262,19 @@ class CounterTrack : public Track {
         unit_multiplier_(unit_multiplier),
         is_incremental_(is_incremental) {}
 
+  // TODO(skyostil): Expose incremental counters once we decide how to manage
+  // their incremental state.
+  constexpr CounterTrack set_is_incremental(bool is_incremental = true) const {
+    return CounterTrack(uuid, parent_uuid, name_, category_, unit_, unit_name_,
+                        unit_multiplier_, is_incremental);
+  }
+
   const char* const name_;
   const char* const category_;
   Unit unit_ = perfetto::protos::pbzero::CounterDescriptor::UNIT_UNSPECIFIED;
   const char* const unit_name_ = nullptr;
   int64_t unit_multiplier_ = 1;
-  const bool is_incremental_ = false;
+  bool is_incremental_ = false;
 };
 
 namespace internal {
@@ -313,7 +297,6 @@ class PERFETTO_EXPORT TrackRegistry {
   ~TrackRegistry();
 
   static void InitializeInstance();
-  static void ResetForTesting();
   static TrackRegistry* Get() { return instance_; }
 
   void EraseTrack(Track);

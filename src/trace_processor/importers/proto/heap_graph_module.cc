@@ -138,7 +138,6 @@ void HeapGraphModule::ParsePacket(
                      decoder.heap_graph());
       return;
     case TracePacket::kDeobfuscationMappingFieldNumber:
-      HeapGraphTracker::GetOrCreate(context_)->FinalizeAllProfiles();
       ParseDeobfuscationMapping(decoder.deobfuscation_mapping());
       return;
   }
@@ -164,8 +163,6 @@ void HeapGraphModule::ParseHeapGraph(uint32_t seq_id,
     obj.self_size = object.self_size();
     obj.type_id = object.type_id();
 
-    // Even though the field is named reference_field_id_base, it has always
-    // been used as a base for reference_object_id.
     uint64_t base_obj_id = object.reference_field_id_base();
 
     // In S+ traces, this field will not be set for normal instances. It will be
@@ -187,11 +184,6 @@ void HeapGraphModule::ParseHeapGraph(uint32_t seq_id,
               value += base_obj_id;
             obj.referred_objects.push_back(value);
           });
-    }
-
-    if (object.has_native_allocation_registry_size_field()) {
-      obj.native_allocation_registry_size =
-          object.native_allocation_registry_size_field();
     }
 
     if (parse_error) {
@@ -289,6 +281,7 @@ void HeapGraphModule::DeobfuscateClass(
   const std::vector<tables::HeapGraphClassTable::Id>* cls_objects =
       heap_graph_tracker->RowsForType(package_name_id,
                                       obfuscated_class_name_id);
+
   if (cls_objects) {
     for (tables::HeapGraphClassTable::Id id : *cls_objects) {
       uint32_t row =
@@ -375,7 +368,7 @@ void HeapGraphModule::ParseDeobfuscationMapping(protozero::ConstBytes blob) {
 
 void HeapGraphModule::NotifyEndOfFile() {
   auto* heap_graph_tracker = HeapGraphTracker::GetOrCreate(context_);
-  heap_graph_tracker->FinalizeAllProfiles();
+  heap_graph_tracker->NotifyEndOfFile();
 }
 
 }  // namespace trace_processor

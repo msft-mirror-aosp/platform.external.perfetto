@@ -62,22 +62,20 @@ uint32_t ExperimentalSliceLayoutGenerator::EstimateRowCount() {
   return slice_table_->row_count();
 }
 
-base::Status ExperimentalSliceLayoutGenerator::ValidateConstraints(
+util::Status ExperimentalSliceLayoutGenerator::ValidateConstraints(
     const QueryConstraints& cs) {
   for (const auto& c : cs.constraints()) {
     if (c.column == kFilterTrackIdsColumnIndex && sqlite_utils::IsOpEq(c.op)) {
-      return base::OkStatus();
+      return util::OkStatus();
     }
   }
-  return base::ErrStatus(
+  return util::ErrStatus(
       "experimental_slice_layout must have filter_track_ids constraint");
 }
 
-base::Status ExperimentalSliceLayoutGenerator::ComputeTable(
+std::unique_ptr<Table> ExperimentalSliceLayoutGenerator::ComputeTable(
     const std::vector<Constraint>& cs,
-    const std::vector<Order>&,
-    const BitVector&,
-    std::unique_ptr<Table>& table_return) {
+    const std::vector<Order>&) {
   std::set<TrackId> selected_tracks;
   std::string filter_string = "";
   for (const auto& c : cs) {
@@ -101,8 +99,7 @@ base::Status ExperimentalSliceLayoutGenerator::ComputeTable(
   // Try and find the table in the cache.
   auto it = layout_table_cache_.find(filter_id);
   if (it != layout_table_cache_.end()) {
-    table_return.reset(new Table(it->second.Copy()));
-    return base::OkStatus();
+    return std::unique_ptr<Table>(new Table(it->second.Copy()));
   }
 
   // Find all the slices for the tracks we want to filter and create a RowMap
@@ -127,9 +124,7 @@ base::Status ExperimentalSliceLayoutGenerator::ComputeTable(
   // Compute the table and add it to the cache for future use.
   Table layout_table = ComputeLayoutTable(filtered_table, filter_id);
   auto res = layout_table_cache_.emplace(filter_id, std::move(layout_table));
-
-  table_return.reset(new Table(res.first->second.Copy()));
-  return base::OkStatus();
+  return std::unique_ptr<Table>(new Table(res.first->second.Copy()));
 }
 
 // Build up a table of slice id -> root slice id by observing each
@@ -240,7 +235,7 @@ Table ExperimentalSliceLayoutGenerator::ComputeLayoutTable(
     {
       auto it = still_open.begin();
       while (it != still_open.end()) {
-        if ((*it)->end <= start) {
+        if ((*it)->end < start) {
           it = still_open.erase(it);
         } else {
           ++it;

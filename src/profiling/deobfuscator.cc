@@ -159,10 +159,8 @@ std::string FlattenClasses(
 // See https://www.guardsquare.com/en/products/proguard/manual/retrace for the
 // file format we are parsing.
 base::Status ProguardParser::AddLine(std::string line) {
-  auto first_ch_pos = line.find_first_not_of(" \t");
-  if (first_ch_pos == std::string::npos || line[first_ch_pos] == '#')
+  if (line.length() == 0 || line[0] == '#')
     return base::Status();
-
   bool is_member = line[0] == ' ';
   if (is_member && !current_class_) {
     return base::Status(

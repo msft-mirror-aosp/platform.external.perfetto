@@ -16,6 +16,7 @@
 
 #include "src/profiling/common/proc_utils.h"
 #include "perfetto/ext/base/optional.h"
+#include "perfetto/profiling/normalize.h"
 
 #include "perfetto/ext/base/utils.h"
 #include "test/gtest_and_gmock.h"

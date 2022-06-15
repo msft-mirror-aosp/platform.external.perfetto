@@ -24,7 +24,7 @@
 namespace perfetto {
 namespace trace_to_text {
 
-bool TraceToText(std::istream*, std::ostream*) {
+int TraceToText(std::istream*, std::ostream*) {
   PERFETTO_FATAL(
       "The 'text' command is not available in lite builds of trace_to_text");
 }

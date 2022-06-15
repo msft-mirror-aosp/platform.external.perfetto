@@ -82,12 +82,6 @@ void __attribute__((noreturn)) ChildProcess(ChildProcessArgs* args) {
     _exit(128);
   };
 
-  if (args->create_args->posix_proc_group_id.has_value()) {
-    if (setpgid(0 /*self*/, args->create_args->posix_proc_group_id.value())) {
-      die("setpgid() failed");
-    }
-  }
-
   auto set_fd_close_on_exec = [&die](int fd, bool close_on_exec) {
     int flags = fcntl(fd, F_GETFD, 0);
     if (flags < 0)
@@ -100,49 +94,41 @@ void __attribute__((noreturn)) ChildProcess(ChildProcessArgs* args) {
   if (getppid() == 1)
     die("terminating because parent process died");
 
-  switch (args->create_args->stdin_mode) {
-    case Subprocess::InputMode::kBuffer:
-      if (dup2(args->stdin_pipe_rd, STDIN_FILENO) == -1)
-        die("Failed to dup2(STDIN)");
-      close(args->stdin_pipe_rd);
-      break;
-    case Subprocess::InputMode::kDevNull:
-      if (dup2(open("/dev/null", O_RDONLY), STDIN_FILENO) == -1)
-        die("Failed to dup2(STDOUT)");
-      break;
-  }
+  if (dup2(args->stdin_pipe_rd, STDIN_FILENO) == -1)
+    die("Failed to dup2(STDIN)");
+  close(args->stdin_pipe_rd);
 
   switch (args->create_args->stdout_mode) {
-    case Subprocess::OutputMode::kInherit:
+    case Subprocess::kInherit:
       break;
-    case Subprocess::OutputMode::kDevNull: {
+    case Subprocess::kDevNull: {
       if (dup2(open("/dev/null", O_RDWR), STDOUT_FILENO) == -1)
         die("Failed to dup2(STDOUT)");
       break;
     }
-    case Subprocess::OutputMode::kBuffer:
+    case Subprocess::kBuffer:
       if (dup2(args->stdouterr_pipe_wr, STDOUT_FILENO) == -1)
         die("Failed to dup2(STDOUT)");
       break;
-    case Subprocess::OutputMode::kFd:
+    case Subprocess::kFd:
       if (dup2(*args->create_args->out_fd, STDOUT_FILENO) == -1)
         die("Failed to dup2(STDOUT)");
       break;
   }
 
   switch (args->create_args->stderr_mode) {
-    case Subprocess::OutputMode::kInherit:
+    case Subprocess::kInherit:
       break;
-    case Subprocess::OutputMode::kDevNull: {
+    case Subprocess::kDevNull: {
       if (dup2(open("/dev/null", O_RDWR), STDERR_FILENO) == -1)
         die("Failed to dup2(STDERR)");
       break;
     }
-    case Subprocess::OutputMode::kBuffer:
+    case Subprocess::kBuffer:
       if (dup2(args->stdouterr_pipe_wr, STDERR_FILENO) == -1)
         die("Failed to dup2(STDERR)");
       break;
-    case Subprocess::OutputMode::kFd:
+    case Subprocess::kFd:
       if (dup2(*args->create_args->out_fd, STDERR_FILENO) == -1)
         die("Failed to dup2(STDERR)");
       break;
@@ -164,14 +150,11 @@ void __attribute__((noreturn)) ChildProcess(ChildProcessArgs* args) {
     }
   }
 
-  // Clears O_CLOEXEC from stdin/out/err and the |preserve_fds| list. These are
-  // the only FDs that we want to be preserved after the exec().
+  // Clears O_CLOEXEC from stdin/out/err. These are the only FDs that we want
+  // to be preserved after the exec().
   set_fd_close_on_exec(STDIN_FILENO, false);
   set_fd_close_on_exec(STDOUT_FILENO, false);
   set_fd_close_on_exec(STDERR_FILENO, false);
-
-  for (auto fd : preserve_fds)
-    set_fd_close_on_exec(fd, false);
 
   // If the caller specified a std::function entrypoint, run that first.
   if (args->create_args->posix_entrypoint_for_testing)
@@ -228,10 +211,8 @@ void Subprocess::Start() {
   }
 
   // Setup the pipes for stdin/err redirection.
-  if (args.stdin_mode == InputMode::kBuffer) {
-    s_->stdin_pipe = base::Pipe::Create(base::Pipe::kWrNonBlock);
-    proc_args.stdin_pipe_rd = *s_->stdin_pipe.rd;
-  }
+  s_->stdin_pipe = base::Pipe::Create(base::Pipe::kWrNonBlock);
+  proc_args.stdin_pipe_rd = *s_->stdin_pipe.rd;
   s_->stdouterr_pipe = base::Pipe::Create(base::Pipe::kRdNonBlock);
   proc_args.stdouterr_pipe_wr = *s_->stdouterr_pipe.wr;
 

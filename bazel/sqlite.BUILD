@@ -35,7 +35,6 @@ include_sqlite = [
 ]
 
 sqlite_copts = [
-    "-Wno-misleading-indentation",
     "-DSQLITE_THREADSAFE=0",
     "-DQLITE_DEFAULT_MEMSTATUS=0",
     "-DSQLITE_LIKE_DOESNT_MATCH_BLOBS",

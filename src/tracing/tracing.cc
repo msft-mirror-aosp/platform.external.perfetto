@@ -20,7 +20,6 @@
 #include <condition_variable>
 #include <mutex>
 
-#include "perfetto/ext/base/no_destructor.h"
 #include "perfetto/ext/base/waitable_event.h"
 #include "perfetto/tracing/internal/track_event_internal.h"
 #include "src/tracing/internal/tracing_muxer_impl.h"
@@ -28,17 +27,10 @@
 namespace perfetto {
 namespace {
 bool g_was_initialized = false;
-
-// Wrapped in a function to avoid global constructor
-std::mutex& InitializedMutex() {
-  static base::NoDestructor<std::mutex> initialized_mutex;
-  return initialized_mutex.ref();
-}
 }
 
 // static
 void Tracing::InitializeInternal(const TracingInitArgs& args) {
-  std::unique_lock<std::mutex> lock(InitializedMutex());
   static TracingInitArgs init_args;
   if (g_was_initialized) {
     if (!(init_args == args)) {
@@ -53,7 +45,7 @@ void Tracing::InitializeInternal(const TracingInitArgs& args) {
   // Make sure the headers and implementation files agree on the build config.
   PERFETTO_CHECK(args.dcheck_is_on_ == PERFETTO_DCHECK_IS_ON());
   if (args.log_message_callback) {
-    base::SetLogMessageCallback(args.log_message_callback);
+    SetLogMessageCallback(args.log_message_callback);
   }
   internal::TracingMuxerImpl::InitializeInstance(args);
   internal::TrackRegistry::InitializeInstance();
@@ -63,19 +55,7 @@ void Tracing::InitializeInternal(const TracingInitArgs& args) {
 
 // static
 bool Tracing::IsInitialized() {
-  std::unique_lock<std::mutex> lock(InitializedMutex());
   return g_was_initialized;
-}
-
-// static
-void Tracing::ResetForTesting() {
-  std::unique_lock<std::mutex> lock(InitializedMutex());
-  if (!g_was_initialized)
-    return;
-  base::SetLogMessageCallback(nullptr);
-  internal::TracingMuxerImpl::ResetForTesting();
-  internal::TrackRegistry::ResetForTesting();
-  g_was_initialized = false;
 }
 
 //  static

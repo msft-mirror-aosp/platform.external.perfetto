@@ -16,9 +16,8 @@
 
 #include "src/tracing/ipc/consumer/consumer_ipc_client_impl.h"
 
+#include <inttypes.h>
 #include <string.h>
-
-#include <cinttypes>
 
 #include "perfetto/base/task_runner.h"
 #include "perfetto/ext/ipc/client.h"
@@ -278,7 +277,7 @@ void ConsumerIPCClientImpl::Attach(const std::string& key) {
           }
           const TraceConfig& trace_config = response->trace_config();
 
-          // If attached successfully, also attach to the end-of-trace
+          // If attached succesfully, also attach to the end-of-trace
           // notificaton callback, via EnableTracing(attach_notification_only).
           protos::gen::EnableTracingRequest enable_req;
           enable_req.set_attach_notification_only(true);

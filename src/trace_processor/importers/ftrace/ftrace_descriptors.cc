@@ -24,7 +24,7 @@ namespace perfetto {
 namespace trace_processor {
 namespace {
 
-std::array<MessageDescriptor, 419> descriptors{{
+std::array<MessageDescriptor, 359> descriptors{{
     {nullptr, 0, {}},
     {nullptr, 0, {}},
     {nullptr, 0, {}},
@@ -446,12 +446,11 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "mm_vmscan_kswapd_wake",
-        3,
+        2,
         {
             {},
             {"nid", ProtoSchemaType::kInt32},
             {"order", ProtoSchemaType::kInt32},
-            {"zid", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -530,11 +529,10 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "workqueue_execute_end",
-        2,
+        1,
         {
             {},
             {"work", ProtoSchemaType::kUint64},
-            {"function", ProtoSchemaType::kUint64},
         },
     },
     {
@@ -619,7 +617,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "cgroup_attach_task",
-        7,
+        5,
         {
             {},
             {"dst_root", ProtoSchemaType::kInt32},
@@ -627,20 +625,16 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"pid", ProtoSchemaType::kInt32},
             {"comm", ProtoSchemaType::kString},
             {"cname", ProtoSchemaType::kString},
-            {"dst_level", ProtoSchemaType::kInt32},
-            {"dst_path", ProtoSchemaType::kString},
         },
     },
     {
         "cgroup_mkdir",
-        5,
+        3,
         {
             {},
             {"root", ProtoSchemaType::kInt32},
             {"id", ProtoSchemaType::kInt32},
             {"cname", ProtoSchemaType::kString},
-            {"level", ProtoSchemaType::kInt32},
-            {"path", ProtoSchemaType::kString},
         },
     },
     {
@@ -655,19 +649,17 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "cgroup_rmdir",
-        5,
+        3,
         {
             {},
             {"root", ProtoSchemaType::kInt32},
             {"id", ProtoSchemaType::kInt32},
             {"cname", ProtoSchemaType::kString},
-            {"level", ProtoSchemaType::kInt32},
-            {"path", ProtoSchemaType::kString},
         },
     },
     {
         "cgroup_transfer_tasks",
-        7,
+        5,
         {
             {},
             {"dst_root", ProtoSchemaType::kInt32},
@@ -675,8 +667,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"pid", ProtoSchemaType::kInt32},
             {"comm", ProtoSchemaType::kString},
             {"cname", ProtoSchemaType::kString},
-            {"dst_level", ProtoSchemaType::kInt32},
-            {"dst_path", ProtoSchemaType::kString},
         },
     },
     {
@@ -691,26 +681,22 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "cgroup_release",
-        5,
+        3,
         {
             {},
             {"root", ProtoSchemaType::kInt32},
             {"id", ProtoSchemaType::kInt32},
             {"cname", ProtoSchemaType::kString},
-            {"level", ProtoSchemaType::kInt32},
-            {"path", ProtoSchemaType::kString},
         },
     },
     {
         "cgroup_rename",
-        5,
+        3,
         {
             {},
             {"root", ProtoSchemaType::kInt32},
             {"id", ProtoSchemaType::kInt32},
             {"cname", ProtoSchemaType::kString},
-            {"level", ProtoSchemaType::kInt32},
-            {"path", ProtoSchemaType::kString},
         },
     },
     {
@@ -1106,13 +1092,12 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "mm_compaction_kcompactd_wake",
-        4,
+        3,
         {
             {},
             {"nid", ProtoSchemaType::kInt32},
             {"order", ProtoSchemaType::kInt32},
             {"classzone_idx", ProtoSchemaType::kUint32},
-            {"highest_zoneidx", ProtoSchemaType::kUint32},
         },
     },
     {
@@ -1137,24 +1122,22 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "mm_compaction_try_to_compact_pages",
-        4,
+        3,
         {
             {},
             {"order", ProtoSchemaType::kInt32},
             {"gfp_mask", ProtoSchemaType::kUint32},
             {"mode", ProtoSchemaType::kUint32},
-            {"prio", ProtoSchemaType::kInt32},
         },
     },
     {
         "mm_compaction_wakeup_kcompactd",
-        4,
+        3,
         {
             {},
             {"nid", ProtoSchemaType::kInt32},
             {"order", ProtoSchemaType::kInt32},
             {"classzone_idx", ProtoSchemaType::kUint32},
-            {"highest_zoneidx", ProtoSchemaType::kUint32},
         },
     },
     {
@@ -1297,7 +1280,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "block_rq_complete",
-        7,
+        6,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -1306,7 +1289,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"errors", ProtoSchemaType::kInt32},
             {"rwbs", ProtoSchemaType::kString},
             {"cmd", ProtoSchemaType::kString},
-            {"error", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -1566,13 +1548,11 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "ext4_discard_preallocations",
-        4,
+        2,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
             {"ino", ProtoSchemaType::kUint64},
-            {"len", ProtoSchemaType::kUint32},
-            {"needed", ProtoSchemaType::kUint32},
         },
     },
     {
@@ -1842,7 +1822,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "ext4_ext_remove_space_done",
-        10,
+        7,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -1852,9 +1832,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"depth", ProtoSchemaType::kInt32},
             {"partial", ProtoSchemaType::kInt64},
             {"eh_entries", ProtoSchemaType::kUint32},
-            {"pc_lblk", ProtoSchemaType::kUint32},
-            {"pc_pclu", ProtoSchemaType::kUint64},
-            {"pc_state", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -1869,7 +1846,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "ext4_ext_rm_leaf",
-        10,
+        7,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -1879,9 +1856,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"ee_lblk", ProtoSchemaType::kUint32},
             {"ee_pblk", ProtoSchemaType::kUint64},
             {"ee_len", ProtoSchemaType::kInt32},
-            {"pc_lblk", ProtoSchemaType::kUint32},
-            {"pc_pclu", ProtoSchemaType::kUint64},
-            {"pc_state", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2049,7 +2023,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "ext4_journal_start",
-        6,
+        5,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2057,7 +2031,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"blocks", ProtoSchemaType::kInt32},
             {"rsv_blocks", ProtoSchemaType::kInt32},
             {"nblocks", ProtoSchemaType::kInt32},
-            {"revoke_creds", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2289,12 +2262,11 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "ext4_read_block_bitmap_load",
-        3,
+        2,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
             {"group", ProtoSchemaType::kUint32},
-            {"prefetch", ProtoSchemaType::kUint32},
         },
     },
     {
@@ -2319,7 +2291,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "ext4_remove_blocks",
-        11,
+        8,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2330,9 +2302,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"ee_pblk", ProtoSchemaType::kUint64},
             {"ee_lblk", ProtoSchemaType::kUint32},
             {"ee_len", ProtoSchemaType::kUint32},
-            {"pc_lblk", ProtoSchemaType::kUint32},
-            {"pc_pclu", ProtoSchemaType::kUint64},
-            {"pc_state", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2663,7 +2632,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "f2fs_get_victim",
-        11,
+        10,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2676,7 +2645,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"pre_victim", ProtoSchemaType::kUint32},
             {"prefree", ProtoSchemaType::kUint32},
             {"free", ProtoSchemaType::kUint32},
-            {"cost", ProtoSchemaType::kUint32},
         },
     },
     {
@@ -2716,7 +2684,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "f2fs_readpage",
-        8,
+        5,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2724,9 +2692,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"index", ProtoSchemaType::kUint64},
             {"blkaddr", ProtoSchemaType::kUint64},
             {"type", ProtoSchemaType::kInt32},
-            {"dir", ProtoSchemaType::kInt32},
-            {"dirty", ProtoSchemaType::kInt32},
-            {"uptodate", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2741,7 +2706,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "f2fs_set_page_dirty",
-        7,
+        6,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2750,7 +2715,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"dir", ProtoSchemaType::kInt32},
             {"index", ProtoSchemaType::kUint64},
             {"dirty", ProtoSchemaType::kInt32},
-            {"uptodate", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2782,7 +2746,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "f2fs_sync_file_exit",
-        6,
+        5,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2790,7 +2754,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"need_cp", ProtoSchemaType::kUint32},
             {"datasync", ProtoSchemaType::kInt32},
             {"ret", ProtoSchemaType::kInt32},
-            {"cp_reason", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2942,7 +2905,7 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "f2fs_vm_page_mkwrite",
-        7,
+        6,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
@@ -2951,7 +2914,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"dir", ProtoSchemaType::kInt32},
             {"index", ProtoSchemaType::kUint64},
             {"dirty", ProtoSchemaType::kInt32},
-            {"uptodate", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -2968,13 +2930,12 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "f2fs_write_checkpoint",
-        4,
+        3,
         {
             {},
             {"dev", ProtoSchemaType::kUint64},
             {"is_umount", ProtoSchemaType::kUint32},
             {"msg", ProtoSchemaType::kString},
-            {"reason", ProtoSchemaType::kInt32},
         },
     },
     {
@@ -3496,13 +3457,12 @@ std::array<MessageDescriptor, 419> descriptors{{
     },
     {
         "binder_transaction_alloc_buf",
-        4,
+        3,
         {
             {},
             {"data_size", ProtoSchemaType::kUint64},
             {"debug_id", ProtoSchemaType::kInt32},
             {"offsets_size", ProtoSchemaType::kUint64},
-            {"extra_buffers_size", ProtoSchemaType::kUint64},
         },
     },
     {
@@ -3879,630 +3839,6 @@ std::array<MessageDescriptor, 419> descriptors{{
             {"bus_id", ProtoSchemaType::kUint32},
             {"client", ProtoSchemaType::kInt32},
             {"ib_quota", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "rss_stat_throttled",
-        4,
-        {
-            {},
-            {"curr", ProtoSchemaType::kUint32},
-            {"member", ProtoSchemaType::kInt32},
-            {"mm_id", ProtoSchemaType::kUint32},
-            {"size", ProtoSchemaType::kInt64},
-        },
-    },
-    {
-        "netif_receive_skb",
-        3,
-        {
-            {},
-            {"len", ProtoSchemaType::kUint32},
-            {"name", ProtoSchemaType::kString},
-            {"skbaddr", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "net_dev_xmit",
-        4,
-        {
-            {},
-            {"len", ProtoSchemaType::kUint32},
-            {"name", ProtoSchemaType::kString},
-            {"rc", ProtoSchemaType::kInt32},
-            {"skbaddr", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "inet_sock_set_state",
-        9,
-        {
-            {},
-            {"daddr", ProtoSchemaType::kUint32},
-            {"dport", ProtoSchemaType::kUint32},
-            {"family", ProtoSchemaType::kUint32},
-            {"newstate", ProtoSchemaType::kInt32},
-            {"oldstate", ProtoSchemaType::kInt32},
-            {"protocol", ProtoSchemaType::kUint32},
-            {"saddr", ProtoSchemaType::kUint32},
-            {"skaddr", ProtoSchemaType::kUint64},
-            {"sport", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "tcp_retransmit_skb",
-        7,
-        {
-            {},
-            {"daddr", ProtoSchemaType::kUint32},
-            {"dport", ProtoSchemaType::kUint32},
-            {"saddr", ProtoSchemaType::kUint32},
-            {"skaddr", ProtoSchemaType::kUint64},
-            {"skbaddr", ProtoSchemaType::kUint64},
-            {"sport", ProtoSchemaType::kUint32},
-            {"state", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "cros_ec_sensorhub_data",
-        6,
-        {
-            {},
-            {"current_time", ProtoSchemaType::kInt64},
-            {"current_timestamp", ProtoSchemaType::kInt64},
-            {"delta", ProtoSchemaType::kInt64},
-            {"ec_fifo_timestamp", ProtoSchemaType::kUint32},
-            {"ec_sensor_num", ProtoSchemaType::kUint32},
-            {"fifo_timestamp", ProtoSchemaType::kInt64},
-        },
-    },
-    {
-        "napi_gro_receive_entry",
-        19,
-        {
-            {},
-            {"data_len", ProtoSchemaType::kUint32},
-            {"gso_size", ProtoSchemaType::kUint32},
-            {"gso_type", ProtoSchemaType::kUint32},
-            {"hash", ProtoSchemaType::kUint32},
-            {"ip_summed", ProtoSchemaType::kUint32},
-            {"l4_hash", ProtoSchemaType::kUint32},
-            {"len", ProtoSchemaType::kUint32},
-            {"mac_header", ProtoSchemaType::kInt32},
-            {"mac_header_valid", ProtoSchemaType::kUint32},
-            {"name", ProtoSchemaType::kString},
-            {"napi_id", ProtoSchemaType::kUint32},
-            {"nr_frags", ProtoSchemaType::kUint32},
-            {"protocol", ProtoSchemaType::kUint32},
-            {"queue_mapping", ProtoSchemaType::kUint32},
-            {"skbaddr", ProtoSchemaType::kUint64},
-            {"truesize", ProtoSchemaType::kUint32},
-            {"vlan_proto", ProtoSchemaType::kUint32},
-            {"vlan_tagged", ProtoSchemaType::kUint32},
-            {"vlan_tci", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "napi_gro_receive_exit",
-        1,
-        {
-            {},
-            {"ret", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kfree_skb",
-        3,
-        {
-            {},
-            {"location", ProtoSchemaType::kUint64},
-            {"protocol", ProtoSchemaType::kUint32},
-            {"skbaddr", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_access_fault",
-        1,
-        {
-            {},
-            {"ipa", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_ack_irq",
-        2,
-        {
-            {},
-            {"irqchip", ProtoSchemaType::kUint32},
-            {"pin", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_age_hva",
-        2,
-        {
-            {},
-            {"end", ProtoSchemaType::kUint64},
-            {"start", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_age_page",
-        4,
-        {
-            {},
-            {"gfn", ProtoSchemaType::kUint64},
-            {"hva", ProtoSchemaType::kUint64},
-            {"level", ProtoSchemaType::kUint32},
-            {"referenced", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_arm_clear_debug",
-        1,
-        {
-            {},
-            {"guest_debug", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_arm_set_dreg32",
-        2,
-        {
-            {},
-            {"name", ProtoSchemaType::kString},
-            {"value", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_arm_set_regset",
-        2,
-        {
-            {},
-            {"len", ProtoSchemaType::kInt32},
-            {"name", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "kvm_arm_setup_debug",
-        2,
-        {
-            {},
-            {"guest_debug", ProtoSchemaType::kUint32},
-            {"vcpu", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_entry",
-        1,
-        {
-            {},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_exit",
-        3,
-        {
-            {},
-            {"esr_ec", ProtoSchemaType::kUint32},
-            {"ret", ProtoSchemaType::kInt32},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_fpu",
-        1,
-        {
-            {},
-            {"load", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_get_timer_map",
-        4,
-        {
-            {},
-            {"direct_ptimer", ProtoSchemaType::kInt32},
-            {"direct_vtimer", ProtoSchemaType::kInt32},
-            {"emul_ptimer", ProtoSchemaType::kInt32},
-            {"vcpu_id", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_guest_fault",
-        4,
-        {
-            {},
-            {"hsr", ProtoSchemaType::kUint64},
-            {"hxfar", ProtoSchemaType::kUint64},
-            {"ipa", ProtoSchemaType::kUint64},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_handle_sys_reg",
-        1,
-        {
-            {},
-            {"hsr", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_hvc_arm64",
-        3,
-        {
-            {},
-            {"imm", ProtoSchemaType::kUint64},
-            {"r0", ProtoSchemaType::kUint64},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_irq_line",
-        4,
-        {
-            {},
-            {"irq_num", ProtoSchemaType::kInt32},
-            {"level", ProtoSchemaType::kInt32},
-            {"type", ProtoSchemaType::kUint32},
-            {"vcpu_idx", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kvm_mmio",
-        4,
-        {
-            {},
-            {"gpa", ProtoSchemaType::kUint64},
-            {"len", ProtoSchemaType::kUint32},
-            {"type", ProtoSchemaType::kUint32},
-            {"val", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_mmio_emulate",
-        3,
-        {
-            {},
-            {"cpsr", ProtoSchemaType::kUint64},
-            {"instr", ProtoSchemaType::kUint64},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_set_guest_debug",
-        2,
-        {
-            {},
-            {"guest_debug", ProtoSchemaType::kUint32},
-            {"vcpu", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_set_irq",
-        3,
-        {
-            {},
-            {"gsi", ProtoSchemaType::kUint32},
-            {"irq_source_id", ProtoSchemaType::kInt32},
-            {"level", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kvm_set_spte_hva",
-        1,
-        {
-            {},
-            {"hva", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_set_way_flush",
-        2,
-        {
-            {},
-            {"cache", ProtoSchemaType::kUint32},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_sys_access",
-        8,
-        {
-            {},
-            {"CRm", ProtoSchemaType::kUint32},
-            {"CRn", ProtoSchemaType::kUint32},
-            {"Op0", ProtoSchemaType::kUint32},
-            {"Op1", ProtoSchemaType::kUint32},
-            {"Op2", ProtoSchemaType::kUint32},
-            {"is_write", ProtoSchemaType::kUint32},
-            {"name", ProtoSchemaType::kString},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_test_age_hva",
-        1,
-        {
-            {},
-            {"hva", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_timer_emulate",
-        2,
-        {
-            {},
-            {"should_fire", ProtoSchemaType::kUint32},
-            {"timer_idx", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kvm_timer_hrtimer_expire",
-        1,
-        {
-            {},
-            {"timer_idx", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kvm_timer_restore_state",
-        3,
-        {
-            {},
-            {"ctl", ProtoSchemaType::kUint64},
-            {"cval", ProtoSchemaType::kUint64},
-            {"timer_idx", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kvm_timer_save_state",
-        3,
-        {
-            {},
-            {"ctl", ProtoSchemaType::kUint64},
-            {"cval", ProtoSchemaType::kUint64},
-            {"timer_idx", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "kvm_timer_update_irq",
-        3,
-        {
-            {},
-            {"irq", ProtoSchemaType::kUint32},
-            {"level", ProtoSchemaType::kInt32},
-            {"vcpu_id", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_toggle_cache",
-        3,
-        {
-            {},
-            {"now", ProtoSchemaType::kUint32},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-            {"was", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_unmap_hva_range",
-        2,
-        {
-            {},
-            {"end", ProtoSchemaType::kUint64},
-            {"start", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "kvm_userspace_exit",
-        1,
-        {
-            {},
-            {"reason", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_vcpu_wakeup",
-        3,
-        {
-            {},
-            {"ns", ProtoSchemaType::kUint64},
-            {"valid", ProtoSchemaType::kUint32},
-            {"waited", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "kvm_wfx_arm64",
-        2,
-        {
-            {},
-            {"is_wfe", ProtoSchemaType::kUint32},
-            {"vcpu_pc", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "trap_reg",
-        4,
-        {
-            {},
-            {"fn", ProtoSchemaType::kString},
-            {"is_write", ProtoSchemaType::kUint32},
-            {"reg", ProtoSchemaType::kInt32},
-            {"write_value", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "vgic_update_irq_pending",
-        3,
-        {
-            {},
-            {"irq", ProtoSchemaType::kUint32},
-            {"level", ProtoSchemaType::kUint32},
-            {"vcpu_id", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "wakeup_source_activate",
-        2,
-        {
-            {},
-            {"name", ProtoSchemaType::kString},
-            {"state", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "wakeup_source_deactivate",
-        2,
-        {
-            {},
-            {"name", ProtoSchemaType::kString},
-            {"state", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "ufshcd_command",
-        10,
-        {
-            {},
-            {"dev_name", ProtoSchemaType::kString},
-            {"doorbell", ProtoSchemaType::kUint32},
-            {"intr", ProtoSchemaType::kUint32},
-            {"lba", ProtoSchemaType::kUint64},
-            {"opcode", ProtoSchemaType::kUint32},
-            {"str", ProtoSchemaType::kString},
-            {"tag", ProtoSchemaType::kUint32},
-            {"transfer_len", ProtoSchemaType::kInt32},
-            {"group_id", ProtoSchemaType::kUint32},
-            {"str_t", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "ufshcd_clk_gating",
-        2,
-        {
-            {},
-            {"dev_name", ProtoSchemaType::kString},
-            {"state", ProtoSchemaType::kInt32},
-        },
-    },
-    {
-        "console",
-        1,
-        {
-            {},
-            {"msg", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "drm_vblank_event",
-        4,
-        {
-            {},
-            {"crtc", ProtoSchemaType::kInt32},
-            {"high_prec", ProtoSchemaType::kUint32},
-            {"seq", ProtoSchemaType::kUint32},
-            {"time", ProtoSchemaType::kInt64},
-        },
-    },
-    {
-        "drm_vblank_event_delivered",
-        3,
-        {
-            {},
-            {"crtc", ProtoSchemaType::kInt32},
-            {"file", ProtoSchemaType::kUint64},
-            {"seq", ProtoSchemaType::kUint32},
-        },
-    },
-    {
-        "drm_sched_job",
-        6,
-        {
-            {},
-            {"entity", ProtoSchemaType::kUint64},
-            {"fence", ProtoSchemaType::kUint64},
-            {"hw_job_count", ProtoSchemaType::kInt32},
-            {"id", ProtoSchemaType::kUint64},
-            {"job_count", ProtoSchemaType::kUint32},
-            {"name", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "drm_run_job",
-        6,
-        {
-            {},
-            {"entity", ProtoSchemaType::kUint64},
-            {"fence", ProtoSchemaType::kUint64},
-            {"hw_job_count", ProtoSchemaType::kInt32},
-            {"id", ProtoSchemaType::kUint64},
-            {"job_count", ProtoSchemaType::kUint32},
-            {"name", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "drm_sched_process_job",
-        1,
-        {
-            {},
-            {"fence", ProtoSchemaType::kUint64},
-        },
-    },
-    {
-        "dma_fence_init",
-        4,
-        {
-            {},
-            {"context", ProtoSchemaType::kUint32},
-            {"driver", ProtoSchemaType::kString},
-            {"seqno", ProtoSchemaType::kUint32},
-            {"timeline", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "dma_fence_emit",
-        4,
-        {
-            {},
-            {"context", ProtoSchemaType::kUint32},
-            {"driver", ProtoSchemaType::kString},
-            {"seqno", ProtoSchemaType::kUint32},
-            {"timeline", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "dma_fence_signaled",
-        4,
-        {
-            {},
-            {"context", ProtoSchemaType::kUint32},
-            {"driver", ProtoSchemaType::kString},
-            {"seqno", ProtoSchemaType::kUint32},
-            {"timeline", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "dma_fence_wait_start",
-        4,
-        {
-            {},
-            {"context", ProtoSchemaType::kUint32},
-            {"driver", ProtoSchemaType::kString},
-            {"seqno", ProtoSchemaType::kUint32},
-            {"timeline", ProtoSchemaType::kString},
-        },
-    },
-    {
-        "dma_fence_wait_end",
-        4,
-        {
-            {},
-            {"context", ProtoSchemaType::kUint32},
-            {"driver", ProtoSchemaType::kString},
-            {"seqno", ProtoSchemaType::kUint32},
-            {"timeline", ProtoSchemaType::kString},
         },
     },
 }};

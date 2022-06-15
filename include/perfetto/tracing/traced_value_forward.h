@@ -22,52 +22,30 @@ namespace perfetto {
 class TracedValue;
 class TracedArray;
 class TracedDictionary;
-template <typename MessageType>
-class TracedProto;
 
 template <typename T>
 void WriteIntoTracedValue(TracedValue context, T&& value);
-template <typename MessageType, typename T>
-void WriteIntoTracedProto(TracedProto<MessageType> context, T&& value);
 
 template <typename T, class = void>
 struct TraceFormatTraits;
 
-// Helpers to check whether a given type T can be written into a TracedValue /
-// TracedProto<MessageType>.
+// Write support checker to allow it to be used when matching.
 //
 // Intended to be used for types like smart pointers, who should support
-// WriteIntoTrace only iff their inner type supports being written into
+// AsTracedValueInto only iff their inner type supports being written into
 // a TracedValue.
 //
 // template <typename T>
 // class SmartPtr {
 //   ...
 //
-//   // Note: |Check| is needed to ensure that using
-//   SmartPtr<ClassWhichDoesNotSupportTracedValue> does not generate a
-//   compilation error.
-//
-//   template <typename Check=void>
-//   typename check_traced_value_support<T, Check>::value
-//   WriteIntoTrace(perfetto::TracedValue context) const {
+//   typename check_traced_value_support<T, void>::value
+//   AsTracedValueInto(perfetto::TracedValue context) const {
 //      WriteIntoTracedValue(std::move(context), *ptr_);
 //   }
-//
-//   template <typename MessageType>
-//   typename check_traced_value_support<T, MessageType>::value
-//   WriteIntoTrace(perfetto::TracedProto<MessageType> message) const {
-//      WriteIntoTracedProto(std::move(message), *ptr_);
-//   }
 // };
-template <typename T, typename ResultType = void, typename = void>
+template <typename T, typename ResultType = void, class = void>
 struct check_traced_value_support;
-
-template <typename MessageType,
-          typename T,
-          typename ResultType = void,
-          typename = void>
-struct check_traced_proto_support;
 
 }  // namespace perfetto
 

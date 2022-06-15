@@ -15,7 +15,6 @@
  */
 
 #include "perfetto/tracing/track_event_legacy.h"
-#include "perfetto/ext/base/hash.h"
 
 #include "perfetto/tracing/track.h"
 
@@ -52,20 +51,15 @@ void LegacyTraceId::Write(protos::pbzero::TrackEvent::LegacyEvent* event,
   uint32_t scope_flags = id_flags_ & (legacy::kTraceEventFlagHasId |
                                       legacy::kTraceEventFlagHasLocalId |
                                       legacy::kTraceEventFlagHasGlobalId);
-  uint64_t id = raw_id_;
-  if (scope_ && scope_flags != legacy::kTraceEventFlagHasGlobalId) {
-    id = base::Hash::Combine(id, scope_);
-  }
-
   switch (scope_flags) {
     case legacy::kTraceEventFlagHasId:
-      event->set_unscoped_id(id);
+      event->set_unscoped_id(raw_id_);
       break;
     case legacy::kTraceEventFlagHasLocalId:
-      event->set_local_id(id);
+      event->set_local_id(raw_id_);
       break;
     case legacy::kTraceEventFlagHasGlobalId:
-      event->set_global_id(id);
+      event->set_global_id(raw_id_);
       break;
   }
   if (scope_)
