@@ -139,6 +139,21 @@ source_set("zip_reader") {
   }
 }
 
+source_set("proto_profiler") {
+  sources = [
+    "proto_profiler.cc",
+    "proto_profiler.h",
+  ]
+  deps = [
+    "../../../gn:default_deps",
+    "../../../gn:protobuf_full",
+    "../../../protos/perfetto/common:zero",
+    "../../../protos/third_party/pprof:zero",
+    "../../base",
+    "../../protozero",
+  ]
+}
+
 source_set("unittests") {
   sources = [
     "debug_annotation_parser_unittest.cc",
