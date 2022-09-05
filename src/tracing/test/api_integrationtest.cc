@@ -499,20 +499,6 @@ class PerfettoApiTest : public ::testing::TestWithParam<perfetto::BackendType> {
     perfetto::Tracing::ResetForTesting();
   }
 
-  static void TearDownTestSuite() {
-    // Test shutting down Perfetto only when all other tests have been run and
-    // no more tracing code will be executed.
-    PERFETTO_CHECK(!perfetto::Tracing::IsInitialized());
-    TracingInitArgs args;
-    args.backends = perfetto::kInProcessBackend;
-    perfetto::Tracing::Initialize(args);
-    perfetto::Tracing::Shutdown();
-    PERFETTO_CHECK(!perfetto::Tracing::IsInitialized());
-    // Shutting down again is a no-op.
-    perfetto::Tracing::Shutdown();
-    PERFETTO_CHECK(!perfetto::Tracing::IsInitialized());
-  }
-
   template <typename DataSourceType>
   TestDataSourceHandle* RegisterDataSource(std::string name) {
     perfetto::DataSourceDescriptor dsd;
@@ -5034,6 +5020,65 @@ TEST_P(PerfettoApiTest, TrackEventObserver_ClearIncrementalState) {
   EXPECT_FALSE(perfetto::TrackEvent::IsEnabled());
 }
 
+TEST_P(PerfettoApiTest, TrackEventObserver_TwoDataSources) {
+  class Observer : public perfetto::TrackEventSessionObserver {
+   public:
+    ~Observer() override = default;
+
+    void OnStart(const perfetto::DataSourceBase::StartArgs&) {
+      EXPECT_FALSE(start_called);
+      start_called = true;
+    }
+
+    bool start_called{};
+  };
+
+  EXPECT_FALSE(perfetto::TrackEvent::IsEnabled());
+  EXPECT_FALSE(tracing_module::IsEnabled());
+
+  {
+    Observer observer1, observer2;
+    perfetto::TrackEvent::AddSessionObserver(&observer1);
+    tracing_module::AddSessionObserver(&observer2);
+
+    perfetto::TraceConfig cfg;
+    auto* tracing_session = NewTraceWithCategories({"foo"}, {}, cfg);
+
+    tracing_session->get()->StartBlocking();
+    tracing_session->on_stop.Wait();
+
+    // The tracing_module hasn't registered its data source yet, so observer2
+    // should not be notified.
+    EXPECT_TRUE(observer1.start_called);
+    EXPECT_FALSE(observer2.start_called);
+    perfetto::TrackEvent::RemoveSessionObserver(&observer1);
+    tracing_module::RemoveSessionObserver(&observer2);
+  }
+
+  tracing_module::InitializeCategories();
+
+  {
+    Observer observer1, observer2;
+    perfetto::TrackEvent::AddSessionObserver(&observer1);
+    tracing_module::AddSessionObserver(&observer2);
+
+    perfetto::TraceConfig cfg;
+    auto* tracing_session = NewTraceWithCategories({"foo"}, {}, cfg);
+
+    tracing_session->get()->StartBlocking();
+    tracing_session->on_stop.Wait();
+
+    // Each observer should be notified exactly once.
+    EXPECT_TRUE(observer1.start_called);
+    EXPECT_TRUE(observer2.start_called);
+    perfetto::TrackEvent::RemoveSessionObserver(&observer1);
+    tracing_module::RemoveSessionObserver(&observer2);
+  }
+
+  EXPECT_FALSE(perfetto::TrackEvent::IsEnabled());
+  EXPECT_FALSE(tracing_module::IsEnabled());
+}
+
 #if PERFETTO_BUILDFLAG(PERFETTO_COMPILER_CLANG)
 struct __attribute__((capability("mutex"))) MockMutex {
   void Lock() __attribute__((acquire_capability())) {}
@@ -5306,13 +5351,6 @@ class PerfettoStartupTracingApiTest : public PerfettoApiTest {
     // referencing a deleted producer, which will lead to crash.
     perfetto::test::SyncProducers();
     this->PerfettoApiTest::TearDown();
-  }
-
-  static void TearDownTestSuite() {
-    // Keep it empty to avoid running TearDownTestSuite() of parent class.
-    // because `PerfettoApiTest::TearDownTestSuite` is not really a cleanup
-    // step but it is just another test case which should run after all other
-    // tests. hence we don't need to run it again here.
   }
 
  protected:
