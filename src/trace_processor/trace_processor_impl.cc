@@ -51,6 +51,7 @@
 #include "src/trace_processor/iterator_impl.h"
 #include "src/trace_processor/sqlite/create_function.h"
 #include "src/trace_processor/sqlite/create_view_function.h"
+#include "src/trace_processor/sqlite/pprof_functions.h"
 #include "src/trace_processor/sqlite/register_function.h"
 #include "src/trace_processor/sqlite/scoped_db.h"
 #include "src/trace_processor/sqlite/span_join_operator_table.h"
@@ -300,6 +301,13 @@ void CreateBuiltinViews(sqlite3* db) {
                "  WHEN 'json' THEN string_value "
                "ELSE NULL END AS display_value "
                "FROM internal_args;",
+               nullptr, nullptr, &error);
+  MaybeRegisterError(error);
+
+  sqlite3_exec(db,
+               "CREATE VIEW thread_slice AS "
+               "SELECT * FROM slice "
+               "WHERE thread_dur is NOT NULL",
                nullptr, nullptr, &error);
   MaybeRegisterError(error);
 }
@@ -954,6 +962,12 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   // functions are supported.
   RegisterLastNonNullFunction(db);
   RegisterValueAtMaxTsFunction(db);
+  {
+    base::Status status = PprofFunctions::Register(db, &context_);
+    if (!status.ok()) {
+      PERFETTO_ELOG("%s", status.c_message());
+    }
+  }
 
   SetupMetrics(this, *db_, &sql_metrics_, cfg.skip_builtin_metric_paths);
 
@@ -1026,7 +1040,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
 
   RegisterDbTable(storage->slice_table());
   RegisterDbTable(storage->flow_table());
-  RegisterDbTable(storage->thread_slice_table());
+  RegisterDbTable(storage->slice_table());
   RegisterDbTable(storage->sched_slice_table());
   RegisterDbTable(storage->thread_state_table());
   RegisterDbTable(storage->gpu_slice_table());
@@ -1047,6 +1061,9 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   RegisterDbTable(storage->gpu_counter_track_table());
   RegisterDbTable(storage->gpu_counter_group_table());
   RegisterDbTable(storage->perf_counter_track_table());
+  RegisterDbTable(storage->energy_counter_track_table());
+  RegisterDbTable(storage->uid_counter_track_table());
+  RegisterDbTable(storage->energy_per_uid_counter_track_table());
 
   RegisterDbTable(storage->heap_graph_object_table());
   RegisterDbTable(storage->heap_graph_reference_table());
