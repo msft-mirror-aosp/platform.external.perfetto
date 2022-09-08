@@ -45,12 +45,6 @@ namespace perfetto {
 
 namespace {
 
-namespace {
-constexpr char kRssStatThrottledTrigger[] =
-    "hist:keys=mm_id,member:bucket=size/0x80000"
-    ":onchange($bucket).rss_stat_throttled(mm_id,curr,member,size)";
-}
-
 void KernelLogWrite(const char* s) {
   PERFETTO_DCHECK(*s && s[strlen(s) - 1] == '\n');
   if (FtraceProcfs::g_kmesg_fd != -1)
@@ -110,11 +104,6 @@ FtraceProcfs::~FtraceProcfs() = default;
 bool FtraceProcfs::EnableEvent(const std::string& group,
                                const std::string& name) {
   std::string path = root_ + "events/" + group + "/" + name + "/enable";
-
-  // Create any required triggers for the ftrace event being enabled.
-  // Some ftrace events (synthetic events) need to set up an event trigger
-  MaybeSetUpEventTriggers(group, name);
-
   if (WriteToFile(path, "1"))
     return true;
   path = root_ + "set_event";
@@ -124,17 +113,10 @@ bool FtraceProcfs::EnableEvent(const std::string& group,
 bool FtraceProcfs::DisableEvent(const std::string& group,
                                 const std::string& name) {
   std::string path = root_ + "events/" + group + "/" + name + "/enable";
-
-  bool ret = WriteToFile(path, "0");
-  if (!ret) {
-    path = root_ + "set_event";
-    ret = AppendToFile(path, "!" + group + ":" + name);
-  }
-
-  // Remove any associated event triggers after disabling the event
-  MaybeTearDownEventTriggers(group, name);
-
-  return ret;
+  if (WriteToFile(path, "0"))
+    return true;
+  path = root_ + "set_event";
+  return AppendToFile(path, "!" + group + ":" + name);
 }
 
 bool FtraceProcfs::DisableAllEvents() {
@@ -148,110 +130,10 @@ std::string FtraceProcfs::ReadEventFormat(const std::string& group,
   return ReadFileIntoString(path);
 }
 
-std::vector<std::string> FtraceProcfs::ReadEventTriggers(
-    const std::string& group,
-    const std::string& name) const {
+std::string FtraceProcfs::ReadEventTrigger(const std::string& group,
+                                           const std::string& name) const {
   std::string path = root_ + "events/" + group + "/" + name + "/trigger";
-  std::string s = ReadFileIntoString(path);
-  std::vector<std::string> triggers;
-
-  for (base::StringSplitter ss(s, '\n'); ss.Next();) {
-    std::string trigger = ss.cur_token();
-    if (trigger.empty() || trigger[0] == '#')
-      continue;
-
-    base::StringSplitter ts(trigger, ' ');
-    PERFETTO_CHECK(ts.Next());
-    triggers.push_back(ts.cur_token());
-  }
-
-  return triggers;
-}
-
-bool FtraceProcfs::CreateEventTrigger(const std::string& group,
-                                      const std::string& name,
-                                      const std::string& trigger) {
-  std::string path = root_ + "events/" + group + "/" + name + "/trigger";
-  return WriteToFile(path, trigger);
-}
-
-bool FtraceProcfs::RemoveEventTrigger(const std::string& group,
-                                      const std::string& name,
-                                      const std::string& trigger) {
-  std::string path = root_ + "events/" + group + "/" + name + "/trigger";
-  return WriteToFile(path, "!" + trigger);
-}
-
-bool FtraceProcfs::RemoveAllEventTriggers(const std::string& group,
-                                          const std::string& name) {
-  std::vector<std::string> triggers = ReadEventTriggers(group, name);
-
-  // Remove the triggers in reverse order since a trigger can depend
-  // on another trigger created earlier.
-  for (auto it = triggers.rbegin(); it != triggers.rend(); ++it)
-    if (!RemoveEventTrigger(group, name, *it))
-      return false;
-  return true;
-}
-
-bool FtraceProcfs::MaybeSetUpEventTriggers(const std::string& group,
-                                           const std::string& name) {
-  bool ret = true;
-
-  if (group == "synthetic" && name == "rss_stat_throttled") {
-    ret = RemoveAllEventTriggers("kmem", "rss_stat") &&
-          CreateEventTrigger("kmem", "rss_stat", kRssStatThrottledTrigger);
-  }
-
-  if (!ret) {
-    PERFETTO_PLOG("Failed to setup event triggers for %s:%s", group.c_str(),
-                  name.c_str());
-  }
-
-  return ret;
-}
-
-bool FtraceProcfs::MaybeTearDownEventTriggers(const std::string& group,
-                                              const std::string& name) {
-  bool ret = true;
-
-  if (group == "synthetic" && name == "rss_stat_throttled")
-    ret = RemoveAllEventTriggers("kmem", "rss_stat");
-
-  if (!ret) {
-    PERFETTO_PLOG("Failed to tear down event triggers for: %s:%s",
-                  group.c_str(), name.c_str());
-  }
-
-  return ret;
-}
-
-bool FtraceProcfs::SupportsRssStatThrottled() {
-  std::string group = "synthetic";
-  std::string name = "rss_stat_throttled";
-
-  // Check if the trigger already exists. Don't try recreating
-  // or removing the trigger if it is already in use.
-  auto triggers = ReadEventTriggers("kmem", "rss_stat");
-  for (const auto& trigger : triggers) {
-    // The kernel shows all the default values of a trigger
-    // when read from and trace event 'trigger' file.
-    //
-    // Trying to match the complete trigger string is prone
-    // to fail if, in the future, the kernel changes default
-    // fields or values for event triggers.
-    //
-    // Do a partial match on the generated event name
-    // (rss_stat_throttled) to detect if the trigger
-    // is already created.
-    if (trigger.find(name) != std::string::npos)
-      return true;
-  }
-
-  // Attempt to create rss_stat_throttled hist trigger */
-  bool ret = MaybeSetUpEventTriggers(group, name);
-
-  return ret && MaybeTearDownEventTriggers(group, name);
+  return ReadFileIntoString(path);
 }
 
 std::string FtraceProcfs::ReadPrintkFormats() const {
