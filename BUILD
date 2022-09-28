@@ -1152,6 +1152,8 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_importers_proto_storage_minimal",
     srcs = [
+        "src/trace_processor/importers/proto/active_chrome_processes_tracker.cc",
+        "src/trace_processor/importers/proto/active_chrome_processes_tracker.h",
         "src/trace_processor/importers/proto/heap_profile_tracker.cc",
         "src/trace_processor/importers/proto/heap_profile_tracker.h",
         "src/trace_processor/importers/proto/profiler_util.cc",
@@ -1548,6 +1550,8 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_util_profile_builder",
     srcs = [
+        "src/trace_processor/util/annotated_callsites.cc",
+        "src/trace_processor/util/annotated_callsites.h",
         "src/trace_processor/util/profile_builder.cc",
         "src/trace_processor/util/profile_builder.h",
     ],
