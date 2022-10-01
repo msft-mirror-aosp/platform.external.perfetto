@@ -897,7 +897,8 @@ base::Status PrepareAndStepUntilLastValidStmt(
     if (prev_stmt) {
       PERFETTO_TP_TRACE(
           "STMT_STEP_UNTIL_DONE", [&prev_stmt](metatrace::Record* record) {
-            record->AddArg("SQL", sqlite3_expanded_sql(*prev_stmt));
+            auto expanded_sql = sqlite_utils::ExpandedSqlForStmt(*prev_stmt);
+            record->AddArg("SQL", expanded_sql.get());
           });
       RETURN_IF_ERROR(sqlite_utils::StepStmtUntilDone(prev_stmt.get()));
     }
@@ -907,7 +908,8 @@ base::Status PrepareAndStepUntilLastValidStmt(
     {
       PERFETTO_TP_TRACE(
           "STMT_FIRST_STEP", [&cur_stmt](metatrace::Record* record) {
-            record->AddArg("SQL", sqlite3_expanded_sql(*cur_stmt));
+            auto expanded_sql = sqlite_utils::ExpandedSqlForStmt(*cur_stmt);
+            record->AddArg("SQL", expanded_sql.get());
           });
 
       // Now step once into |cur_stmt| so that when we prepare the next statment
@@ -934,6 +936,30 @@ base::Status PrepareAndStepUntilLastValidStmt(
   metadata->column_count =
       static_cast<uint32_t>(sqlite3_column_count(output_stmt->get()));
   return base::OkStatus();
+}
+
+const char* TraceTypeToString(TraceType trace_type) {
+  switch (trace_type) {
+    case kUnknownTraceType:
+      return "unknown";
+    case kProtoTraceType:
+      return "proto";
+    case kJsonTraceType:
+      return "json";
+    case kFuchsiaTraceType:
+      return "fuchsia";
+    case kSystraceTraceType:
+      return "systrace";
+    case kGzipTraceType:
+      return "gzip";
+    case kCtraceTraceType:
+      return "ctrace";
+    case kNinjaLogTraceType:
+      return "ninja_log";
+    case kAndroidBugreportTraceType:
+      return "android_bugreport";
+  }
+  PERFETTO_FATAL("For GCC");
 }
 
 }  // namespace
@@ -1164,6 +1190,10 @@ void TraceProcessorImpl::Flush() {
   context_.metadata_tracker->SetMetadata(
       metadata::trace_size_bytes,
       Variadic::Integer(static_cast<int64_t>(bytes_parsed_)));
+  const StringId trace_type_id =
+      context_.storage->InternString(TraceTypeToString(context_.trace_type));
+  context_.metadata_tracker->SetMetadata(metadata::trace_type,
+                                         Variadic::String(trace_type_id));
   BuildBoundsTable(*db_, context_.storage->GetTraceTimestampBoundsNs());
 }
 
