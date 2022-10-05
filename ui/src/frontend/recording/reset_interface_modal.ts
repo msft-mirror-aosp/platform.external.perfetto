@@ -15,6 +15,7 @@
 import * as m from 'mithril';
 
 import {showModal} from '../modal';
+import {FORCE_RESET_MESSAGE} from './recording_ui_utils';
 
 export function couldNotClaimInterface(
     onReset: () => Promise<void>, onCancel: () => void) {
@@ -35,7 +36,7 @@ export function couldNotClaimInterface(
         ),
     buttons: [
       {
-        text: 'Force reset the USB interface',
+        text: FORCE_RESET_MESSAGE,
         primary: true,
         id: 'force_USB_interface',
         action: () => {

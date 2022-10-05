@@ -35,36 +35,43 @@ import {
   VmstatCounters,
 } from '../protos';
 
-import {RecordingTargetV2, TargetInfo} from './recording_interfaces_v2';
+import {TargetInfo} from './recording_interfaces_v2';
 
 export interface ConfigProtoEncoded {
   configProtoText?: string;
   configProtoBase64?: string;
+  hasDataSources: boolean;
 }
 
 export class RecordingConfigUtils {
   private lastConfig?: RecordConfig;
+  private lastTargetInfo?: TargetInfo;
   private configProtoText?: string;
   private configProtoBase64?: string;
+  private hasDataSources: boolean = false;
 
-  fetchLatestRecordCommand(
-      recordConfig: RecordConfig,
-      target: RecordingTargetV2): ConfigProtoEncoded {
-    if (recordConfig === this.lastConfig) {
+  fetchLatestRecordCommand(recordConfig: RecordConfig, targetInfo: TargetInfo):
+      ConfigProtoEncoded {
+    if (recordConfig === this.lastConfig &&
+        targetInfo === this.lastTargetInfo) {
       return {
         configProtoText: this.configProtoText,
         configProtoBase64: this.configProtoBase64,
+        hasDataSources: this.hasDataSources,
       };
     }
     this.lastConfig = recordConfig;
-    const configProto =
-        TraceConfig.encode(genTraceConfig(this.lastConfig, target.getInfo()))
-            .finish();
+    this.lastTargetInfo = targetInfo;
+
+    const traceConfig = genTraceConfig(recordConfig, targetInfo);
+    const configProto = TraceConfig.encode(traceConfig).finish();
     this.configProtoText = toPbtxt(configProto);
     this.configProtoBase64 = base64Encode(configProto);
+    this.hasDataSources = traceConfig.dataSources.length > 0;
     return {
       configProtoText: this.configProtoText,
       configProtoBase64: this.configProtoBase64,
+      hasDataSources: this.hasDataSources,
     };
   }
 }
@@ -437,6 +444,7 @@ export function genTraceConfig(
     }
     const chromeConfig = new ChromeConfig();
     chromeConfig.clientPriority = ChromeConfig.ClientPriority.USER_INITIATED;
+    chromeConfig.privacyFilteringEnabled = uiCfg.chromePrivacyFiltering;
     chromeConfig.traceConfig = JSON.stringify(configStruct);
 
     const traceDs = new TraceConfig.DataSource();
@@ -456,6 +464,10 @@ export function genTraceConfig(
         [...chromeCategories.values(), '__metadata'];
     trackEventDs.config.trackEventConfig.enableThreadTimeSampling = true;
     trackEventDs.config.trackEventConfig.timestampUnitMultiplier = 1000;
+    trackEventDs.config.trackEventConfig.filterDynamicEventNames =
+        uiCfg.chromePrivacyFiltering;
+    trackEventDs.config.trackEventConfig.filterDebugAnnotations =
+        uiCfg.chromePrivacyFiltering;
     protoCfg.dataSources.push(trackEventDs);
 
     const metadataDs = new TraceConfig.DataSource();

@@ -22,6 +22,8 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/ftrace/binder_tracker.h"
 #include "src/trace_processor/importers/ftrace/thread_state_tracker.h"
+#include "src/trace_processor/importers/ftrace/v4l2_tracker.h"
+#include "src/trace_processor/importers/ftrace/virtio_video_tracker.h"
 #include "src/trace_processor/importers/i2c/i2c_tracker.h"
 #include "src/trace_processor/importers/proto/async_track_set_tracker.h"
 #include "src/trace_processor/importers/proto/metadata_tracker.h"
@@ -90,17 +92,22 @@ struct FtraceEventAndFieldId {
 // TODO(lalitm): going through this array is O(n) on a hot-path (see
 // ParseTypedFtraceToRaw). Consider changing this if we end up adding a lot of
 // events here.
-constexpr auto kKernelFunctionFields = std::array<FtraceEventAndFieldId, 3>{
-    {FtraceEventAndFieldId{
-         protos::pbzero::FtraceEvent::kSchedBlockedReasonFieldNumber,
-         protos::pbzero::SchedBlockedReasonFtraceEvent::kCallerFieldNumber},
-     FtraceEventAndFieldId{
-         protos::pbzero::FtraceEvent::kWorkqueueExecuteStartFieldNumber,
-         protos::pbzero::WorkqueueExecuteStartFtraceEvent::
-             kFunctionFieldNumber},
-     FtraceEventAndFieldId{
-         protos::pbzero::FtraceEvent::kWorkqueueQueueWorkFieldNumber,
-         protos::pbzero::WorkqueueQueueWorkFtraceEvent::kFunctionFieldNumber}}};
+constexpr auto kKernelFunctionFields = std::array<FtraceEventAndFieldId, 5>{
+    FtraceEventAndFieldId{
+        protos::pbzero::FtraceEvent::kSchedBlockedReasonFieldNumber,
+        protos::pbzero::SchedBlockedReasonFtraceEvent::kCallerFieldNumber},
+    FtraceEventAndFieldId{
+        protos::pbzero::FtraceEvent::kWorkqueueExecuteStartFieldNumber,
+        protos::pbzero::WorkqueueExecuteStartFtraceEvent::kFunctionFieldNumber},
+    FtraceEventAndFieldId{
+        protos::pbzero::FtraceEvent::kWorkqueueQueueWorkFieldNumber,
+        protos::pbzero::WorkqueueQueueWorkFtraceEvent::kFunctionFieldNumber},
+    FtraceEventAndFieldId{
+        protos::pbzero::FtraceEvent::kFuncgraphEntryFieldNumber,
+        protos::pbzero::FuncgraphEntryFtraceEvent::kFuncFieldNumber},
+    FtraceEventAndFieldId{
+        protos::pbzero::FtraceEvent::kFuncgraphExitFieldNumber,
+        protos::pbzero::FuncgraphExitFtraceEvent::kFuncFieldNumber}};
 
 std::string GetUfsCmdString(uint32_t ufsopcode, uint32_t gid) {
   std::string buffer;
@@ -815,6 +822,32 @@ util::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
       }
       case FtraceEvent::kI2cResultFieldNumber: {
         ParseI2cResultEvent(ts, pid, fld_bytes);
+        break;
+      }
+      case FtraceEvent::kFuncgraphEntryFieldNumber: {
+        ParseFuncgraphEntry(ts, pid, fld_bytes, seq_state);
+        break;
+      }
+      case FtraceEvent::kFuncgraphExitFieldNumber: {
+        ParseFuncgraphExit(ts, pid, fld_bytes, seq_state);
+        break;
+      }
+      case FtraceEvent::kV4l2QbufFieldNumber:
+      case FtraceEvent::kV4l2DqbufFieldNumber:
+      case FtraceEvent::kVb2V4l2BufQueueFieldNumber:
+      case FtraceEvent::kVb2V4l2BufDoneFieldNumber:
+      case FtraceEvent::kVb2V4l2QbufFieldNumber:
+      case FtraceEvent::kVb2V4l2DqbufFieldNumber: {
+        V4l2Tracker::GetOrCreate(context_)->ParseV4l2Event(fld.id(), ts, pid,
+                                                           fld_bytes);
+        break;
+      }
+      case FtraceEvent::kVirtioVideoCmdFieldNumber:
+      case FtraceEvent::kVirtioVideoCmdDoneFieldNumber:
+      case FtraceEvent::kVirtioVideoResourceQueueFieldNumber:
+      case FtraceEvent::kVirtioVideoResourceQueueDoneFieldNumber: {
+        VirtioVideoTracker::GetOrCreate(context_)->ParseVirtioVideoEvent(
+            fld.id(), ts, fld_bytes);
         break;
       }
       default:
@@ -1652,19 +1685,7 @@ void FtraceParser::ParseWorkqueueExecuteStart(
     PacketSequenceStateGeneration* seq_state) {
   protos::pbzero::WorkqueueExecuteStartFtraceEvent::Decoder evt(blob.data,
                                                                 blob.size);
-
-  auto* interned_string = seq_state->LookupInternedMessage<
-      protos::pbzero::InternedData::kKernelSymbolsFieldNumber,
-      protos::pbzero::InternedString>(static_cast<uint32_t>(evt.function()));
-  StringId name_id;
-  if (interned_string) {
-    protozero::ConstBytes str = interned_string->str();
-    name_id = context_->storage->InternString(
-        base::StringView(reinterpret_cast<const char*>(str.data), str.size));
-  } else {
-    base::StackString<255> slice_name("%#" PRIx64, evt.function());
-    name_id = context_->storage->InternString(slice_name.string_view());
-  }
+  StringId name_id = InternedKernelSymbolOrFallback(evt.function(), seq_state);
 
   UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
   TrackId track = context_->track_tracker->InternThreadTrack(utid);
@@ -2284,6 +2305,60 @@ void FtraceParser::ParseSchedCpuUtilCfs(int64_t timestamp,
       context_->track_tracker->InternGlobalCounterTrack(nrr_track_name_id);
   context_->event_tracker->PushCounter(
       timestamp, static_cast<double>(evt.nr_running()), nrr_track);
+}
+
+void FtraceParser::ParseFuncgraphEntry(
+    int64_t timestamp,
+    uint32_t pid,
+    protozero::ConstBytes blob,
+    PacketSequenceStateGeneration* seq_state) {
+  // TODO(rsavitski): remove if/when we stop collapsing all idle (swapper)
+  // threads to a single track, otherwise this breaks slice nesting.
+  if (pid == 0)
+    return;
+
+  protos::pbzero::FuncgraphEntryFtraceEvent::Decoder evt(blob.data, blob.size);
+  StringId name_id = InternedKernelSymbolOrFallback(evt.func(), seq_state);
+
+  UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
+  TrackId track = context_->track_tracker->InternThreadTrack(utid);
+  context_->slice_tracker->Begin(timestamp, track, kNullStringId, name_id);
+}
+
+void FtraceParser::ParseFuncgraphExit(
+    int64_t timestamp,
+    uint32_t pid,
+    protozero::ConstBytes blob,
+    PacketSequenceStateGeneration* seq_state) {
+  // TODO(rsavitski): remove if/when we stop collapsing all idle (swapper)
+  // threads to a single track, otherwise this breaks slice nesting.
+  if (pid == 0)
+    return;
+
+  protos::pbzero::FuncgraphExitFtraceEvent::Decoder evt(blob.data, blob.size);
+  StringId name_id = InternedKernelSymbolOrFallback(evt.func(), seq_state);
+
+  UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
+  TrackId track = context_->track_tracker->InternThreadTrack(utid);
+  context_->slice_tracker->End(timestamp, track, kNullStringId, name_id);
+}
+
+StringId FtraceParser::InternedKernelSymbolOrFallback(
+    uint64_t key,
+    PacketSequenceStateGeneration* seq_state) {
+  auto* interned_string = seq_state->LookupInternedMessage<
+      protos::pbzero::InternedData::kKernelSymbolsFieldNumber,
+      protos::pbzero::InternedString>(key);
+  StringId name_id;
+  if (interned_string) {
+    protozero::ConstBytes str = interned_string->str();
+    name_id = context_->storage->InternString(
+        base::StringView(reinterpret_cast<const char*>(str.data), str.size));
+  } else {
+    base::StackString<255> slice_name("%#" PRIx64, key);
+    name_id = context_->storage->InternString(slice_name.string_view());
+  }
+  return name_id;
 }
 
 }  // namespace trace_processor
