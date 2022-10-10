@@ -1322,6 +1322,7 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/chrome_event_metadata.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_histogram_hashes.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_input_to_browser_intervals.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_input_to_browser_intervals_template.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_performance_mark_hashes.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_processes.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_reliable_range.sql",
@@ -1331,6 +1332,8 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/chrome_stack_samples_for_task.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_tasks.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_tasks_delaying_input_processing.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_tasks_delaying_input_processing_template.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_tasks_template.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_thread_slice.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_unsymbolized_args.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_user_event_hashes.sql",
@@ -1339,6 +1342,7 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/estimated_power_by_category.sql",
         "src/trace_processor/metrics/sql/chrome/estimated_power_by_rail_mode.sql",
         "src/trace_processor/metrics/sql/chrome/event_latency_to_breakdowns.sql",
+        "src/trace_processor/metrics/sql/chrome/experimental_reliable_chrome_tasks_delaying_input_processing.sql",
         "src/trace_processor/metrics/sql/chrome/gesture_flow_event.sql",
         "src/trace_processor/metrics/sql/chrome/gesture_flow_event_queuing_delay.sql",
         "src/trace_processor/metrics/sql/chrome/gesture_jank.sql",
@@ -1991,6 +1995,8 @@ perfetto_filegroup(
         "src/traced/probes/ftrace/ftrace_data_source.cc",
         "src/traced/probes/ftrace/ftrace_data_source.h",
         "src/traced/probes/ftrace/ftrace_metadata.h",
+        "src/traced/probes/ftrace/ftrace_print_filter.cc",
+        "src/traced/probes/ftrace/ftrace_print_filter.h",
         "src/traced/probes/ftrace/ftrace_stats.cc",
         "src/traced/probes/ftrace/ftrace_stats.h",
         "src/traced/probes/ftrace/printk_formats_parser.cc",
@@ -4688,6 +4694,22 @@ perfetto_go_proto_library(
     visibility = PERFETTO_CONFIG.go_proto_library_visibility,
     deps = [
         ":protos_perfetto_trace_track_event_protos",
+    ],
+)
+
+perfetto_go_proto_library(
+    name = "protos_perfetto_metrics_protos_go_proto",
+    visibility = PERFETTO_CONFIG.go_proto_library_visibility,
+    deps = [
+        ":protos_perfetto_metrics_protos",
+    ],
+)
+
+perfetto_go_proto_library(
+    name = "protos_perfetto_metrics_android_protos_go_proto",
+    visibility = PERFETTO_CONFIG.go_proto_library_visibility,
+    deps = [
+        ":protos_perfetto_metrics_android_protos",
     ],
 )
 
