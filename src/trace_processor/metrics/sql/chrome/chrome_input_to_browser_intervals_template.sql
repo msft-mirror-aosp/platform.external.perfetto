@@ -36,25 +36,26 @@ SELECT CREATE_FUNCTION(
   '{{function_prefix}}PRECEDING_IO_THREAD_EVENT_FLOW_ID(id LONG)',
   -- Returning the slice id for the flow_out on the chrome IO thread.
   'LONG',
-  'SELECT MAX(s.id) AS id
+  'SELECT MAX(flow.slice_out) AS id
   FROM
-    (SELECT * FROM PRECEDING_FLOW(($id))) flow
-    JOIN {{slice_table_name}} s
-      ON flow.slice_out = s.id
-    JOIN thread_track
-      ON thread_track.id = s.track_id
-    JOIN thread
-      ON thread.utid = thread_track.utid
-      AND thread.name = "Chrome_IOThread"
-      AND s.name = "SequenceManager PostTask"');
+    PRECEDING_FLOW(($id)) flow');
 
 SELECT CREATE_FUNCTION(
   '{{function_prefix}}GET_MOJO_PARENT_INTERFACE_TAG(id LONG)',
   'STRING',
   'SELECT
     interface_name
-    FROM ancestor_slice(($id)) ancestors
-    JOIN chrome_mojo_slices_tbl USING(id)'
+    FROM
+    (SELECT MAX(mojo.id),
+    interface_name
+      FROM ((SELECT id FROM ancestor_slice(($id))
+             UNION
+             SELECT slice.id as id FROM PRECEDING_FLOW(($id)) flow
+        	 JOIN slice ON flow.slice_out = slice.id) candidates
+    JOIN chrome_mojo_slices_tbl mojo
+    ON mojo.id = candidates.id
+      OR (SELECT COUNT() FROM ancestor_slice(candidates.id) parents
+      WHERE parents.id = mojo.id) > 0))'
 );
 
 SELECT CREATE_FUNCTION(
@@ -67,7 +68,7 @@ SELECT CREATE_FUNCTION(
             THEN "fling"
             WHEN ($mojo_interface_tag) = "blink.mojom.WidgetInputHandler"
             THEN "blocking_touch_move"
-            ELSE "unkown" END)
+            ELSE "unknown" END)
     ELSE "regular" END AS delay_type');
 
 -- Get all InputLatency::GestureScrollUpdate events, to use their

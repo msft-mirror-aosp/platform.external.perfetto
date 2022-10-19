@@ -291,24 +291,30 @@ SELECT
     ),
     'system_state', AndroidStartupMetric_SystemState(
       'dex2oat_running',
-        IS_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*dex2oat64'),
+        DUR_OF_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*dex2oat64') > 0,
       'installd_running',
-        IS_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*installd'),
+        DUR_OF_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*installd') > 0,
       'broadcast_dispatched_count',
         COUNT_SLICES_CONCURRENT_TO_LAUNCH(launches.id, 'Broadcast dispatched*'),
       'broadcast_received_count',
         COUNT_SLICES_CONCURRENT_TO_LAUNCH(launches.id, 'broadcastReceiveReg*'),
       'most_active_non_launch_processes',
-        N_MOST_ACTIVE_PROCESS_NAMES_FOR_LAUNCH(launches.id)
+        N_MOST_ACTIVE_PROCESS_NAMES_FOR_LAUNCH(launches.id),
+      'installd_dur_ns',
+        DUR_OF_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*installd'),
+      'dex2oat_dur_ns',
+        DUR_OF_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*dex2oat64')
     ),
     'slow_start_reason', (SELECT RepeatedField(slow_cause)
       FROM (
         SELECT 'dex2oat running during launch' AS slow_cause
-        WHERE IS_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*dex2oat64')
+        WHERE
+          DUR_OF_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*dex2oat64') > 2e9
 
         UNION ALL
         SELECT 'installd running during launch' AS slow_cause
-        WHERE IS_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*installd')
+        WHERE
+          DUR_OF_PROCESS_RUNNING_CONCURRENT_TO_LAUNCH(launches.id, '*installd') > 2e9
 
         UNION ALL
         SELECT 'Main Thread - Time spent in Running state'

@@ -73,11 +73,6 @@ android_startup {
     }
     activities {
       name: "com.google.android.calendar.MainActivity"
-      method: "performResume"
-      ts_method_start: 102000000000
-    }
-    activities {
-      name: "com.google.android.calendar.MainActivity"
       method: "performCreate"
       ts_method_start: 188000000000
     }
@@ -104,6 +99,8 @@ android_startup {
       broadcast_received_count: 0
       most_active_non_launch_processes: "init"
       most_active_non_launch_processes: "system_server"
+      installd_dur_ns: 0
+      dex2oat_dur_ns: 0
     }
     slow_start_reason: "Main Thread - Time spent in Running state"
     slow_start_reason: "Main Thread - Time spent in Runnable state"

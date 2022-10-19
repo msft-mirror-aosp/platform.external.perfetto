@@ -1341,6 +1341,7 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/cpu_time_by_rail_mode.sql",
         "src/trace_processor/metrics/sql/chrome/estimated_power_by_category.sql",
         "src/trace_processor/metrics/sql/chrome/estimated_power_by_rail_mode.sql",
+        "src/trace_processor/metrics/sql/chrome/event_latency_scroll_jank.sql",
         "src/trace_processor/metrics/sql/chrome/event_latency_to_breakdowns.sql",
         "src/trace_processor/metrics/sql/chrome/experimental_reliable_chrome_tasks_delaying_input_processing.sql",
         "src/trace_processor/metrics/sql/chrome/gesture_flow_event.sql",
@@ -1361,6 +1362,7 @@ perfetto_genrule(
         "src/trace_processor/metrics/sql/chrome/touch_flow_event.sql",
         "src/trace_processor/metrics/sql/chrome/touch_flow_event_queuing_delay.sql",
         "src/trace_processor/metrics/sql/chrome/touch_jank.sql",
+        "src/trace_processor/metrics/sql/chrome/vsync_intervals.sql",
         "src/trace_processor/metrics/sql/common/parent_slice.sql",
         "src/trace_processor/metrics/sql/experimental/blink_gc_metric.sql",
         "src/trace_processor/metrics/sql/experimental/chrome_dropped_frames.sql",
@@ -1455,6 +1457,7 @@ perfetto_filegroup(
         "src/trace_processor/sqlite/sqlite3_str_split.h",
         "src/trace_processor/sqlite/sqlite_raw_table.cc",
         "src/trace_processor/sqlite/sqlite_raw_table.h",
+        "src/trace_processor/sqlite/sqlite_utils.cc",
         "src/trace_processor/sqlite/sqlite_utils.h",
         "src/trace_processor/sqlite/stats_table.cc",
         "src/trace_processor/sqlite/stats_table.h",
@@ -1531,6 +1534,15 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/util/descriptors.cc",
         "src/trace_processor/util/descriptors.h",
+    ],
+)
+
+# GN target: //src/trace_processor/util:glob
+perfetto_filegroup(
+    name = "src_trace_processor_util_glob",
+    srcs = [
+        "src/trace_processor/util/glob.cc",
+        "src/trace_processor/util/glob.h",
     ],
 )
 
@@ -3713,6 +3725,7 @@ perfetto_cc_protozero_library(
 perfetto_proto_library(
     name = "protos_perfetto_trace_processor_protos",
     srcs = [
+        "protos/perfetto/trace_processor/metatrace_categories.proto",
         "protos/perfetto/trace_processor/trace_processor.proto",
     ],
     visibility = [
@@ -4233,6 +4246,7 @@ perfetto_cc_library(
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_types_types",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
         ":src_trace_processor_util_profile_builder",
@@ -4360,6 +4374,7 @@ perfetto_cc_binary(
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_types_types",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
         ":src_trace_processor_util_profile_builder",
@@ -4542,6 +4557,7 @@ perfetto_cc_binary(
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_types_types",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
         ":src_trace_processor_util_profile_builder",
