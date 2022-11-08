@@ -69,8 +69,7 @@ FtraceDataSourceConfig EmptyConfig() {
                                 base::nullopt,
                                 {},
                                 {},
-                                false /*symbolize_ksyms*/,
-                                false /*preserve_ftrace_buffer*/};
+                                false /*symbolize_ksyms*/};
 }
 
 constexpr uint64_t kNanoInSecond = 1000 * 1000 * 1000;
@@ -948,8 +947,7 @@ TEST(CpuReaderTest, ParseSixSchedSwitchCompactFormat) {
                                    base::nullopt,
                                    {},
                                    {},
-                                   false /* symbolize_ksyms*/,
-                                   false /*preserve_ftrace_buffer*/};
+                                   false /* symbolize_ksyms*/};
   ds_config.event_filter.AddEnabledEvent(
       table->EventToFtraceId(GroupAndName("sched", "sched_switch")));
 

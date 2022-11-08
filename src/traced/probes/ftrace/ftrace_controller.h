@@ -72,9 +72,7 @@ class FtraceController {
   };
 
   // The passed Observer must outlive the returned FtraceController instance.
-  static std::unique_ptr<FtraceController> Create(base::TaskRunner*,
-                                                  Observer*,
-                                                  bool preserve_ftrace_buffer);
+  static std::unique_ptr<FtraceController> Create(base::TaskRunner*, Observer*);
   virtual ~FtraceController();
 
   void DisableAllEvents();
@@ -100,8 +98,7 @@ class FtraceController {
                    std::unique_ptr<ProtoTranslationTable>,
                    std::unique_ptr<FtraceConfigMuxer>,
                    base::TaskRunner*,
-                   Observer*,
-                   bool);
+                   Observer*);
 
   // Protected and virtual for testing.
   virtual uint64_t NowMs() const;
@@ -141,7 +138,6 @@ class FtraceController {
   int generation_ = 0;
   bool atrace_running_ = false;
   bool retain_ksyms_on_stop_ = false;
-  bool preserve_ftrace_buffer_ = false;
   std::vector<PerCpuState> per_cpu_;  // empty if tracing isn't active
   std::set<FtraceDataSource*> data_sources_;
   std::set<FtraceDataSource*> started_data_sources_;

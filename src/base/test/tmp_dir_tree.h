@@ -47,11 +47,6 @@ class TmpDirTree {
   // succeeds.
   void AddFile(const std::string& relative_path, const std::string& content);
 
-  // Tells this object to remove `relative_path` on destruction. This is used
-  // for files created by the caller that still need to be removed on cleanup by
-  // this object.
-  void TrackFile(const std::string& relative_path);
-
  private:
   TmpDirTree(const TmpDirTree&) = delete;
   TmpDirTree& operator=(const TmpDirTree&) = delete;

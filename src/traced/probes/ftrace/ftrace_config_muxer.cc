@@ -571,16 +571,14 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
     PERFETTO_DCHECK(active_configs_.empty());
 
     // If someone outside of perfetto is using ftrace give up now.
-    if (!request.preserve_ftrace_buffer() && is_ftrace_enabled &&
-        !IsOldAtrace()) {
+    if (is_ftrace_enabled && !IsOldAtrace()) {
       PERFETTO_ELOG("ftrace in use by non-Perfetto.");
       return 0;
     }
 
     // Setup ftrace, without starting it. Setting buffers can be quite slow
     // (up to hundreds of ms).
-    if (!request.preserve_ftrace_buffer())
-      SetupClock(request);
+    SetupClock(request);
     SetupBufferSize(request);
   } else {
     // Did someone turn ftrace off behind our back? If so give up.
@@ -711,8 +709,7 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
       std::forward_as_tuple(std::move(filter), std::move(syscall_filter),
                             compact_sched, std::move(ftrace_print_filter),
                             std::move(apps), std::move(categories),
-                            request.symbolize_ksyms(),
-                            request.preserve_ftrace_buffer()));
+                            request.symbolize_ksyms()));
   return id;
 }
 
@@ -723,8 +720,7 @@ bool FtraceConfigMuxer::ActivateConfig(FtraceConfigId id) {
   }
 
   if (active_configs_.empty()) {
-    if (!ds_configs_.at(id).preserve_ftrace_buffer &&
-        ftrace_->IsTracingEnabled() && !IsOldAtrace()) {
+    if (ftrace_->IsTracingEnabled() && !IsOldAtrace()) {
       // If someone outside of perfetto is using ftrace give up now.
       PERFETTO_ELOG("ftrace in use by non-Perfetto.");
       return false;
