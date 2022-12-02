@@ -34,6 +34,7 @@ export const recordConfigValidator = record({
 
   cpuSched: bool(),
   cpuFreq: bool(),
+  cpuFreqPollMs: num(1000),
   cpuSyscall: bool(),
 
   gpuFreq: bool(),
@@ -51,6 +52,7 @@ export const recordConfigValidator = record({
   androidLogs: bool(),
   androidLogBuffers: arrayOf(str()),
   androidFrameTimeline: bool(),
+  androidGameInterventionList: bool(),
 
   cpuCoarse: bool(),
   cpuCoarsePollMs: num(1000),
@@ -89,6 +91,7 @@ export const recordConfigValidator = record({
 
   chromeCategoriesSelected: arrayOf(str()),
   chromeHighOverheadCategoriesSelected: arrayOf(str()),
+  chromePrivacyFiltering: bool(),
 
   chromeLogs: bool(),
   taskScheduling: bool(),

@@ -24,7 +24,7 @@ namespace perfetto {
 namespace trace_processor {
 namespace {
 
-std::array<FtraceMessageDescriptor, 431> descriptors{{
+std::array<FtraceMessageDescriptor, 467> descriptors{{
     {nullptr, 0, {}},
     {nullptr, 0, {}},
     {nullptr, 0, {}},
@@ -3560,10 +3560,11 @@ std::array<FtraceMessageDescriptor, 431> descriptors{{
     },
     {
         "sys_enter",
-        1,
+        2,
         {
             {},
             {"id", ProtoSchemaType::kInt64},
+            {"args", ProtoSchemaType::kUint64},
         },
     },
     {
@@ -4756,6 +4757,397 @@ std::array<FtraceMessageDescriptor, 431> descriptors{{
             {"last", ProtoSchemaType::kUint32},
             {"tx_buf", ProtoSchemaType::kUint32},
             {"type", ProtoSchemaType::kUint32},
+        },
+    },
+    {
+        "android_fs_dataread_end",
+        3,
+        {
+            {},
+            {"bytes", ProtoSchemaType::kInt32},
+            {"ino", ProtoSchemaType::kUint64},
+            {"offset", ProtoSchemaType::kInt64},
+        },
+    },
+    {
+        "android_fs_dataread_start",
+        7,
+        {
+            {},
+            {"bytes", ProtoSchemaType::kInt32},
+            {"cmdline", ProtoSchemaType::kString},
+            {"i_size", ProtoSchemaType::kInt64},
+            {"ino", ProtoSchemaType::kUint64},
+            {"offset", ProtoSchemaType::kInt64},
+            {"pathbuf", ProtoSchemaType::kString},
+            {"pid", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "android_fs_datawrite_end",
+        3,
+        {
+            {},
+            {"bytes", ProtoSchemaType::kInt32},
+            {"ino", ProtoSchemaType::kUint64},
+            {"offset", ProtoSchemaType::kInt64},
+        },
+    },
+    {
+        "android_fs_datawrite_start",
+        7,
+        {
+            {},
+            {"bytes", ProtoSchemaType::kInt32},
+            {"cmdline", ProtoSchemaType::kString},
+            {"i_size", ProtoSchemaType::kInt64},
+            {"ino", ProtoSchemaType::kUint64},
+            {"offset", ProtoSchemaType::kInt64},
+            {"pathbuf", ProtoSchemaType::kString},
+            {"pid", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "android_fs_fsync_end",
+        3,
+        {
+            {},
+            {"bytes", ProtoSchemaType::kInt32},
+            {"ino", ProtoSchemaType::kUint64},
+            {"offset", ProtoSchemaType::kInt64},
+        },
+    },
+    {
+        "android_fs_fsync_start",
+        5,
+        {
+            {},
+            {"cmdline", ProtoSchemaType::kString},
+            {"i_size", ProtoSchemaType::kInt64},
+            {"ino", ProtoSchemaType::kUint64},
+            {"pathbuf", ProtoSchemaType::kString},
+            {"pid", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "funcgraph_entry",
+        2,
+        {
+            {},
+            {"depth", ProtoSchemaType::kInt32},
+            {"func", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "funcgraph_exit",
+        5,
+        {
+            {},
+            {"calltime", ProtoSchemaType::kUint64},
+            {"depth", ProtoSchemaType::kInt32},
+            {"func", ProtoSchemaType::kUint64},
+            {"overrun", ProtoSchemaType::kUint64},
+            {"rettime", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "virtio_video_cmd",
+        2,
+        {
+            {},
+            {"stream_id", ProtoSchemaType::kUint32},
+            {"type", ProtoSchemaType::kUint32},
+        },
+    },
+    {
+        "virtio_video_cmd_done",
+        2,
+        {
+            {},
+            {"stream_id", ProtoSchemaType::kUint32},
+            {"type", ProtoSchemaType::kUint32},
+        },
+    },
+    {
+        "virtio_video_resource_queue",
+        8,
+        {
+            {},
+            {"data_size0", ProtoSchemaType::kUint32},
+            {"data_size1", ProtoSchemaType::kUint32},
+            {"data_size2", ProtoSchemaType::kUint32},
+            {"data_size3", ProtoSchemaType::kUint32},
+            {"queue_type", ProtoSchemaType::kUint32},
+            {"resource_id", ProtoSchemaType::kInt32},
+            {"stream_id", ProtoSchemaType::kInt32},
+            {"timestamp", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "virtio_video_resource_queue_done",
+        8,
+        {
+            {},
+            {"data_size0", ProtoSchemaType::kUint32},
+            {"data_size1", ProtoSchemaType::kUint32},
+            {"data_size2", ProtoSchemaType::kUint32},
+            {"data_size3", ProtoSchemaType::kUint32},
+            {"queue_type", ProtoSchemaType::kUint32},
+            {"resource_id", ProtoSchemaType::kInt32},
+            {"stream_id", ProtoSchemaType::kInt32},
+            {"timestamp", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "mm_shrink_slab_start",
+        11,
+        {
+            {},
+            {"cache_items", ProtoSchemaType::kUint64},
+            {"delta", ProtoSchemaType::kUint64},
+            {"gfp_flags", ProtoSchemaType::kUint32},
+            {"lru_pgs", ProtoSchemaType::kUint64},
+            {"nr_objects_to_shrink", ProtoSchemaType::kInt64},
+            {"pgs_scanned", ProtoSchemaType::kUint64},
+            {"shr", ProtoSchemaType::kUint64},
+            {"shrink", ProtoSchemaType::kUint64},
+            {"total_scan", ProtoSchemaType::kUint64},
+            {"nid", ProtoSchemaType::kInt32},
+            {"priority", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "mm_shrink_slab_end",
+        7,
+        {
+            {},
+            {"new_scan", ProtoSchemaType::kInt64},
+            {"retval", ProtoSchemaType::kInt32},
+            {"shr", ProtoSchemaType::kUint64},
+            {"shrink", ProtoSchemaType::kUint64},
+            {"total_scan", ProtoSchemaType::kInt64},
+            {"unused_scan", ProtoSchemaType::kInt64},
+            {"nid", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "trusty_smc",
+        4,
+        {
+            {},
+            {"r0", ProtoSchemaType::kUint64},
+            {"r1", ProtoSchemaType::kUint64},
+            {"r2", ProtoSchemaType::kUint64},
+            {"r3", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "trusty_smc_done",
+        1,
+        {
+            {},
+            {"ret", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "trusty_std_call32",
+        4,
+        {
+            {},
+            {"r0", ProtoSchemaType::kUint64},
+            {"r1", ProtoSchemaType::kUint64},
+            {"r2", ProtoSchemaType::kUint64},
+            {"r3", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "trusty_std_call32_done",
+        1,
+        {
+            {},
+            {"ret", ProtoSchemaType::kInt64},
+        },
+    },
+    {
+        "trusty_share_memory",
+        3,
+        {
+            {},
+            {"len", ProtoSchemaType::kUint64},
+            {"lend", ProtoSchemaType::kUint32},
+            {"nents", ProtoSchemaType::kUint32},
+        },
+    },
+    {
+        "trusty_share_memory_done",
+        5,
+        {
+            {},
+            {"handle", ProtoSchemaType::kUint64},
+            {"len", ProtoSchemaType::kUint64},
+            {"lend", ProtoSchemaType::kUint32},
+            {"nents", ProtoSchemaType::kUint32},
+            {"ret", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "trusty_reclaim_memory",
+        1,
+        {
+            {},
+            {"id", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "trusty_reclaim_memory_done",
+        2,
+        {
+            {},
+            {"id", ProtoSchemaType::kUint64},
+            {"ret", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "trusty_irq",
+        1,
+        {
+            {},
+            {"irq", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "trusty_ipc_handle_event",
+        3,
+        {
+            {},
+            {"chan", ProtoSchemaType::kUint32},
+            {"event_id", ProtoSchemaType::kUint32},
+            {"srv_name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "trusty_ipc_connect",
+        3,
+        {
+            {},
+            {"chan", ProtoSchemaType::kUint32},
+            {"port", ProtoSchemaType::kString},
+            {"state", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "trusty_ipc_connect_end",
+        3,
+        {
+            {},
+            {"chan", ProtoSchemaType::kUint32},
+            {"err", ProtoSchemaType::kInt32},
+            {"state", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "trusty_ipc_write",
+        6,
+        {
+            {},
+            {"buf_id", ProtoSchemaType::kUint64},
+            {"chan", ProtoSchemaType::kUint32},
+            {"kind_shm", ProtoSchemaType::kInt32},
+            {"len_or_err", ProtoSchemaType::kInt32},
+            {"shm_cnt", ProtoSchemaType::kUint64},
+            {"srv_name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "trusty_ipc_poll",
+        3,
+        {
+            {},
+            {"chan", ProtoSchemaType::kUint32},
+            {"poll_mask", ProtoSchemaType::kUint32},
+            {"srv_name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "trusty_ipc_poll_end",
+        0,
+        {
+            {},
+        },
+    },
+    {
+        "trusty_ipc_read",
+        2,
+        {
+            {},
+            {"chan", ProtoSchemaType::kUint32},
+            {"srv_name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "trusty_ipc_read_end",
+        5,
+        {
+            {},
+            {"buf_id", ProtoSchemaType::kUint64},
+            {"chan", ProtoSchemaType::kUint32},
+            {"len_or_err", ProtoSchemaType::kInt32},
+            {"shm_cnt", ProtoSchemaType::kUint64},
+            {"srv_name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "trusty_ipc_rx",
+        3,
+        {
+            {},
+            {"buf_id", ProtoSchemaType::kUint64},
+            {"chan", ProtoSchemaType::kUint32},
+            {"srv_name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "trusty_ipc_tx",
+        0,
+        {
+            {},
+        },
+    },
+    {
+        "trusty_enqueue_nop",
+        3,
+        {
+            {},
+            {"arg1", ProtoSchemaType::kUint32},
+            {"arg2", ProtoSchemaType::kUint32},
+            {"arg3", ProtoSchemaType::kUint32},
+        },
+    },
+    {
+        "cma_alloc_start",
+        3,
+        {
+            {},
+            {"align", ProtoSchemaType::kUint32},
+            {"count", ProtoSchemaType::kUint32},
+            {"name", ProtoSchemaType::kString},
+        },
+    },
+    {
+        "cma_alloc_info",
+        10,
+        {
+            {},
+            {"align", ProtoSchemaType::kUint32},
+            {"count", ProtoSchemaType::kUint32},
+            {"err_iso", ProtoSchemaType::kUint32},
+            {"err_mig", ProtoSchemaType::kUint32},
+            {"err_test", ProtoSchemaType::kUint32},
+            {"name", ProtoSchemaType::kString},
+            {"nr_mapped", ProtoSchemaType::kUint64},
+            {"nr_migrated", ProtoSchemaType::kUint64},
+            {"nr_reclaimed", ProtoSchemaType::kUint64},
+            {"pfn", ProtoSchemaType::kUint64},
         },
     },
 }};

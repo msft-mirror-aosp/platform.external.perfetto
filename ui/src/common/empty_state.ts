@@ -15,7 +15,6 @@
 import {createEmptyRecordConfig} from '../controller/record_config_types';
 import {
   Aggregation,
-  aggregationKey,
 } from '../frontend/pivot_table_redux_types';
 import {
   autosaveConfigStore,
@@ -62,17 +61,17 @@ export function createEmptyNonSerializableState(): NonSerializableState {
       queryResult: null,
       selectedSlicePivots: [{kind: 'regular', table: 'slice', column: 'name'}],
       selectedPivots: [],
-      selectedAggregations: keyedMap(
-          aggregationKey,
-          {
-            aggregationFunction: 'SUM',
-            column: {kind: 'regular', table: 'slice', column: 'dur'},
-          },
-          {
-            aggregationFunction: 'SUM',
-            column: {kind: 'regular', table: 'slice', column: 'thread_dur'},
-          },
-          COUNT_AGGREGATION),
+      selectedAggregations: [
+        {
+          aggregationFunction: 'SUM',
+          column: {kind: 'regular', table: 'slice', column: 'dur'},
+        },
+        {
+          aggregationFunction: 'SUM',
+          column: {kind: 'regular', table: 'slice', column: 'thread_dur'},
+        },
+        COUNT_AGGREGATION,
+      ],
       constrainToArea: true,
       queryRequested: false,
       argumentNames: [],
@@ -87,10 +86,8 @@ export function createEmptyNonSerializableState(): NonSerializableState {
 export function createEmptyState(): State {
   return {
     version: STATE_VERSION,
-    currentEngineId: undefined,
     nextId: '-1',
     newEngineMode: 'USE_HTTP_RPC_IF_AVAILABLE',
-    engines: {},
     traceTime: {...defaultTraceTime},
     tracks: {},
     uiTrackIdByTraceTrackId: {},
@@ -114,17 +111,16 @@ export function createEmptyState(): State {
     lastLoadedConfig: {type: 'NONE'},
 
     frontendLocalState: {
-      omniboxState: {
-        lastUpdate: 0,
-        omnibox: '',
-        mode: 'SEARCH',
-      },
-
       visibleState: {
         ...defaultTraceTime,
         lastUpdate: 0,
         resolution: 0,
       },
+    },
+
+    omniboxState: {
+      omnibox: '',
+      mode: 'SEARCH',
     },
 
     logsPagination: {
@@ -158,5 +154,12 @@ export function createEmptyState(): State {
     fetchChromeCategories: false,
     chromeCategories: undefined,
     nonSerializableState: createEmptyNonSerializableState(),
+
+    logFilteringCriteria: {
+      // The first two log priorities are ignored.
+      minimumLevel: 2,
+      tags: [],
+      textEntry: '',
+    },
   };
 }

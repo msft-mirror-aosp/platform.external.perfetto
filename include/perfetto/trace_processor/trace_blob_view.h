@@ -48,7 +48,7 @@ namespace trace_processor {
 class TraceBlobView {
  public:
   // Takes ownership of the passed |blob|.
-  static constexpr size_t kWholeBlob = std::numeric_limits<size_t>::max();
+  static constexpr uint32_t kWholeBlob = std::numeric_limits<uint32_t>::max();
   explicit TraceBlobView(TraceBlob blob,
                          size_t offset = 0,
                          size_t length = kWholeBlob) {
@@ -62,6 +62,18 @@ class TraceBlobView {
       length_ = static_cast<uint32_t>(length);
     }
     blob_.reset(new TraceBlob(std::move(blob)));
+  }
+
+  TraceBlobView(RefPtr<TraceBlob> blob_ptr, uint32_t offset, uint32_t length) {
+    PERFETTO_DCHECK(offset <= std::numeric_limits<uint32_t>::max());
+    data_ = blob_ptr->data() + offset;
+    if (length == kWholeBlob) {
+      length_ = static_cast<uint32_t>(blob_ptr->size() - offset);
+    } else {
+      PERFETTO_DCHECK(offset + length_ <= blob_ptr->size());
+      length_ = length;
+    }
+    blob_ = blob_ptr;
   }
 
   // Trivial empty ctor.
@@ -87,16 +99,18 @@ class TraceBlobView {
   TraceBlobView slice(const uint8_t* data, size_t length) const {
     PERFETTO_DCHECK(data >= data_);
     PERFETTO_DCHECK(data + length <= data_ + length_);
-    return TraceBlobView(data, static_cast<uint32_t>(length), blob_);
+    return TraceBlobView(blob_, data, static_cast<uint32_t>(length));
   }
 
   // Like slice() but takes an offset rather than a pointer as 1st argument.
   TraceBlobView slice_off(size_t off, size_t length) const {
     PERFETTO_DCHECK(off + length <= length_);
-    return TraceBlobView(data_ + off, static_cast<uint32_t>(length), blob_);
+    return TraceBlobView(blob_, data_ + off, static_cast<uint32_t>(length));
   }
 
   TraceBlobView copy() const { return slice(data_, length_); }
+
+  explicit operator bool() const { return data_ != nullptr; }
 
   bool operator==(const TraceBlobView& rhs) const {
     return (data_ == rhs.data_) && (length_ == rhs.length_) &&
@@ -106,16 +120,21 @@ class TraceBlobView {
 
   const uint8_t* data() const { return data_; }
   // TODO(primiano): normalize length() vs size() usage.
-  size_t length() const { return length_; }
-  size_t size() const { return length_; }
+  uint32_t length() const { return length_; }
+  uint32_t size() const { return length_; }
+  uint32_t offset() const {
+    return static_cast<uint32_t>(data_ - blob_->data());
+  }
+
+  const RefPtr<TraceBlob>& blob() const { return blob_; }
 
  private:
-  TraceBlobView(const uint8_t* data, uint32_t length, RefPtr<TraceBlob> blob)
-      : data_(data), length_(length), blob_(std::move(blob)) {}
+  TraceBlobView(RefPtr<TraceBlob> blob, const uint8_t* data, uint32_t length)
+      : blob_(std::move(blob)), data_(data), length_(length) {}
 
+  RefPtr<TraceBlob> blob_;
   const uint8_t* data_ = nullptr;
   uint32_t length_ = 0;
-  RefPtr<TraceBlob> blob_;
 };
 
 }  // namespace trace_processor

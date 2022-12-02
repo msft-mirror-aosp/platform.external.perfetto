@@ -22,6 +22,8 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/fuchsia/fuchsia_trace_utils.h"
+#include "src/trace_processor/importers/proto/proto_trace_parser.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -61,25 +63,23 @@ struct Arg {
 }  // namespace
 
 FuchsiaTraceParser::FuchsiaTraceParser(TraceProcessorContext* context)
-    : context_(context) {}
+    : context_(context), proto_parser_(new ProtoTraceParser(context_)) {}
 
 FuchsiaTraceParser::~FuchsiaTraceParser() = default;
 
-void FuchsiaTraceParser::ParseFtracePacket(uint32_t,
-                                           int64_t,
-                                           TimestampedTracePiece) {
-  PERFETTO_FATAL("Fuchsia Trace Parser cannot handle ftrace packets.");
+void FuchsiaTraceParser::ParseTrackEvent(int64_t ts, TrackEventData data) {
+  proto_parser_->ParseTrackEvent(ts, std::move(data));
 }
 
-void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
-  PERFETTO_DCHECK(ttp.type == TimestampedTracePiece::Type::kFuchsiaRecord);
+void FuchsiaTraceParser::ParseTracePacket(int64_t ts, TracePacketData data) {
+  proto_parser_->ParseTracePacket(ts, std::move(data));
+}
 
+void FuchsiaTraceParser::ParseFuchsiaRecord(int64_t, FuchsiaRecord fr) {
   // The timestamp is also present in the record, so we'll ignore the one passed
   // as an argument.
-  fuchsia_trace_utils::RecordCursor cursor(
-      ttp.fuchsia_record.record_view()->data(),
-      ttp.fuchsia_record.record_view()->length());
-  FuchsiaRecord& record = ttp.fuchsia_record;
+  fuchsia_trace_utils::RecordCursor cursor(fr.record_view()->data(),
+                                           fr.record_view()->length());
   ProcessTracker* procs = context_->process_tracker.get();
   SliceTracker* slices = context_->slice_tracker.get();
 
@@ -103,18 +103,18 @@ void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
           fuchsia_trace_utils::ReadField<uint32_t>(header, 48, 63);
 
       int64_t ts;
-      if (!cursor.ReadTimestamp(record.get_ticks_per_second(), &ts)) {
+      if (!cursor.ReadTimestamp(fr.get_ticks_per_second(), &ts)) {
         context_->storage->IncrementStats(stats::fuchsia_invalid_event);
         return;
       }
-      fuchsia_trace_utils::ThreadInfo tinfo;
+      FuchsiaThreadInfo tinfo;
       if (fuchsia_trace_utils::IsInlineThread(thread_ref)) {
         if (!cursor.ReadInlineThread(&tinfo)) {
           context_->storage->IncrementStats(stats::fuchsia_invalid_event);
           return;
         }
       } else {
-        tinfo = record.GetThread(thread_ref);
+        tinfo = fr.GetThread(thread_ref);
       }
       StringId cat;
       if (fuchsia_trace_utils::IsInlineString(cat_ref)) {
@@ -125,7 +125,7 @@ void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
         }
         cat = context_->storage->InternString(cat_string_view);
       } else {
-        cat = record.GetString(cat_ref);
+        cat = fr.GetString(cat_ref);
       }
       StringId name;
       if (fuchsia_trace_utils::IsInlineString(name_ref)) {
@@ -136,7 +136,7 @@ void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
         }
         name = context_->storage->InternString(name_string_view);
       } else {
-        name = record.GetString(name_ref);
+        name = fr.GetString(name_ref);
       }
 
       // Read arguments
@@ -163,7 +163,7 @@ void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
           }
           arg.name = context_->storage->InternString(arg_name_view);
         } else {
-          arg.name = record.GetString(arg_name_ref);
+          arg.name = fr.GetString(arg_name_ref);
         }
 
         switch (arg_type) {
@@ -217,7 +217,7 @@ void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
               }
               value = context_->storage->InternString(arg_value_view);
             } else {
-              value = record.GetString(arg_value_ref);
+              value = fr.GetString(arg_value_ref);
             }
             arg.value = fuchsia_trace_utils::ArgValue::String(value);
             break;
@@ -342,7 +342,7 @@ void FuchsiaTraceParser::ParseTracePacket(int64_t, TimestampedTracePiece ttp) {
         }
         case kDurationComplete: {
           int64_t end_ts;
-          if (!cursor.ReadTimestamp(record.get_ticks_per_second(), &end_ts)) {
+          if (!cursor.ReadTimestamp(fr.get_ticks_per_second(), &end_ts)) {
             context_->storage->IncrementStats(stats::fuchsia_invalid_event);
             return;
           }

@@ -40,7 +40,7 @@ export interface Table {
 
 export const sliceTable = {
   name: 'slice',
-  columns: ['type', 'ts', 'dur', 'category', 'name'],
+  columns: ['type', 'ts', 'dur', 'category', 'name', 'depth'],
 };
 
 // Columns of `slice` table available for aggregation.
@@ -103,9 +103,8 @@ function outerAggregation(fn: AggregationFunction): AggregationFunction {
 export class QueryGeneratorError extends Error {}
 
 // Internal column name for different rollover levels of aggregate columns.
-function aggregationAlias(
-    aggregationIndex: number, rolloverLevel: number): string {
-  return `agg_${aggregationIndex}_level_${rolloverLevel}`;
+function aggregationAlias(aggregationIndex: number): string {
+  return `agg_${aggregationIndex}`;
 }
 
 export function areaFilter(area: Area): string {
@@ -133,8 +132,9 @@ function aggregationExpression(aggregation: Aggregation): string {
       expression(aggregation.column)})`;
 }
 
-export function extractArgumentExpression(argument: string) {
-  return `extract_arg(arg_set_id, ${sqliteString(argument)})`;
+export function extractArgumentExpression(argument: string, table?: string) {
+  const prefix = table === undefined ? '' : `${table}.`;
+  return `extract_arg(${prefix}arg_set_id, ${sqliteString(argument)})`;
 }
 
 function generateInnerQuery(
@@ -146,8 +146,8 @@ function generateInnerQuery(
   const aggregationColumns: string[] = [];
 
   for (let i = 0; i < aggregations.length; i++) {
-    aggregationColumns.push(`${aggregationExpression(aggregations[i])} as ${
-        aggregationAlias(i, 0)}`);
+    aggregationColumns.push(
+        `${aggregationExpression(aggregations[i])} as ${aggregationAlias(i)}`);
   }
 
   const selectColumns: string[] = [];
@@ -186,13 +186,8 @@ function generateInnerQuery(
   return {query, groupByColumns};
 }
 
-// Every aggregation in the request is contained in the result in (number of
-// pivots + 1) times for each rollover level. This helper function returs an
-// index of the necessary column in the response.
-export function aggregationIndex(
-    pivotColumns: number, aggregationNo: number, depth: number) {
-  return pivotColumns + aggregationNo * (pivotColumns + 1) +
-      (pivotColumns - depth);
+export function aggregationIndex(pivotColumns: number, aggregationNo: number) {
+  return pivotColumns + aggregationNo;
 }
 
 export function generateQueryFromState(
@@ -201,26 +196,14 @@ export function generateQueryFromState(
   if (state.selectionArea === undefined) {
     throw new QueryGeneratorError('Should not be called without area');
   }
-  return generateQuery(
-      state.selectedPivots,
-      state.selectedSlicePivots,
-      state.selectedAggregations,
-      globals.state.areas[state.selectionArea.areaId],
-      state.constrainToArea);
-}
 
-export function generateQuery(
-    nonSlicePivots: RegularColumn[],
-    slicePivots: TableColumn[],
-    selectedAggregations: Map<string, Aggregation>,
-    area: Area,
-    constrainToArea: boolean): PivotTableReduxQuery {
-  const sliceTableAggregations = [...selectedAggregations.values()];
-
+  const sliceTableAggregations = [...state.selectedAggregations.values()];
   if (sliceTableAggregations.length === 0) {
     throw new QueryGeneratorError('No aggregations selected');
   }
 
+  const nonSlicePivots = state.selectedPivots;
+  const slicePivots = state.selectedSlicePivots;
   if (slicePivots.length === 0 && nonSlicePivots.length === 0) {
     throw new QueryGeneratorError('No pivots selected');
   }
@@ -230,54 +213,32 @@ export function generateQuery(
       slicePivots,
       sliceTableAggregations,
       nonSlicePivots.length > 0,
-      area,
-      constrainToArea);
+      globals.state.areas[state.selectionArea.areaId],
+      state.constrainToArea);
 
   const prefixedSlicePivots =
       innerQuery.groupByColumns.map((p) => `preaggregated.${p}`);
   const renderedNonSlicePivots =
       nonSlicePivots.map((pivot) => `${pivot.table}.${pivot.column}`);
-  const totalPivotsArray = renderedNonSlicePivots.concat(prefixedSlicePivots);
   const sortCriteria =
       globals.state.nonSerializableState.pivotTableRedux.sortCriteria;
   const sortClauses: string[] = [];
   for (let i = 0; i < sliceTableAggregations.length; i++) {
-    const agg = `preaggregated.${aggregationAlias(i, 0)}`;
+    const agg = `preaggregated.${aggregationAlias(i)}`;
     const fn = outerAggregation(sliceTableAggregations[i].aggregationFunction);
-    outerAggregations.push(`${fn}(${agg}) as ${aggregationAlias(i, 0)}`);
-
-    for (let level = 1; level < totalPivotsArray.length; level++) {
-      // Peculiar form "SUM(SUM(agg)) over (partition by columns)" here means
-      // following: inner SUM(agg) is an aggregation that is going to collapse
-      // tracks with the same pivot values, which is going to be post-aggregated
-      // by the set of columns by outer **window** SUM function.
-
-      // Need to use complicated query syntax can be avoided by having yet
-      // another nested subquery computing only aggregation values with window
-      // functions in the wrapper, but the generation code is going to be more
-      // complex; so complexity of the query is traded for complexity of the
-      // query generator.
-      outerAggregations.push(`${fn}(${fn}(${agg})) over (partition by ${
-          totalPivotsArray.slice(0, totalPivotsArray.length - level)
-              .join(', ')}) as ${aggregationAlias(i, level)}`);
-    }
-
-    outerAggregations.push(`${fn}(${fn}(${agg})) over () as ${
-        aggregationAlias(i, totalPivotsArray.length)}`);
+    outerAggregations.push(`${fn}(${agg}) as ${aggregationAlias(i)}`);
 
     if (sortCriteria !== undefined &&
         tableColumnEquals(
             sliceTableAggregations[i].column, sortCriteria.column)) {
-      for (let level = totalPivotsArray.length - 1; level >= 0; level--) {
-        sortClauses.push(`${aggregationAlias(i, level)} ${sortCriteria.order}`);
-      }
+      sortClauses.push(`${aggregationAlias(i)} ${sortCriteria.order}`);
     }
   }
 
   const joins = `
-    join thread_track on thread_track.id = preaggregated.track_id
-    join thread using (utid)
-    join process using (upid)
+    left join thread_track on thread_track.id = preaggregated.track_id
+    left join thread using (utid)
+    left join process using (upid)
   `;
 
   const text = `

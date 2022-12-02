@@ -24,13 +24,13 @@
 #include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/string_view.h"
-#include "perfetto/ext/base/utils.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/flow_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/json/json_utils.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/tables/slice_tables.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
@@ -62,25 +62,16 @@ JsonTraceParser::JsonTraceParser(TraceProcessorContext* context)
 
 JsonTraceParser::~JsonTraceParser() = default;
 
-void JsonTraceParser::ParseFtracePacket(uint32_t,
-                                        int64_t,
-                                        TimestampedTracePiece) {
-  PERFETTO_FATAL("Json Trace Parser cannot handle ftrace packets.");
+void JsonTraceParser::ParseSystraceLine(int64_t, SystraceLine line) {
+  systrace_line_parser_.ParseLine(line);
 }
 
-void JsonTraceParser::ParseTracePacket(int64_t timestamp,
-                                       TimestampedTracePiece ttp) {
+void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
+                                      std::string string_value) {
   PERFETTO_DCHECK(json::IsJsonSupported());
 
 #if PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
-  PERFETTO_DCHECK(ttp.type == TimestampedTracePiece::Type::kJsonValue ||
-                  ttp.type == TimestampedTracePiece::Type::kSystraceLine);
-  if (ttp.type == TimestampedTracePiece::Type::kSystraceLine) {
-    systrace_line_parser_.ParseLine(ttp.systrace_line);
-    return;
-  }
-
-  auto opt_value = json::ParseJsonString(base::StringView(ttp.json_value));
+  auto opt_value = json::ParseJsonString(base::StringView(string_value));
   if (!opt_value) {
     context_->storage->IncrementStats(stats::json_parser_failure);
     return;
@@ -107,20 +98,19 @@ void JsonTraceParser::ParseTracePacket(int64_t timestamp,
 
   uint32_t pid = opt_pid.value_or(0);
   uint32_t tid = opt_tid.value_or(pid);
+  UniqueTid utid = procs->UpdateThread(tid, pid);
+
+  std::string id = value.isMember("id") ? value["id"].asString() : "";
 
   base::StringView cat = value.isMember("cat")
                              ? base::StringView(value["cat"].asCString())
                              : base::StringView();
+  StringId cat_id = storage->InternString(cat);
+
   base::StringView name = value.isMember("name")
                               ? base::StringView(value["name"].asCString())
                               : base::StringView();
-  base::StringView id = value.isMember("id")
-                            ? base::StringView(value["id"].asCString())
-                            : base::StringView();
-
-  StringId cat_id = storage->InternString(cat);
-  StringId name_id = storage->InternString(name);
-  UniqueTid utid = procs->UpdateThread(tid, pid);
+  StringId name_id = name.empty() ? kNullStringId : storage->InternString(name);
 
   auto args_inserter = [this, &value](ArgsTracker::BoundInserter* inserter) {
     if (value.isMember("args")) {
@@ -181,9 +171,7 @@ void JsonTraceParser::ParseTracePacket(int64_t timestamp,
         break;
       }
       UniquePid upid = context_->process_tracker->GetOrCreateProcess(pid);
-      // TODO(hjd): base::Hash::Combine should work on StringViews
-      int64_t cookie =
-          static_cast<int64_t>(base::Hash::Combine(id.ToStdString().c_str()));
+      int64_t cookie = static_cast<int64_t>(base::Hasher::Combine(id.c_str()));
       StringId scope = kNullStringId;
       TrackId track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
           name_id, upid, cookie, true /* source_id_is_process_scoped */, scope);
@@ -224,7 +212,7 @@ void JsonTraceParser::ParseTracePacket(int64_t timestamp,
 
       std::string counter_name_prefix = name.ToStdString();
       if (!id.empty()) {
-        counter_name_prefix += " id: " + id.ToStdString();
+        counter_name_prefix += " id: " + id;
       }
 
       for (auto it = args.begin(); it != args.end(); ++it) {
@@ -353,8 +341,8 @@ void JsonTraceParser::ParseTracePacket(int64_t timestamp,
   }
 #else
   perfetto::base::ignore_result(timestamp);
-  perfetto::base::ignore_result(ttp);
   perfetto::base::ignore_result(context_);
+  perfetto::base::ignore_result(string_value);
   PERFETTO_ELOG("Cannot parse JSON trace due to missing JSON support");
 #endif  // PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
 }

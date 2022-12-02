@@ -62,14 +62,14 @@ class SpanJoinOperatorTableTest : public ::testing::Test {
 TEST_F(SpanJoinOperatorTableTest, JoinTwoSpanTables) {
   RunStatement(
       "CREATE TEMP TABLE f("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "cpu UNSIGNED INT"
       ");");
   RunStatement(
       "CREATE TEMP TABLE s("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "cpu UNSIGNED INT"
       ");");
   RunStatement(
@@ -124,14 +124,14 @@ TEST_F(SpanJoinOperatorTableTest, JoinTwoSpanTables) {
 TEST_F(SpanJoinOperatorTableTest, NullPartitionKey) {
   RunStatement(
       "CREATE TEMP TABLE f("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "cpu UNSIGNED INT"
       ");");
   RunStatement(
       "CREATE TEMP TABLE s("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "cpu UNSIGNED INT"
       ");");
   RunStatement(
@@ -188,15 +188,15 @@ TEST_F(SpanJoinOperatorTableTest, NullPartitionKey) {
 TEST_F(SpanJoinOperatorTableTest, MixedPartitioning) {
   RunStatement(
       "CREATE TEMP TABLE f("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "upid UNSIGNED INT"
       ");");
   RunStatement(
       "CREATE TEMP TABLE s("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
-      "s_val BIG INT"
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
+      "s_val BIGINT"
       ");");
   RunStatement(
       "CREATE VIRTUAL TABLE sp USING span_join(f PARTITIONED upid, s);");
@@ -226,15 +226,15 @@ TEST_F(SpanJoinOperatorTableTest, MixedPartitioning) {
 TEST_F(SpanJoinOperatorTableTest, NoPartitioning) {
   RunStatement(
       "CREATE TEMP TABLE f("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
-      "f_val BIG INT"
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
+      "f_val BIGINT"
       ");");
   RunStatement(
       "CREATE TEMP TABLE s("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
-      "s_val BIG INT"
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
+      "s_val BIGINT"
       ");");
   RunStatement("CREATE VIRTUAL TABLE sp USING span_join(f, s);");
 
@@ -257,14 +257,14 @@ TEST_F(SpanJoinOperatorTableTest, NoPartitioning) {
 TEST_F(SpanJoinOperatorTableTest, LeftJoinTwoSpanTables) {
   RunStatement(
       "CREATE TEMP TABLE f("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "cpu UNSIGNED INT"
       ");");
   RunStatement(
       "CREATE TEMP TABLE s("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "tid UNSIGNED INT"
       ");");
   RunStatement("CREATE VIRTUAL TABLE sp USING span_left_join(f, s);");
@@ -308,17 +308,52 @@ TEST_F(SpanJoinOperatorTableTest, LeftJoinTwoSpanTables) {
 TEST_F(SpanJoinOperatorTableTest, LeftJoinTwoSpanTables_EmptyRight) {
   RunStatement(
       "CREATE TEMP TABLE f("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "cpu UNSIGNED INT"
       ");");
   RunStatement(
       "CREATE TEMP TABLE s("
-      "ts BIG INT PRIMARY KEY, "
-      "dur BIG INT, "
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
       "tid UNSIGNED INT"
       ");");
   RunStatement("CREATE VIRTUAL TABLE sp USING span_left_join(f, s);");
+
+  RunStatement("INSERT INTO f VALUES(100, 10, 0);");
+  RunStatement("INSERT INTO f VALUES(110, 50, 1);");
+
+  PrepareValidStatement("SELECT * FROM sp");
+
+  ASSERT_EQ(sqlite3_step(stmt_.get()), SQLITE_ROW);
+  ASSERT_EQ(sqlite3_column_int64(stmt_.get(), 0), 100);
+  ASSERT_EQ(sqlite3_column_int64(stmt_.get(), 1), 10);
+  ASSERT_EQ(sqlite3_column_int64(stmt_.get(), 2), 0);
+  ASSERT_EQ(sqlite3_column_type(stmt_.get(), 3), SQLITE_NULL);
+
+  ASSERT_EQ(sqlite3_step(stmt_.get()), SQLITE_ROW);
+  ASSERT_EQ(sqlite3_column_int64(stmt_.get(), 0), 110);
+  ASSERT_EQ(sqlite3_column_int64(stmt_.get(), 1), 50);
+  ASSERT_EQ(sqlite3_column_int64(stmt_.get(), 2), 1);
+  ASSERT_EQ(sqlite3_column_type(stmt_.get(), 3), SQLITE_NULL);
+
+  ASSERT_EQ(sqlite3_step(stmt_.get()), SQLITE_DONE);
+}
+
+TEST_F(SpanJoinOperatorTableTest, CapitalizedLeftJoin) {
+  RunStatement(
+      "CREATE TEMP TABLE f("
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
+      "cpu UNSIGNED INT"
+      ");");
+  RunStatement(
+      "CREATE TEMP TABLE s("
+      "ts BIGINT PRIMARY KEY, "
+      "dur BIGINT, "
+      "tid UNSIGNED INT"
+      ");");
+  RunStatement("CREATE VIRTUAL TABLE sp USING SPAN_LEFT_JOIN(f, s);");
 
   RunStatement("INSERT INTO f VALUES(100, 10, 0);");
   RunStatement("INSERT INTO f VALUES(110, 50, 1);");

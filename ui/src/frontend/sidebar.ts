@@ -20,6 +20,12 @@ import {getCurrentChannel} from '../common/channels';
 import {TRACE_SUFFIX} from '../common/constants';
 import {ConversionJobStatus} from '../common/conversion_jobs';
 import {Engine} from '../common/engine';
+import {featureFlags} from '../common/feature_flags';
+import {
+  disableMetatracingAndGetTrace,
+  enableMetatracing,
+  isMetatracingEnabled,
+} from '../common/metatracing';
 import {EngineMode, TraceArrayBufferSource} from '../common/state';
 import * as version from '../gen/perfetto_version';
 
@@ -119,8 +125,15 @@ function getBugReportUrl(): string {
   }
 }
 
+const HIRING_BANNER_FLAG = featureFlags.register({
+  id: 'showHiringBanner',
+  name: 'Show hiring banner',
+  description: 'Show the "We\'re hiring" banner link in the side bar.',
+  defaultValue: false,
+});
+
 function shouldShowHiringBanner(): boolean {
-  return globals.isInternalUser;
+  return globals.isInternalUser && HIRING_BANNER_FLAG.get();
 }
 
 function createCannedQuery(query: string): (_: Event) => void {
@@ -137,7 +150,9 @@ function showDebugTrack(): (_: Event) => void {
   return (e: Event) => {
     e.preventDefault();
     globals.dispatch(Actions.addDebugTrack({
-      engineId: assertExists(globals.state.currentEngineId),
+      // The debug track will only be shown once we have a currentEngineId which
+      // is not undefined.
+      engineId: assertExists(globals.state.engine).id,
       name: 'Debug Slices',
     }));
   };
@@ -147,7 +162,7 @@ const EXAMPLE_ANDROID_TRACE_URL =
     'https://storage.googleapis.com/perfetto-misc/example_android_trace_15s';
 
 const EXAMPLE_CHROME_TRACE_URL =
-    'https://storage.googleapis.com/perfetto-misc/example_chrome_trace_4s_1.json';
+    'https://storage.googleapis.com/perfetto-misc/chrome_example_wikipedia.perfetto_trace.gz';
 
 interface SectionItem {
   t: string;
@@ -288,7 +303,12 @@ const SECTIONS: Section[] = [
     title: 'Sample queries',
     summary: 'Compute summary statistics',
     items: [
-      {t: 'Show Debug Track', a: showDebugTrack(), i: 'view_day'},
+      {
+        t: 'Show Debug Track',
+        a: showDebugTrack(),
+        i: 'view_day',
+        isVisible: () => globals.state.engine !== undefined,
+      },
       {
         t: 'Record metatrace',
         a: recordMetatrace,
@@ -613,7 +633,11 @@ function downloadTrace(e: Event) {
     fileName = url.split('/').slice(-1)[0];
   } else if (src.type === 'ARRAY_BUFFER') {
     const blob = new Blob([src.buffer], {type: 'application/octet-stream'});
-    if (src.fileName) {
+    const inputFileName =
+        window.prompt('Please enter a name for your file or leave blank');
+    if (inputFileName) {
+      fileName = `${inputFileName}.perfetto_trace.gz`;
+    } else if (src.fileName) {
       fileName = src.fileName;
     }
     url = URL.createObjectURL(blob);
@@ -668,6 +692,7 @@ Alternatively, connect to a trace_processor_shell --httpd instance.
           text: 'YES, record metatrace',
           primary: true,
           action: () => {
+            enableMetatracing();
             engine.enableMetatrace();
           },
         },
@@ -685,6 +710,8 @@ async function finaliseMetatrace(e: Event) {
   e.preventDefault();
   globals.logging.logEvent('Trace Actions', 'Finalise metatrace');
 
+  const jsEvents = disableMetatracingAndGetTrace();
+
   const engine = getCurrentEngine();
   if (!engine) return;
 
@@ -693,7 +720,8 @@ async function finaliseMetatrace(e: Event) {
     throw new Error(`Failed to read metatrace: ${result.error}`);
   }
 
-  const blob = new Blob([result.metatrace], {type: 'application/octet-stream'});
+  const blob = new Blob(
+      [result.metatrace, jsEvents], {type: 'application/octet-stream'});
   const url = URL.createObjectURL(blob);
 
   downloadUrl(url, 'metatrace');
@@ -708,10 +736,8 @@ const EngineRPCWidget: m.Component = {
     let failed = false;
     let mode: EngineMode|undefined;
 
-    // We are assuming we have at most one engine here.
-    const engines = Object.values(globals.state.engines);
-    assertTrue(engines.length <= 1);
-    for (const engine of engines) {
+    const engine = globals.state.engine;
+    if (engine !== undefined) {
       mode = engine.mode;
       if (engine.failed !== undefined) {
         cssClass += '.red';
@@ -886,14 +912,12 @@ export class Sidebar implements m.ClassComponent {
           continue;
         }
         if (item.checkMetatracingEnabled || item.checkMetatracingDisabled) {
-          const engine = getCurrentEngine();
-          if (!engine) continue;
           if (item.checkMetatracingEnabled === true &&
-              !engine.isMetatracingEnabled()) {
+              !isMetatracingEnabled()) {
             continue;
           }
           if (item.checkMetatracingDisabled === true &&
-              engine.isMetatracingEnabled()) {
+              isMetatracingEnabled()) {
             continue;
           }
           if (item.checkMetatracingDisabled &&
@@ -917,24 +941,27 @@ export class Sidebar implements m.ClassComponent {
             'li', m(`a${css}`, attrs, m('i.material-icons', item.i), item.t)));
       }
       if (section.appendOpenedTraceTitle) {
-        const engines = Object.values(globals.state.engines);
-        if (engines.length === 1) {
+        const engine = globals.state.engine;
+        if (engine !== undefined) {
           let traceTitle = '';
           let traceUrl = '';
-          switch (engines[0].source.type) {
+          switch (engine.source.type) {
             case 'FILE':
               // Split on both \ and / (because C:\Windows\paths\are\like\this).
-              traceTitle = engines[0].source.file.name.split(/[/\\]/).pop()!;
-              const fileSizeMB = Math.ceil(engines[0].source.file.size / 1e6);
+              traceTitle = engine.source.file.name.split(/[/\\]/).pop()!;
+              const fileSizeMB = Math.ceil(engine.source.file.size / 1e6);
               traceTitle += ` (${fileSizeMB} MB)`;
               break;
             case 'URL':
-              traceUrl = engines[0].source.url;
+              traceUrl = engine.source.url;
               traceTitle = traceUrl.split('/').pop()!;
               break;
             case 'ARRAY_BUFFER':
-              traceTitle = engines[0].source.title;
-              traceUrl = engines[0].source.url || '';
+              traceTitle = engine.source.title;
+              traceUrl = engine.source.url || '';
+              const arrayBufferSizeMB =
+                  Math.ceil(engine.source.buffer.byteLength / 1e6);
+              traceTitle += ` (${arrayBufferSizeMB} MB)`;
               break;
             case 'HTTP_RPC':
               traceTitle = 'External trace (RPC)';

@@ -1,5 +1,7 @@
 * [Overview](README.md)
 
+* [Tracing 101](tracing-101.md)
+
 * [Quickstart](#)
   * [Record traces on Android](quickstart/android-tracing.md)
   * [Record traces on Linux](quickstart/linux-tracing.md)
@@ -9,6 +11,8 @@
   * [Heap profiling](quickstart/heap-profiling.md)
   * [Callstack sampling on Android](quickstart/callstack-sampling.md)
 
+* [FAQ](faq.md)
+
 * [Case studies](#)
   * [Android boot tracing](case-studies/android-boot-tracing.md)
   * [Debugging memory usage](case-studies/memory.md)
@@ -16,8 +20,8 @@
 * [Data sources](#)
   * [Memory](#)
     * [Counters and events](data-sources/memory-counters.md)
-    * [Native heap profiler](data-sources/native-heap-profiler.md)
-    * [Java heap profiler](data-sources/java-heap-profiler.md)
+    * [Heap profiler](data-sources/native-heap-profiler.md)
+    * [Java heap dumps](data-sources/java-heap-profiler.md)
   * [CPU](#)
     * [Scheduling events](data-sources/cpu-scheduling.md)
     * [System calls](data-sources/syscalls.md)
@@ -25,6 +29,7 @@
   * [Power](#)
     * [Battery counters and rails](data-sources/battery-counters.md)
   * [Android system](#)
+    * [Android game intervention list](data-sources/android-game-intervention-list.md)
     * [Atrace instrumentation](data-sources/atrace.md)
     * [Android log (logcat)](data-sources/android-log.md)
     * [Android Janks](data-sources/frametimeline.md)
@@ -41,6 +46,7 @@
   * [Common queries](analysis/common-queries.md)
   * [SQL tables](analysis/sql-tables.autogen)
   * [Stats table](analysis/sql-stats.autogen)
+  * [Pivot tables](analysis/pivot-tables.md)
 
 * [Trace visualization](#)
   * [Perfetto UI](visualization/perfetto-ui.md)
@@ -69,15 +75,17 @@
     * [Embedding Perfetto](contributing/embedding.md)
     * [Releasing the SDK](contributing/sdk-releasing.md)
     * [Chrome branches](contributing/chrome-branches.md)
+    * [UI development](contributing/ui-development.md)
+    * [Press](contributing/perfetto-in-the-press.md)
 
 * [Design documents](#)
     * [API and ABI surface](design-docs/api-and-abi.md)
+    * [Batch Trace Processor](design-docs/batch-trace-processor.md)
     * [Heapprofd design](design-docs/heapprofd-design.md)
     * [Heapprofd wire protocol](design-docs/heapprofd-wire-protocol.md)
     * [Heapprofd sampling](design-docs/heapprofd-sampling.md)
     * [Life of a tracing session](design-docs/life-of-a-tracing-session.md)
     * [Perfetto CI](design-docs/continuous-integration.md)
-    * [Pivot tables](design-docs/pivot-tables.md)
     * [ProtoZero](design-docs/protozero.md)
     * [Security model](design-docs/security-model.md)
     * [Statsd Checkpoint Atoms](design-docs/checkpoint-atoms.md)

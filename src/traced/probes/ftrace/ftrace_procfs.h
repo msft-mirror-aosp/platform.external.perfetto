@@ -34,9 +34,12 @@ class FtraceProcfs {
   // Takes an optional |instance_path| such as "instances/wifi/", in which case
   // the returned object will be for that ftrace instance path.
   static std::unique_ptr<FtraceProcfs> CreateGuessingMountPoint(
-      const std::string& instance_path = "");
+      const std::string& instance_path = "",
+      bool preserve_ftrace_buffer = false);
 
-  static std::unique_ptr<FtraceProcfs> Create(const std::string& root);
+  static std::unique_ptr<FtraceProcfs> Create(
+      const std::string& root,
+      bool preserve_ftrace_buffer = false);
   static int g_kmesg_fd;
 
   explicit FtraceProcfs(const std::string& root);
@@ -60,6 +63,16 @@ class FtraceProcfs {
                                       const std::string& name) const;
 
   virtual std::string ReadPageHeaderFormat() const;
+
+  // Sets the "current_tracer". Might fail with EBUSY if tracing pipes have
+  // already been opened for reading.
+  bool SetCurrentTracer(const std::string& tracer);
+  // Resets the "current_tracer" to "nop".
+  bool ResetCurrentTracer();
+  bool AppendFunctionFilters(const std::vector<std::string>& filters);
+  bool ClearFunctionFilters();
+  bool AppendFunctionGraphFilters(const std::vector<std::string>& filters);
+  bool ClearFunctionGraphFilters();
 
   // Get all triggers for event with the given |group| and |name|.
   std::vector<std::string> ReadEventTriggers(const std::string& group,

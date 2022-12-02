@@ -18,19 +18,25 @@ import {
   DeferredAction,
 } from '../common/actions';
 import {cacheTrace} from '../common/cache_manager';
-import {TRACE_MARGIN_TIME_S} from '../common/constants';
 import {Engine} from '../common/engine';
 import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../common/feature_flags';
 import {HttpRpcEngine} from '../common/http_rpc_engine';
+import {
+  getEnabledMetatracingCategories,
+  isMetatracingEnabled,
+} from '../common/metatracing';
 import {NUM, NUM_NULL, QueryError, STR, STR_NULL} from '../common/query_result';
+import {onSelectionChanged} from '../common/selection_observer';
 import {defaultTraceTime, EngineMode, ProfileType} from '../common/state';
 import {TimeSpan, toNs, toNsCeil, toNsFloor} from '../common/time';
 import {resetEngineWorker, WasmEngineProxy} from '../common/wasm_engine_proxy';
+import {BottomTabList} from '../frontend/bottom_tab';
 import {
   globals as frontendGlobals,
   QuantizedLoad,
   ThreadDesc,
 } from '../frontend/globals';
+import {showModal} from '../frontend/modal';
 import {
   publishHasFtrace,
   publishMetricError,
@@ -128,6 +134,41 @@ const FLAGGED_METRICS: Array<[Flag, string]> = METRICS.map((m) => {
   return [flag, m];
 });
 
+const ENABLE_CHROME_RELIABLE_RANGE_ZOOM_FLAG = featureFlags.register({
+  id: 'enableChromeReliableRangeZoom',
+  name: 'Enable Chrome reliable range zoom',
+  description: 'Automatically zoom into the reliable range for Chrome traces',
+  defaultValue: false,
+});
+
+const ENABLE_CHROME_RELIABLE_RANGE_ANNOTATION_FLAG = featureFlags.register({
+  id: 'enableChromeReliableRangeAnnotation',
+  name: 'Enable Chrome reliable range annotation',
+  description: 'Automatically adds an annotation for the reliable range start',
+  defaultValue: false,
+});
+
+// A local storage key where the indication that JSON warning has been shown is
+// stored.
+const SHOWN_JSON_WARNING_KEY = 'shownJsonWarning';
+
+function showJsonWarning() {
+  showModal({
+    title: 'Warning',
+    content:
+        m('div',
+          m('span',
+            'Perfetto UI features are limited for JSON traces. ',
+            'We recommend recording ',
+            m('a',
+              {href: 'https://perfetto.dev/docs/quickstart/chrome-tracing'},
+              'proto-format traces'),
+            ' from Chrome.'),
+          m('br')),
+    buttons: [],
+  });
+}
+
 // TraceController handles handshakes with the frontend for everything that
 // concerns a single trace. It owns the WASM trace processor engine, handles
 // tracks data and SQL queries. There is one TraceController instance for each
@@ -142,7 +183,7 @@ export class TraceController extends Controller<States> {
   }
 
   run() {
-    const engineCfg = assertExists(globals.state.engines[this.engineId]);
+    const engineCfg = assertExists(globals.state.engine);
     switch (this.state) {
       case 'init':
         this.loadTrace()
@@ -186,11 +227,10 @@ export class TraceController extends Controller<States> {
         // Create a QueryController for each query.
         for (const queryId of Object.keys(globals.state.queries)) {
           // If the expected engineId was not specified in the query, we
-          // assume it's `state.currentEngineId`. The engineId is not specified
+          // assume it's current engine id. The engineId is not specified
           // for instances with queries created prior to the creation of the
           // first engine.
-          const expectedEngineId = globals.state.queries[queryId].engineId ||
-              frontendGlobals.state.currentEngineId;
+          const expectedEngineId = globals.state.engine?.id;
           // Check that we are executing the query on the correct engine.
           if (expectedEngineId !== engine.id) {
             continue;
@@ -303,13 +343,21 @@ export class TraceController extends Controller<States> {
     }
     this.engine = engine;
 
+    if (isMetatracingEnabled()) {
+      this.engine.enableMetatrace(
+          assertExists(getEnabledMetatracingCategories()));
+    }
+    frontendGlobals.bottomTabList =
+        new BottomTabList(engine.getProxy('BottomTabList'));
+
     frontendGlobals.engines.set(this.engineId, engine);
     globals.dispatch(Actions.setEngineReady({
       engineId: this.engineId,
       ready: false,
       mode: engineMode,
     }));
-    const engineCfg = assertExists(globals.state.engines[this.engineId]);
+    const engineCfg = assertExists(globals.state.engine);
+    assertTrue(engineCfg.id === this.engineId);
     let traceStream: TraceStream | undefined;
     if (engineCfg.source.type === 'FILE') {
       traceStream = new TraceFileStream(engineCfg.source.file);
@@ -355,20 +403,35 @@ export class TraceController extends Controller<States> {
     const traceUuid = await this.cacheCurrentTrace();
 
     const traceTime = await this.engine.getTraceTimeBounds();
-    let startSec = traceTime.start;
-    let endSec = traceTime.end;
-    startSec -= TRACE_MARGIN_TIME_S;
-    endSec += TRACE_MARGIN_TIME_S;
+    const startSec = traceTime.start;
+    const endSec = traceTime.end;
     const traceTimeState = {
       startSec,
       endSec,
     };
 
+    const shownJsonWarning =
+        window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) !== null;
+
+    // Show warning if the trace is in JSON format.
+    const query = `select str_value from metadata where name = 'trace_type'`;
+    const result = await assertExists(this.engine).query(query);
+    const traceType = result.firstRow({str_value: STR}).str_value;
+    const isJsonTrace = traceType == 'json';
+    if (!shownJsonWarning) {
+      // When in embedded mode, the host app will control which trace format
+      // it passes to Perfetto, so we don't need to show this warning.
+      if (isJsonTrace && !frontendGlobals.embeddedMode) {
+        showJsonWarning();
+        // Save that the warning has been shown. Value is irrelevant since only
+        // the presence of key is going to be checked.
+        window.localStorage.setItem(SHOWN_JSON_WARNING_KEY, 'true');
+      }
+    }
+
     const emptyOmniboxState = {
       omnibox: '',
-      mode: frontendGlobals.state.frontendLocalState.omniboxState.mode ||
-          'SEARCH',
-      lastUpdate: Date.now() / 1000,
+      mode: frontendGlobals.state.omniboxState.mode || 'SEARCH',
     };
 
     const actions: DeferredAction[] = [
@@ -378,7 +441,7 @@ export class TraceController extends Controller<States> {
     ];
 
     const [startVisibleTime, endVisibleTime] =
-        await computeVisibleTime(startSec, endSec, this.engine);
+        await computeVisibleTime(startSec, endSec, isJsonTrace, this.engine);
     // We don't know the resolution at this point. However this will be
     // replaced in 50ms so a guess is fine.
     const resolution = (endVisibleTime - startVisibleTime) / 1000;
@@ -430,6 +493,26 @@ export class TraceController extends Controller<States> {
     await this.selectFirstHeapProfile();
     if (PERF_SAMPLE_FLAG.get()) {
       await this.selectPerfSample();
+    }
+
+    // If the trace was shared via a permalink, it might already have a
+    // selection. Emit onSelectionChanged to ensure that the components (like
+    // current selection details) react to it.
+    if (globals.state.currentSelection !== null) {
+      onSelectionChanged(globals.state.currentSelection, undefined);
+    }
+
+    // Trace Processor doesn't support the reliable range feature for JSON
+    // traces.
+    if (!isJsonTrace && ENABLE_CHROME_RELIABLE_RANGE_ANNOTATION_FLAG.get()) {
+      const reliableRangeStart = await computeTraceReliableRangeStart(engine);
+      if (reliableRangeStart > 0) {
+        globals.dispatch(Actions.addAutomaticNote({
+          timestamp: reliableRangeStart,
+          color: '#ff0000',
+          text: 'Reliable Range Start',
+        }));
+      }
     }
 
     return engineMode;
@@ -598,7 +681,8 @@ export class TraceController extends Controller<States> {
       return '';
     }
     const traceUuid = result.firstRow({uuid: STR}).uuid;
-    const engineConfig = assertExists(globals.state.engines[engine.id]);
+    const engineConfig = assertExists(globals.state.engine);
+    assertTrue(engineConfig.id === this.engineId);
     if (!(await cacheTrace(engineConfig.source, traceUuid))) {
       // If the trace is not cacheable (cacheable means it has been opened from
       // URL or RPC) only append '?local_cache_key' to the URL, without the
@@ -640,9 +724,9 @@ export class TraceController extends Controller<States> {
     this.updateStatus('Creating annotation counter table');
     await engine.query(`
       CREATE TABLE annotation_counter(
-        id BIG INT,
+        id BIGINT,
         track_id INT,
-        ts BIG INT,
+        ts BIGINT,
         value DOUBLE,
         PRIMARY KEY (track_id, ts)
       ) WITHOUT ROWID;
@@ -652,9 +736,9 @@ export class TraceController extends Controller<States> {
       CREATE TABLE annotation_slice(
         id INTEGER PRIMARY KEY,
         track_id INT,
-        ts BIG INT,
-        dur BIG INT,
-        thread_dur BIG INT,
+        ts BIGINT,
+        dur BIGINT,
+        thread_dur BIGINT,
         depth INT,
         cat STRING,
         name STRING,
@@ -794,13 +878,25 @@ export class TraceController extends Controller<States> {
   }
 }
 
+async function computeTraceReliableRangeStart(engine: Engine): Promise<number> {
+  const result =
+      await engine.query(`SELECT RUN_METRIC('chrome/chrome_reliable_range.sql');
+       SELECT start FROM chrome_reliable_range`);
+  const bounds = result.firstRow({start: NUM});
+  return bounds.start / 1e9;
+}
+
 async function computeVisibleTime(
-    traceStartSec: number, traceEndSec: number, engine: Engine):
-    Promise<[number, number]> {
+    traceStartSec: number,
+    traceEndSec: number,
+    isJsonTrace: boolean,
+    engine: Engine): Promise<[number, number]> {
   // if we have non-default visible state, update the visible time to it
   const previousVisibleState = globals.state.frontendLocalState.visibleState;
   if (!(previousVisibleState.startSec === defaultTraceTime.startSec &&
-        previousVisibleState.endSec === defaultTraceTime.endSec)) {
+        previousVisibleState.endSec === defaultTraceTime.endSec) &&
+        (previousVisibleState.startSec >= traceStartSec &&
+        previousVisibleState.endSec <= traceEndSec)) {
     return [previousVisibleState.startSec, previousVisibleState.endSec];
   }
 
@@ -811,11 +907,19 @@ async function computeVisibleTime(
   // compare start and end with metadata computed by the trace processor
   const mdTime = await engine.getTracingMetadataTimeBounds();
   // make sure the bounds hold
-  if (Math.max(visibleStartSec, mdTime.start - TRACE_MARGIN_TIME_S) <
-      Math.min(visibleEndSec, mdTime.end + TRACE_MARGIN_TIME_S)) {
+  if (Math.max(visibleStartSec, mdTime.start) <
+      Math.min(visibleEndSec, mdTime.end)) {
     visibleStartSec =
-        Math.max(visibleStartSec, mdTime.start - TRACE_MARGIN_TIME_S);
-    visibleEndSec = Math.min(visibleEndSec, mdTime.end + TRACE_MARGIN_TIME_S);
+        Math.max(visibleStartSec, mdTime.start);
+    visibleEndSec = Math.min(visibleEndSec, mdTime.end);
   }
+
+  // Trace Processor doesn't support the reliable range feature for JSON
+  // traces.
+  if (!isJsonTrace && ENABLE_CHROME_RELIABLE_RANGE_ZOOM_FLAG.get()) {
+    const reliableRangeStart = await computeTraceReliableRangeStart(engine);
+    visibleStartSec = Math.max(visibleStartSec, reliableRangeStart);
+  }
+
   return [visibleStartSec, visibleEndSec];
 }

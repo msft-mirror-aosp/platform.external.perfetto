@@ -17,27 +17,16 @@ import("../../../gn/test.gni")
 if (enable_perfetto_trace_processor_sqlite) {
   source_set("sqlite") {
     sources = [
-      "create_function.cc",
-      "create_function.h",
-      "create_function_internal.cc",
-      "create_function_internal.h",
-      "create_view_function.cc",
-      "create_view_function.h",
       "db_sqlite_table.cc",
       "db_sqlite_table.h",
-      "pprof_functions.cc",
-      "pprof_functions.h",
       "query_cache.h",
-      "register_function.cc",
-      "register_function.h",
       "span_join_operator_table.cc",
       "span_join_operator_table.h",
       "sql_stats_table.cc",
       "sql_stats_table.h",
-      "sqlite3_str_split.cc",
-      "sqlite3_str_split.h",
       "sqlite_raw_table.cc",
       "sqlite_raw_table.h",
+      "sqlite_utils.cc",
       "sqlite_utils.h",
       "stats_table.cc",
       "stats_table.h",
@@ -45,7 +34,6 @@ if (enable_perfetto_trace_processor_sqlite) {
       "window_operator_table.h",
     ]
     deps = [
-      "..:ftrace_descriptors",
       "..:metatrace",
       "../../../gn:default_deps",
       "../../../gn:sqlite",
@@ -55,6 +43,7 @@ if (enable_perfetto_trace_processor_sqlite) {
       "../db",
       "../dynamic",
       "../importers/common",
+      "../importers/ftrace:ftrace_descriptors",
       "../storage",
       "../types",
       "../util",
@@ -73,6 +62,7 @@ if (enable_perfetto_trace_processor_sqlite) {
       "sqlite_utils.h",
     ]
     deps = [
+      "..:metatrace",
       "../../../gn:default_deps",
       "../../../gn:sqlite",
       "../../../include/perfetto/trace_processor",
@@ -86,7 +76,6 @@ if (enable_perfetto_trace_processor_sqlite) {
       "db_sqlite_table_unittest.cc",
       "query_constraints_unittest.cc",
       "span_join_operator_table_unittest.cc",
-      "sqlite3_str_split_unittest.cc",
       "sqlite_utils_unittest.cc",
     ]
     deps = [

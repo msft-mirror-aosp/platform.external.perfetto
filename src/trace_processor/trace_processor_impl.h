@@ -25,16 +25,19 @@
 #include <string>
 #include <vector>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/status.h"
 #include "perfetto/trace_processor/trace_processor.h"
-#include "src/trace_processor/sqlite/create_function.h"
-#include "src/trace_processor/sqlite/create_view_function.h"
 #include "src/trace_processor/sqlite/db_sqlite_table.h"
+#include "src/trace_processor/sqlite/functions/create_function.h"
+#include "src/trace_processor/sqlite/functions/create_view_function.h"
+#include "src/trace_processor/sqlite/functions/import.h"
 #include "src/trace_processor/sqlite/query_cache.h"
 #include "src/trace_processor/sqlite/scoped_db.h"
 #include "src/trace_processor/trace_processor_storage_impl.h"
+#include "src/trace_processor/util/sql_modules.h"
 
 #include "src/trace_processor/metrics/metrics.h"
 #include "src/trace_processor/util/descriptors.h"
@@ -68,6 +71,10 @@ class TraceProcessorImpl : public TraceProcessor,
   base::Status RegisterMetric(const std::string& path,
                               const std::string& sql) override;
 
+  base::Status RegisterSqlModule(
+      const std::string& module_name,
+      const std::vector<std::pair<std::string, std::string>>& files) override;
+
   base::Status ExtendMetricsProto(const uint8_t* data, size_t size) override;
 
   base::Status ExtendMetricsProto(
@@ -91,7 +98,7 @@ class TraceProcessorImpl : public TraceProcessor,
   std::string GetCurrentTraceName() override;
   void SetCurrentTraceName(const std::string&) override;
 
-  void EnableMetatrace() override;
+  void EnableMetatrace(MetatraceConfig config) override;
 
   base::Status DisableAndReadMetatrace(
       std::vector<uint8_t>* trace_proto) override;
@@ -102,8 +109,8 @@ class TraceProcessorImpl : public TraceProcessor,
 
   template <typename Table>
   void RegisterDbTable(const Table& table) {
-    DbSqliteTable::RegisterTable(*db_, query_cache_.get(), Table::Schema(),
-                                 &table, Table::Name());
+    DbSqliteTable::RegisterTable(*db_, query_cache_.get(), &table,
+                                 Table::Name());
   }
 
   void RegisterDynamicTable(std::unique_ptr<DynamicTableGenerator> generator) {
@@ -127,6 +134,9 @@ class TraceProcessorImpl : public TraceProcessor,
   std::unique_ptr<QueryCache> query_cache_;
 
   DescriptorPool pool_;
+
+  // Map from module name to module contents. Used for IMPORT function.
+  base::FlatHashMap<std::string, sql_modules::Module> sql_modules_;
   std::vector<metrics::SqlMetricFile> sql_metrics_;
   std::unordered_map<std::string, std::string> proto_field_to_sql_metric_path_;
 

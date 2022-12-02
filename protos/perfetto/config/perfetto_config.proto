@@ -419,6 +419,21 @@ message AndroidSystemPropertyConfig {
 
 // End of protos/perfetto/config/android/android_system_property_config.proto
 
+// Begin of protos/perfetto/config/android/network_trace_config.proto
+
+// Network tracing data source that records details on all packets sent or
+// received by the network.
+message NetworkPacketTraceConfig {
+  // Polling frequency in milliseconds. Network tracing writes to a fixed size
+  // ring buffer. The polling interval should be such that the ring buffer is
+  // unlikely to fill in that interval (or that filling is an acceptable risk).
+  // The minimum polling rate is 100ms (values below this are ignored).
+  // Introduced in Android 14 (U).
+  optional uint32 poll_ms = 1;
+}
+
+// End of protos/perfetto/config/android/network_trace_config.proto
+
 // Begin of protos/perfetto/config/android/packages_list_config.proto
 
 // Data source that lists details (such as version code) about packages on an
@@ -466,7 +481,7 @@ message ChromeConfig {
 
 // Begin of protos/perfetto/config/ftrace/ftrace_config.proto
 
-// Next id: 19.
+// Next id: 24.
 message FtraceConfig {
   repeated string ftrace_events = 1;
   repeated string atrace_categories = 2;
@@ -484,6 +499,24 @@ message FtraceConfig {
     optional bool enabled = 1;
   }
   optional CompactSchedConfig compact_sched = 12;
+
+  // Optional filter for "ftrace/print" events.
+  //
+  // The filter consists of multiple rules. A rule matches if its prefix matches
+  // exactly with the beginning of the "ftrace/print" "buf" field. As soon as a
+  // rule matches (the rules are processed in order), its `allow` field will be
+  // used as the outcome: if `allow` is true, the event will be included in the
+  // trace, otherwise it will be discarded. If an event does not match any rule,
+  // it will be allowed by default (a rule with an empty prefix and allow=false,
+  // disallows everything by default).
+  message PrintFilter {
+    message Rule {
+      optional string prefix = 1;
+      optional bool allow = 2;
+    }
+    repeated Rule rules = 1;
+  }
+  optional PrintFilter print_filter = 22;
 
   // Enables symbol name resolution against /proc/kallsyms.
   // It requires that either traced_probes is running as root or that
@@ -518,7 +551,7 @@ message FtraceConfig {
 
   // When this boolean is true AND the ftrace_events contains "kmem/rss_stat",
   // this option causes traced_probes to enable the "kmem/rss_stat_throttled"
-  // event instad if present, and fall back to "kmem/rss_stat" if not present.
+  // event instead if present, and fall back to "kmem/rss_stat" if not present.
   // The historical context for this is the following:
   // - Up to Android S (12), the rss_stat was internally throttled in its
   //   kernel implementation.
@@ -528,8 +561,6 @@ message FtraceConfig {
   // - Not all Android T/13 devices will receive a new kernel though, hence we
   //   need to deal with both cases.
   // For more context: go/rss-stat-throttled.
-  // TODO(kaleshsingh): implement the logic behind this. Right now this flag
-  // does nothing.
   optional bool throttle_rss_stat = 15;
 
   // If true, avoid enabling events that aren't statically known by
@@ -546,6 +577,51 @@ message FtraceConfig {
   // are enabled, this setting has no effect. Example: ["sys_read", "sys_open"].
   // Introduced in: Android U.
   repeated string syscall_events = 18;
+
+  // If true, enable the "function_graph" kernel tracer that emits events
+  // whenever a kernel function is entered and exited
+  // (funcgraph_entry/funcgraph_exit).
+  // Notes on use:
+  // * Requires |symbolize_ksyms| for function name resolution.
+  // * Use |function_filters| or |function_graph_roots| to constrain the traced
+  //   set of functions, otherwise the event bandwidth will be too high for
+  //   practical use.
+  // * The data source might be rejected if there is already a concurrent
+  //   ftrace data source that does not use function graph itself, as we do not
+  //   support switching kernel tracers mid-trace.
+  // * Requires a kernel compiled with CONFIG_FUNCTION_GRAPH_TRACER. This is
+  //   enabled if "cat /sys/kernel/tracing/available_tracers" includes
+  //   "function_graph".
+  // Android:
+  // * Available only on debuggable builds.
+  // * Introduced in: Android U.
+  optional bool enable_function_graph = 19;
+
+  // Constrains the set of functions traced when |enable_function_graph| is
+  // true. Supports globs, e.g. "sched*". You can specify multiple filters,
+  // in which case all matching functions will be traced. See kernel
+  // documentation on ftrace "set_ftrace_filter" file for more details.
+  // Android:
+  // * Available only on debuggable builds.
+  // * Introduced in: Android U.
+  repeated string function_filters = 20;
+
+  // If |enable_function_graph| is true, trace this set of functions *and* all
+  // of its callees. Supports globs. Can be set together with
+  // |function_filters|, in which case only callees matching the filter will be
+  // traced. If setting both, you most likely want all roots to also be
+  // included in |function_filters|.
+  // Android:
+  // * Available only on debuggable builds.
+  // * Introduced in: Android U.
+  repeated string function_graph_roots = 21;
+
+  // If true, does not clear ftrace buffers before the start of the program.
+  // This makes sense only if this is the first ftrace data source instance
+  // created after the daemon has been started. Can be useful for gathering boot
+  // traces, if ftrace has been separately configured (e.g. via kernel
+  // commandline).
+  optional bool preserve_ftrace_buffer = 23;
 }
 
 // End of protos/perfetto/config/ftrace/ftrace_config.proto
@@ -2124,6 +2200,10 @@ message SysStatsConfig {
   // Polls /proc/buddyinfo every X ms, if non-zero.
   // This is required to be > 10ms to avoid excessive CPU usage.
   optional uint32 buddyinfo_period_ms = 9;
+
+  // Polls /proc/diskstats every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  optional uint32 diskstat_period_ms = 10;
 }
 
 // End of protos/perfetto/config/sys_stats/sys_stats_config.proto
@@ -2274,7 +2354,7 @@ message TrackEventConfig {
 // Begin of protos/perfetto/config/data_source_config.proto
 
 // The configuration that is passed to each data source when starting tracing.
-// Next id: 120
+// Next id: 121
 message DataSourceConfig {
   enum SessionInitiator {
     SESSION_INITIATOR_UNSPECIFIED = 0;
@@ -2350,7 +2430,7 @@ message DataSourceConfig {
   optional AndroidLogConfig android_log_config = 107 [lazy = true];
   // TODO(fmayer): Add data source name for this.
   optional GpuCounterConfig gpu_counter_config = 108 [lazy = true];
-  // Data source name: android.game_intervention_list
+  // Data source name: android.game_interventions
   optional AndroidGameInterventionListConfig
       android_game_intervention_list_config = 116 [lazy = true];
   // Data source name: android.packages_list
@@ -2387,6 +2467,11 @@ message DataSourceConfig {
   // through the Perfetto SDK API. Data sources that don't use that API (e.g.,
   // traced_probes) may not support interception.
   optional InterceptorConfig interceptor_config = 115;
+
+  // Data source name: android.network_packets.
+  // Introduced in Android 14 (U).
+  optional NetworkPacketTraceConfig network_packet_trace_config = 120
+      [lazy = true];
 
   // This is a fallback mechanism to send a free-form text config to the
   // producer. In theory this should never be needed. All the code that
@@ -2804,10 +2889,14 @@ message TraceConfig {
 
   // DEPRECATED. Was trace_uuid, use trace_uuid_msb and trace_uuid_lsb instead.
   reserved 26;
+
   // An identifier clients can use to tie this trace to other logging.
-  // Alternative encoding of trace_uuid as two int64s.
-  optional int64 trace_uuid_msb = 27;
-  optional int64 trace_uuid_lsb = 28;
+  // DEPRECATED as per v32. See TracePacket.trace_uuid for the authoritative
+  // Trace UUID. If this field is set, the tracing service will respect the
+  // requested UUID (i.e. TracePacket.trace_uuid == this field) but only if
+  // gap-less snapshotting is not used.
+  optional int64 trace_uuid_msb = 27 [deprecated = true];
+  optional int64 trace_uuid_lsb = 28 [deprecated = true];
 
   // When set applies a post-filter to the trace contents using the filter
   // provided. The filter is applied at ReadBuffers() time and works both in the

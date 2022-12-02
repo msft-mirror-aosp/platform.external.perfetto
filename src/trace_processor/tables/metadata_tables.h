@@ -18,6 +18,7 @@
 #define SRC_TRACE_PROCESSOR_TABLES_METADATA_TABLES_H_
 
 #include "src/trace_processor/tables/macros.h"
+#include "src/trace_processor/tables/metadata_tables_py.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -139,6 +140,15 @@ PERFETTO_TP_TABLE(PERFETTO_TP_THREAD_TABLE_DEF);
   C(uint32_t, arg_set_id)
 
 PERFETTO_TP_TABLE(PERFETTO_TP_PROCESS_TABLE_DEF);
+
+// Experimental table, subject to arbitrary breaking changes.
+#define PERFETTO_TP_EXP_MISSING_CHROME_PROC_TABLE_DEF(NAME, PARENT, C)     \
+  NAME(ExpMissingChromeProcTable, "experimental_missing_chrome_processes") \
+  PERFETTO_TP_ROOT_TABLE(PARENT, C)                                        \
+  C(uint32_t, upid)                                                        \
+  C(base::Optional<int64_t>, reliable_from)
+
+PERFETTO_TP_TABLE(PERFETTO_TP_EXP_MISSING_CHROME_PROC_TABLE_DEF);
 
 // Contains information of processes seen during the trace
 //

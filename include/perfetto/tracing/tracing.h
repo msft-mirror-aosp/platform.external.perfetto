@@ -116,6 +116,13 @@ struct TracingInitArgs {
   // callback instead of being logged directly.
   LogMessageCallback log_message_callback = nullptr;
 
+  // When this flag is set to false, it overrides
+  // `DataSource::kSupportsMultipleInstances` for all the data sources.
+  // As a result when a tracing session is already running and if we attempt to
+  // start another session, it will fail to start the data source which were
+  // already active.
+  bool supports_multiple_data_source_instances = true;
+
  protected:
   friend class Tracing;
   friend class internal::TracingMuxerImpl;
@@ -256,6 +263,15 @@ class PERFETTO_EXPORT_COMPONENT Tracing {
   static std::unique_ptr<StartupTracingSession> SetupStartupTracingBlocking(
       const TraceConfig& config,
       SetupStartupTracingOpts);
+
+  // Informs the tracing services to activate any of these triggers if any
+  // tracing session was waiting for them.
+  //
+  // Sends the trigger signal to all the initialized backends that are currently
+  // connected and that connect in the next `ttl_ms` milliseconds (but
+  // returns immediately anyway).
+  static void ActivateTriggers(const std::vector<std::string>& triggers,
+                               uint32_t ttl_ms);
 
  private:
   static void InitializeInternal(const TracingInitArgs&);

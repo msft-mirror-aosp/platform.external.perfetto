@@ -20,10 +20,10 @@
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/traced/sys_stats_counters.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
+#include "src/trace_processor/importers/common/async_track_set_tracker.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
-#include "src/trace_processor/importers/proto/async_track_set_tracker.h"
 #include "src/trace_processor/importers/proto/metadata_tracker.h"
 #include "src/trace_processor/importers/syscalls/syscall_tracker.h"
 #include "src/trace_processor/types/trace_processor_context.h"
@@ -172,14 +172,11 @@ void AndroidProbesParser::ParseEnergyBreakdown(int64_t ts, ConstBytes blob) {
       continue;
     }
 
-    TrackId uid_track = context_->track_tracker->InternUidCounterTrack(
-        consumer_name, breakdown.uid());
-
-    context_->track_tracker->InternEnergyPerUidCounterTrack(consumer_name,
-                                                            consumer_id);
-
+    TrackId energy_uid_track =
+        context_->track_tracker->InternEnergyPerUidCounterTrack(
+            consumer_name, consumer_id, breakdown.uid());
     context_->event_tracker->PushCounter(
-        ts, static_cast<double>(breakdown.energy_uws()), uid_track);
+        ts, static_cast<double>(breakdown.energy_uws()), energy_uid_track);
   }
 }
 
@@ -384,7 +381,8 @@ void AndroidProbesParser::ParseAndroidSystemProperty(int64_t ts,
                                                             blob.size);
   for (auto it = properties.values(); it; ++it) {
     protos::pbzero::AndroidSystemProperty::PropertyValue::Decoder kv(*it);
-    if (base::StringView(kv.name()) == "debug.tracing.screen_state") {
+    base::StringView name(kv.name());
+    if (name == "debug.tracing.screen_state") {
       base::Optional<int32_t> state =
           base::StringToInt32(kv.value().ToStdString());
       if (state) {
@@ -392,7 +390,7 @@ void AndroidProbesParser::ParseAndroidSystemProperty(int64_t ts,
             context_->track_tracker->InternGlobalCounterTrack(screen_state_id_);
         context_->event_tracker->PushCounter(ts, *state, track);
       }
-    } else if (base::StringView(kv.name()) == "debug.tracing.device_state") {
+    } else if (name == "debug.tracing.device_state") {
       auto state = kv.value();
 
       StringId state_id = context_->storage->InternString(state);
@@ -402,6 +400,16 @@ void AndroidProbesParser::ParseAndroidSystemProperty(int64_t ts,
       TrackId track_id =
           context_->async_track_set_tracker->Scoped(track_set_id, ts, 0);
       context_->slice_tracker->Scoped(ts, track_id, kNullStringId, state_id, 0);
+    } else if (name.StartsWith("debug.tracing.battery_stats.")) {
+      base::StringView battery_stat = name.substr(strlen("debug.tracing."));
+      StringId name_id = context_->storage->InternString(battery_stat);
+      base::Optional<int32_t> state =
+          base::StringToInt32(kv.value().ToStdString());
+      if (state) {
+        TrackId track =
+            context_->track_tracker->InternGlobalCounterTrack(name_id);
+        context_->event_tracker->PushCounter(ts, *state, track);
+      }
     }
   }
 }

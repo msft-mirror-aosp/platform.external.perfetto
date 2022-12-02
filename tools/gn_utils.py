@@ -59,13 +59,20 @@ def repo_root():
       os.path.realpath(os.path.dirname(__file__)), os.path.pardir)
 
 
-def _tool_path(name):
+def _tool_path(name, system_buildtools=False):
+  # Pass-through to use name if the caller requests to use the system
+  # toolchain.
+  if system_buildtools:
+    return [name]
   wrapper = os.path.abspath(
       os.path.join(repo_root(), 'tools', 'run_buildtools_binary.py'))
   return ['python3', wrapper, name]
 
 
-def prepare_out_directory(gn_args, name, root=repo_root()):
+def prepare_out_directory(gn_args,
+                          name,
+                          root=repo_root(),
+                          system_buildtools=False):
   """Creates the JSON build description by running GN.
 
     Returns (path, desc) where |path| is the location of the output directory
@@ -78,14 +85,16 @@ def prepare_out_directory(gn_args, name, root=repo_root()):
     if e.errno != errno.EEXIST:
       raise
   _check_command_output(
-      _tool_path('gn') + ['gen', out, '--args=%s' % gn_args], cwd=repo_root())
+      _tool_path('gn', system_buildtools) +
+      ['gen', out, '--args=%s' % gn_args],
+      cwd=repo_root())
   return out
 
 
-def load_build_description(out):
+def load_build_description(out, system_buildtools=False):
   """Creates the JSON build description by running GN."""
   desc = _check_command_output(
-      _tool_path('gn') +
+      _tool_path('gn', system_buildtools) +
       ['desc', out, '--format=json', '--all-toolchains', '//*'],
       cwd=repo_root())
   return json.loads(desc)
@@ -103,7 +112,7 @@ def create_build_description(gn_args, root=repo_root()):
     shutil.rmtree(out)
 
 
-def build_targets(out, targets, quiet=False):
+def build_targets(out, targets, quiet=False, system_buildtools=False):
   """Runs ninja to build a list of GN targets in the given out directory.
 
     Compiling these targets is required so that we can include any generated
@@ -112,14 +121,14 @@ def build_targets(out, targets, quiet=False):
   targets = [t.replace('//', '') for t in targets]
   with open(os.devnull, 'w') as devnull:
     stdout = devnull if quiet else None
-    cmd = _tool_path('ninja') + targets
+    cmd = _tool_path('ninja', system_buildtools) + targets
     subprocess.check_call(cmd, cwd=os.path.abspath(out), stdout=stdout)
 
 
-def compute_source_dependencies(out):
+def compute_source_dependencies(out, system_buildtools=False):
   """For each source file, computes a set of headers it depends on."""
   ninja_deps = _check_command_output(
-      _tool_path('ninja') + ['-t', 'deps'], cwd=out)
+      _tool_path('ninja', system_buildtools) + ['-t', 'deps'], cwd=out)
   deps = {}
   current_source = None
   for line in ninja_deps.split('\n'):
@@ -301,7 +310,7 @@ class GnParser(object):
       self.name = name  # e.g. //src/ipc:ipc
 
       VALID_TYPES = ('static_library', 'shared_library', 'executable', 'group',
-                     'action', 'source_set', 'proto_library')
+                     'action', 'source_set', 'proto_library', 'generated_file')
       assert (type in VALID_TYPES)
       self.type = type
       self.testonly = False
@@ -319,10 +328,13 @@ class GnParser(object):
       self.public_headers = set()  # 'public'
 
       # These are valid only for type == 'action'
+      self.data = set()
       self.inputs = set()
       self.outputs = set()
       self.script = None
       self.args = []
+      self.custom_action_type = None
+      self.python_main = None
 
       # These variables are propagated up when encountering a dependency
       # on a source_set target.
@@ -359,9 +371,9 @@ class GnParser(object):
                         sort_keys=True)
 
     def update(self, other):
-      for key in ('cflags', 'defines', 'deps', 'include_dirs', 'ldflags',
-                  'source_set_deps', 'proto_deps', 'transitive_proto_deps',
-                  'libs', 'proto_paths'):
+      for key in ('cflags', 'data', 'defines', 'deps', 'include_dirs',
+                  'ldflags', 'source_set_deps', 'proto_deps',
+                  'transitive_proto_deps', 'libs', 'proto_paths'):
         self.__dict__[key].update(other.__dict__.get(key, []))
 
   def __init__(self, gn_desc):
@@ -411,11 +423,13 @@ class GnParser(object):
     elif target.type == 'source_set':
       self.source_sets[gn_target_name] = target
       target.sources.update(desc.get('sources', []))
+      target.inputs.update(desc.get('inputs', []))
     elif target.type in LINKER_UNIT_TYPES:
       self.linker_units[gn_target_name] = target
       target.sources.update(desc.get('sources', []))
     elif target.type == 'action':
       self.actions[gn_target_name] = target
+      target.data.update(desc.get('metadata', {}).get('perfetto_data', []))
       target.inputs.update(desc.get('inputs', []))
       target.sources.update(desc.get('sources', []))
       outs = [re.sub('^//out/.+?/gen/', '', x) for x in desc['outputs']]
@@ -424,6 +438,12 @@ class GnParser(object):
       # Args are typically relative to the root build dir (../../xxx)
       # because root build dir is typically out/xxx/).
       target.args = [re.sub('^../../', '//', x) for x in desc['args']]
+      action_types = desc.get('metadata',
+                              {}).get('perfetto_action_type_for_generator', [])
+      target.custom_action_type = action_types[0] if len(
+          action_types) > 0 else None
+      python_main = desc.get('metadata', {}).get('perfetto_python_main', [])
+      target.python_main = python_main[0] if python_main else None
 
     # Default for 'public' is //* - all headers in 'sources' are public.
     # TODO(primiano): if a 'public' section is specified (even if empty), then

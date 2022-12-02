@@ -21,6 +21,8 @@
 #include <cinttypes>
 #include <functional>
 #include <iostream>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -34,11 +36,13 @@
 #include "perfetto/base/status.h"
 #include "perfetto/base/time.h"
 #include "perfetto/ext/base/file_utils.h"
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/getopt.h"
 #include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/string_splitter.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/version.h"
 
 #include "perfetto/trace_processor/read_trace.h"
@@ -48,6 +52,7 @@
 #include "src/trace_processor/metrics/metrics.h"
 #include "src/trace_processor/read_trace_internal.h"
 #include "src/trace_processor/util/proto_to_json.h"
+#include "src/trace_processor/util/sql_modules.h"
 #include "src/trace_processor/util/status_macros.h"
 
 #include "protos/perfetto/trace_processor/trace_processor.pbzero.h"
@@ -652,6 +657,31 @@ class MetricExtension {
   }
 };
 
+metatrace::MetatraceCategories ParseMetatraceCategories(std::string s) {
+  using Cat = metatrace::MetatraceCategories;
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  base::StringSplitter splitter(s, ',');
+
+  Cat result = Cat::NONE;
+  for (; splitter.Next();) {
+    std::string cur = splitter.cur_token();
+    if (cur == "all" || cur == "*") {
+      result = Cat::ALL;
+    } else if (cur == "toplevel") {
+      result = static_cast<Cat>(result | Cat::TOPLEVEL);
+    } else if (cur == "function") {
+      result = static_cast<Cat>(result | Cat::FUNCTION);
+    } else if (cur == "query") {
+      result = static_cast<Cat>(result | Cat::QUERY);
+    } else {
+      PERFETTO_ELOG("Unknown metatrace category %s", cur.data());
+      exit(1);
+    }
+  }
+  return result;
+}
+
 struct CommandLineOptions {
   std::string perf_file_path;
   std::string query_file_path;
@@ -661,14 +691,19 @@ struct CommandLineOptions {
   std::string metric_output;
   std::string trace_file_path;
   std::string port_number;
+  std::string override_stdlib_path;
   std::vector<std::string> raw_metric_extensions;
   bool launch_shell = false;
   bool enable_httpd = false;
   bool wide = false;
   bool force_full_sort = false;
   std::string metatrace_path;
+  size_t metatrace_buffer_capacity = 0;
+  metatrace::MetatraceCategories metatrace_categories =
+      metatrace::MetatraceCategories::ALL;
   bool dev = false;
   bool no_ftrace_raw = false;
+  bool analyze_trace_proto_content = false;
 };
 
 void PrintUsage(char** argv) {
@@ -713,6 +748,10 @@ Options:
                                       text).
  -m, --metatrace FILE                 Enables metatracing of trace processor
                                       writing the resulting trace into FILE.
+ --metatrace-buffer-capacity N        Sets metatrace event buffer to capture
+                                      last N events.
+ --metatrace-categories CATEGORIES    A comma-separated list of metatrace
+                                      categories to enable.
  --full-sort                          Forces the trace processor into performing
                                       a full sort ignoring any windowing
                                       logic.
@@ -726,11 +765,17 @@ Options:
                                       *should not* be enabled on production
                                       builds. The features behind this flag can
                                       break at any time without any warning.
+ --override-stdlib=[path_to_stdlib]   Will override trace_processor/stdlib with
+                                      passed contents. The outer directory will
+                                      be ignored. Only allowed when --dev is
+                                      specified.
  --no-ftrace-raw                      Prevents ingestion of typed ftrace events
                                       into the raw table. This significantly
                                       reduces the memory usage of trace
                                       processor when loading traces containing
-                                      ftrace events.)",
+                                      ftrace events.
+--analyze-trace-proto-content         Enables trace proto content analysis in
+                                      trace processor.)",
                 argv[0]);
 }
 
@@ -744,7 +789,11 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
     OPT_HTTP_PORT,
     OPT_METRIC_EXTENSION,
     OPT_DEV,
+    OPT_OVERRIDE_STDLIB,
     OPT_NO_FTRACE_RAW,
+    OPT_METATRACE_BUFFER_CAPACITY,
+    OPT_METATRACE_CATEGORIES,
+    OPT_ANALYZE_TRACE_PROTO_CONTENT,
   };
 
   static const option long_options[] = {
@@ -758,6 +807,10 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
       {"query-file", required_argument, nullptr, 'q'},
       {"export", required_argument, nullptr, 'e'},
       {"metatrace", required_argument, nullptr, 'm'},
+      {"metatrace-buffer-capacity", required_argument, nullptr,
+       OPT_METATRACE_BUFFER_CAPACITY},
+      {"metatrace-categories", required_argument, nullptr,
+       OPT_METATRACE_CATEGORIES},
       {"run-metrics", required_argument, nullptr, OPT_RUN_METRICS},
       {"pre-metrics", required_argument, nullptr, OPT_PRE_METRICS},
       {"metrics-output", required_argument, nullptr, OPT_METRICS_OUTPUT},
@@ -765,7 +818,10 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
       {"http-port", required_argument, nullptr, OPT_HTTP_PORT},
       {"metric-extension", required_argument, nullptr, OPT_METRIC_EXTENSION},
       {"dev", no_argument, nullptr, OPT_DEV},
+      {"override-stdlib", required_argument, nullptr, OPT_OVERRIDE_STDLIB},
       {"no-ftrace-raw", no_argument, nullptr, OPT_NO_FTRACE_RAW},
+      {"analyze-trace-proto-content", no_argument, nullptr,
+       OPT_ANALYZE_TRACE_PROTO_CONTENT},
       {nullptr, 0, nullptr, 0}};
 
   bool explicit_interactive = false;
@@ -862,8 +918,30 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
       continue;
     }
 
+    if (option == OPT_OVERRIDE_STDLIB) {
+      command_line_options.override_stdlib_path = optarg;
+      continue;
+    }
+
     if (option == OPT_NO_FTRACE_RAW) {
       command_line_options.no_ftrace_raw = true;
+      continue;
+    }
+
+    if (option == OPT_METATRACE_BUFFER_CAPACITY) {
+      command_line_options.metatrace_buffer_capacity =
+          static_cast<size_t>(atoi(optarg));
+      continue;
+    }
+
+    if (option == OPT_METATRACE_CATEGORIES) {
+      command_line_options.metatrace_categories =
+          ParseMetatraceCategories(optarg);
+      continue;
+    }
+
+    if (option == OPT_ANALYZE_TRACE_PROTO_CONTENT) {
+      command_line_options.analyze_trace_proto_content = true;
       continue;
     }
 
@@ -1038,6 +1116,39 @@ base::Status ParseMetricExtensionPaths(
                                                    metric_extensions.back()));
   }
   return CheckForDuplicateMetricExtension(metric_extensions);
+}
+
+base::Status LoadOverridenStdlib(std::string root) {
+  // Remove trailing slash
+  if (root.back() == '/') {
+    root = root.substr(0, root.length() - 1);
+  }
+
+  if (!base::FileExists(root)) {
+    return base::ErrStatus("Directory %s does not exist.", root.c_str());
+  }
+
+  std::vector<std::string> paths;
+  RETURN_IF_ERROR(base::ListFilesRecursive(root, paths));
+  sql_modules::NameToModule modules;
+  for (const auto& path : paths) {
+    if (base::GetFileExtension(path) != ".sql") {
+      continue;
+    }
+    std::string filename = root + "/" + path;
+    std::string file_contents;
+    if (!base::ReadFile(filename, &file_contents)) {
+      return base::ErrStatus("Cannot read file %s", filename.c_str());
+    }
+    std::string import_key = sql_modules::GetImportKey(path);
+    std::string module = sql_modules::GetModuleName(import_key);
+    modules.Insert(module, {}).first->push_back({import_key, file_contents});
+  }
+  for (auto module_it = modules.GetIterator(); module_it; ++module_it) {
+    g_tp->RegisterSqlModule(module_it.key(), module_it.value());
+  }
+
+  return base::OkStatus();
 }
 
 base::Status LoadMetricExtensionProtos(const std::string& proto_root,
@@ -1294,6 +1405,25 @@ base::Status StartInteractiveShell(const InteractiveOptions& options) {
   return base::OkStatus();
 }
 
+base::Status MaybeWriteMetatrace(const std::string& metatrace_path) {
+  if (metatrace_path.empty()) {
+    return base::OkStatus();
+  }
+  std::vector<uint8_t> serialized;
+  base::Status status = g_tp->DisableAndReadMetatrace(&serialized);
+  if (!status.ok())
+    return status;
+
+  auto file = base::OpenFile(metatrace_path, O_CREAT | O_RDWR | O_TRUNC, 0600);
+  if (!file)
+    return base::ErrStatus("Unable to open metatrace file");
+
+  ssize_t res = base::WriteAll(*file, serialized.data(), serialized.size());
+  if (res < 0)
+    return base::ErrStatus("Error while writing metatrace file");
+  return base::OkStatus();
+}
+
 base::Status TraceProcessorMain(int argc, char** argv) {
   CommandLineOptions options = ParseCommandLineOptions(argc, argv);
 
@@ -1302,6 +1432,7 @@ base::Status TraceProcessorMain(int argc, char** argv) {
                             ? SortingMode::kForceFullSort
                             : SortingMode::kDefaultHeuristics;
   config.ingest_ftrace_in_raw_table = !options.no_ftrace_raw;
+  config.analyze_trace_proto_content = options.analyze_trace_proto_content;
 
   std::vector<MetricExtension> metric_extensions;
   RETURN_IF_ERROR(ParseMetricExtensionPaths(
@@ -1311,12 +1442,29 @@ base::Status TraceProcessorMain(int argc, char** argv) {
     config.skip_builtin_metric_paths.push_back(extension.virtual_path());
   }
 
+  if (options.dev) {
+    config.enable_dev_features = true;
+  }
+
   std::unique_ptr<TraceProcessor> tp = TraceProcessor::CreateInstance(config);
   g_tp = tp.get();
 
+  if (!options.override_stdlib_path.empty()) {
+    if (!options.dev)
+      return base::ErrStatus("Overriding stdlib requires --dev flag");
+
+    auto status = LoadOverridenStdlib(options.override_stdlib_path);
+    if (!status.ok())
+      return base::ErrStatus("Couldn't override stdlib: %s",
+                             status.c_message());
+  }
+
   // Enable metatracing as soon as possible.
   if (!options.metatrace_path.empty()) {
-    tp->EnableMetatrace();
+    metatrace::MetatraceConfig metatrace_config;
+    metatrace_config.override_buffer_size = options.metatrace_buffer_capacity;
+    metatrace_config.categories = options.metatrace_categories;
+    tp->EnableMetatrace(metatrace_config);
   }
 
   // We load all the metric extensions even when --run-metrics arg is not there,
@@ -1340,14 +1488,8 @@ base::Status TraceProcessorMain(int argc, char** argv) {
     RETURN_IF_ERROR(PrintStats());
   }
 
-#if PERFETTO_BUILDFLAG(PERFETTO_TP_HTTPD)
-  if (options.enable_httpd) {
-    RunHttpRPCServer(std::move(tp), options.port_number);
-    PERFETTO_FATAL("Should never return");
-  }
-#endif
-
 #if PERFETTO_HAS_SIGNAL_H()
+  // Set up interrupt signal to allow the user to abort query.
   signal(SIGINT, [](int) { g_tp->InterruptQuery(); });
 #endif
 
@@ -1376,13 +1518,40 @@ base::Status TraceProcessorMain(int argc, char** argv) {
   }
 
   if (!options.query_file_path.empty()) {
-    RETURN_IF_ERROR(RunQueries(options.query_file_path, true));
+    base::Status status = RunQueries(options.query_file_path, true);
+    if (!status.ok()) {
+      // Write metatrace if needed before exiting.
+      RETURN_IF_ERROR(MaybeWriteMetatrace(options.metatrace_path));
+      return status;
+    }
   }
   base::TimeNanos t_query = base::GetWallTimeNs() - t_query_start;
 
   if (!options.sqlite_file_path.empty()) {
     RETURN_IF_ERROR(ExportTraceToDatabase(options.sqlite_file_path));
   }
+
+#if PERFETTO_BUILDFLAG(PERFETTO_TP_HTTPD)
+  if (options.enable_httpd) {
+#if PERFETTO_HAS_SIGNAL_H()
+    if (options.metatrace_path.empty()) {
+      // Restore the default signal handler to allow the user to terminate
+      // httpd server via Ctrl-C.
+      signal(SIGINT, SIG_DFL);
+    } else {
+      // Write metatrace to file before exiting.
+      static std::string* metatrace_path = &options.metatrace_path;
+      signal(SIGINT, [](int) {
+        MaybeWriteMetatrace(*metatrace_path);
+        exit(1);
+      });
+    }
+#endif
+
+    RunHttpRPCServer(std::move(tp), options.port_number);
+    PERFETTO_FATAL("Should never return");
+  }
+#endif
 
   if (options.launch_shell) {
     RETURN_IF_ERROR(StartInteractiveShell(
@@ -1392,21 +1561,7 @@ base::Status TraceProcessorMain(int argc, char** argv) {
     RETURN_IF_ERROR(PrintPerfFile(options.perf_file_path, t_load, t_query));
   }
 
-  if (!options.metatrace_path.empty()) {
-    std::vector<uint8_t> serialized;
-    base::Status status = g_tp->DisableAndReadMetatrace(&serialized);
-    if (!status.ok())
-      return status;
-
-    auto file =
-        base::OpenFile(options.metatrace_path, O_CREAT | O_RDWR | O_TRUNC);
-    if (!file)
-      return base::ErrStatus("Unable to open metatrace file");
-
-    ssize_t res = base::WriteAll(*file, serialized.data(), serialized.size());
-    if (res < 0)
-      return base::ErrStatus("Error while writing metatrace file");
-  }
+  RETURN_IF_ERROR(MaybeWriteMetatrace(options.metatrace_path));
 
   return base::OkStatus();
 }

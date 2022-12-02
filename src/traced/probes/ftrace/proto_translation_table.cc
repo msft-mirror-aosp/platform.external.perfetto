@@ -287,6 +287,20 @@ bool InferFtraceType(const std::string& type_and_name,
     return true;
   }
 
+  // Parsing of sys_enter argument field declared as
+  //    field:unsigned long args[6];
+  if (type_and_name == "unsigned long args[6]") {
+    if (size == 24) {
+      // 24 / 6 = 4 -> 32bit system
+      *out = kFtraceUint32;
+      return true;
+    } else if (size == 48) {
+      // 48 / 6 = 8 -> 64bit system
+      *out = kFtraceUint64;
+      return true;
+    }
+  }
+
   if (Contains(type_and_name, "char[] ")) {
     *out = kFtraceStringPtr;
     return true;
@@ -443,6 +457,20 @@ std::unique_ptr<ProtoTranslationTable> ProtoTranslationTable::Create(
             FtraceEvent::Field{"char buf", 16, 0, 0});
       } else {
         continue;
+      }
+    }
+
+    // Special case function_graph events as they use a u64 field for kernel
+    // function pointers. Fudge the type so that |MergeFields| correctly tags
+    // the fields for kernel address symbolization (kFtraceSymAddr64).
+    if (!strcmp(event.group, "ftrace") &&
+        (!strcmp(event.name, "funcgraph_entry") ||
+         !strcmp(event.name, "funcgraph_exit"))) {
+      for (auto& field : ftrace_event.fields) {
+        if (GetNameFromTypeAndName(field.type_and_name) == "func") {
+          field.type_and_name = "void * func";
+          break;
+        }
       }
     }
 

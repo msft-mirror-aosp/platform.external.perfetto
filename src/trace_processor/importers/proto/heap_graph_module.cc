@@ -16,6 +16,7 @@
 
 #include "src/trace_processor/importers/proto/heap_graph_module.h"
 
+#include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/proto/heap_graph_tracker.h"
 #include "src/trace_processor/importers/proto/profiler_util.h"
@@ -24,6 +25,7 @@
 
 #include "protos/perfetto/trace/profiling/deobfuscation.pbzero.h"
 #include "protos/perfetto/trace/profiling/heap_graph.pbzero.h"
+#include "protos/perfetto/trace/profiling/profile_common.pbzero.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -132,13 +134,14 @@ HeapGraphModule::HeapGraphModule(TraceProcessorContext* context)
   RegisterForField(TracePacket::kDeobfuscationMappingFieldNumber, context);
 }
 
-void HeapGraphModule::ParsePacket(
+void HeapGraphModule::ParseTracePacketData(
     const protos::pbzero::TracePacket::Decoder& decoder,
-    const TimestampedTracePiece& ttp,
+    int64_t ts,
+    const TracePacketData&,
     uint32_t field_id) {
   switch (field_id) {
     case TracePacket::kHeapGraphFieldNumber:
-      ParseHeapGraph(decoder.trusted_packet_sequence_id(), ttp.timestamp,
+      ParseHeapGraph(decoder.trusted_packet_sequence_id(), ts,
                      decoder.heap_graph());
       return;
     case TracePacket::kDeobfuscationMappingFieldNumber:

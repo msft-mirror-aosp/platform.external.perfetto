@@ -123,6 +123,7 @@ def run_metrics_test(trace_processor_path, gen_trace_path, metric,
   json_output = os.path.basename(expected_path).endswith('.json.out')
   cmd = [
       trace_processor_path,
+      '--analyze-trace-proto-content',
       '--run-metrics',
       metric,
       '--metrics-output=%s' % ('json' if json_output else 'binary'),
@@ -163,6 +164,7 @@ def run_query_test(trace_processor_path, gen_trace_path, query_path,
 
   cmd = [
       trace_processor_path,
+      '--analyze-trace-proto-content',
       '-q',
       query_path,
       '--perf-file',
@@ -291,7 +293,7 @@ def run_test(trace_descriptor_path, extension_descriptor_paths, args, test):
     else:
       result_str += write_cmdlines()
 
-    result_str += f"{red_str}[     FAIL ]{end_color_str} {test_name} "
+    result_str += f"{red_str}[  FAILED  ]{end_color_str} {test_name} "
     result_str += f"{os.path.basename(trace_path)}\n"
 
     if args.rebase:
@@ -467,65 +469,66 @@ def main():
 
   sys.stderr.write(
       f"[==========] {len(tests)} tests ran. ({test_time_ms} ms total)\n")
-  if test_failures:
+  sys.stderr.write(
+      f"{green(args.no_colors)}[  PASSED  ]{end_color(args.no_colors)} "
+      f"{len(tests) - len(test_failures)} tests.\n")
+  if len(test_failures) > 0:
     sys.stderr.write(
-        f"{red(args.no_colors)}[  PASSED  ]{end_color(args.no_colors)} "
-        f"{len(tests) - len(test_failures)} tests.\n")
-  else:
-    sys.stderr.write(
-        f"{green(args.no_colors)}[  PASSED  ]{end_color(args.no_colors)} "
-        f"{len(tests)} tests.\n")
+        f"{red(args.no_colors)}[  FAILED  ]{end_color(args.no_colors)} "
+        f"{len(test_failures)} tests.\n")
+    for failure in test_failures:
+      sys.stderr.write(
+          f"{red(args.no_colors)}[  FAILED  ]{end_color(args.no_colors)} "
+          f"{failure}\n")
 
   if args.rebase:
     sys.stderr.write('\n')
     sys.stderr.write(f"{rebased} tests rebased.\n")
 
-  if len(test_failures) == 0:
-    if args.perf_file:
-      test_dir = os.path.join(ROOT_DIR, 'test')
-      trace_processor_dir = os.path.join(test_dir, 'trace_processor')
-
-      metrics = []
-      sorted_data = sorted(
-          perf_data,
-          key=lambda x: (x.test_type, x.trace_path, x.query_path_or_metric))
-      for perf_args in sorted_data:
-        trace_short_path = os.path.relpath(perf_args.trace_path, test_dir)
-
-        query_short_path_or_metric = perf_args.query_path_or_metric
-        if perf_args.test_type == 'queries':
-          query_short_path_or_metric = os.path.relpath(
-              perf_args.query_path_or_metric, trace_processor_dir)
-
-        metrics.append({
-            'metric': 'tp_perf_test_ingest_time',
-            'value': float(perf_args.ingest_time_ns) / 1.0e9,
-            'unit': 's',
-            'tags': {
-                'test_name': f"{trace_short_path}-{query_short_path_or_metric}",
-                'test_type': perf_args.test_type,
-            },
-            'labels': {},
-        })
-        metrics.append({
-            'metric': 'perf_test_real_time',
-            'value': float(perf_args.real_time_ns) / 1.0e9,
-            'unit': 's',
-            'tags': {
-                'test_name': f"{trace_short_path}-{query_short_path_or_metric}",
-                'test_type': perf_args.test_type,
-            },
-            'labels': {},
-        })
-
-      output_data = {'metrics': metrics}
-      with open(args.perf_file, 'w+') as perf_file:
-        perf_file.write(json.dumps(output_data, indent=2))
-    return 0
-  else:
-    for failure in test_failures:
-      sys.stderr.write(f"[  FAILED  ] {failure}\n")
+  if len(test_failures) > 0:
     return 1
+
+  if args.perf_file:
+    test_dir = os.path.join(ROOT_DIR, 'test')
+    trace_processor_dir = os.path.join(test_dir, 'trace_processor')
+
+    metrics = []
+    sorted_data = sorted(
+        perf_data,
+        key=lambda x: (x.test_type, x.trace_path, x.query_path_or_metric))
+    for perf_args in sorted_data:
+      trace_short_path = os.path.relpath(perf_args.trace_path, test_dir)
+
+      query_short_path_or_metric = perf_args.query_path_or_metric
+      if perf_args.test_type == 'queries':
+        query_short_path_or_metric = os.path.relpath(
+            perf_args.query_path_or_metric, trace_processor_dir)
+
+      metrics.append({
+          'metric': 'tp_perf_test_ingest_time',
+          'value': float(perf_args.ingest_time_ns) / 1.0e9,
+          'unit': 's',
+          'tags': {
+              'test_name': f"{trace_short_path}-{query_short_path_or_metric}",
+              'test_type': perf_args.test_type,
+          },
+          'labels': {},
+      })
+      metrics.append({
+          'metric': 'perf_test_real_time',
+          'value': float(perf_args.real_time_ns) / 1.0e9,
+          'unit': 's',
+          'tags': {
+              'test_name': f"{trace_short_path}-{query_short_path_or_metric}",
+              'test_type': perf_args.test_type,
+          },
+          'labels': {},
+      })
+
+    output_data = {'metrics': metrics}
+    with open(args.perf_file, 'w+') as perf_file:
+      perf_file.write(json.dumps(output_data, indent=2))
+  return 0
 
 
 if __name__ == '__main__':

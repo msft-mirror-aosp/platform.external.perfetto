@@ -20,6 +20,8 @@ Here is an [example change](https://android-review.googlesource.com/c/platform/e
 2. Import the proto in [protos/perfetto/metrics/metrics.proto](/protos/perfetto/metrics/metrics.proto) and add a field for the new message.
 3. Run `tools/gen_all out/YOUR_BUILD_DIRECTORY`. This will update the generated headers containing the descriptors for the proto.
   * *Note: this step has to be performed any time any metric-related proto is modified.*
+  * If you don't see anything inside the `out/` directory you might have to
+  rerun `tools/setup_all_configs.py`.
 4. Add a new SQL file for the metric to [src/trace_processor/metrics](/src/trace_processor/metrics). The appropriate `BUILD.gn` file should be updated as well.
   * To learn how to write new metrics, see the [trace-based metrics documentation](/docs/analysis/metrics.md).
 5. Build all targets in your out directory with `tools/ninja -C out/YOUR_BUILD_DIRECTORY`.
@@ -43,15 +45,6 @@ Here is an [example change](https://android-review.googlesource.com/c/platform/e
   `tools/add_tp_diff_test.py`.
   3. Run the newly added test with `tools/diff_test_trace_processor.py <path to trace processor binary>`.
 4. Upload and land your change as normal.
-
-## {#new-annotation} Add a new annotation
-
-NOTE: all currently implemented annotations are based only on the name of the slice. It is straightforward to extend this to also consider ancestors and other similar properties; we plan on doing this in the future.
-
-1. Change the [`DescribeSlice`](/src/trace_processor/analysis/describe_slice.h) function as appropriate.
-  * The inputs are the table containing all the slices from the trace and the id of the slice which an embedder (e.g. the UI) is requesting a description for.
-  * The output is a `SliceDescription` which is simply a `pair<description, doc link>`.
-2. Upload and land your change as normal.
 
 ## Adding new derived events
 

@@ -20,10 +20,12 @@
 
 syntax = "proto2";
 
+import "protos/perfetto/trace/ftrace/android_fs.proto";
 import "protos/perfetto/trace/ftrace/binder.proto";
 import "protos/perfetto/trace/ftrace/block.proto";
 import "protos/perfetto/trace/ftrace/cgroup.proto";
 import "protos/perfetto/trace/ftrace/clk.proto";
+import "protos/perfetto/trace/ftrace/cma.proto";
 import "protos/perfetto/trace/ftrace/compaction.proto";
 import "protos/perfetto/trace/ftrace/cpuhp.proto";
 import "protos/perfetto/trace/ftrace/cros_ec.proto";
@@ -69,8 +71,10 @@ import "protos/perfetto/trace/ftrace/systrace.proto";
 import "protos/perfetto/trace/ftrace/task.proto";
 import "protos/perfetto/trace/ftrace/tcp.proto";
 import "protos/perfetto/trace/ftrace/thermal.proto";
+import "protos/perfetto/trace/ftrace/trusty.proto";
 import "protos/perfetto/trace/ftrace/ufs.proto";
 import "protos/perfetto/trace/ftrace/v4l2.proto";
+import "protos/perfetto/trace/ftrace/virtio_video.proto";
 import "protos/perfetto/trace/ftrace/vmscan.proto";
 import "protos/perfetto/trace/ftrace/workqueue.proto";
 import "protos/perfetto/trace/ftrace/generic.proto";
@@ -533,5 +537,42 @@ message FtraceEvent {
     DsiCmdFifoStatusFtraceEvent dsi_cmd_fifo_status = 428;
     DsiRxFtraceEvent dsi_rx = 429;
     DsiTxFtraceEvent dsi_tx = 430;
+    AndroidFsDatareadEndFtraceEvent android_fs_dataread_end = 431;
+    AndroidFsDatareadStartFtraceEvent android_fs_dataread_start = 432;
+    AndroidFsDatawriteEndFtraceEvent android_fs_datawrite_end = 433;
+    AndroidFsDatawriteStartFtraceEvent android_fs_datawrite_start = 434;
+    AndroidFsFsyncEndFtraceEvent android_fs_fsync_end = 435;
+    AndroidFsFsyncStartFtraceEvent android_fs_fsync_start = 436;
+    FuncgraphEntryFtraceEvent funcgraph_entry = 437;
+    FuncgraphExitFtraceEvent funcgraph_exit = 438;
+    VirtioVideoCmdFtraceEvent virtio_video_cmd = 439;
+    VirtioVideoCmdDoneFtraceEvent virtio_video_cmd_done = 440;
+    VirtioVideoResourceQueueFtraceEvent virtio_video_resource_queue = 441;
+    VirtioVideoResourceQueueDoneFtraceEvent virtio_video_resource_queue_done =
+        442;
+    MmShrinkSlabStartFtraceEvent mm_shrink_slab_start = 443;
+    MmShrinkSlabEndFtraceEvent mm_shrink_slab_end = 444;
+    TrustySmcFtraceEvent trusty_smc = 445;
+    TrustySmcDoneFtraceEvent trusty_smc_done = 446;
+    TrustyStdCall32FtraceEvent trusty_std_call32 = 447;
+    TrustyStdCall32DoneFtraceEvent trusty_std_call32_done = 448;
+    TrustyShareMemoryFtraceEvent trusty_share_memory = 449;
+    TrustyShareMemoryDoneFtraceEvent trusty_share_memory_done = 450;
+    TrustyReclaimMemoryFtraceEvent trusty_reclaim_memory = 451;
+    TrustyReclaimMemoryDoneFtraceEvent trusty_reclaim_memory_done = 452;
+    TrustyIrqFtraceEvent trusty_irq = 453;
+    TrustyIpcHandleEventFtraceEvent trusty_ipc_handle_event = 454;
+    TrustyIpcConnectFtraceEvent trusty_ipc_connect = 455;
+    TrustyIpcConnectEndFtraceEvent trusty_ipc_connect_end = 456;
+    TrustyIpcWriteFtraceEvent trusty_ipc_write = 457;
+    TrustyIpcPollFtraceEvent trusty_ipc_poll = 458;
+    TrustyIpcPollEndFtraceEvent trusty_ipc_poll_end = 459;
+    TrustyIpcReadFtraceEvent trusty_ipc_read = 460;
+    TrustyIpcReadEndFtraceEvent trusty_ipc_read_end = 461;
+    TrustyIpcRxFtraceEvent trusty_ipc_rx = 462;
+    TrustyIpcTxFtraceEvent trusty_ipc_tx = 463;
+    TrustyEnqueueNopFtraceEvent trusty_enqueue_nop = 464;
+    CmaAllocStartFtraceEvent cma_alloc_start = 465;
+    CmaAllocInfoFtraceEvent cma_alloc_info = 466;
   }
 }

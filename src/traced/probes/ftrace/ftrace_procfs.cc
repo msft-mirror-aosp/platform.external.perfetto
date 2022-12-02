@@ -83,7 +83,8 @@ const char* const FtraceProcfs::kTracingPaths[] = {
 
 // static
 std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
-    const std::string& instance_path) {
+    const std::string& instance_path,
+    bool preserve_ftrace_buffer) {
   std::unique_ptr<FtraceProcfs> ftrace_procfs;
   size_t index = 0;
   while (!ftrace_procfs && kTracingPaths[index]) {
@@ -91,14 +92,16 @@ std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
     if (!instance_path.empty())
       path += instance_path;
 
-    ftrace_procfs = Create(path);
+    ftrace_procfs = Create(path, preserve_ftrace_buffer);
   }
   return ftrace_procfs;
 }
 
 // static
-std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(const std::string& root) {
-  if (!CheckRootPath(root)) {
+std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(
+    const std::string& root,
+    bool preserve_ftrace_buffer) {
+  if (!preserve_ftrace_buffer && !CheckRootPath(root)) {
     return nullptr;
   }
   return std::unique_ptr<FtraceProcfs>(new FtraceProcfs(root));
@@ -119,7 +122,7 @@ bool FtraceProcfs::SetSyscallFilter(const std::set<size_t>& filter) {
     filter_str = base::Join(parts, " || ");
   }
 
-  for (const std::string& event : {"sys_enter", "sys_exit"}) {
+  for (const char* event : {"sys_enter", "sys_exit"}) {
     std::string path = root_ + "events/raw_syscalls/" + event + "/filter";
     if (!WriteToFile(path, filter_str)) {
       PERFETTO_ELOG("Failed to write file: %s", path.c_str());
@@ -168,6 +171,51 @@ std::string FtraceProcfs::ReadEventFormat(const std::string& group,
                                           const std::string& name) const {
   std::string path = root_ + "events/" + group + "/" + name + "/format";
   return ReadFileIntoString(path);
+}
+
+bool FtraceProcfs::SetCurrentTracer(const std::string& tracer) {
+  std::string path = root_ + "current_tracer";
+  return WriteToFile(path, tracer);
+}
+
+bool FtraceProcfs::ResetCurrentTracer() {
+  return SetCurrentTracer("nop");
+}
+
+bool FtraceProcfs::AppendFunctionFilters(
+    const std::vector<std::string>& filters) {
+  std::string path = root_ + "set_ftrace_filter";
+  std::string filter = base::Join(filters, "\n");
+
+  // The same file accepts special actions to perform when a corresponding
+  // kernel function is hit (regardless of active tracer). For example
+  // "__schedule_bug:traceoff" would disable tracing once __schedule_bug is
+  // called.
+  // We disallow these commands as most of them break the isolation of
+  // concurrent ftrace data sources (as the underlying ftrace instance is
+  // shared).
+  if (base::Contains(filter, ':')) {
+    PERFETTO_ELOG("Filter commands are disallowed.");
+    return false;
+  }
+  return AppendToFile(path, filter);
+}
+
+bool FtraceProcfs::ClearFunctionFilters() {
+  std::string path = root_ + "set_ftrace_filter";
+  return ClearFile(path);
+}
+
+bool FtraceProcfs::AppendFunctionGraphFilters(
+    const std::vector<std::string>& filters) {
+  std::string path = root_ + "set_graph_function";
+  std::string filter = base::Join(filters, "\n");
+  return AppendToFile(path, filter);
+}
+
+bool FtraceProcfs::ClearFunctionGraphFilters() {
+  std::string path = root_ + "set_graph_function";
+  return ClearFile(path);
 }
 
 std::vector<std::string> FtraceProcfs::ReadEventTriggers(

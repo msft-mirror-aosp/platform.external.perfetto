@@ -19,8 +19,9 @@ import {RecordConfig} from '../controller/record_config_types';
 import {globals} from '../frontend/globals';
 import {
   Aggregation,
-  aggregationKey,
+  AggregationFunction,
   TableColumn,
+  tableColumnEquals,
   toggleEnabled,
 } from '../frontend/pivot_table_redux_types';
 import {DropDirection} from '../frontend/reorderable_cells';
@@ -28,6 +29,7 @@ import {DropDirection} from '../frontend/reorderable_cells';
 import {randomColor} from './colorizer';
 import {createEmptyState} from './empty_state';
 import {DEFAULT_VIEWING_OPTION, PERF_SAMPLES_KEY} from './flamegraph_util';
+import {traceEventBegin, traceEventEnd, TraceEventScope} from './metatracing';
 import {
   AdbRecordingTarget,
   Area,
@@ -80,6 +82,12 @@ export interface PostedTrace {
   keepApiOpen?: boolean;
 }
 
+export interface PostedScrollToRange {
+  timeStart: number;
+  timeEnd: number;
+  viewPercentage?: number;
+}
+
 function clearTraceState(state: StateDraft) {
   const nextId = state.nextId;
   const recordConfig = state.recordConfig;
@@ -127,13 +135,14 @@ function removeTrack(state: StateDraft, trackId: string) {
   state.pinnedTracks = state.pinnedTracks.filter((id) => id !== trackId);
 }
 
+let statusTraceEvent: TraceEventScope|undefined;
+
 export const StateActions = {
 
   openTraceFromFile(state: StateDraft, args: {file: File}): void {
     clearTraceState(state);
     const id = generateNextId(state);
-    state.currentEngineId = id;
-    state.engines[id] = {
+    state.engine = {
       id,
       ready: false,
       source: {type: 'FILE', file: args.file},
@@ -143,8 +152,7 @@ export const StateActions = {
   openTraceFromBuffer(state: StateDraft, args: PostedTrace): void {
     clearTraceState(state);
     const id = generateNextId(state);
-    state.currentEngineId = id;
-    state.engines[id] = {
+    state.engine = {
       id,
       ready: false,
       source: {type: 'ARRAY_BUFFER', ...args},
@@ -154,8 +162,7 @@ export const StateActions = {
   openTraceFromUrl(state: StateDraft, args: {url: string}): void {
     clearTraceState(state);
     const id = generateNextId(state);
-    state.currentEngineId = id;
-    state.engines[id] = {
+    state.engine = {
       id,
       ready: false,
       source: {type: 'URL', url: args.url},
@@ -165,8 +172,7 @@ export const StateActions = {
   openTraceFromHttpRpc(state: StateDraft, _args: {}): void {
     clearTraceState(state);
     const id = generateNextId(state);
-    state.currentEngineId = id;
-    state.engines[id] = {
+    state.engine = {
       id,
       ready: false,
       source: {type: 'HTTP_RPC'},
@@ -467,8 +473,8 @@ export const StateActions = {
   setEngineReady(
       state: StateDraft,
       args: {engineId: string; ready: boolean, mode: EngineMode}): void {
-    const engine = state.engines[args.engineId];
-    if (engine === undefined) {
+    const engine = state.engine;
+    if (engine === undefined || engine.id !== args.engineId) {
       return;
     }
     engine.ready = args.ready;
@@ -482,8 +488,8 @@ export const StateActions = {
   // Marks all engines matching the given |mode| as failed.
   setEngineFailed(state: StateDraft, args: {mode: EngineMode; failure: string}):
       void {
-        for (const engine of Object.values(state.engines)) {
-          if (engine.mode === args.mode) engine.failed = args.failure;
+        if (state.engine !== undefined && state.engine.mode === args.mode) {
+          state.engine.failed = args.failure;
         }
       },
 
@@ -515,6 +521,10 @@ export const StateActions = {
   },
 
   updateStatus(state: StateDraft, args: Status): void {
+    if (statusTraceEvent) {
+      traceEventEnd(statusTraceEvent);
+    }
+    statusTraceEvent = traceEventBegin(args.msg);
     state.status = args;
   },
 
@@ -529,8 +539,8 @@ export const StateActions = {
 
     // If we're loading from a permalink then none of the engines can
     // possibly be ready:
-    for (const engine of Object.values(state.engines)) {
-      engine.ready = false;
+    if (state.engine !== undefined) {
+      state.engine.ready = false;
     }
   },
 
@@ -548,6 +558,19 @@ export const StateActions = {
         id: args.id,
       };
     }
+  },
+
+  addAutomaticNote(
+      state: StateDraft,
+      args: {timestamp: number, color: string, text: string}): void {
+    const id = generateNextId(state);
+    state.notes[id] = {
+      noteType: 'DEFAULT',
+      id,
+      timestamp: args.timestamp,
+      color: args.color,
+      text: args.text,
+    };
   },
 
   addNote(state: StateDraft, args: {timestamp: number, color: string}): void {
@@ -833,7 +856,7 @@ export const StateActions = {
   },
 
   setOmnibox(state: StateDraft, args: OmniboxState): void {
-    state.frontendLocalState.omniboxState = args;
+    state.omniboxState = args;
   },
 
   selectArea(state: StateDraft, args: {area: Area}): void {
@@ -893,6 +916,11 @@ export const StateActions = {
         }
       }
     }
+    // It's super unexpected that |toggleTrackSelection| does not cause
+    // selection to be updated and this leads to bugs for people who do:
+    // if (oldSelection !== state.selection) etc.
+    // To solve this re-create the selection object here:
+    state.currentSelection = Object.assign({}, state.currentSelection);
   },
 
   setVisibleTraceTime(state: StateDraft, args: VisibleState): void {
@@ -1017,6 +1045,17 @@ export const StateActions = {
     state.flamegraphModalDismissed = true;
   },
 
+  addPivotTableAggregation(
+      state: StateDraft, args: {aggregation: Aggregation, after: number}) {
+    state.nonSerializableState.pivotTableRedux.selectedAggregations.splice(
+        args.after, 0, args.aggregation);
+  },
+
+  removePivotTableAggregation(state: StateDraft, args: {index: number}) {
+    state.nonSerializableState.pivotTableRedux.selectedAggregations.splice(
+        args.index, 1);
+  },
+
   setPivotTableQueryRequested(
       state: StateDraft, args: {queryRequested: boolean}) {
     state.nonSerializableState.pivotTableRedux.queryRequested =
@@ -1027,26 +1066,23 @@ export const StateActions = {
       state: StateDraft, args: {column: TableColumn, selected: boolean}) {
     if (args.column.kind === 'argument' || args.column.table === 'slice') {
       toggleEnabled(
+          tableColumnEquals,
           state.nonSerializableState.pivotTableRedux.selectedSlicePivots,
           args.column,
           args.selected);
     } else {
       toggleEnabled(
+          tableColumnEquals,
           state.nonSerializableState.pivotTableRedux.selectedPivots,
           args.column,
           args.selected);
     }
   },
 
-  setPivotTableAggregationSelected(
-      state: StateDraft, args: {column: Aggregation, selected: boolean}) {
-    if (args.selected) {
-      state.nonSerializableState.pivotTableRedux.selectedAggregations.set(
-          aggregationKey(args.column), args.column);
-    } else {
-      state.nonSerializableState.pivotTableRedux.selectedAggregations.delete(
-          aggregationKey(args.column));
-    }
+  setPivotTableAggregationFunction(
+      state: StateDraft, args: {index: number, function: AggregationFunction}) {
+    state.nonSerializableState.pivotTableRedux.selectedAggregations[args.index]
+        .aggregationFunction = args.function;
   },
 
   setPivotTableSortColumn(
@@ -1092,6 +1128,35 @@ export const StateActions = {
         args.from,
         args.to,
         args.direction);
+  },
+
+  changePivotTableAggregationOrder(
+      state: StateDraft,
+      args: {from: number, to: number, direction: DropDirection}) {
+    moveElement(
+        state.nonSerializableState.pivotTableRedux.selectedAggregations,
+        args.from,
+        args.to,
+        args.direction);
+  },
+
+  setMinimumLogLevel(state: StateDraft, args: {minimumLevel: number}) {
+    state.logFilteringCriteria.minimumLevel = args.minimumLevel;
+  },
+
+  addLogTag(state: StateDraft, args: {tag: string}) {
+    if (!state.logFilteringCriteria.tags.includes(args.tag)) {
+      state.logFilteringCriteria.tags.push(args.tag);
+    }
+  },
+
+  removeLogTag(state: StateDraft, args: {tag: string}) {
+    state.logFilteringCriteria.tags =
+        state.logFilteringCriteria.tags.filter((t) => t !== args.tag);
+  },
+
+  updateLogFilterText(state: StateDraft, args: {textEntry: string}) {
+    state.logFilteringCriteria.textEntry = args.textEntry;
   },
 };
 

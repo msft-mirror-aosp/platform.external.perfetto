@@ -205,10 +205,12 @@ void ArgsSerializer::SerializeArgs() {
     WriteArgForField(SS::kPrevStateFieldNumber, [this](const Variadic& value) {
       PERFETTO_DCHECK(value.type == Variadic::Type::kInt);
       auto state = static_cast<uint16_t>(value.int_value);
-      auto kernel_version =
+      base::Optional<VersionNumber> kernel_version =
           SystemInfoTracker::GetOrCreate(context_)->GetKernelVersion();
       writer_->AppendString(
-          ftrace_utils::TaskState(state, kernel_version).ToString('|').data());
+          ftrace_utils::TaskState::FromRawPrevState(state, kernel_version)
+              .ToString('|')
+              .data());
     });
     writer_->AppendLiteral(" ==>");
     WriteArgForField(SS::kNextCommFieldNumber, DVW());
@@ -537,10 +539,9 @@ void ArgsSerializer::WriteValue(const Variadic& value) {
 }  // namespace
 
 SqliteRawTable::SqliteRawTable(sqlite3* db, Context context)
-    : DbSqliteTable(
-          db,
-          {context.cache, tables::RawTable::Schema(), TableComputation::kStatic,
-           &context.context->storage->raw_table(), nullptr}),
+    : DbSqliteTable(db,
+                    {context.cache, TableComputation::kStatic,
+                     &context.context->storage->raw_table(), nullptr}),
       serializer_(context.context) {
   auto fn = [](sqlite3_context* ctx, int argc, sqlite3_value** argv) {
     auto* thiz = static_cast<SqliteRawTable*>(sqlite3_user_data(ctx));
