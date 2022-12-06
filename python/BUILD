@@ -23,7 +23,7 @@ load(
 
 licenses(["notice"])
 
-package(default_visibility = [PERFETTO_CONFIG.root + ":__subpackages__"])
+package(default_visibility = ["//visibility:private"])
 
 # GN target: //python:batch_trace_processor
 perfetto_py_library(

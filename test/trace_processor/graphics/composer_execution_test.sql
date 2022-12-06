@@ -18,8 +18,8 @@ SELECT RUN_METRIC('android/composer_execution.sql',
 
 SELECT
   validation_type,
-  COUNT(*) AS count,
-  SUM(execution_time_ns) AS total
+  COUNT(*) as count,
+  SUM(execution_time_ns) as total
 FROM hwc_execution_spans
 GROUP BY validation_type
 ORDER BY validation_type;

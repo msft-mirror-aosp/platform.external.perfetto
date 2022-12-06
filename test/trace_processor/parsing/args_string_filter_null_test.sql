@@ -13,36 +13,34 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
--- noqa: disable=L049
-SELECT string_value
-FROM args
-WHERE string_value = NULL  -- noqa
+select string_value
+from args
+where string_value = NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value != NULL
+select string_value
+from args
+where string_value != NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value < NULL
+select string_value
+from args
+where string_value < NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value <= NULL
+select string_value
+from args
+where string_value <= NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value > NULL
+select string_value
+from args
+where string_value > NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value >= NULL
+select string_value
+from args
+where string_value >= NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value GLOB NULL
+select string_value
+from args
+where string_value GLOB NULL
 UNION
-SELECT string_value
-FROM args
-WHERE string_value GLOB NULL;
--- noqa: enable=L049
+select string_value
+from args
+where string_value GLOB NULL

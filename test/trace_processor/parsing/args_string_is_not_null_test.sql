@@ -13,7 +13,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-SELECT string_value
-FROM args
-WHERE string_value IS NOT NULL
-LIMIT 10;
+select string_value
+from args
+where string_value IS NOT NULL
+limit 10

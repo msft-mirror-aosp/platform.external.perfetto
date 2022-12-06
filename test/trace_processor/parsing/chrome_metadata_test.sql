@@ -1,1 +1,1 @@
-SELECT * FROM metadata;
+select * from metadata

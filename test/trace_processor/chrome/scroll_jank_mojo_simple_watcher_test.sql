@@ -12,7 +12,8 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
-SELECT RUN_METRIC('chrome/scroll_jank_cause_queuing_delay.sql');
+SELECT RUN_METRIC('chrome/scroll_jank_cause_queuing_delay.sql')
+   ;
 
 SELECT
   trace_id,

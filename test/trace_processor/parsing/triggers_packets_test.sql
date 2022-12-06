@@ -39,7 +39,7 @@ FROM (
   FROM args
   WHERE key = "trusted_producer_uid"
 ) prod_uid ON prod_uid.arg_set_id = slice_prod.arg_set_id
-WHERE slice_prod.track_id IN (
+WHERE slice_prod.track_id in (
   SELECT id FROM track WHERE name = "Trace Triggers"
 )
 ORDER BY ts ASC;

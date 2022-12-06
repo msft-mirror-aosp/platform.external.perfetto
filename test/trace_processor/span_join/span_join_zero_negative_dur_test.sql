@@ -13,12 +13,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-CREATE TABLE t1(
+create table t1(
   ts BIGINT,
   dur BIGINT,
   part BIGINT,
   PRIMARY KEY (part, ts, dur)
-) WITHOUT ROWID;
+) without rowid;
 
 INSERT INTO t1(ts, dur, part)
 VALUES
@@ -26,12 +26,12 @@ VALUES
 (5, -1, 0),
 (2, 0, 1);
 
-CREATE TABLE t2(
+create table t2(
   ts BIGINT,
   dur BIGINT,
   part BIGINT,
   PRIMARY KEY (part, ts, dur)
-) WITHOUT ROWID;
+) without rowid;
 
 INSERT INTO t2(ts, dur, part)
 VALUES
@@ -39,6 +39,6 @@ VALUES
 (5, 0, 0),
 (1, 1, 1);
 
-CREATE VIRTUAL TABLE sp USING span_outer_join(t1 PARTITIONED part, t2 PARTITIONED part);
+create virtual table sp using span_outer_join(t1 PARTITIONED part, t2 PARTITIONED part);
 
-SELECT ts, dur, part FROM sp;
+select ts,dur,part from sp;

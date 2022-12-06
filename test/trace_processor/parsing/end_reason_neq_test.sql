@@ -13,7 +13,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-SELECT end_state, count(*)
-FROM sched
-WHERE end_state != 'D'
-GROUP BY end_state;
+select end_state, count(*)
+from sched
+where end_state != 'D'
+group by end_state

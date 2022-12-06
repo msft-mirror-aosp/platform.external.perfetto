@@ -13,19 +13,19 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-CREATE TABLE t1(
+create table t1(
   ts BIGINT,
   dur BIGINT,
   a BIGINT,
   PRIMARY KEY (ts)
-) WITHOUT ROWID;
+) without rowid;
 
-CREATE TABLE t2(
+create table t2(
   ts BIGINT,
   dur BIGINT,
   b BIGINT,
   PRIMARY KEY (ts)
-) WITHOUT ROWID;
+) without rowid;
 
 -- Then insert some rows into t1 in part 1, 3, 4 and 5.
 INSERT INTO t1(ts, dur, a)
@@ -44,6 +44,6 @@ INSERT INTO t2(ts, dur, b) VALUES (300, 100, 222);
 -- Insert a row into t2 which should span between t1's first and second rows.
 INSERT INTO t2(ts, dur, b) VALUES (400, 250, 333);
 
-CREATE VIRTUAL TABLE sp USING span_left_join(t1, t2);
+create virtual table sp using span_left_join(t1, t2);
 
-SELECT * FROM sp;
+select * from sp;

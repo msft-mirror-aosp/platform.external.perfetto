@@ -13,7 +13,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-SELECT c.name AS type_name,
+select c.name as type_name,
        o.native_size
-FROM heap_graph_object o JOIN heap_graph_class c ON o.type_id = c.id
-WHERE o.root_type = "ROOT_JAVA_FRAME";
+from heap_graph_object o join heap_graph_class c on o.type_id = c.id
+where o.root_type = "ROOT_JAVA_FRAME"

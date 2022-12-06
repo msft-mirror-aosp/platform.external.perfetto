@@ -1,6 +1,6 @@
-SELECT
+select
   process_counter_track.name,
   counter.ts,
   counter.value
-FROM counter
-JOIN process_counter_track ON (counter.track_id = process_counter_track.id);
+from counter
+join process_counter_track on (counter.track_id = process_counter_track.id);

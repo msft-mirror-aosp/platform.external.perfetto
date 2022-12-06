@@ -13,14 +13,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-SELECT o.id,
+select o.id,
        o.type,
        o.upid,
        o.graph_sample_ts,
        o.self_size,
        o.reference_set_id,
        o.reachable,
-       c.name AS type_name,
-       c.deobfuscated_name AS deobfuscated_type_name,
+       c.name as type_name,
+       c.deobfuscated_name as deobfuscated_type_name,
        o.root_type
-FROM heap_graph_object o JOIN heap_graph_class c ON o.type_id = c.id;
+from heap_graph_object o join heap_graph_class c on o.type_id = c.id

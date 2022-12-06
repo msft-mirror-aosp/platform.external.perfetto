@@ -1,16 +1,16 @@
-CREATE TABLE t1(
+create table t1(
   ts BIGINT,
   dur BIGINT,
   part BIGINT,
   PRIMARY KEY (part, ts)
-) WITHOUT ROWID;
+) without rowid;
 
-CREATE TABLE t2(
+create table t2(
   ts BIGINT,
   dur BIGINT,
   part BIGINT,
   PRIMARY KEY (part, ts)
-) WITHOUT ROWID;
+) without rowid;
 
 -- Insert a single row into t1.
 INSERT INTO t1(ts, dur, part)
@@ -20,7 +20,7 @@ VALUES (500, 100, 10);
 INSERT INTO t2(ts, dur, part)
 VALUES (500, 100, 5);
 
-CREATE VIRTUAL TABLE sp USING span_left_join(t1 PARTITIONED part,
+create virtual table sp using span_left_join(t1 PARTITIONED part,
                                              t2 PARTITIONED part);
 
-SELECT * FROM sp;
+select * from sp;

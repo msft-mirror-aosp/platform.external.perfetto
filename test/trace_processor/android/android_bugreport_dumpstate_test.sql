@@ -1,2 +1,2 @@
-SELECT section, service, count(line) AS linecount FROM android_dumpstate
-GROUP BY section, service;
+select section, service, count(line) as linecount from android_dumpstate
+group by section, service;

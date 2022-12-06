@@ -1,1 +1,1 @@
-SELECT * FROM heap_profile_allocation;
+select * from heap_profile_allocation;

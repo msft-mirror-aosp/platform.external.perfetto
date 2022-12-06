@@ -1,14 +1,16 @@
-WITH
-initial AS (SELECT
-    (SELECT count(*) FROM android_logs) AS cnt,
-    ts, prio, tag, msg FROM android_logs
-  ORDER BY ts ASC
-  LIMIT 100
+with
+initial as
+  (select
+    (select count(*) from android_logs) as cnt,
+    ts, prio, tag, msg from android_logs
+    order by ts asc
+    limit 100
 ),
-latest AS (SELECT
-    (SELECT count(*) FROM android_logs) AS cnt,
-    ts, prio, tag, msg FROM android_logs
-  ORDER BY ts DESC
-  LIMIT 100
+latest as
+  (select
+    (select count(*) from android_logs) as cnt,
+    ts, prio, tag, msg from android_logs
+    order by ts desc
+    limit 100
 )
-SELECT * FROM initial UNION ALL SELECT * FROM latest;
+select * from initial union all select * from latest;

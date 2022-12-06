@@ -13,8 +13,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 --
-SELECT
+select
   id,
   name,
-  extract_arg(arg_set_id, "chrome.host_app_package_name") AS host_app
-FROM process;
+  extract_arg(arg_set_id, "chrome.host_app_package_name") as host_app
+from process;
