@@ -437,11 +437,11 @@ std::string CppObjGenerator::GetPackedBuffer(
     case FieldDescriptor::TYPE_UINT64:
     case FieldDescriptor::TYPE_SINT64:
     case FieldDescriptor::TYPE_BOOL:
+    case FieldDescriptor::TYPE_ENUM:
       return "::protozero::PackedVarInt";
     case FieldDescriptor::TYPE_STRING:
     case FieldDescriptor::TYPE_BYTES:
     case FieldDescriptor::TYPE_MESSAGE:
-    case FieldDescriptor::TYPE_ENUM:
     case FieldDescriptor::TYPE_GROUP:
       break;  // Will abort()
   }
@@ -466,11 +466,11 @@ std::string CppObjGenerator::GetPackedWireType(
     case FieldDescriptor::TYPE_UINT64:
     case FieldDescriptor::TYPE_SINT64:
     case FieldDescriptor::TYPE_BOOL:
+    case FieldDescriptor::TYPE_ENUM:
       return "::protozero::proto_utils::ProtoWireType::kVarInt";
     case FieldDescriptor::TYPE_STRING:
     case FieldDescriptor::TYPE_BYTES:
     case FieldDescriptor::TYPE_MESSAGE:
-    case FieldDescriptor::TYPE_ENUM:
     case FieldDescriptor::TYPE_GROUP:
       break;  // Will abort()
   }
@@ -532,7 +532,8 @@ void CppObjGenerator::GenEnumAliases(const EnumDescriptor* enum_desc,
 void CppObjGenerator::GenClassDecl(const Descriptor* msg, Printer* p) const {
   std::string full_name = GetFullName(msg);
   p->Print(
-      "\nclass PERFETTO_EXPORT $n$ : public ::protozero::CppMessageObj {\n",
+      "\nclass PERFETTO_EXPORT_COMPONENT $n$ : public "
+      "::protozero::CppMessageObj {\n",
       "n", full_name);
   p->Print(" public:\n");
   p->Indent();

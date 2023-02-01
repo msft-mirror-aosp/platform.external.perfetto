@@ -46,6 +46,11 @@
 
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 
+// DEPRECATED: Instead of using this macro, prefer specifying symbol linkage
+// attributes explicitly using the `_WITH_ATTRS` macro variants (e.g.,
+// PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS_WITH_ATTRS). This avoids
+// potential macro definition collisions between two libraries using Perfetto.
+//
 // PERFETTO_COMPONENT_EXPORT is used to mark symbols in Perfetto's headers
 // (typically templates) that are defined by the user outside of Perfetto and
 // should be made visible outside the current module. (e.g., in Chrome's
@@ -64,7 +69,7 @@ class TrackEventDataSource;
 
 // Base class with the virtual methods to get start/stop notifications.
 // Embedders are supposed to derive the templated version below, not this one.
-class PERFETTO_EXPORT DataSourceBase {
+class PERFETTO_EXPORT_COMPONENT DataSourceBase {
  public:
   virtual ~DataSourceBase();
 
@@ -121,6 +126,13 @@ class PERFETTO_EXPORT DataSourceBase {
     uint32_t internal_instance_index = 0;
   };
   virtual void OnStop(const StopArgs&);
+
+  class ClearIncrementalStateArgs {
+   public:
+    // The index of this data source instance (0..kMaxDataSourceInstances - 1).
+    uint32_t internal_instance_index = 0;
+  };
+  virtual void WillClearIncrementalState(const ClearIncrementalStateArgs&);
 };
 
 struct DefaultDataSourceTraits {
@@ -170,6 +182,20 @@ class DataSource : public DataSourceBase {
   constexpr static BufferExhaustedPolicy kBufferExhaustedPolicy =
       BufferExhaustedPolicy::kDrop;
 
+  // When this flag is false, we cannot have multiple instances of this data
+  // source. When a data source is already active and if we attempt
+  // to start another instance of that data source (via another tracing
+  // session), it will fail to start the second instance of data source.
+  static constexpr bool kSupportsMultipleInstances = true;
+
+  // When this flag is true, DataSource callbacks (OnSetup, OnStart, etc.) are
+  // called under the lock (the same that is used in GetDataSourceLocked
+  // function). This is not recommended because it can lead to deadlocks, but
+  // it was the default behavior for a long time and some embedders rely on it
+  // to protect concurrent access to the DataSource members. So we keep the
+  // "true" value as the default.
+  static constexpr bool kRequiresCallbacksUnderLock = true;
+
   // Argument passed to the lambda function passed to Trace() (below).
   class TraceContext {
    public:
@@ -182,6 +208,21 @@ class DataSource : public DataSourceBase {
       // each trace point to make sure the interceptor sees the data right away.
       if (PERFETTO_UNLIKELY(tls_inst_->is_intercepted))
         Flush();
+    }
+
+    // Adds an empty trace packet to the trace to ensure that the service can
+    // safely read the last event from the trace buffer.
+    // See PERFETTO_INTERNAL_ADD_EMPTY_EVENT macros for context.
+    void AddEmptyTracePacket() {
+      // If nothing was written since the last empty packet, there's nothing to
+      // scrape, so adding more empty packets serves no purpose.
+      if (tls_inst_->trace_writer->written() ==
+          tls_inst_->last_empty_packet_position) {
+        return;
+      }
+      tls_inst_->trace_writer->NewTracePacket();
+      tls_inst_->last_empty_packet_position =
+          tls_inst_->trace_writer->written();
     }
 
     TracePacketHandle NewTracePacket() {
@@ -222,8 +263,9 @@ class DataSource : public DataSourceBase {
       auto* internal_state = static_state_.TryGet(instance_index_);
       if (!internal_state)
         return LockedHandle<DataSourceType>();
+      std::unique_lock<std::recursive_mutex> lock(internal_state->lock);
       return LockedHandle<DataSourceType>(
-          &internal_state->lock,
+          std::move(lock),
           static_cast<DataSourceType*>(internal_state->data_source.get()));
     }
 
@@ -402,6 +444,9 @@ class DataSource : public DataSourceBase {
         tls_inst.backend_id = instance_state->backend_id;
         tls_inst.backend_connection_id = instance_state->backend_connection_id;
         tls_inst.buffer_id = instance_state->buffer_id;
+        tls_inst.startup_target_buffer_reservation =
+            instance_state->startup_target_buffer_reservation.load(
+                std::memory_order_relaxed);
         tls_inst.data_source_instance_id =
             instance_state->data_source_instance_id;
         tls_inst.is_intercepted = instance_state->interceptor_id != 0;
@@ -442,7 +487,10 @@ class DataSource : public DataSourceBase {
           new DataSourceType(constructor_args...));
     };
     auto* tracing_impl = internal::TracingMuxer::Get();
-    return tracing_impl->RegisterDataSource(descriptor, factory,
+    internal::DataSourceParams params{
+        DataSourceType::kSupportsMultipleInstances,
+        DataSourceType::kRequiresCallbacksUnderLock};
+    return tracing_impl->RegisterDataSource(descriptor, factory, params,
                                             &static_state_);
   }
 
@@ -572,9 +620,16 @@ PERFETTO_THREAD_LOCAL internal::DataSourceThreadLocalState*
 
 // This macro must be used once for each data source next to the data source's
 // declaration.
-#define PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS(...)              \
-  template <>                                                         \
-  PERFETTO_COMPONENT_EXPORT perfetto::internal::DataSourceStaticState \
+#define PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS(...)  \
+  PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS_WITH_ATTRS( \
+      PERFETTO_COMPONENT_EXPORT, __VA_ARGS__)
+
+// Similar to `PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS` but it also takes
+// custom attributes, which are useful when DataSource is defined in a component
+// where a component specific export macro is used.
+#define PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS_WITH_ATTRS(attrs, ...) \
+  template <>                                                              \
+  attrs perfetto::internal::DataSourceStaticState                          \
       perfetto::DataSource<__VA_ARGS__>::static_state_
 
 // This macro must be used once for each data source in one source file to
@@ -584,9 +639,16 @@ PERFETTO_THREAD_LOCAL internal::DataSourceThreadLocalState*
 // permissive- flag to enable standards-compliant mode. See
 // https://developercommunity.visualstudio.com/content/problem/319447/
 // explicit-specialization-of-static-data-member-inco.html.
-#define PERFETTO_DEFINE_DATA_SOURCE_STATIC_MEMBERS(...)               \
-  template <>                                                         \
-  PERFETTO_COMPONENT_EXPORT perfetto::internal::DataSourceStaticState \
+#define PERFETTO_DEFINE_DATA_SOURCE_STATIC_MEMBERS(...)  \
+  PERFETTO_DEFINE_DATA_SOURCE_STATIC_MEMBERS_WITH_ATTRS( \
+      PERFETTO_COMPONENT_EXPORT, __VA_ARGS__)
+
+// Similar to `PERFETTO_DEFINE_DATA_SOURCE_STATIC_MEMBERS` but it also takes
+// custom attributes, which are useful when DataSource is defined in a component
+// where a component specific export macro is used.
+#define PERFETTO_DEFINE_DATA_SOURCE_STATIC_MEMBERS_WITH_ATTRS(attrs, ...) \
+  template <>                                                             \
+  attrs perfetto::internal::DataSourceStaticState                         \
       perfetto::DataSource<__VA_ARGS__>::static_state_ {}
 
 #endif  // INCLUDE_PERFETTO_TRACING_DATA_SOURCE_H_

@@ -16,6 +16,7 @@
 
 #include <cinttypes>
 
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "perfetto/ext/tracing/core/consumer.h"
 #include "perfetto/ext/tracing/core/producer.h"
@@ -85,6 +86,7 @@ class MockConsumer : public Consumer {
   MOCK_METHOD2(OnAttach, void(bool, const TraceConfig&));
   MOCK_METHOD2(OnTraceStats, void(bool, const TraceStats&));
   MOCK_METHOD1(OnObservableEvents, void(const ObservableEvents&));
+  MOCK_METHOD2(OnSessionCloned, void(bool, const std::string&));
 
   // Workaround, gmock doesn't support yet move-only types, passing a pointer.
   void OnTraceData(std::vector<TracePacket> packets, bool has_more) {
@@ -280,7 +282,7 @@ TEST_F(TracingIntegrationTest, WithIPCTransport) {
   const size_t kNumPackets = 10;
   for (size_t i = 0; i < kNumPackets; i++) {
     char buf[16];
-    sprintf(buf, "evt_%zu", i);
+    base::SprintfTrunc(buf, sizeof(buf), "evt_%zu", i);
     writer->NewTracePacket()->set_for_testing()->set_str(buf, strlen(buf));
   }
 
@@ -315,7 +317,7 @@ TEST_F(TracingIntegrationTest, WithIPCTransport) {
                   encoded_packet.GetRawBytesForTesting()));
               if (packet.has_for_testing()) {
                 char buf[8];
-                sprintf(buf, "evt_%zu", num_pack_rx++);
+                base::SprintfTrunc(buf, sizeof(buf), "evt_%zu", num_pack_rx++);
                 EXPECT_EQ(std::string(buf), packet.for_testing().str());
               } else if (packet.has_clock_snapshot()) {
                 EXPECT_GE(packet.clock_snapshot().clocks_size(),
@@ -413,7 +415,7 @@ TEST_F(TracingIntegrationTest, WriteIntoFile) {
   const size_t kNumPackets = 10;
   for (size_t i = 0; i < kNumPackets; i++) {
     char buf[16];
-    sprintf(buf, "evt_%zu", i);
+    base::SprintfTrunc(buf, sizeof(buf), "evt_%zu", i);
     writer->NewTracePacket()->set_for_testing()->set_str(buf, strlen(buf));
   }
   auto on_data_committed = task_runner_->CreateCheckpoint("on_data_committed");

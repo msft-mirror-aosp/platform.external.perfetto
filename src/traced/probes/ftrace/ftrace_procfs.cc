@@ -83,7 +83,8 @@ const char* const FtraceProcfs::kTracingPaths[] = {
 
 // static
 std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
-    const std::string& instance_path) {
+    const std::string& instance_path,
+    bool preserve_ftrace_buffer) {
   std::unique_ptr<FtraceProcfs> ftrace_procfs;
   size_t index = 0;
   while (!ftrace_procfs && kTracingPaths[index]) {
@@ -91,14 +92,16 @@ std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
     if (!instance_path.empty())
       path += instance_path;
 
-    ftrace_procfs = Create(path);
+    ftrace_procfs = Create(path, preserve_ftrace_buffer);
   }
   return ftrace_procfs;
 }
 
 // static
-std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(const std::string& root) {
-  if (!CheckRootPath(root)) {
+std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(
+    const std::string& root,
+    bool preserve_ftrace_buffer) {
+  if (!preserve_ftrace_buffer && !CheckRootPath(root)) {
     return nullptr;
   }
   return std::unique_ptr<FtraceProcfs>(new FtraceProcfs(root));
@@ -106,6 +109,28 @@ std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(const std::string& root) {
 
 FtraceProcfs::FtraceProcfs(const std::string& root) : root_(root) {}
 FtraceProcfs::~FtraceProcfs() = default;
+
+bool FtraceProcfs::SetSyscallFilter(const std::set<size_t>& filter) {
+  std::vector<std::string> parts;
+  for (size_t id : filter) {
+    base::StackString<16> m("id == %zu", id);
+    parts.push_back(m.ToStdString());
+  }
+
+  std::string filter_str = "0";
+  if (!parts.empty()) {
+    filter_str = base::Join(parts, " || ");
+  }
+
+  for (const char* event : {"sys_enter", "sys_exit"}) {
+    std::string path = root_ + "events/raw_syscalls/" + event + "/filter";
+    if (!WriteToFile(path, filter_str)) {
+      PERFETTO_ELOG("Failed to write file: %s", path.c_str());
+      return false;
+    }
+  }
+  return true;
+}
 
 bool FtraceProcfs::EnableEvent(const std::string& group,
                                const std::string& name) {
@@ -137,6 +162,13 @@ bool FtraceProcfs::DisableEvent(const std::string& group,
   return ret;
 }
 
+bool FtraceProcfs::IsEventAccessible(const std::string& group,
+                                     const std::string& name) {
+  std::string path = root_ + "events/" + group + "/" + name + "/enable";
+
+  return IsFileWriteable(path);
+}
+
 bool FtraceProcfs::DisableAllEvents() {
   std::string path = root_ + "events/enable";
   return WriteToFile(path, "0");
@@ -146,6 +178,57 @@ std::string FtraceProcfs::ReadEventFormat(const std::string& group,
                                           const std::string& name) const {
   std::string path = root_ + "events/" + group + "/" + name + "/format";
   return ReadFileIntoString(path);
+}
+
+std::string FtraceProcfs::GetCurrentTracer() {
+  std::string path = root_ + "current_tracer";
+  std::string current_tracer = ReadFileIntoString(path);
+  return base::StripSuffix(current_tracer, "\n");
+}
+
+bool FtraceProcfs::SetCurrentTracer(const std::string& tracer) {
+  std::string path = root_ + "current_tracer";
+  return WriteToFile(path, tracer);
+}
+
+bool FtraceProcfs::ResetCurrentTracer() {
+  return SetCurrentTracer("nop");
+}
+
+bool FtraceProcfs::AppendFunctionFilters(
+    const std::vector<std::string>& filters) {
+  std::string path = root_ + "set_ftrace_filter";
+  std::string filter = base::Join(filters, "\n");
+
+  // The same file accepts special actions to perform when a corresponding
+  // kernel function is hit (regardless of active tracer). For example
+  // "__schedule_bug:traceoff" would disable tracing once __schedule_bug is
+  // called.
+  // We disallow these commands as most of them break the isolation of
+  // concurrent ftrace data sources (as the underlying ftrace instance is
+  // shared).
+  if (base::Contains(filter, ':')) {
+    PERFETTO_ELOG("Filter commands are disallowed.");
+    return false;
+  }
+  return AppendToFile(path, filter);
+}
+
+bool FtraceProcfs::ClearFunctionFilters() {
+  std::string path = root_ + "set_ftrace_filter";
+  return ClearFile(path);
+}
+
+bool FtraceProcfs::AppendFunctionGraphFilters(
+    const std::vector<std::string>& filters) {
+  std::string path = root_ + "set_graph_function";
+  std::string filter = base::Join(filters, "\n");
+  return AppendToFile(path, filter);
+}
+
+bool FtraceProcfs::ClearFunctionGraphFilters() {
+  std::string path = root_ + "set_graph_function";
+  return ClearFile(path);
 }
 
 std::vector<std::string> FtraceProcfs::ReadEventTriggers(
@@ -330,30 +413,43 @@ bool FtraceProcfs::SetCpuBufferSizeInPages(size_t pages) {
   return WriteNumberToFile(path, pages * (base::kPageSize / 1024ul));
 }
 
-bool FtraceProcfs::EnableTracing() {
-  KernelLogWrite("perfetto: enabled ftrace\n");
-  PERFETTO_LOG("enabled ftrace in %s", root_.c_str());
-  std::string path = root_ + "tracing_on";
-  return WriteToFile(path, "1");
-}
-
-bool FtraceProcfs::DisableTracing() {
-  KernelLogWrite("perfetto: disabled ftrace\n");
-  PERFETTO_LOG("disabled ftrace in %s", root_.c_str());
-  std::string path = root_ + "tracing_on";
-  return WriteToFile(path, "0");
-}
-
-bool FtraceProcfs::SetTracingOn(bool enable) {
-  return enable ? EnableTracing() : DisableTracing();
-}
-
-bool FtraceProcfs::IsTracingEnabled() {
+bool FtraceProcfs::GetTracingOn() {
   std::string path = root_ + "tracing_on";
   char tracing_on = ReadOneCharFromFile(path);
   if (tracing_on == '\0')
     PERFETTO_PLOG("Failed to read %s", path.c_str());
   return tracing_on == '1';
+}
+
+bool FtraceProcfs::SetTracingOn(bool on) {
+  std::string path = root_ + "tracing_on";
+  if (!WriteToFile(path, on ? "1" : "0")) {
+    PERFETTO_PLOG("Failed to write %s", path.c_str());
+    return false;
+  }
+  if (on) {
+    KernelLogWrite("perfetto: enabled ftrace\n");
+    PERFETTO_LOG("enabled ftrace in %s", root_.c_str());
+  } else {
+    KernelLogWrite("perfetto: disabled ftrace\n");
+    PERFETTO_LOG("disabled ftrace in %s", root_.c_str());
+  }
+
+  return true;
+}
+
+bool FtraceProcfs::IsTracingAvailable() {
+  std::string current_tracer = GetCurrentTracer();
+
+  // Ftrace tracing is available if current_tracer == "nop".
+  // events/enable could be 0, 1, X or 0*. 0* means events would be
+  // dynamically enabled so we need to treat as event tracing is in use.
+  // However based on the discussion in asop/2328817, on Android events/enable
+  // is "X" after boot up. To avoid causing more problem, the decision is just
+  // look at current_tracer.
+  // As the discussion in asop/2328817, if GetCurrentTracer failed to
+  // read file and return "", we treat it as tracing is available.
+  return current_tracer == "nop" || current_tracer == "";
 }
 
 bool FtraceProcfs::SetClock(const std::string& clock_name) {
@@ -444,6 +540,10 @@ char FtraceProcfs::ReadOneCharFromFile(const std::string& path) {
 bool FtraceProcfs::ClearFile(const std::string& path) {
   base::ScopedFile fd = base::OpenFile(path, O_WRONLY | O_TRUNC);
   return !!fd;
+}
+
+bool FtraceProcfs::IsFileWriteable(const std::string& path) {
+  return access(path.c_str(), W_OK) == 0;
 }
 
 std::string FtraceProcfs::ReadFileIntoString(const std::string& path) const {

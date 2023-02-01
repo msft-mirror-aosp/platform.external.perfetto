@@ -47,7 +47,9 @@ class MockConsumer : public Consumer {
   explicit MockConsumer(base::TestTaskRunner*);
   ~MockConsumer() override;
 
+  void Connect(std::unique_ptr<TracingService::ConsumerEndpoint>);
   void Connect(TracingService* svc, uid_t = 0);
+  void ForceDisconnect();
   void EnableTracing(const TraceConfig&, base::ScopedFile = base::ScopedFile());
   void StartTracing();
   void ChangeTraceConfig(const TraceConfig&);
@@ -61,6 +63,7 @@ class MockConsumer : public Consumer {
   TracingServiceState QueryServiceState();
   void ObserveEvents(uint32_t enabled_event_types);
   ObservableEvents WaitForObservableEvents();
+  void CloneSession(TracingSessionID);
 
   TracingService::ConsumerEndpoint* endpoint() {
     return service_endpoint_.get();
@@ -76,6 +79,7 @@ class MockConsumer : public Consumer {
   MOCK_METHOD2(OnAttach, void(bool, const TraceConfig&));
   MOCK_METHOD2(OnTraceStats, void(bool, const TraceStats&));
   MOCK_METHOD1(OnObservableEvents, void(const ObservableEvents&));
+  MOCK_METHOD2(OnSessionCloned, void(bool, const std::string&));
 
   // gtest doesn't support move-only types. This wrapper is here jut to pass
   // a pointer to the vector (rather than the vector itself) to the mock method.
