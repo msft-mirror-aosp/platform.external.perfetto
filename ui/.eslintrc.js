@@ -47,13 +47,20 @@ module.exports = {
     // https://github.com/typescript-eslint/typescript-eslint/issues/2621
     'no-unused-vars': 'off',
     '@typescript-eslint/no-unused-vars':
-        ['error', {'argsIgnorePattern': '^_.*'}],
+        ['error', {'argsIgnorePattern': '^_.*', 'varsIgnorePattern': '^_.*'}],
 
     // new Array() is banned (use [] instead) but new Array<Foo>() is
     // allowed since it can be clearer to put the type by the
     // construtor.
     'no-array-constructor': 'off',
     '@typescript-eslint/no-array-constructor': ['error'],
+
+    // Rest parameters are not equivalent to 'arguments'.
+    // Rest parameters are arrays: https://developer.mozilla.org/en-US/docs/Web/
+    // JavaScript/Reference/Functions/rest_parameters
+    // 'arguments' are objects: https://developer.mozilla.org/en-US/docs/Web/
+    // JavaScript/Reference/Functions/arguments
+    'prefer-rest-params': 'off',
 
     // We have a lot normal functions which are capitalised.
     // TODO(hjd): Switch these to be lowercase and remove capIsNew.

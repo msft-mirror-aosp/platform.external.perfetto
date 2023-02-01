@@ -173,16 +173,22 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
       const TrackEventCategoryRegistry&,
       bool (*register_data_source)(const DataSourceDescriptor&));
 
-  static bool AddSessionObserver(TrackEventSessionObserver*);
-  static void RemoveSessionObserver(TrackEventSessionObserver*);
+  static bool AddSessionObserver(const TrackEventCategoryRegistry&,
+                                 TrackEventSessionObserver*);
+  static void RemoveSessionObserver(const TrackEventCategoryRegistry&,
+                                    TrackEventSessionObserver*);
 
   static void EnableTracing(const TrackEventCategoryRegistry& registry,
                             const protos::gen::TrackEventConfig& config,
                             const DataSourceBase::SetupArgs&);
-  static void OnStart(const DataSourceBase::StartArgs&);
+  static void OnStart(const TrackEventCategoryRegistry&,
+                      const DataSourceBase::StartArgs&);
+  static void OnStop(const TrackEventCategoryRegistry&,
+                     const DataSourceBase::StopArgs&);
   static void DisableTracing(const TrackEventCategoryRegistry& registry,
-                             const DataSourceBase::StopArgs&);
+                             uint32_t internal_instance_index);
   static void WillClearIncrementalState(
+      const TrackEventCategoryRegistry&,
       const DataSourceBase::ClearIncrementalStateArgs&);
 
   static bool IsCategoryEnabled(const TrackEventCategoryRegistry& registry,
@@ -219,14 +225,15 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
 
   // TODO(altimin): Remove this method once Chrome uses
   // EventContext::AddDebugAnnotation directly.
-  template <typename T>
+  template <typename NameType, typename ValueType>
   static void AddDebugAnnotation(perfetto::EventContext* event_ctx,
-                                 const char* name,
-                                 T&& value) {
-    auto annotation = AddDebugAnnotation(event_ctx, name);
+                                 NameType&& name,
+                                 ValueType&& value) {
+    auto annotation =
+        AddDebugAnnotation(event_ctx, std::forward<NameType>(name));
     WriteIntoTracedValue(
         internal::CreateTracedValueFromProto(annotation, event_ctx),
-        std::forward<T>(value));
+        std::forward<ValueType>(value));
   }
 
   // If the given track hasn't been seen by the trace writer yet, write a
@@ -263,14 +270,9 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
 
   static TraceTimestamp GetTraceTime();
 
-  // Get the clock used by GetTimeNs().
-  static constexpr protos::pbzero::BuiltinClock GetClockId() {
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE) && \
-    !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-    return protos::pbzero::BUILTIN_CLOCK_BOOTTIME;
-#else
-    return protos::pbzero::BUILTIN_CLOCK_MONOTONIC;
-#endif
+  static inline protos::pbzero::BuiltinClock GetClockId() { return clock_; }
+  static inline void SetClockId(protos::pbzero::BuiltinClock clock) {
+    clock_ = clock;
   }
 
   static int GetSessionCount();
@@ -291,11 +293,18 @@ class PERFETTO_EXPORT_COMPONENT TrackEventInternal {
       TraceTimestamp,
       uint32_t seq_flags =
           protos::pbzero::TracePacket::SEQ_NEEDS_INCREMENTAL_STATE);
+
   static protos::pbzero::DebugAnnotation* AddDebugAnnotation(
       perfetto::EventContext*,
       const char* name);
 
+  static protos::pbzero::DebugAnnotation* AddDebugAnnotation(
+      perfetto::EventContext*,
+      perfetto::DynamicString name);
+
   static std::atomic<int> session_count_;
+
+  static protos::pbzero::BuiltinClock clock_;
 };
 
 template <typename TraceContext>
@@ -314,7 +323,7 @@ TrackEventTlsState::TrackEventTlsState(const TraceContext& trace_context) {
   }
   if (disable_incremental_timestamps) {
     if (timestamp_unit_multiplier == 1) {
-      default_clock = TrackEventInternal::GetClockId();
+      default_clock = static_cast<uint32_t>(TrackEventInternal::GetClockId());
     } else {
       default_clock = TrackEventIncrementalState::kClockIdAbsolute;
     }

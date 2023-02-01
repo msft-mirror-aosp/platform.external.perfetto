@@ -17,10 +17,6 @@
 #include <algorithm>
 #include <vector>
 
-#include <google/protobuf/compiler/importer.h>
-#include <google/protobuf/dynamic_message.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
-
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/scoped_file.h"
@@ -29,6 +25,7 @@
 #include "perfetto/protozero/proto_decoder.h"
 #include "perfetto/protozero/proto_utils.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
+#include "src/trace_processor/importers/proto/trace.descriptor.h"
 #include "src/trace_processor/util/proto_profiler.h"
 
 #include "protos/third_party/pprof/profile.pbzero.h"
@@ -37,53 +34,12 @@ namespace perfetto {
 namespace protoprofile {
 namespace {
 
-using ::google::protobuf::Descriptor;
-using ::google::protobuf::DynamicMessageFactory;
-using ::google::protobuf::FieldDescriptor;
-using ::google::protobuf::FileDescriptor;
-using ::google::protobuf::Message;
-using ::google::protobuf::compiler::DiskSourceTree;
-using ::google::protobuf::compiler::Importer;
-using ::google::protobuf::compiler::MultiFileErrorCollector;
-using protozero::proto_utils::ProtoWireType;
-
-class MultiFileErrorCollectorImpl : public MultiFileErrorCollector {
- public:
-  ~MultiFileErrorCollectorImpl() override;
-  void AddError(const std::string& filename,
-                int line,
-                int column,
-                const std::string& message) override;
-
-  void AddWarning(const std::string& filename,
-                  int line,
-                  int column,
-                  const std::string& message) override;
-};
-
-MultiFileErrorCollectorImpl::~MultiFileErrorCollectorImpl() = default;
-
-void MultiFileErrorCollectorImpl::AddError(const std::string& filename,
-                                           int line,
-                                           int column,
-                                           const std::string& message) {
-  PERFETTO_ELOG("Error %s %d:%d: %s", filename.c_str(), line, column,
-                message.c_str());
-}
-
-void MultiFileErrorCollectorImpl::AddWarning(const std::string& filename,
-                                             int line,
-                                             int column,
-                                             const std::string& message) {
-  PERFETTO_ELOG("Error %s %d:%d: %s", filename.c_str(), line, column,
-                message.c_str());
-}
-
 class PprofProfileComputer {
  public:
   std::string Compute(const uint8_t* ptr,
                       size_t size,
-                      const Descriptor* descriptor);
+                      const std::string& message_type,
+                      trace_processor::DescriptorPool* pool);
 
  private:
   int InternString(const std::string& str);
@@ -118,13 +74,24 @@ int PprofProfileComputer::InternLocation(const std::string& s) {
   return id;
 }
 
-std::string PprofProfileComputer::Compute(const uint8_t* ptr,
-                                          size_t size,
-                                          const Descriptor* descriptor) {
+std::string PprofProfileComputer::Compute(
+    const uint8_t* ptr,
+    size_t size,
+    const std::string& message_type,
+    trace_processor::DescriptorPool* pool) {
   PERFETTO_CHECK(InternString("") == 0);
 
-  trace_processor::util::SizeProfileComputer computer;
-  auto field_path_to_samples = computer.Compute(ptr, size, descriptor);
+  trace_processor::util::SizeProfileComputer computer(pool, message_type);
+  computer.Reset(ptr, size);
+
+  using PathToSamplesMap = std::unordered_map<
+      trace_processor::util::SizeProfileComputer::FieldPath,
+      std::vector<size_t>,
+      trace_processor::util::SizeProfileComputer::FieldPathHasher>;
+  PathToSamplesMap field_path_to_samples;
+  for (auto sample = computer.GetNext(); sample; sample = computer.GetNext()) {
+    field_path_to_samples[computer.GetPath()].push_back(*sample);
+  }
 
   protozero::HeapBuffered<third_party::perftools::profiles::pbzero::Profile>
       profile;
@@ -150,9 +117,14 @@ std::string PprofProfileComputer::Compute(const uint8_t* ptr,
   sample_type->set_unit(InternString("bytes"));
 
   // For each unique field path we've seen write out the stats:
-  for (auto it = field_path_to_samples.GetIterator(); it; ++it) {
-    const auto& field_path = it.key();
-    auto& samples = it.value();
+  for (auto& entry : field_path_to_samples) {
+    std::vector<std::string> field_path;
+    for (const auto& field : entry.first) {
+      if (field.has_field_name())
+        field_path.push_back(field.field_name());
+      field_path.push_back(field.type_name());
+    }
+    std::vector<size_t>& samples = entry.second;
 
     protozero::PackedVarInt location_ids;
     auto* sample = profile->add_sample();
@@ -224,23 +196,17 @@ int Main(int argc, const char** argv) {
   std::string s;
   base::ReadFileDescriptor(proto_fd.get(), &s);
 
-  const Descriptor* descriptor;
-  DiskSourceTree dst;
-  dst.MapPath("", "");
-  MultiFileErrorCollectorImpl mfe;
-  Importer importer(&dst, &mfe);
-  const FileDescriptor* parsed_file =
-      importer.Import("protos/perfetto/trace/trace.proto");
-  DynamicMessageFactory dmf;
-  descriptor = parsed_file->message_type(0);
+  trace_processor::DescriptorPool pool;
+  base::Status status = pool.AddFromFileDescriptorSet(kTraceDescriptor.data(),
+                                                      kTraceDescriptor.size());
+  if (!status.ok()) {
+    PERFETTO_ELOG("Could not add Trace proto descriptor: %s",
+                  status.c_message());
+    return 1;
+  }
 
   const uint8_t* start = reinterpret_cast<const uint8_t*>(s.data());
   size_t size = s.size();
-
-  if (!descriptor) {
-    PERFETTO_ELOG("Could not parse trace.proto");
-    return 1;
-  }
 
   base::ScopedFile output_fd =
       base::OpenFile(output_path, O_WRONLY | O_TRUNC | O_CREAT, 0600);
@@ -249,7 +215,8 @@ int Main(int argc, const char** argv) {
     return 1;
   }
   PprofProfileComputer computer;
-  std::string out = computer.Compute(start, size, descriptor);
+  std::string out =
+      computer.Compute(start, size, ".perfetto.protos.Trace", &pool);
   base::WriteAll(output_fd.get(), out.data(), out.size());
   base::FlushFile(output_fd.get());
 

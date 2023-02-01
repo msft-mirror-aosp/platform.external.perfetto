@@ -15,7 +15,6 @@
 import {Actions} from '../../common/actions';
 import {cropText, drawIncompleteSlice} from '../../common/canvas_utils';
 import {colorForThreadIdleSlice, hslForSlice} from '../../common/colorizer';
-import {TRACE_MARGIN_TIME_S} from '../../common/constants';
 import {PluginContext} from '../../common/plugin_api';
 import {NUM, NUM_NULL, STR} from '../../common/query_result';
 import {fromNs, toNs} from '../../common/time';
@@ -43,7 +42,6 @@ export interface Config {
   maxDepth: number;
   namespace: string;
   trackId: number;
-  isThreadSlice?: boolean;
 }
 
 export interface Data extends TrackData {
@@ -75,13 +73,7 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
     // be an even number, so we can snap in the middle.
     const bucketNs = Math.max(Math.round(resolution * 1e9 * pxSize / 2) * 2, 1);
 
-    const isThreadSlice = this.config.isThreadSlice;
-    let tableName = this.namespaceTable('slice');
-    let threadDurQuery = ', dur';
-    if (isThreadSlice) {
-      tableName = this.namespaceTable('thread_slice');
-      threadDurQuery = ', iif(thread_dur IS NULL, dur, thread_dur)';
-    }
+    const tableName = this.namespaceTable('slice');
 
     if (this.maxDurNs === 0) {
       const query = `
@@ -107,8 +99,8 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
         id as sliceId,
         ifnull(name, '[null]') as name,
         dur = 0 as isInstant,
-        dur = -1 as isIncomplete
-        ${threadDurQuery} as threadDur
+        dur = -1 as isIncomplete,
+        thread_dur as threadDur
       FROM ${tableName}
       WHERE track_id = ${this.config.trackId} AND
         ts >= (${startNs - this.maxDurNs}) AND
@@ -152,7 +144,7 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
       name: STR,
       isInstant: NUM,
       isIncomplete: NUM,
-      threadDur: NUM,
+      threadDur: NUM_NULL,
     });
     for (let row = 0; it.valid(); it.next(), row++) {
       const startNsQ = it.tsq;
@@ -184,7 +176,7 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
       slices.isIncomplete[row] = it.isIncomplete;
 
       let cpuTimeRatio = 1;
-      if (!isInstant && !it.isIncomplete) {
+      if (!isInstant && !it.isIncomplete && it.threadDur !== null) {
         // Rounding the CPU time ratio to two decimal places and ensuring
         // it is less than or equal to one, incase the thread duration exceeds
         // the total duration.
@@ -252,7 +244,6 @@ export class ChromeSliceTrack extends Track<Config, Data> {
       const isIncomplete = data.isIncomplete[i];
       const title = data.strings[titleId];
       const colorOverride = data.colors && data.strings[data.colors[i]];
-      const isThreadSlice = this.config.isThreadSlice;
       if (isIncomplete) {  // incomplete slice
         tEnd = visibleWindowTime.end;
       }
@@ -322,7 +313,8 @@ export class ChromeSliceTrack extends Track<Config, Data> {
 
       if (isIncomplete && rect.width > SLICE_HEIGHT / 4) {
         drawIncompleteSlice(ctx, rect.left, rect.top, rect.width, SLICE_HEIGHT);
-      } else if (isThreadSlice) {
+      } else if (
+          data.cpuTimeRatio !== undefined && data.cpuTimeRatio[i] < 1 - 1e-9) {
         // We draw two rectangles, representing the ratio between wall time and
         // time spent on cpu.
         const cpuTimeRatio = data.cpuTimeRatio![i];
@@ -445,7 +437,7 @@ export class ChromeSliceTrack extends Track<Config, Data> {
       |undefined {
     const {timeScale, visibleWindowTime} = globals.frontendLocalState;
     const pxEnd = timeScale.timeToPx(visibleWindowTime.end);
-    const left = Math.max(timeScale.timeToPx(tStart), -TRACE_MARGIN_TIME_S);
+    const left = Math.max(timeScale.timeToPx(tStart), 0);
     const right = Math.min(timeScale.timeToPx(tEnd), pxEnd);
     return {
       left,

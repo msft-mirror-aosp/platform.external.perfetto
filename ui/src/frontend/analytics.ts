@@ -26,9 +26,11 @@ export function initAnalytics() {
   // Only initialize logging on the official site and on localhost (to catch
   // analytics bugs when testing locally).
   // Skip analytics is the fragment has "testing=1", this is used by UI tests.
+  // Skip analytics in embeddedMode since iFrames do not have the same access to
+  // local storage.
   if ((window.location.origin.startsWith('http://localhost:') ||
        window.location.origin.endsWith('.perfetto.dev')) &&
-      !globals.testing) {
+      !globals.testing && !globals.embeddedMode) {
     return new AnalyticsImpl();
   }
   return new NullAnalytics();
@@ -69,10 +71,10 @@ class AnalyticsImpl implements Analytics {
     // [1] https://developers.google.com/analytics/devguides/collection/gtagjs .
     gtagGlobals.dataLayer = gtagGlobals.dataLayer || [];
 
-    function gtagFunction(...args: any[]) {
+    function gtagFunction(..._: any[]) {
       // This needs to be a function and not a lambda. |arguments| behaves
       // slightly differently in a lambda and breaks GA.
-      gtagGlobals.dataLayer.push(args);
+      gtagGlobals.dataLayer.push(arguments);
     }
     gtagGlobals.gtag = gtagFunction;
     gtagGlobals.gtag('js', new Date());

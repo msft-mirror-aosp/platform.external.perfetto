@@ -381,10 +381,15 @@ void SliceTracker::MaybeCloseStack(int64_t ts,
       //          [     slice 2     ]
       // This is invalid in chrome and should be fixed. Duration events should
       // either be nested or disjoint, never partially intersecting.
+      // KI: if tracing both binder and system calls on android, "binder reply"
+      // slices will try to escape the enclosing sys_ioctl.
       PERFETTO_DLOG(
-          "Incorrect ordering of begin/end slice events around timestamp "
-          "%" PRId64,
-          ts);
+          "Incorrect ordering of begin/end slice events. "
+          "Truncating incomplete descendants to the end of slice "
+          "%s[%" PRId64 ", %" PRId64 "] due to an event at ts=%" PRId64 ".",
+          context_->storage->GetString(ref.name().value_or(kNullStringId))
+              .c_str(),
+          start_ts, end_ts, ts);
       context_->storage->IncrementStats(stats::misplaced_end_event);
 
       // Every slice below this one should have a pending duration. Update
@@ -416,7 +421,7 @@ int64_t SliceTracker::GetStackHash(const SlicesStack& stack) {
 
   const auto& slices = context_->storage->slice_table();
 
-  base::Hash hash;
+  base::Hasher hash;
   for (size_t i = 0; i < stack.size(); i++) {
     auto ref = stack[i].row.ToRowReference(slices);
     hash.Update(ref.category().value_or(kNullStringId).raw_id());

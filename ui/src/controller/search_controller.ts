@@ -12,27 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TRACE_MARGIN_TIME_S} from '../common/constants';
+import {sqliteString} from '../base/string_utils';
 import {Engine} from '../common/engine';
 import {NUM, STR} from '../common/query_result';
+import {escapeSearchQuery} from '../common/query_utils';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
 import {TimeSpan} from '../common/time';
 import {publishSearch, publishSearchResult} from '../frontend/publish';
 
 import {Controller} from './controller';
 import {App} from './globals';
-
-export function escapeQuery(s: string): string {
-  // See https://www.sqlite.org/lang_expr.html#:~:text=A%20string%20constant
-  s = s.replace(/\'/g, '\'\'');
-  s = s.replace(/_/g, '^_');
-  s = s.replace(/%/g, '^%');
-  return `'%${s}%' escape '^'`;
-}
-
-export function escapeSingleQuotes(s: string): string {
-  return s.replace(/\'/g, '\'\'');
-}
+import {toNs} from '../common/time';
 
 export interface SearchControllerArgs {
   engine: Engine;
@@ -78,7 +68,7 @@ export class SearchController extends Controller<'main'> {
     }
 
     const visibleState = this.app.state.frontendLocalState.visibleState;
-    const omniboxState = this.app.state.frontendLocalState.omniboxState;
+    const omniboxState = this.app.state.omniboxState;
     if (visibleState === undefined || omniboxState === undefined ||
         omniboxState.mode === 'COMMAND') {
       return;
@@ -91,9 +81,14 @@ export class SearchController extends Controller<'main'> {
         newSearch === this.previousSearch) {
       return;
     }
-    this.previousSpan = new TimeSpan(
-        Math.max(newSpan.start - newSpan.duration, -TRACE_MARGIN_TIME_S),
-        newSpan.end + newSpan.duration);
+
+
+    // TODO(hjd): We should restrict this to the start of the trace but
+    // that is not easily available here.
+    // N.B. Timestamps can be negative.
+    const start = newSpan.start - newSpan.duration;
+    const end = newSpan.end + newSpan.duration;
+    this.previousSpan = new TimeSpan(start, end);
     this.previousResolution = newResolution;
     this.previousSearch = newSearch;
     if (newSearch === '' || newSearch.length < 4) {
@@ -113,8 +108,8 @@ export class SearchController extends Controller<'main'> {
       return;
     }
 
-    let startNs = Math.round(newSpan.start * 1e9);
-    let endNs = Math.round(newSpan.end * 1e9);
+    let startNs = toNs(newSpan.start);
+    let endNs = toNs(newSpan.end);
 
     // TODO(hjd): We shouldn't need to be so defensive here:
     if (!Number.isFinite(startNs)) {
@@ -152,7 +147,7 @@ export class SearchController extends Controller<'main'> {
       resolution: number): Promise<SearchSummary> {
     const quantumNs = Math.round(resolution * 10 * 1e9);
 
-    const searchLiteral = escapeQuery(search);
+    const searchLiteral = escapeSearchQuery(search);
 
     startNs = Math.floor(startNs / quantumNs) * quantumNs;
 
@@ -164,8 +159,8 @@ export class SearchController extends Controller<'main'> {
       where rowid = 0;`);
 
     const utidRes = await this.query(`select utid from thread join process
-      using(upid) where thread.name like ${searchLiteral}
-      or process.name like ${searchLiteral}`);
+      using(upid) where thread.name glob ${searchLiteral}
+      or process.name glob ${searchLiteral}`);
 
     const utids = [];
     for (const it = utidRes.iter({utid: NUM}); it.valid(); it.next()) {
@@ -189,7 +184,7 @@ export class SearchController extends Controller<'main'> {
               select
               quantum_ts
               from search_summary_slice_span
-              where name like ${searchLiteral}
+              where name glob ${searchLiteral}
           )
           group by quantum_ts
           order by quantum_ts;`);
@@ -211,7 +206,7 @@ export class SearchController extends Controller<'main'> {
   }
 
   private async specificSearch(search: string) {
-    const searchLiteral = escapeQuery(search);
+    const searchLiteral = escapeSearchQuery(search);
     // TODO(hjd): we should avoid recomputing this every time. This will be
     // easier once the track table has entries for all the tracks.
     const cpuToTrackId = new Map();
@@ -224,8 +219,8 @@ export class SearchController extends Controller<'main'> {
 
     const utidRes = await this.query(`select utid from thread join process
     using(upid) where
-      thread.name like ${searchLiteral} or
-      process.name like ${searchLiteral}`);
+      thread.name glob ${searchLiteral} or
+      process.name glob ${searchLiteral}`);
     const utids = [];
     for (const it = utidRes.iter({utid: NUM}); it.valid(); it.next()) {
       utids.push(it.utid);
@@ -247,10 +242,10 @@ export class SearchController extends Controller<'main'> {
       track_id as sourceId,
       0 as utid
       from slice
-      where slice.name like ${searchLiteral}
+      where slice.name glob ${searchLiteral}
         or (
-          0 != CAST('${escapeSingleQuotes(search)}' AS INT) and
-          sliceId = CAST('${escapeSingleQuotes(search)}' AS INT)
+          0 != CAST(${(sqliteString(search))} AS INT) and
+          sliceId = CAST(${(sqliteString(search))} AS INT)
         )
     union
     select
@@ -261,8 +256,18 @@ export class SearchController extends Controller<'main'> {
       0 as utid
       from slice
       join args using(arg_set_id)
-      where string_value like ${searchLiteral}
-    order by ts`);
+      where string_value glob ${searchLiteral} or key glob ${searchLiteral}
+    union
+    select
+      id as sliceId,
+      ts,
+      'log' as source,
+      0 as sourceId,
+      utid
+    from android_logs where msg glob ${searchLiteral}
+    order by ts
+
+    `);
 
     const rows = queryRes.numRows();
     const searchResults: CurrentSearchResults = {
@@ -282,6 +287,12 @@ export class SearchController extends Controller<'main'> {
         trackId = cpuToTrackId.get(it.sourceId);
       } else if (it.source === 'track') {
         trackId = this.app.state.uiTrackIdByTraceTrackId[it.sourceId];
+      } else if (it.source === 'log') {
+        const logTracks = Object.values(this.app.state.tracks)
+                              .filter((t) => t.kind === 'AndroidLogTrack');
+        if (logTracks.length > 0) {
+          trackId = logTracks[0].id;
+        }
       }
 
       // The .get() calls above could return undefined, this isn't just an else.

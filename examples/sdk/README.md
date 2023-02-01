@@ -8,14 +8,14 @@ developing, debugging and performance analysis.
 Dependencies:
 
 - [CMake](https://cmake.org/)
-- C++11
+- C++17
 
 ## Building
 
 First, check out the latest Perfetto release:
 
 ```bash
-git clone https://android.googlesource.com/platform/external/perfetto -b v26.0
+git clone https://android.googlesource.com/platform/external/perfetto -b v29.0
 ```
 
 Then, build using CMake:

@@ -17,33 +17,12 @@
 #ifndef SRC_TRACE_PROCESSOR_TABLES_ANDROID_TABLES_H_
 #define SRC_TRACE_PROCESSOR_TABLES_ANDROID_TABLES_H_
 
+#include "src/trace_processor/tables/android_tables_py.h"
 #include "src/trace_processor/tables/macros.h"
 
 namespace perfetto {
 namespace trace_processor {
 namespace tables {
-
-// Log entries from Android logcat.
-//
-// NOTE: this table is not sorted by timestamp. This is why we omit the
-// sorted flag on the ts column.
-//
-// @param ts timestamp of log entry.
-// @param utid thread writing the log entry {@joinable thread.utid}.
-// @param prio priority of the log. 3=DEBUG, 4=INFO, 5=WARN, 6=ERROR.
-// @param tag tag of the log entry.
-// @param msg content of the log entry.
-// @tablegroup Events
-#define PERFETTO_TP_ANDROID_LOG_TABLE_DEF(NAME, PARENT, C) \
-  NAME(AndroidLogTable, "android_logs")                    \
-  PERFETTO_TP_ROOT_TABLE(PARENT, C)                        \
-  C(int64_t, ts)                                           \
-  C(uint32_t, utid)                                        \
-  C(uint32_t, prio)                                        \
-  C(base::Optional<StringPool::Id>, tag)                   \
-  C(StringPool::Id, msg)
-
-PERFETTO_TP_TABLE(PERFETTO_TP_ANDROID_LOG_TABLE_DEF);
 
 // A table presenting all game modes and interventions
 // of games installed on the system.
@@ -87,6 +66,22 @@ PERFETTO_TP_TABLE(PERFETTO_TP_ANDROID_LOG_TABLE_DEF);
   C(base::Optional<double>, battery_mode_fps)
 
 PERFETTO_TP_TABLE(PERFETTO_TP_ANDROID_GAME_INTERVENTION_LIST_DEF);
+
+// Dumpsys entries from Android dumpstate.
+//
+// @param section name of the dumpstate section.
+// @param service name of the dumpsys service. Only present when
+// dumpstate=="dumpsys", NULL otherwise.
+// @param line line-by-line contents of the section/service, one row per line.
+// @tablegroup Events
+#define PERFETTO_TP_ANDROID_DUMPSTATE_TABLE_DEF(NAME, PARENT, C) \
+  NAME(AndroidDumpstateTable, "android_dumpstate")               \
+  PERFETTO_TP_ROOT_TABLE(PARENT, C)                              \
+  C(base::Optional<StringPool::Id>, section)                     \
+  C(base::Optional<StringPool::Id>, service)                     \
+  C(StringPool::Id, line)
+
+PERFETTO_TP_TABLE(PERFETTO_TP_ANDROID_DUMPSTATE_TABLE_DEF);
 
 }  // namespace tables
 }  // namespace trace_processor

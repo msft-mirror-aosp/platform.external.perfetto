@@ -82,10 +82,12 @@ if (perfetto_build_with_android) {
 }
 
 if (enable_perfetto_tools) {
-  all_targets += [
-    "src/tools",
-    "src/websocket_bridge",
-  ]
+  all_targets += [ "src/tools" ]
+
+  # Windows does not have an IPC implementation.
+  if (!is_win) {
+    all_targets += [ "src/websocket_bridge" ]
+  }
 }
 
 if (enable_perfetto_unittests) {
@@ -148,6 +150,9 @@ if (perfetto_build_standalone) {
   all_targets += [
     "test/configs",
 
+    # Used to evaluate the Python folder for Bazel script generation.
+    "python:trace_processor_py",
+
     # For syntax-checking the protos.
     "protos/perfetto/trace:merged_trace_lite",
 
@@ -171,6 +176,7 @@ if (perfetto_build_standalone) {
 # catch refactoring breakages earlier without having to wait for treehugger.
 if (is_android && (perfetto_build_standalone || perfetto_build_with_android)) {
   all_targets += [ "test/cts:perfetto_cts_deps" ]
+  all_targets += [ "test/vts:perfetto_vts_deps" ]
 }
 
 group("all") {
@@ -197,6 +203,12 @@ group("default") {
 if (enable_perfetto_ui) {
   group("ui") {
     deps = [ "ui" ]
+  }
+}
+
+if (enable_perfetto_site) {
+  group("site") {
+    deps = [ "infra/perfetto.dev:site" ]
   }
 }
 

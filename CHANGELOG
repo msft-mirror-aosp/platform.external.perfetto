@@ -1,16 +1,89 @@
 Unreleased:
   Tracing service and probes:
-    *
+    * Added an explicit TraceUuid packet. The tracing service now always
+      generates a UUID, even if TraceConfig.trace_uuid_msb/lsb is empty.
   Trace Processor:
     *
   UI:
     *
+  SDK:
+    * Add perfetto::Tracing::ActivateTriggers() function.
+    * Made it possible to declare track event categories in a C++ namespace
+      with PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE, allowing multiple category
+      sets to be used in one same translation unit. Correspondingly, the
+      PERFETTO_COMPONENT_EXPORT and PERFETTO_TRACK_EVENT_NAMESPACE macros have
+      been deprecated in favor of this new functionality.
+    * Deprecated the PERFETTO_COMPONENT_EXPORT macro in favor of
+      PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE_WITH_ATTRS.
+    * Added TracingInitArgs::enable_system_consumer configuration option, that
+      allows the linker to discard the consumer IPC, if not required.
+
+
+v31.0 - 2022-11-10:
+  Tracing service and probes:
+    * Added support for collecting Android Trusty ftrace events.
+    * Fixed resetting syscall filter when recording selected syscalls.
+  Trace Processor:
+    * Improved error messages on SQL syntax errors.
+    * Improved performance of queries containing GLOB. Handling of GLOB
+      constraints now happens inside trace processor instead of SQLite.
+    * Added support for parsing Android Trusty ftrace events.
+  UI:
+    * Added support for metatracing UI code and integrate with trace processor
+      metatracing.
+    * Added support for scrolling to a time region using the postMessage API.
+    * Enabled Pivot table functionality by default.
+    * Fixed downloading of Java heap profiles.
+  SDK:
+    * Switched to require C++17 by default. A time-limited opt-out exists but
+      is planned to be removed in v34. Please contact us at
+      perfetto-dev@googlegroups.com if you have thoughts or concerns on this
+      move.
+
+
+v30.0 - 2022-10-06:
+  Trace Processor:
+    * Fixed parsing of "R+" (preempted) and "I" (idle kernel thread) end states
+      of sched_switch events, collected on Linux kernels v4.14 and above.
+      Previously, preemption was not recognised, and idle was reported as
+      "x" (task dead). See commit c60a630cfe0.
+    * Add support for parsing sys_write syscalls.
+    * Remove the thread_slice table: all columns have moved to the slice table
+      and thread_slice exists as a view for backwards compatibility. This view
+      will also be removed in the future
+    * Add Base64 encode SQL function.
+    * Add support for importing function graph ftrace events.
+    * Add support for importing V4L2 ftrace events.
+    * Add support for importing virtio-video ftrace events.
+  UI:
+    * Fix downloading profiles from flamegraphs.
+    * Enable Pivot table support by default.
+  SDK:
+    * Add support for disallowing concurrent tracing sessions.
+
+
+v29.0 - 2022-09-06:
+  Tracing service and probes:
+    * Add support for only tracing selected syscalls. By selecting only syscalls
+      of interest, usage of the trace buffer and performance impact on device
+      is reduced.
+    * Add support for parsing DSI ftrace events.
+  Trace Processor:
+    * Make calling NotifyEndOfFile more than once an error: this was deprecated
+      in v28. Flush should be used instead for all by the final call.
+    * Add parsing and ingestion for V4L2 events.
+    * Upgraded SQLite to 3.39.2.
+  UI:
+    * Add support for searching Android log events.
+    * Group kernel wakelock tracks into a single track group.
   SDK:
     * Added support for startup tracing. Tracing can be started in an app
       before it connects to the tracing service.
       The data sources which are started for startup tracing, will
       be automatically adopted to normal tracing session once we start
       normal tracing session.
+    * Added the |first_packet_on_sequence| boolean which is set the first packet
+      emitted on each TraceWriter.
 
 
 v28.0 - 2022-08-02:
