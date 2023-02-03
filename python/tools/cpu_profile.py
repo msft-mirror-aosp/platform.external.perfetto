@@ -109,7 +109,8 @@ def parse_and_validate_args():
       "--partial-matching",
       help="If set, enables \"partial matching\" on the strings in --names/-n."
       "Processes that are already running when profiling is started, and whose "
-      "names include any of the values in --names/-n as substrings will be profiled.",
+      "names include any of the values in --names/-n as substrings will be "
+      "profiled.",
       action="store_true")
   parser.add_argument(
       "-c",
@@ -144,7 +145,8 @@ def parse_and_validate_args():
 
 
 def get_matching_processes(args, names_to_match):
-  """Returns a list of currently-running processes whose names match `names_to_match`.
+  """Returns a list of currently-running processes whose names match
+  `names_to_match`.
 
   Args:
     args: The command-line arguments provided to this script.
@@ -171,7 +173,8 @@ def get_matching_processes(args, names_to_match):
 
 
 def get_perfetto_config(args):
-  """Returns a Perfetto config with CPU profiling enabled for the selected processes.
+  """Returns a Perfetto config with CPU profiling enabled for the selected
+  processes.
 
   Args:
     args: The command-line arguments provided to this script.
@@ -261,7 +264,8 @@ def release_or_newer(release):
 
 
 def get_and_prepare_profile_target(args):
-  """Returns the target where the trace/profile will be output. Creates a new directory if necessary.
+  """Returns the target where the trace/profile will be output.  Creates a
+  new directory if necessary.
 
   Args:
     args: The command-line arguments provided to this script.
@@ -293,14 +297,23 @@ def record_trace(config, profile_target):
   }
   if not release_or_newer('R'):
     sys.exit("This tool requires Android R+ to run.")
+
+  # Push configuration to the device.
+  tf = tempfile.NamedTemporaryFile()
+  tf.file.write(config.encode('utf-8'))
+  tf.file.flush()
+  profile_config_path = '/data/misc/perfetto-configs/config-' + UUID
+  adb_check_output(['adb', 'push', tf.name, profile_config_path])
+  tf.close()
+
+
   profile_device_path = '/data/misc/perfetto-traces/profile-' + UUID
-  perfetto_command = ('CONFIG=\'{}\'; echo ${{CONFIG}} | '
-                      'perfetto --txt -c - -o {} -d')
+  perfetto_command = ('perfetto --txt -c {} -o {} -d')
   try:
     perfetto_pid = int(
         adb_check_output([
             'adb', 'exec-out',
-            perfetto_command.format(config, profile_device_path)
+            perfetto_command.format(profile_config_path, profile_device_path)
         ]).strip())
   except ValueError as error:
     sys.exit("Unable to start profiling: {}".format(error))
@@ -330,6 +343,7 @@ def record_trace(config, profile_target):
 
   profile_host_path = os.path.join(profile_target, 'raw-trace')
   adb_check_output(['adb', 'pull', profile_device_path, profile_host_path])
+  adb_check_output(['adb', 'shell', 'rm', profile_config_path])
   adb_check_output(['adb', 'shell', 'rm', profile_device_path])
 
 
@@ -360,7 +374,8 @@ def concatenate_files(files_to_concatenate, output_file):
 
 
 def symbolize_trace(traceconv, profile_target):
-  """Attempts symbolization of the recorded trace/profile, if symbols are available.
+  """Attempts symbolization of the recorded trace/profile, if symbols are
+  available.
 
   Args:
     traceconv: The path to the `traceconv` binary used for symbolization.
