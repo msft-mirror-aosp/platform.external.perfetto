@@ -6744,6 +6744,7 @@ genrule {
 genrule {
     name: "perfetto_protos_perfetto_trace_processor_zero_gen",
     srcs: [
+        "protos/perfetto/trace_processor/cloud_trace_processor.proto",
         "protos/perfetto/trace_processor/metatrace_categories.proto",
         "protos/perfetto/trace_processor/trace_processor.proto",
     ],
@@ -6753,6 +6754,7 @@ genrule {
     ],
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location protozero_plugin) --plugin_out=wrapper_namespace=pbzero:$(genDir)/external/perfetto/ $(in)",
     out: [
+        "external/perfetto/protos/perfetto/trace_processor/cloud_trace_processor.pbzero.cc",
         "external/perfetto/protos/perfetto/trace_processor/metatrace_categories.pbzero.cc",
         "external/perfetto/protos/perfetto/trace_processor/trace_processor.pbzero.cc",
     ],
@@ -6762,6 +6764,7 @@ genrule {
 genrule {
     name: "perfetto_protos_perfetto_trace_processor_zero_gen_headers",
     srcs: [
+        "protos/perfetto/trace_processor/cloud_trace_processor.proto",
         "protos/perfetto/trace_processor/metatrace_categories.proto",
         "protos/perfetto/trace_processor/trace_processor.proto",
     ],
@@ -6771,6 +6774,7 @@ genrule {
     ],
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location protozero_plugin) --plugin_out=wrapper_namespace=pbzero:$(genDir)/external/perfetto/ $(in)",
     out: [
+        "external/perfetto/protos/perfetto/trace_processor/cloud_trace_processor.pbzero.h",
         "external/perfetto/protos/perfetto/trace_processor/metatrace_categories.pbzero.h",
         "external/perfetto/protos/perfetto/trace_processor/trace_processor.pbzero.h",
     ],
@@ -8139,6 +8143,7 @@ filegroup {
 filegroup {
     name: "perfetto_src_base_threading_unittests",
     srcs: [
+        "src/base/threading/channel_unittest.cc",
         "src/base/threading/thread_pool_unittest.cc",
     ],
 }
@@ -8850,6 +8855,7 @@ filegroup {
     name: "perfetto_src_protozero_protozero",
     srcs: [
         "src/protozero/field.cc",
+        "src/protozero/gen_field_helpers.cc",
         "src/protozero/message.cc",
         "src/protozero/message_arena.cc",
         "src/protozero/message_handle.cc",
@@ -12889,6 +12895,8 @@ java_library_host {
     srcs: [
         "protos/perfetto/trace/perfetto_trace.proto",
     ],
+    // b/267831518: Pin tradefed and dependencies to Java 11.
+    java_version: "11",
 }
 
 java_library_host {
@@ -12899,6 +12907,8 @@ java_library_host {
     srcs: [
         "protos/perfetto/metrics/perfetto_merged_metrics.proto",
     ],
+    // b/267831518: Pin tradefed and dependencies to Java 11.
+    java_version: "11",
 }
 
 // This sample target shows how to use the perfetto client API from within the
