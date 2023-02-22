@@ -819,12 +819,8 @@ if (use_custom_libcxx) {
       "//gn/standalone:extra_warnings",
       "//gn/standalone:no_exceptions",
       "//gn/standalone:no_rtti",
+      "//gn/standalone:c++17",
     ]
-    if (perfetto_cpp11_until_q1_2023) {
-      configs -= [ "//gn/standalone:c++11" ]
-    } else {
-      configs -= [ "//gn/standalone:c++17" ]
-    }
     configs += [
       ":libc++config",
       "//gn/standalone/sanitizers:sanitizer_options_link_helper",
@@ -922,12 +918,8 @@ if (use_custom_libcxx) {
       "//gn/standalone:extra_warnings",
       "//gn/standalone:no_exceptions",
       "//gn/standalone:no_rtti",
+      "//gn/standalone:c++17",
     ]
-    if (perfetto_cpp11_until_q1_2023) {
-      configs -= [ "//gn/standalone:c++11" ]
-    } else {
-      configs -= [ "//gn/standalone:c++17" ]
-    }
     if ((is_android || is_mac) && !custom_libcxx_is_static) {
       # Use libc++_perfetto to avoid conflicting with system libc++
       output_name = "libc++_perfettto"
@@ -1310,11 +1302,6 @@ source_set("libunwindstack") {
     cflags += [ "-Wno-deprecated-declarations" ]
   }
   public_configs = [ ":libunwindstack_config" ]
-
-  if (perfetto_cpp11_until_q1_2023) {
-    configs -= [ "//gn/standalone:c++11" ]
-    public_configs += [ "//gn/standalone:c++17" ]
-  }
 }
 
 config("bionic_kernel_uapi_headers") {
@@ -1423,16 +1410,6 @@ config("llvm_demangle_config") {
 source_set("llvm_demangle") {
   visibility = _buildtools_visibility
   configs -= [ "//gn/standalone:extra_warnings" ]
-
-  # NB: this is built under c++14 and linked into code that is c++11 by default.
-  # We rely on the ABIs being compatible for this to be sane. At the time of
-  # writing, the only c++14 specific code is behind an #ifndef NDEBUG, so we
-  # could keep building as c++11 in non-debug builds, but we always use c++14 for
-  # consistency.
-  if (perfetto_cpp11_until_q1_2023) {
-    configs -= [ "//gn/standalone:c++11" ]
-    configs += [ "//gn/standalone:c++14" ]
-  }
   public_configs = [ ":llvm_demangle_config" ]
   sources = [
     "llvm-project/llvm/include/llvm/Demangle/Demangle.h",
@@ -1473,6 +1450,11 @@ if (enable_perfetto_grpc) {
     ]
   }
 
+  config("grpc_re2_config") {
+    visibility = _buildtools_visibility
+    include_dirs = [ "grpc/src/third_party/re2" ]
+  }
+
   config("grpc_internal_config") {
     visibility = _buildtools_visibility
     include_dirs = [
@@ -1487,10 +1469,24 @@ if (enable_perfetto_grpc) {
     cflags = [ "-DGRPC_ARES=0" ]
   }
 
-  source_set("grpc") {
-    deps = [
-      "grpc:grpc++",
-      "//gn:default_deps",
+  config("grpc_gen_config") {
+    cflags = [
+      # Using -isystem instead of include_dirs (-I), so we don't need to
+      # suppress warnings coming from libprotobuf headers. Doing so would mask
+      # warnings in our own code.
+      perfetto_isystem_cflag,
+      rebase_path("grpc/src/include", root_build_dir),
+      perfetto_isystem_cflag,
+      rebase_path("grpc/src/third_party/abseil-cpp", root_build_dir),
     ]
+
+    # This issues appear in .grpc.pb.h files so we unfortunately need to leak
+    # the cflags outside of just compiling this code.
+    if (is_clang && !is_win) {
+      cflags += [
+        "-Wno-weak-vtables",
+        "-Wno-suggest-destructor-override",
+      ]
+    }
   }
 }
