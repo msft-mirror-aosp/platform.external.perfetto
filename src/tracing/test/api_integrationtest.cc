@@ -4557,6 +4557,51 @@ TEST_P(PerfettoApiTest, LegacyTraceEvents) {
           "[track=0]Legacy_e(unscoped_id=9001):cat.LegacyAsync3"));
 }
 
+TEST_P(PerfettoApiTest, LegacyTraceEventsAndClockSnapshots) {
+  auto* tracing_session = NewTraceWithCategories({"cat"});
+  tracing_session->get()->StartBlocking();
+
+  {
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("cat", "LegacyAsync", 5678);
+
+    perfetto::test::TracingMuxerImplInternalsForTest::ClearIncrementalState();
+
+    TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
+        "cat", "LegacyAsyncWithTimestamp", 5678, MyTimestamp{1});
+    TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
+        "cat", "LegacyAsyncWithTimestamp", 5678, MyTimestamp{2});
+
+    perfetto::test::TracingMuxerImplInternalsForTest::ClearIncrementalState();
+
+    TRACE_EVENT_NESTABLE_ASYNC_END0("cat", "LegacyAsync", 5678);
+  }
+
+  auto trace = StopSessionAndReturnParsedTrace(tracing_session);
+
+  // Check that clock snapshots are monotonic and don't contain timestamps from
+  // trace events with explicit timestamps.
+  std::unordered_map<uint64_t, uint64_t> last_clock_ts;
+  for (const auto& packet : trace.packet()) {
+    if (packet.has_clock_snapshot()) {
+      for (auto& clock : packet.clock_snapshot().clocks()) {
+        if (!clock.is_incremental()) {
+          uint64_t ts = clock.timestamp();
+          uint64_t id = clock.clock_id();
+          EXPECT_LE(last_clock_ts[id], ts);
+          last_clock_ts[id] = ts;
+        }
+      }
+
+      // Events that don't use explicit timestamps should have exactly the same
+      // timestamp as in the snapshot (i.e. the relative ts of 0).
+      // Here we assume that timestamps are incremental by default.
+      if (!packet.has_timestamp_clock_id()) {
+        EXPECT_EQ(packet.timestamp(), 0u);
+      }
+    }
+  }
+}
+
 TEST_P(PerfettoApiTest, LegacyTraceEventsWithCustomAnnotation) {
   // Create a new trace session.
   auto* tracing_session = NewTraceWithCategories({"cat"});
@@ -5986,8 +6031,12 @@ class ConcurrentSessionTest : public ::testing::Test {
   void TearDown() override { perfetto::Tracing::ResetForTesting(); }
 
   static std::unique_ptr<perfetto::TracingSession> StartTracing(
-      perfetto::BackendType backend_type) {
+      perfetto::BackendType backend_type,
+      bool short_stop_timeout = false) {
     perfetto::TraceConfig cfg;
+    if (short_stop_timeout) {
+      cfg.set_data_source_stop_timeout_ms(500);
+    }
     cfg.add_buffers()->set_size_kb(1024);
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");
@@ -6039,7 +6088,8 @@ TEST_F(ConcurrentSessionTest, DisallowMultipleSessionBasic) {
   auto tracing_session1 = StartTracing(perfetto::kInProcessBackend);
   TRACE_EVENT_BEGIN("test", "DrawGame1");
 
-  auto tracing_session2 = StartTracing(perfetto::kInProcessBackend);
+  auto tracing_session2 =
+      StartTracing(perfetto::kInProcessBackend, /*short_stop_timeout=*/true);
   TRACE_EVENT_BEGIN("test", "DrawGame2");
 
   auto slices1 = StopTracing(std::move(tracing_session1));
@@ -6081,18 +6131,105 @@ TEST(PerfettoApiInitTest, DisableSystemConsumer) {
 
   perfetto::test::DisableReconnectLimit();
 
-  std::unique_ptr<perfetto::TracingSession> ts =
-      perfetto::Tracing::NewTrace(perfetto::kSystemBackend);
+  // Creating the consumer with kUnspecifiedBackend should cause a connection
+  // error: there's no consumer backend.
+  {
+    std::unique_ptr<perfetto::TracingSession> ts =
+        perfetto::Tracing::NewTrace(perfetto::kUnspecifiedBackend);
 
-  // Creating the consumer should cause an asynchronous disconnect error.
-  WaitableTestEvent got_error;
-  ts->SetOnErrorCallback([&](perfetto::TracingError error) {
-    EXPECT_EQ(perfetto::TracingError::kDisconnected, error.code);
-    EXPECT_FALSE(error.message.empty());
-    got_error.Notify();
-  });
-  got_error.Wait();
-  ts.reset();
+    WaitableTestEvent got_error;
+    ts->SetOnErrorCallback([&](perfetto::TracingError error) {
+      EXPECT_EQ(perfetto::TracingError::kDisconnected, error.code);
+      EXPECT_FALSE(error.message.empty());
+      got_error.Notify();
+    });
+    got_error.Wait();
+  }
+
+  // Creating the consumer with kSystemBackend should create a system consumer
+  // backend on the spot.
+  EXPECT_TRUE(perfetto::Tracing::NewTrace(perfetto::kSystemBackend)
+                  ->QueryServiceStateBlocking()
+                  .success);
+
+  // Now even a consumer with kUnspecifiedBackend should succeed, because the
+  // backend has been created.
+  EXPECT_TRUE(perfetto::Tracing::NewTrace(perfetto::kUnspecifiedBackend)
+                  ->QueryServiceStateBlocking()
+                  .success);
+
+  perfetto::Tracing::ResetForTesting();
+}
+
+TEST(PerfettoApiInitTest, SeparateInitializations) {
+  auto system_service = perfetto::test::SystemService::Start();
+  // If the system backend isn't supported, skip
+  if (!system_service.valid()) {
+    GTEST_SKIP();
+  }
+
+  {
+    EXPECT_FALSE(perfetto::Tracing::IsInitialized());
+    TracingInitArgs args;
+    args.backends = perfetto::kInProcessBackend;
+    perfetto::Tracing::Initialize(args);
+  }
+
+  // If this wasn't the first test to run in this process, any producers
+  // connected to the old system service will have been disconnected by the
+  // service restarting above. Wait for all producers to connect again before
+  // proceeding with the test.
+  perfetto::test::SyncProducers();
+
+  perfetto::test::DisableReconnectLimit();
+
+  {
+    perfetto::DataSourceDescriptor dsd;
+    dsd.set_name("CustomDataSource");
+    CustomDataSource::Register(dsd);
+  }
+
+  {
+    std::unique_ptr<perfetto::TracingSession> tracing_session =
+        perfetto::Tracing::NewTrace(perfetto::kInProcessBackend);
+    auto result = tracing_session->QueryServiceStateBlocking();
+    perfetto::protos::gen::TracingServiceState state;
+    ASSERT_TRUE(result.success);
+    ASSERT_TRUE(state.ParseFromArray(result.service_state_data.data(),
+                                     result.service_state_data.size()));
+    EXPECT_THAT(state.data_sources(),
+                Contains(Property(
+                    &perfetto::protos::gen::TracingServiceState::DataSource::
+                        ds_descriptor,
+                    Property(&perfetto::protos::gen::DataSourceDescriptor::name,
+                             "CustomDataSource"))));
+  }
+
+  {
+    EXPECT_TRUE(perfetto::Tracing::IsInitialized());
+    TracingInitArgs args;
+    args.backends = perfetto::kSystemBackend;
+    args.enable_system_consumer = false;
+    perfetto::Tracing::Initialize(args);
+  }
+
+  perfetto::test::SyncProducers();
+
+  {
+    std::unique_ptr<perfetto::TracingSession> tracing_session =
+        perfetto::Tracing::NewTrace(perfetto::kSystemBackend);
+    auto result = tracing_session->QueryServiceStateBlocking();
+    perfetto::protos::gen::TracingServiceState state;
+    ASSERT_TRUE(result.success);
+    ASSERT_TRUE(state.ParseFromArray(result.service_state_data.data(),
+                                     result.service_state_data.size()));
+    EXPECT_THAT(state.data_sources(),
+                Contains(Property(
+                    &perfetto::protos::gen::TracingServiceState::DataSource::
+                        ds_descriptor,
+                    Property(&perfetto::protos::gen::DataSourceDescriptor::name,
+                             "CustomDataSource"))));
+  }
 
   perfetto::Tracing::ResetForTesting();
 }
