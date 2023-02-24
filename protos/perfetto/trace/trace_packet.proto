@@ -46,6 +46,7 @@ import "protos/perfetto/trace/memory_graph.proto";
 import "protos/perfetto/trace/perfetto/perfetto_metatrace.proto";
 import "protos/perfetto/trace/perfetto/tracing_service_event.proto";
 import "protos/perfetto/trace/power/android_energy_estimation_breakdown.proto";
+import "protos/perfetto/trace/power/android_entity_state_residency.proto";
 import "protos/perfetto/trace/power/battery_counters.proto";
 import "protos/perfetto/trace/power/power_rails.proto";
 import "protos/perfetto/trace/statsd/statsd_atom.proto";
@@ -61,6 +62,7 @@ import "protos/perfetto/trace/system_info.proto";
 import "protos/perfetto/trace/system_info/cpu_info.proto";
 import "protos/perfetto/trace/trace_packet_defaults.proto";
 import "protos/perfetto/trace/track_event/process_descriptor.proto";
+import "protos/perfetto/trace/track_event/range_of_interest.proto";
 import "protos/perfetto/trace/track_event/thread_descriptor.proto";
 import "protos/perfetto/trace/track_event/track_descriptor.proto";
 import "protos/perfetto/trace/track_event/track_event.proto";
@@ -92,7 +94,7 @@ package perfetto.protos;
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 90.
+// Next id: 92.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -161,6 +163,7 @@ message TracePacket {
     AndroidGameInterventionList android_game_intervention_list = 83;
     StatsdAtom statsd_atom = 84;
     AndroidSystemProperty android_system_property = 86;
+    EntityStateResidency entity_state_residency = 91;
 
     // Only used in profile packets.
     ProfiledFrameSymbols profiled_frame_symbols = 55;
@@ -199,6 +202,10 @@ message TracePacket {
 
     // Represents a single packet sent or received by the network.
     NetworkPacketEvent network_packet = 88;
+
+    // The "range of interest" for track events. See the message definition
+    // comments for more details.
+    TrackEventRangeOfInterest track_event_range_of_interest = 90;
 
     // This field is only used for testing.
     // In previous versions of this proto this field had the id 268435455

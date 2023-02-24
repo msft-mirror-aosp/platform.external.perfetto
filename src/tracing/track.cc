@@ -161,8 +161,6 @@ TrackRegistry::~TrackRegistry() = default;
 
 // static
 void TrackRegistry::InitializeInstance() {
-  // TODO(eseckler): Chrome may call this more than once. Once Chrome doesn't
-  // call this directly anymore, bring back DCHECK(!instance_) instead.
   if (instance_)
     return;
   instance_ = new TrackRegistry();
@@ -184,8 +182,7 @@ void TrackRegistry::InitializeInstance() {
 }
 
 void TrackRegistry::ResetForTesting() {
-  delete instance_;
-  instance_ = nullptr;
+  instance_->tracks_.clear();
 }
 
 void TrackRegistry::UpdateTrack(Track track,

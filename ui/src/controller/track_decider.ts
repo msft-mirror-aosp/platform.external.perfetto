@@ -88,7 +88,13 @@ const DISK_IOSTAT_GROUP_NAME = 'diskstat';
 const UFS_CMD_TAG = 'io.ufs.command.tag';
 const UFS_CMD_TAG_GROUP_NAME = 'io.ufs.command.tags';
 const BUDDY_INFO_TAG = 'mem.buddyinfo';
-const KERNEL_WAKELOCK_PREFIX = 'Wakelock';
+// NB: Userspace wakelocks start with "WakeLock" not "Wakelock".
+const KERNEL_WAKELOCK_REGEX = new RegExp('^Wakelock.*$');
+const KERNEL_WAKELOCK_GROUP = 'Kernel wakelocks';
+const NETWORK_TRACK_REGEX = new RegExp('^.* (Received|Transmitted)( KB)?$');
+const NETWORK_TRACK_GROUP = 'Networking';
+const ENTITY_RESIDENCY_REGEX = new RegExp('^Entity residency: (.*)$');
+const ENTITY_RESIDENCY_GROUP = 'Entity residency';
 
 // Sets the default 'scale' for counter tracks. If the regex matches
 // then the paired mode is used. Entries are in priority order so the
@@ -99,7 +105,9 @@ const COUNTER_REGEX: [RegExp, CounterScaleOptions][] = [
   // value.
   [new RegExp('^power\..*$'), 'RATE'],
   // Same for network counters.
-  [new RegExp('^.* (Received|Transmitted) KB$'), 'RATE'],
+  [NETWORK_TRACK_REGEX, 'RATE'],
+  // Entity residency
+  [ENTITY_RESIDENCY_REGEX, 'RATE'],
 ];
 
 function getCounterScale(name: string): CounterScaleOptions|undefined {
@@ -624,12 +632,17 @@ class TrackDecider {
     }
   }
 
-  async groupKernelWakelockTracks(): Promise<void> {
+  async groupTracksByRegex(
+      regex: RegExp, groupName: string,
+      renameToCapturingGroup?: number): Promise<void> {
     let groupUuid = undefined;
 
     for (const track of this.tracksToAdd) {
-      // NB: Userspace wakelocks start with "WakeLock" not "Wakelock".
-      if (track.name.startsWith(KERNEL_WAKELOCK_PREFIX)) {
+      const matches = regex.exec(track.name);
+      if (matches !== null) {
+        if (renameToCapturingGroup) {
+          track.name = matches[renameToCapturingGroup];
+        }
         if (groupUuid === undefined) {
           groupUuid = uuidv4();
         }
@@ -644,7 +657,7 @@ class TrackDecider {
         engineId: this.engineId,
         kind: NULL_TRACK_KIND,
         trackSortKey: PrimaryTrackSortKey.NULL_TRACK,
-        name: 'Kernel wakelocks',
+        name: groupName,
         trackGroup: undefined,
         config: {},
       });
@@ -652,7 +665,7 @@ class TrackDecider {
       const addGroup = Actions.addTrackGroup({
         engineId: this.engineId,
         summaryTrackId,
-        name: 'Kernel wakelocks',
+        name: groupName,
         id: groupUuid,
         collapsed: true,
       });
@@ -1679,7 +1692,10 @@ class TrackDecider {
     await this.groupGlobalIostatTracks(DISK_IOSTAT_TAG, DISK_IOSTAT_GROUP_NAME);
     await this.groupGlobalUfsCmdTagTracks(UFS_CMD_TAG, UFS_CMD_TAG_GROUP_NAME);
     await this.groupGlobalBuddyInfoTracks();
-    await this.groupKernelWakelockTracks();
+    await this.groupTracksByRegex(KERNEL_WAKELOCK_REGEX, KERNEL_WAKELOCK_GROUP);
+    await this.groupTracksByRegex(NETWORK_TRACK_REGEX, NETWORK_TRACK_GROUP);
+    await this.groupTracksByRegex(
+        ENTITY_RESIDENCY_REGEX, ENTITY_RESIDENCY_GROUP, 1);
 
     // Pre-group all kernel "threads" (actually processes) if this is a linux
     // system trace. Below, addProcessTrackGroups will skip them due to an

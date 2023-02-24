@@ -42,6 +42,7 @@
 * [Trace analysis](#)
   * [Trace Processor (SQL)](analysis/trace-processor.md)
   * [Batch Trace Processor](analysis/batch-trace-processor.md)
+  * [Standard library](analysis/stdlib-docs.autogen)
   * [Trace-based metrics](analysis/metrics.md)
   * [Common queries](analysis/common-queries.md)
   * [SQL tables](analysis/sql-tables.autogen)
@@ -66,6 +67,7 @@
   * [Trace Packet proto](reference/trace-packet-proto.autogen)
   * [perfetto cmdline](reference/perfetto-cli.md)
   * [heap_profile cmdline](reference/heap_profile-cli.md)
+  * [Synthetic TrackEvent](reference/synthetic-track-event.md)
 
 * [Contributing](#)
     * [Getting started](contributing/getting-started.md)

@@ -48,6 +48,7 @@ import {CheckHttpRpcConnection} from './rpc_http_dialog';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
 import {ViewerPage} from './viewer_page';
+import {WidgetsPage} from './widgets_page';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -251,11 +252,17 @@ function main() {
     '/flags': FlagsPage,
     '/metrics': MetricsPage,
     '/info': TraceInfoPage,
+    '/widgets': WidgetsPage,
   });
   router.onRouteChanged = (route) => {
     globals.rafScheduler.scheduleFullRedraw();
     maybeOpenTraceFromRoute(route);
   };
+
+  // This must be called before calling `globals.initialize` so that the
+  // `embeddedMode` global is set.
+  initGlobalsFromQueryString();
+
   globals.initialize(dispatch, router);
   globals.serviceWorkerController.install();
 
@@ -323,8 +330,6 @@ function onCssLoaded() {
   globals.rafScheduler.domRedraw = () => {
     m.render(main, globals.router.resolve());
   };
-
-  initGlobalsFromQueryString();
 
   initLiveReloadIfLocalhost();
 

@@ -186,9 +186,10 @@ size_t CpuReader::ReadCycle(
                              metatrace::FTRACE_CPU_READ_CYCLE);
 
   // Work in batches to keep cache locality, and limit memory usage.
-  size_t batch_pages = std::min(parsing_buf_size_pages, max_pages);
   size_t total_pages_read = 0;
   for (bool is_first_batch = true;; is_first_batch = false) {
+    size_t batch_pages =
+        std::min(parsing_buf_size_pages, max_pages - total_pages_read);
     size_t pages_read = ReadAndProcessBatch(
         parsing_buf, batch_pages, is_first_batch, started_data_sources);
 
@@ -929,8 +930,9 @@ bool CpuReader::ParseSysExit(const Event& info,
   // if the call succeeded and is within fd bounds
   if (ds_config->syscalls_returning_fd.count(syscall_id) && syscall_ret >= 0 &&
       syscall_ret <= std::numeric_limits<int>::max()) {
-    auto& pid_fds = metadata->fds[metadata->last_seen_common_pid];
-    pid_fds.insert(static_cast<uint64_t>(syscall_ret));
+    const auto pid = metadata->last_seen_common_pid;
+    const auto syscall_ret_u = static_cast<uint64_t>(syscall_ret);
+    metadata->fds.insert(std::make_pair(pid, syscall_ret_u));
   }
   return true;
 }

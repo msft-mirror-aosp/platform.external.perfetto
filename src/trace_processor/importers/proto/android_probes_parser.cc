@@ -26,6 +26,7 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/proto/metadata_tracker.h"
 #include "src/trace_processor/importers/syscalls/syscall_tracker.h"
+#include "src/trace_processor/types/tcp_state.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 #include "protos/perfetto/common/android_energy_consumer_descriptor.pbzero.h"
@@ -36,8 +37,10 @@
 #include "protos/perfetto/trace/android/android_log.pbzero.h"
 #include "protos/perfetto/trace/android/android_system_property.pbzero.h"
 #include "protos/perfetto/trace/android/initial_display_state.pbzero.h"
+#include "protos/perfetto/trace/android/network_trace.pbzero.h"
 #include "protos/perfetto/trace/android/packages_list.pbzero.h"
 #include "protos/perfetto/trace/power/android_energy_estimation_breakdown.pbzero.h"
+#include "protos/perfetto/trace/power/android_entity_state_residency.pbzero.h"
 #include "protos/perfetto/trace/power/battery_counters.pbzero.h"
 #include "protos/perfetto/trace/power/power_rails.pbzero.h"
 #include "protos/perfetto/trace/ps/process_stats.pbzero.h"
@@ -49,6 +52,22 @@
 
 namespace perfetto {
 namespace trace_processor {
+namespace {
+// Convert the bitmask into a string where '.' indicates an unset bit
+// and each bit gets a unique letter if set. The letters correspond to
+// the bitfields in tcphdr (fin, syn, rst, etc).
+base::StackString<12> GetTcpFlagMask(uint32_t tcp_flags) {
+  static constexpr char kBitNames[] = "fsrpauec";
+  static constexpr int kBitCount = 8;
+
+  char flags[kBitCount + 1] = {'\0'};
+  for (int f = 0; f < kBitCount; f++) {
+    flags[f] = (tcp_flags & (1 << f)) ? kBitNames[f] : '.';
+  }
+
+  return base::StackString<12>("%s", flags);
+}
+}  // namespace
 
 AndroidProbesParser::AndroidProbesParser(TraceProcessorContext* context)
     : context_(context),
@@ -58,7 +77,17 @@ AndroidProbesParser::AndroidProbesParser(TraceProcessorContext* context)
       batt_current_avg_id_(
           context->storage->InternString("batt.current.avg_ua")),
       screen_state_id_(context->storage->InternString("ScreenState")),
-      device_state_id_(context->storage->InternString("DeviceStateChanged")) {}
+      device_state_id_(context->storage->InternString("DeviceStateChanged")),
+      battery_status_id_(context->storage->InternString("BatteryStatus")),
+      plug_type_id_(context->storage->InternString("PlugType")),
+      net_arg_length_(context->storage->InternString("packet_length")),
+      net_arg_ip_proto_(context->storage->InternString("packet_transport")),
+      net_arg_tcp_flags_(context->storage->InternString("packet_tcp_flags")),
+      net_arg_tag_(context->storage->InternString("socket_tag")),
+      net_arg_local_port_(context->storage->InternString("local_port")),
+      net_arg_remote_port_(context->storage->InternString("remote_port")),
+      net_ipproto_tcp_(context->storage->InternString("IPPROTO_TCP")),
+      net_ipproto_udp_(context->storage->InternString("IPPROTO_UDP")) {}
 
 void AndroidProbesParser::ParseBatteryCounters(int64_t ts, ConstBytes blob) {
   protos::pbzero::BatteryCounters::Decoder evt(blob.data, blob.size);
@@ -82,7 +111,18 @@ void AndroidProbesParser::ParseBatteryCounters(int64_t ts, ConstBytes blob) {
         context_->track_tracker->InternGlobalCounterTrack(batt_charge_id);
     context_->event_tracker->PushCounter(
         ts, static_cast<double>(evt.charge_counter_uah()), track);
+  } else if (evt.has_energy_counter_uwh() && evt.has_voltage_uv()) {
+    // Calculate charge counter from energy counter and voltage.
+    TrackId track =
+        context_->track_tracker->InternGlobalCounterTrack(batt_charge_id);
+    auto energy = evt.energy_counter_uwh();
+    auto voltage = evt.voltage_uv();
+    if (voltage > 0) {
+      context_->event_tracker->PushCounter(
+          ts, static_cast<double>(energy * 1000000 / voltage), track);
+    }
   }
+
   if (evt.has_capacity_percent()) {
     TrackId track =
         context_->track_tracker->InternGlobalCounterTrack(batt_capacity_id);
@@ -177,6 +217,36 @@ void AndroidProbesParser::ParseEnergyBreakdown(int64_t ts, ConstBytes blob) {
             consumer_name, consumer_id, breakdown.uid());
     context_->event_tracker->PushCounter(
         ts, static_cast<double>(breakdown.energy_uws()), energy_uid_track);
+  }
+}
+
+void AndroidProbesParser::ParseEntityStateResidency(int64_t ts,
+                                                    ConstBytes blob) {
+  protos::pbzero::EntityStateResidency::Decoder event(blob.data, blob.size);
+
+  if (!event.has_residency()) {
+    context_->storage->IncrementStats(stats::entity_state_residency_invalid);
+    return;
+  }
+
+  auto* tracker = AndroidProbesTracker::GetOrCreate(context_);
+
+  for (auto it = event.residency(); it; ++it) {
+    protos::pbzero::EntityStateResidency::StateResidency::Decoder residency(
+        *it);
+
+    auto entity_state = tracker->GetEntityStateDescriptor(
+        residency.entity_index(), residency.state_index());
+    if (!entity_state) {
+      context_->storage->IncrementStats(
+          stats::entity_state_residency_lookup_failed);
+      return;
+    }
+
+    TrackId track = context_->track_tracker->InternGlobalCounterTrack(
+        entity_state->overall_name);
+    context_->event_tracker->PushCounter(
+        ts, double(residency.total_time_in_state_ms()), track);
   }
 }
 
@@ -382,15 +452,9 @@ void AndroidProbesParser::ParseAndroidSystemProperty(int64_t ts,
   for (auto it = properties.values(); it; ++it) {
     protos::pbzero::AndroidSystemProperty::PropertyValue::Decoder kv(*it);
     base::StringView name(kv.name());
-    if (name == "debug.tracing.screen_state") {
-      base::Optional<int32_t> state =
-          base::StringToInt32(kv.value().ToStdString());
-      if (state) {
-        TrackId track =
-            context_->track_tracker->InternGlobalCounterTrack(screen_state_id_);
-        context_->event_tracker->PushCounter(ts, *state, track);
-      }
-    } else if (name == "debug.tracing.device_state") {
+    base::Optional<StringId> mapped_name_id;
+
+    if (name == "debug.tracing.device_state") {
       auto state = kv.value();
 
       StringId state_id = context_->storage->InternString(state);
@@ -400,9 +464,10 @@ void AndroidProbesParser::ParseAndroidSystemProperty(int64_t ts,
       TrackId track_id =
           context_->async_track_set_tracker->Scoped(track_set_id, ts, 0);
       context_->slice_tracker->Scoped(ts, track_id, kNullStringId, state_id, 0);
-    } else if (name.StartsWith("debug.tracing.battery_stats.")) {
-      base::StringView battery_stat = name.substr(strlen("debug.tracing."));
-      StringId name_id = context_->storage->InternString(battery_stat);
+    } else if (name.StartsWith("debug.tracing.battery_stats.") ||
+               name == "debug.tracing.mcc" || name == "debug.tracing.mnc") {
+      StringId name_id = context_->storage->InternString(
+          name.substr(strlen("debug.tracing.")));
       base::Optional<int32_t> state =
           base::StringToInt32(kv.value().ToStdString());
       if (state) {
@@ -410,8 +475,88 @@ void AndroidProbesParser::ParseAndroidSystemProperty(int64_t ts,
             context_->track_tracker->InternGlobalCounterTrack(name_id);
         context_->event_tracker->PushCounter(ts, *state, track);
       }
+    } else if (name == "debug.tracing.screen_state") {
+      mapped_name_id = screen_state_id_;
+    } else if (name == "debug.tracing.battery_status") {
+      mapped_name_id = battery_status_id_;
+    } else if (name == "debug.tracing.plug_type") {
+      mapped_name_id = plug_type_id_;
+    }
+    if (mapped_name_id) {
+      base::Optional<int32_t> state =
+          base::StringToInt32(kv.value().ToStdString());
+      if (state) {
+        TrackId track =
+            context_->track_tracker->InternGlobalCounterTrack(*mapped_name_id);
+        context_->event_tracker->PushCounter(ts, *state, track);
+      }
     }
   }
+}
+
+void AndroidProbesParser::ParseNetworkPacketEvent(int64_t ts, ConstBytes blob) {
+  using protos::pbzero::NetworkPacketEvent;
+  using protos::pbzero::TrafficDirection;
+  NetworkPacketEvent::Decoder evt(blob);
+
+  // Tracks are per interface and per direction.
+  const char* track_suffix =
+      evt.direction() == TrafficDirection::DIR_INGRESS  ? " Received"
+      : evt.direction() == TrafficDirection::DIR_EGRESS ? " Transmitted"
+                                                        : " DIR_UNKNOWN";
+
+  base::StackString<64> name("%.*s%s", static_cast<int>(evt.interface().size),
+                             evt.interface().data, track_suffix);
+  StringId name_id = context_->storage->InternString(name.string_view());
+
+  // Event titles are the package name, if available.
+  StringId title_id = kNullStringId;
+  if (evt.uid() > 0) {
+    const auto& package_list = context_->storage->package_list_table();
+    base::Optional<uint32_t> pkg_row = package_list.uid().IndexOf(evt.uid());
+    if (pkg_row) {
+      title_id = package_list.package_name()[*pkg_row];
+    }
+  }
+
+  // If the above fails, fall back to the uid.
+  if (title_id == kNullStringId) {
+    base::StackString<32> title_str("uid=%" PRIu32, evt.uid());
+    title_id = context_->storage->InternString(title_str.string_view());
+  }
+
+  TrackId track_id = context_->async_track_set_tracker->Scoped(
+      context_->async_track_set_tracker->InternGlobalTrackSet(name_id), ts, 0);
+
+  context_->slice_tracker->Scoped(
+      ts, track_id, name_id, title_id, 0, [&](ArgsTracker::BoundInserter* i) {
+        i->AddArg(net_arg_length_, Variadic::Integer(evt.length()));
+
+        StringId ip_proto;
+        if (evt.ip_proto() == kIpprotoTcp) {
+          ip_proto = net_ipproto_tcp_;
+        } else if (evt.ip_proto() == kIpprotoUdp) {
+          ip_proto = net_ipproto_udp_;
+        } else {
+          base::StackString<32> proto("IPPROTO (%d)", evt.ip_proto());
+          ip_proto = context_->storage->InternString(proto.string_view());
+        }
+
+        i->AddArg(net_arg_ip_proto_, Variadic::String(ip_proto));
+
+        base::StackString<16> tag("0x%x", evt.tag());
+        i->AddArg(net_arg_tag_,
+                  Variadic::String(
+                      context_->storage->InternString(tag.string_view())));
+
+        base::StackString<12> flags = GetTcpFlagMask(evt.tcp_flags());
+        i->AddArg(net_arg_tcp_flags_,
+                  Variadic::String(
+                      context_->storage->InternString(flags.string_view())));
+
+        i->AddArg(net_arg_local_port_, Variadic::Integer(evt.local_port()));
+        i->AddArg(net_arg_remote_port_, Variadic::Integer(evt.remote_port()));
+      });
 }
 
 }  // namespace trace_processor

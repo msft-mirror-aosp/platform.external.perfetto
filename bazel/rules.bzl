@@ -280,8 +280,7 @@ def perfetto_cc_proto_descriptor(name, deps, outs, **kwargs):
         **kwargs
     )
 
-def perfetto_cc_amalgamated_sql(name, deps, outs, root_dir, namespace,
-                                **kwargs):
+def perfetto_cc_amalgamated_sql(name, deps, outs, namespace, **kwargs):
     if PERFETTO_CONFIG.root[:2] != "//":
         fail("Expected PERFETTO_CONFIG.root to start with //")
 
@@ -289,8 +288,6 @@ def perfetto_cc_amalgamated_sql(name, deps, outs, root_dir, namespace,
         "$(location gen_amalgamated_sql_py)",
         "--namespace",
         namespace,
-        "--root-dir",
-        PERFETTO_CONFIG.root[2:] + "/" + root_dir,
         "--cpp-out=$@",
         "$(SRCS)",
     ]
@@ -312,10 +309,15 @@ def perfetto_cc_amalgamated_sql(name, deps, outs, root_dir, namespace,
     )
 
 def perfetto_cc_tp_tables(name, srcs, outs, **kwargs):
+    if PERFETTO_CONFIG.root == "//":
+      python_path = PERFETTO_CONFIG.root + "python"
+    else:
+      python_path = PERFETTO_CONFIG.root + "/python"
+
     perfetto_py_binary(
         name = name + "_tool",
         deps = [
-            PERFETTO_CONFIG.root + "python:trace_processor_table_generator",
+            python_path + ":trace_processor_table_generator",
         ],
         srcs = srcs + [
             "tools/gen_tp_table_headers.py",
@@ -339,9 +341,9 @@ def perfetto_cc_tp_tables(name, srcs, outs, **kwargs):
         outs = outs,
     )
 
-    perfetto_cc_library(
+    perfetto_filegroup(
         name = name,
-        hdrs = [":" + name + "_gen"],
+        srcs = [":" + name + "_gen"],
         **kwargs,
     )
 

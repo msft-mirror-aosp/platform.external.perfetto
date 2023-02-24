@@ -31,7 +31,6 @@
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/json/json_utils.h"
 #include "src/trace_processor/storage/trace_storage.h"
-#include "src/trace_processor/tables/slice_tables.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
@@ -367,6 +366,9 @@ void JsonTraceParser::MaybeAddFlow(TrackId track_id, const Json::Value& event) {
       context_->storage->IncrementStats(stats::flow_without_direction);
     }
   }
+#else
+  perfetto::base::ignore_result(track_id);
+  perfetto::base::ignore_result(event);
 #endif  // PERFETTO_BUILDFLAG(PERFETTO_TP_JSON)
 }
 

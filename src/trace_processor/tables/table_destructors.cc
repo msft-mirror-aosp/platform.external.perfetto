@@ -49,6 +49,7 @@ CpuTable::~CpuTable() = default;
 CpuFreqTable::~CpuFreqTable() = default;
 ThreadTable::~ThreadTable() = default;
 ProcessTable::~ProcessTable() = default;
+FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 
 // profiler_tables.h
@@ -98,6 +99,7 @@ UidCounterTrackTable::~UidCounterTrackTable() = default;
 EnergyPerUidCounterTrackTable::~EnergyPerUidCounterTrackTable() = default;
 
 // trace_proto_tables.h
+ExperimentalProtoPathTable::~ExperimentalProtoPathTable() = default;
 ExperimentalProtoContentTable::~ExperimentalProtoContentTable() = default;
 
 // memory_tables.h

@@ -137,11 +137,6 @@ ProbesProducer::CreateDSInstance<FtraceDataSource>(
       ftrace_creation_failed_ = true;
       return nullptr;
     }
-
-    if (!ftrace_config.preserve_ftrace_buffer()) {
-      ftrace_->DisableAllEvents();
-      ftrace_->ClearTrace();
-    }
   }
 
   PERFETTO_LOG("Ftrace setup (target_buf=%" PRIu32 ")", config.target_buffer());
@@ -438,6 +433,10 @@ void ProbesProducer::StartDataSource(DataSourceInstanceID instance_id,
     // We need to ensure this timeout is worse than the worst case
     // time from us starting to traced managing to disable us.
     // See b/236814186#comment8 for context
+    // Note: when using prefer_suspend_clock_for_duration the actual duration
+    // might be < timeout measured in in wall time. But this is fine
+    // because the resulting timeout will be conservative (it will be accurate
+    // if the device never suspends, and will be more lax if it does).
     uint32_t timeout =
         2 * (kDefaultFlushTimeoutMs + config.trace_duration_ms() +
              config.stop_timeout_ms());
@@ -611,6 +610,8 @@ void ProbesProducer::OnFtraceDataWrittenIntoDataSourceBuffers() {
           ps_ds->OnRenamePids(metadata->rename_pids);
         if (!metadata->pids.empty())
           ps_ds->OnPids(metadata->pids);
+        if (!metadata->fds.empty())
+          ps_ds->OnFds(metadata->fds);
       }
       for (auto in_it = ino_range.first; in_it != ino_range.second; in_it++) {
         auto* inode_ds = static_cast<InodeFileDataSource*>(in_it->second);

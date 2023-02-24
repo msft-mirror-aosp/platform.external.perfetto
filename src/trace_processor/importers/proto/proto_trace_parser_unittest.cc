@@ -20,7 +20,6 @@
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/trace_processor/trace_blob.h"
-#include "src/trace_processor/importers/additional_modules.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
@@ -29,8 +28,9 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
-#include "src/trace_processor/importers/default_modules.h"
 #include "src/trace_processor/importers/ftrace/sched_event_tracker.h"
+#include "src/trace_processor/importers/proto/additional_modules.h"
+#include "src/trace_processor/importers/proto/default_modules.h"
 #include "src/trace_processor/importers/proto/metadata_tracker.h"
 #include "src/trace_processor/importers/proto/proto_trace_parser.h"
 #include "src/trace_processor/importers/proto/stack_profile_tracker.h"
@@ -603,10 +603,14 @@ TEST_F(ProtoTraceParserTest, LoadCpuFreqKHz) {
   context_.sorter->ExtractEventsForced();
 
   EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
-  EXPECT_EQ(context_.storage->track_table().name().GetString(0),
-            "CPU 0 Freq in kHz");
-  EXPECT_EQ(context_.storage->track_table().name().GetString(1),
-            "CPU 1 Freq in kHz");
+  EXPECT_EQ(context_.storage->cpu_counter_track_table().row_count(), 2u);
+
+  auto row = context_.storage->cpu_counter_track_table().FindById(TrackId(0));
+  EXPECT_EQ(context_.storage->GetString(row->name()), "cpufreq");
+  EXPECT_EQ(row->cpu(), 0u);
+
+  row = context_.storage->cpu_counter_track_table().FindById(TrackId(1));
+  EXPECT_EQ(row->cpu(), 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadMemInfo) {

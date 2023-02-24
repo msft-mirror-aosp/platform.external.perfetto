@@ -126,7 +126,7 @@ SystemProbesParser::SystemProbesParser(TraceProcessorContext* context)
       cpu_times_softirq_ns_id_(
           context->storage->InternString("cpu.times.softirq_ns")),
       oom_score_adj_id_(context->storage->InternString("oom_score_adj")),
-      cpu_freq_id_(context_->storage->InternString("freq")) {
+      cpu_freq_id_(context_->storage->InternString("cpufreq")) {
   for (const auto& name : BuildMeminfoCounterNames()) {
     meminfo_strs_id_.emplace_back(context->storage->InternString(name));
   }
@@ -264,11 +264,10 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
                                          track);
   }
 
-  int c = 0;
+  uint32_t c = 0;
   for (auto it = sys_stats.cpufreq_khz(); it; ++it, ++c) {
-    base::StackString<255> counter_name("CPU %d Freq in kHz", c);
-    StringId name = context_->storage->InternString(counter_name.string_view());
-    TrackId track = context_->track_tracker->InternGlobalCounterTrack(name);
+    TrackId track =
+        context_->track_tracker->InternCpuCounterTrack(cpu_freq_id_, c);
     context_->event_tracker->PushCounter(ts, static_cast<double>(*it), track);
   }
 
@@ -485,6 +484,10 @@ void SystemProbesParser::ParseProcessStats(int64_t ts, ConstBytes blob) {
         ParseThreadStats(ts, pid, fld.as_bytes());
         continue;
       }
+      if (fld.id() == protos::pbzero::ProcessStats::Process::kFdsFieldNumber) {
+        ParseProcessFds(ts, pid, fld.as_bytes());
+        continue;
+      }
       bool is_counter_field = fld.id() < proc_stats_process_names_.size() &&
                               !proc_stats_process_names_[fld.id()].is_null();
       if (is_counter_field) {
@@ -532,6 +535,21 @@ void SystemProbesParser::ParseThreadStats(int64_t,
   protos::pbzero::ProcessStats::Thread::Decoder stats(blob.data, blob.size);
   context_->process_tracker->UpdateThread(static_cast<uint32_t>(stats.tid()),
                                           pid);
+}
+
+void SystemProbesParser::ParseProcessFds(int64_t ts,
+                                         uint32_t pid,
+                                         ConstBytes blob) {
+  protos::pbzero::ProcessStats::FDInfo::Decoder fd_info(blob.data, blob.size);
+
+  tables::FiledescriptorTable::Row row;
+  row.fd = static_cast<int64_t>(fd_info.fd());
+  row.ts = ts;
+  row.path = context_->storage->InternString(fd_info.path());
+  row.upid = context_->process_tracker->GetOrCreateProcess(pid);
+
+  auto* fd_table = context_->storage->mutable_filedescriptor_table();
+  fd_table->Insert(row);
 }
 
 void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
