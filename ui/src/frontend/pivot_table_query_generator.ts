@@ -17,8 +17,8 @@
 import {sqliteString} from '../base/string_utils';
 import {
   Area,
-  PivotTableReduxQuery,
-  PivotTableReduxState,
+  PivotTableQuery,
+  PivotTableState,
 } from '../common/state';
 import {toNs} from '../common/time';
 import {
@@ -29,7 +29,7 @@ import {globals} from './globals';
 import {
   Aggregation,
   TableColumn,
-} from './pivot_table_redux_types';
+} from './pivot_table_types';
 
 export interface Table {
   name: string;
@@ -111,7 +111,7 @@ export function expression(column: TableColumn): string {
     case 'regular':
       return `${column.table}.${column.column}`;
     case 'argument':
-      return extractArgumentExpression(column.argument);
+      return extractArgumentExpression(column.argument, 'slice');
   }
 }
 
@@ -132,9 +132,8 @@ export function aggregationIndex(pivotColumns: number, aggregationNo: number) {
   return pivotColumns + aggregationNo;
 }
 
-export function generateQueryFromState(
-    state: PivotTableReduxState,
-    ): PivotTableReduxQuery {
+export function generateQueryFromState(state: PivotTableState):
+    PivotTableQuery {
   if (state.selectionArea === undefined) {
     throw new QueryGeneratorError('Should not be called without area');
   }
@@ -149,9 +148,11 @@ export function generateQueryFromState(
   const aggregations = sliceTableAggregations.map(
       (agg, index) =>
           `${aggregationExpression(agg)} as ${aggregationAlias(index)}`);
+  const countIndex = aggregations.length;
+  // Extra count aggregation, needed in order to compute combined averages.
+  aggregations.push('COUNT() as hidden_count');
 
-  const renderedPivots =
-      pivots.map((pivot) => `${pivot.table}.${pivot.column}`);
+  const renderedPivots = pivots.map(expression);
   const sortClauses: string[] = [];
   for (let i = 0; i < sliceTableAggregations.length; i++) {
     const sortDirection = sliceTableAggregations[i].sortDirection;
@@ -184,6 +185,7 @@ export function generateQueryFromState(
     metadata: {
       pivotColumns: pivots,
       aggregationColumns: sliceTableAggregations,
+      countIndex,
     },
   };
 }
