@@ -32,7 +32,7 @@ import {TimeSpan, toNs, toNsCeil, toNsFloor} from '../common/time';
 import {resetEngineWorker, WasmEngineProxy} from '../common/wasm_engine_proxy';
 import {BottomTabList} from '../frontend/bottom_tab';
 import {
-  globals as frontendGlobals,
+  globals,
   QuantizedLoad,
   ThreadDesc,
 } from '../frontend/globals';
@@ -77,14 +77,13 @@ import {
   FlowEventsController,
   FlowEventsControllerArgs,
 } from './flow_events_controller';
-import {globals} from './globals';
 import {LoadingManager} from './loading_manager';
 import {LogsController} from './logs_controller';
 import {MetricsController} from './metrics_controller';
 import {
   PIVOT_TABLE_REDUX_FLAG,
-  PivotTableReduxController,
-} from './pivot_table_redux_controller';
+  PivotTableController,
+} from './pivot_table_controller';
 import {QueryController, QueryControllerArgs} from './query_controller';
 import {SearchController} from './search_controller';
 import {
@@ -206,17 +205,17 @@ export class TraceController extends Controller<States> {
     switch (this.state) {
       case 'init':
         this.loadTrace()
-          .then((mode) => {
-            globals.dispatch(Actions.setEngineReady({
-              engineId: this.engineId,
-              ready: true,
-              mode,
-            }));
-          })
-          .catch((err) => {
-            this.updateStatus(`${err}`);
-            throw err;
-          });
+            .then((mode) => {
+              globals.dispatch(Actions.setEngineReady({
+                engineId: this.engineId,
+                ready: true,
+                mode,
+              }));
+            })
+            .catch((err) => {
+              this.updateStatus(`${err}`);
+              throw err;
+            });
         this.updateStatus('Opening trace');
         this.setState('loading_trace');
         break;
@@ -312,7 +311,7 @@ export class TraceController extends Controller<States> {
           app: globals,
         }));
         childControllers.push(
-          Child('pivot_table_redux', PivotTableReduxController, {engine}));
+            Child('pivot_table', PivotTableController, {engine}));
 
         childControllers.push(Child('logs', LogsController, {
           engine,
@@ -331,7 +330,7 @@ export class TraceController extends Controller<States> {
   }
 
   onDestroy() {
-    frontendGlobals.engines.delete(this.engineId);
+    globals.engines.delete(this.engineId);
   }
 
   private async loadTrace(): Promise<EngineMode> {
@@ -350,7 +349,7 @@ export class TraceController extends Controller<States> {
       engine = new HttpRpcEngine(this.engineId, LoadingManager.getInstance);
       engine.errorHandler = (err) => {
         globals.dispatch(
-          Actions.setEngineFailed({mode: 'HTTP_RPC', failure: `${err}`}));
+            Actions.setEngineFailed({mode: 'HTTP_RPC', failure: `${err}`}));
         throw err;
       };
     } else {
@@ -371,10 +370,9 @@ export class TraceController extends Controller<States> {
       this.engine.enableMetatrace(
         assertExists(getEnabledMetatracingCategories()));
     }
-    frontendGlobals.bottomTabList =
-      new BottomTabList(engine.getProxy('BottomTabList'));
+    globals.bottomTabList = new BottomTabList(engine.getProxy('BottomTabList'));
 
-    frontendGlobals.engines.set(this.engineId, engine);
+    globals.engines.set(this.engineId, engine);
     globals.dispatch(Actions.setEngineReady({
       engineId: this.engineId,
       ready: false,
@@ -445,7 +443,7 @@ export class TraceController extends Controller<States> {
     if (!shownJsonWarning) {
       // When in embedded mode, the host app will control which trace format
       // it passes to Perfetto, so we don't need to show this warning.
-      if (isJsonTrace && !frontendGlobals.embeddedMode) {
+      if (isJsonTrace && !globals.embeddedMode) {
         showJsonWarning();
         // Save that the warning has been shown. Value is irrelevant since only
         // the presence of key is going to be checked.
@@ -455,7 +453,7 @@ export class TraceController extends Controller<States> {
 
     const emptyOmniboxState = {
       omnibox: '',
-      mode: frontendGlobals.state.omniboxState.mode || 'SEARCH',
+      mode: globals.state.omniboxState.mode || 'SEARCH',
     };
 
     const actions: DeferredAction[] = [
@@ -555,7 +553,7 @@ export class TraceController extends Controller<States> {
     const leftTs = toNs(globals.state.traceTime.startSec);
     const rightTs = toNs(globals.state.traceTime.endSec);
     globals.dispatch(Actions.selectPerfSamples(
-      {id: 0, upid, leftTs, rightTs, type: ProfileType.PERF_SAMPLE}));
+        {id: 0, upid, leftTs, rightTs, type: ProfileType.PERF_SAMPLE}));
   }
 
   private async selectFirstHeapProfile() {

@@ -83,17 +83,29 @@ export class NotesPanel extends Panel {
           },
         },
         isTraceLoaded() ?
-            m('button',
-              {
-                onclick: (e: Event) => {
-                  e.preventDefault();
-                  globals.dispatch(
-                      Actions.toggleAllTrackGroups({collapsed: !allCollapsed}));
+            [
+              m('button',
+                {
+                  onclick: (e: Event) => {
+                    e.preventDefault();
+                    globals.dispatch(Actions.toggleAllTrackGroups(
+                        {collapsed: !allCollapsed}));
+                  },
                 },
-              },
-              m('i.material-icons',
-                {title: allCollapsed ? 'Expand all' : 'Collapse all'},
-                allCollapsed ? 'unfold_more' : 'unfold_less')) :
+                m('i.material-icons',
+                  {title: allCollapsed ? 'Expand all' : 'Collapse all'},
+                  allCollapsed ? 'unfold_more' : 'unfold_less')),
+              m('button',
+                {
+                  onclick: (e: Event) => {
+                    e.preventDefault();
+                    globals.dispatch(Actions.clearAllPinnedTracks({}));
+                  },
+                },
+                m('i.material-icons',
+                  {title: 'Clear all pinned tracks'},
+                  'clear_all')),
+            ] :
             '');
   }
 
@@ -220,7 +232,7 @@ export class NotesPanel extends Panel {
     const prevBaseline = ctx.textBaseline;
     ctx.textBaseline = 'alphabetic';
     // Adjust height for icon font.
-    ctx.font = '24px Material Icons';
+    ctx.font = '24px Material Symbols Sharp';
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
     // The ligatures have padding included that means the icon is not drawn

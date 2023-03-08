@@ -36,11 +36,11 @@ class AndroidProbesParser {
   void ParseBatteryCounters(int64_t ts, ConstBytes);
   void ParsePowerRails(int64_t ts, ConstBytes);
   void ParseEnergyBreakdown(int64_t ts, ConstBytes);
+  void ParseEntityStateResidency(int64_t ts, ConstBytes);
   void ParseAndroidLogPacket(ConstBytes);
   void ParseAndroidLogEvent(ConstBytes);
   void ParseAndroidLogStats(ConstBytes);
   void ParseStatsdMetadata(ConstBytes);
-  void ParseAndroidPackagesList(ConstBytes);
   void ParseInitialDisplayState(int64_t ts, ConstBytes);
   void ParseAndroidSystemProperty(int64_t ts, ConstBytes);
   void ParseAndroidGameIntervention(ConstBytes);
@@ -55,6 +55,8 @@ class AndroidProbesParser {
   const StringId batt_current_avg_id_;
   const StringId screen_state_id_;
   const StringId device_state_id_;
+  const StringId battery_status_id_;
+  const StringId plug_type_id_;
 
   const StringId net_arg_length_;
   const StringId net_arg_ip_proto_;

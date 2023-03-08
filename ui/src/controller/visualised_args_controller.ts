@@ -18,12 +18,12 @@ import {Actions, AddTrackArgs} from '../common/actions';
 import {Engine} from '../common/engine';
 import {NUM} from '../common/query_result';
 import {InThreadTrackSortKey} from '../common/state';
+import {globals} from '../frontend/globals';
 import {
   VISUALISED_ARGS_SLICE_TRACK_KIND,
 } from '../tracks/visualised_args/index';
 
 import {Controller} from './controller';
-import {globals} from './globals';
 
 export interface VisualisedArgControllerArgs {
   argName: string;

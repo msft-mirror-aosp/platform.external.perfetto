@@ -15,7 +15,13 @@
 import("../../../../../gn/perfetto.gni")
 
 source_set("threading") {
-  sources = [ "thread_pool.h" ]
+  sources = [
+    "channel.h",
+    "future.h",
+    "future_combinators.h",
+    "poll.h",
+    "thread_pool.h",
+  ]
   deps = [
     "..:base",
     "../../../../../gn:default_deps",

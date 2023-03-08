@@ -79,7 +79,7 @@ def parse_and_validate_args():
   traces if requested.
 
   For usage instructions, please see:
-  https://perfetto.dev/docs/quickstart/cpu-profiling
+  https://perfetto.dev/docs/quickstart/callstack-sampling
   """
   parser = argparse.ArgumentParser(description=DESCRIPTION)
   parser.add_argument(
@@ -98,6 +98,25 @@ def parse_and_validate_args():
       metavar="DURATION",
       type=int,
       default=0)
+  # Profiling using hardware counters.
+  parser.add_argument(
+      "-e",
+      "--event",
+      help="Use the specified hardware counter event for sampling.",
+      metavar="EVENT",
+      action="append",
+      # See: '//perfetto/protos/perfetto/trace/perfetto_trace.proto'.
+      choices=['HW_CPU_CYCLES', 'HW_INSTRUCTIONS', 'HW_CACHE_REFERENCES',
+               'HW_CACHE_MISSES', 'HW_BRANCH_INSTRUCTIONS', 'HW_BRANCH_MISSES',
+               'HW_BUS_CYCLES', 'HW_STALLED_CYCLES_FRONTEND',
+               'HW_STALLED_CYCLES_BACKEND'],
+      default=[])
+  parser.add_argument(
+      "-k",
+      "--kernel-frames",
+      help="Collect kernel frames.  Default: false.",
+      action="store_true",
+      default=False)
   parser.add_argument(
       "-n",
       "--name",
@@ -136,8 +155,11 @@ def parse_and_validate_args():
       default=None)
 
   args = parser.parse_args()
-  if args.config is not None and args.name is not None:
-    sys.exit("--name/-n should not be provided when --config/-c is provided.")
+  if args.config is not None:
+    if args.name is not None:
+      sys.exit("--name/-n should not be specified with --config/-c.")
+    elif args.event is not None:
+      sys.exit("-e/--event should not be specified with --config/-c.")
   elif args.config is None and args.name is None:
     sys.exit("One of --names/-n or --config/-c is required.")
 
@@ -186,7 +208,7 @@ def get_perfetto_config(args):
     except IOError as error:
       sys.exit("Unable to read config file: {}".format(error))
 
-  CONFIG_INDENT = '      '
+  CONFIG_INDENT = '          '
   CONFIG = textwrap.dedent('''\
   buffers {{
     size_kb: 2048
@@ -202,18 +224,6 @@ def get_perfetto_config(args):
       target_buffer: 0
       process_stats_config {{
         proc_stats_poll_ms: 100
-      }}
-    }}
-  }}
-
-  data_sources {{
-    config {{
-      name: "linux.perf"
-      target_buffer: 1
-      perf_event_config {{
-        all_cpus: true
-        sampling_frequency: {frequency}
-  {target_config}
       }}
     }}
   }}
@@ -235,6 +245,35 @@ def get_perfetto_config(args):
   target_config = "\n".join(
       [f'{CONFIG_INDENT}target_cmdline: "{p}"' for p in matching_processes])
 
+  events = args.event or ['SW_CPU_CLOCK']
+  for event in events:
+    CONFIG += (textwrap.dedent('''
+    data_sources {{
+      config {{
+        name: "linux.perf"
+        target_buffer: 1
+        perf_event_config {{
+          timebase {{
+            counter: %s
+            frequency: {frequency}
+            timestamp_clock: PERF_CLOCK_MONOTONIC
+          }}
+          callstack_sampling {{
+            scope {{
+    {target_config}
+            }}
+            kernel_frames: {kernel_config}
+          }}
+        }}
+      }}
+    }}
+    ''') % (event))
+
+  if args.kernel_frames:
+    kernel_config = "true"
+  else:
+    kernel_config = "false"
+
   if not args.print_config:
     print("Configured profiling for these processes:\n")
     for matching_process in matching_processes:
@@ -244,7 +283,8 @@ def get_perfetto_config(args):
   config = CONFIG.format(
       frequency=args.frequency,
       duration=args.duration,
-      target_config=target_config)
+      target_config=target_config,
+      kernel_config=kernel_config)
 
   return config
 
@@ -297,14 +337,23 @@ def record_trace(config, profile_target):
   }
   if not release_or_newer('R'):
     sys.exit("This tool requires Android R+ to run.")
+
+  # Push configuration to the device.
+  tf = tempfile.NamedTemporaryFile()
+  tf.file.write(config.encode('utf-8'))
+  tf.file.flush()
+  profile_config_path = '/data/misc/perfetto-configs/config-' + UUID
+  adb_check_output(['adb', 'push', tf.name, profile_config_path])
+  tf.close()
+
+
   profile_device_path = '/data/misc/perfetto-traces/profile-' + UUID
-  perfetto_command = ('CONFIG=\'{}\'; echo ${{CONFIG}} | '
-                      'perfetto --txt -c - -o {} -d')
+  perfetto_command = ('perfetto --txt -c {} -o {} -d')
   try:
     perfetto_pid = int(
         adb_check_output([
             'adb', 'exec-out',
-            perfetto_command.format(config, profile_device_path)
+            perfetto_command.format(profile_config_path, profile_device_path)
         ]).strip())
   except ValueError as error:
     sys.exit("Unable to start profiling: {}".format(error))
@@ -334,6 +383,7 @@ def record_trace(config, profile_target):
 
   profile_host_path = os.path.join(profile_target, 'raw-trace')
   adb_check_output(['adb', 'pull', profile_device_path, profile_host_path])
+  adb_check_output(['adb', 'shell', 'rm', profile_config_path])
   adb_check_output(['adb', 'shell', 'rm', profile_device_path])
 
 

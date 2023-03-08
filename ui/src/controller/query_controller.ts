@@ -16,10 +16,10 @@ import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {Engine} from '../common/engine';
 import {runQuery} from '../common/queries';
+import {globals} from '../frontend/globals';
 import {publishQueryResult} from '../frontend/publish';
 
 import {Controller} from './controller';
-import {globals} from './globals';
 
 export interface QueryControllerArgs {
   queryId: string;
