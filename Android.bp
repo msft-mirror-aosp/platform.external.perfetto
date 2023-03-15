@@ -8195,6 +8195,7 @@ filegroup {
 filegroup {
     name: "perfetto_src_base_threading_threading",
     srcs: [
+        "src/base/threading/stream_combinators.cc",
         "src/base/threading/thread_pool.cc",
     ],
 }
@@ -8205,6 +8206,7 @@ filegroup {
     srcs: [
         "src/base/threading/channel_unittest.cc",
         "src/base/threading/future_unittest.cc",
+        "src/base/threading/stream_unittest.cc",
         "src/base/threading/thread_pool_unittest.cc",
     ],
 }
@@ -9560,6 +9562,7 @@ filegroup {
         "src/trace_processor/importers/proto/memory_tracker_snapshot_parser.cc",
         "src/trace_processor/importers/proto/metadata_minimal_module.cc",
         "src/trace_processor/importers/proto/metadata_tracker.cc",
+        "src/trace_processor/importers/proto/network_trace_module.cc",
         "src/trace_processor/importers/proto/packet_analyzer.cc",
         "src/trace_processor/importers/proto/packet_sequence_state_generation.cc",
         "src/trace_processor/importers/proto/perf_sample_tracker.cc",
