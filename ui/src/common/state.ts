@@ -97,8 +97,9 @@ export const MAX_TIME = 180;
 // 26: Add tags for filtering Android log entries.
 // 27. Add a text entry for filtering Android log entries.
 // 28. Add a boolean indicating if non matching log entries are hidden.
-// 29. Add ftrace state.
-export const STATE_VERSION = 29;
+// 29. Add ftrace state. <-- Borked, state contains a non-serializable object.
+// 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
+export const STATE_VERSION = 30;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -497,7 +498,7 @@ export interface FtraceFilterState {
   // We use an exclude list rather than include list for filtering events, as we
   // want to include all events by default but we won't know what names are
   // present initially.
-  excludedNames: Set<string>;
+  excludedNames: string[];
 }
 
 export interface State {
@@ -583,7 +584,6 @@ export interface State {
 
   fetchChromeCategories: boolean;
   chromeCategories: string[]|undefined;
-  analyzePageQuery?: string;
 
   // Special key: this part of the state is not going to be serialized when
   // using permalink. Can be used to store those parts of the state that can't
