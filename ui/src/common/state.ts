@@ -97,7 +97,9 @@ export const MAX_TIME = 180;
 // 26: Add tags for filtering Android log entries.
 // 27. Add a text entry for filtering Android log entries.
 // 28. Add a boolean indicating if non matching log entries are hidden.
-export const STATE_VERSION = 28;
+// 29. Add ftrace state. <-- Borked, state contains a non-serializable object.
+// 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
+export const STATE_VERSION = 30;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -304,6 +306,14 @@ export interface SliceSelection {
   id: number;
 }
 
+export interface DebugSliceSelection {
+  kind: 'DEBUG_SLICE';
+  id: number;
+  sqlTableName: string;
+  startS: number;
+  durationS: number;
+}
+
 export interface CounterSelection {
   kind: 'COUNTER';
   leftTs: number;
@@ -366,12 +376,19 @@ export interface LogSelection {
 export type Selection =
     (NoteSelection|SliceSelection|CounterSelection|HeapProfileSelection|
      CpuProfileSampleSelection|ChromeSliceSelection|ThreadStateSelection|
-     AreaSelection|PerfSamplesSelection|LogSelection)&{trackId?: string};
+     AreaSelection|PerfSamplesSelection|LogSelection|DebugSliceSelection)&
+    {trackId?: string};
 export type SelectionKind = Selection['kind'];  // 'THREAD_STATE' | 'SLICE' ...
 
-export interface LogsPagination {
+export interface Pagination {
   offset: number;
   count: number;
+}
+
+export type StringListPatch = ['add' | 'remove', string];
+
+export interface FtraceFilterPatch {
+  excludedNames: StringListPatch[];
 }
 
 export interface RecordingTarget {
@@ -486,6 +503,13 @@ export interface LogFilteringCriteria {
   hideNonMatching: boolean;
 }
 
+export interface FtraceFilterState {
+  // We use an exclude list rather than include list for filtering events, as we
+  // want to include all events by default but we won't know what names are
+  // present initially.
+  excludedNames: string[];
+}
+
 export interface State {
   version: number;
   nextId: string;
@@ -522,7 +546,9 @@ export interface State {
   status: Status;
   currentSelection: Selection|null;
   currentFlamegraphState: FlamegraphState|null;
-  logsPagination: LogsPagination;
+  logsPagination: Pagination;
+  ftracePagination: Pagination;
+  ftraceFilter: FtraceFilterState;
   traceConversionInProgress: boolean;
   visualisedArgs: string[];
 
@@ -543,7 +569,7 @@ export interface State {
   // Hovered and focused events
   hoveredUtid: number;
   hoveredPid: number;
-  hoveredLogsTimestamp: number;
+  hoverCursorTimestamp: number;
   hoveredNoteTimestamp: number;
   highlightedSliceId: number;
   focusedFlowIdLeft: number;
@@ -567,7 +593,6 @@ export interface State {
 
   fetchChromeCategories: boolean;
   chromeCategories: string[]|undefined;
-  analyzePageQuery?: string;
 
   // Special key: this part of the state is not going to be serialized when
   // using permalink. Can be used to store those parts of the state that can't

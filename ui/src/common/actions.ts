@@ -14,7 +14,7 @@
 
 import {Draft} from 'immer';
 
-import {assertExists, assertTrue} from '../base/logging';
+import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
 import {RecordConfig} from '../controller/record_config_types';
 import {globals} from '../frontend/globals';
 import {
@@ -24,6 +24,7 @@ import {
   tableColumnEquals,
   toggleEnabled,
 } from '../frontend/pivot_table_types';
+import {DebugTrackV2Config} from '../tracks/debug/slice_track';
 
 import {randomColor} from './colorizer';
 import {
@@ -40,10 +41,11 @@ import {
   CallsiteInfo,
   EngineMode,
   FlamegraphStateViewingOption,
+  FtraceFilterPatch,
   LoadedConfig,
-  LogsPagination,
   NewEngineMode,
   OmniboxState,
+  Pagination,
   PivotTableResult,
   PrimaryTrackSortKey,
   ProfileType,
@@ -61,7 +63,7 @@ import {
 } from './state';
 import {toNs} from './time';
 
-const DEBUG_SLICE_TRACK_KIND = 'DebugSliceTrack';
+export const DEBUG_SLICE_TRACK_KIND = 'DebugSliceTrack';
 
 type StateDraft = Draft<State>;
 
@@ -274,11 +276,12 @@ export const StateActions = {
     };
   },
 
-  addDebugTrack(state: StateDraft, args: {engineId: string, name: string}):
+  addDebugTrack(
+      state: StateDraft,
+      args: {engineId: string, name: string, config: DebugTrackV2Config}):
       void {
         if (state.debugTrackId !== undefined) return;
         const trackId = generateNextId(state);
-        state.debugTrackId = trackId;
         this.addTrack(state, {
           id: trackId,
           engineId: args.engineId,
@@ -286,18 +289,15 @@ export const StateActions = {
           name: args.name,
           trackSortKey: PrimaryTrackSortKey.DEBUG_SLICE_TRACK,
           trackGroup: SCROLLING_TRACK_GROUP,
-          config: {
-            maxDepth: 1,
-          },
+          config: args.config,
         });
         this.toggleTrackPinned(state, {trackId});
       },
 
-  removeDebugTrack(state: StateDraft, _: {}): void {
-    const {debugTrackId} = state;
-    if (debugTrackId === undefined) return;
-    removeTrack(state, debugTrackId);
-    state.debugTrackId = undefined;
+  removeDebugTrack(state: StateDraft, args: {trackId: string}): void {
+    const track = state.tracks[args.trackId];
+    assertTrue(track.kind === DEBUG_SLICE_TRACK_KIND);
+    removeTrack(state, args.trackId);
   },
 
   removeVisualisedArgTracks(state: StateDraft, args: {trackIds: string[]}) {
@@ -396,20 +396,6 @@ export const StateActions = {
   updateTrackConfig(state: StateDraft, args: {id: string, config: {}}) {
     if (state.tracks[args.id] === undefined) return;
     state.tracks[args.id].config = args.config;
-  },
-
-  executeQuery(
-      state: StateDraft,
-      args: {queryId: string; query: string, engineId?: string}): void {
-    state.queries[args.queryId] = {
-      id: args.queryId,
-      query: args.query,
-      engineId: args.engineId,
-    };
-  },
-
-  deleteQuery(state: StateDraft, args: {queryId: string}): void {
-    delete state.queries[args.queryId];
   },
 
   moveTrack(
@@ -795,6 +781,23 @@ export const StateActions = {
         state.pendingScrollId = args.scroll ? args.id : undefined;
       },
 
+  selectDebugSlice(state: StateDraft, args: {
+    id: number,
+    sqlTableName: string,
+    startS: number,
+    durationS: number,
+    trackId: string,
+  }): void {
+    state.currentSelection = {
+      kind: 'DEBUG_SLICE',
+      id: args.id,
+      sqlTableName: args.sqlTableName,
+      startS: args.startS,
+      durationS: args.durationS,
+      trackId: args.trackId,
+    };
+  },
+
   clearPendingScrollId(state: StateDraft, _: {}): void {
     state.pendingScrollId = undefined;
   },
@@ -823,8 +826,34 @@ export const StateActions = {
     state.currentSelection = null;
   },
 
-  updateLogsPagination(state: StateDraft, args: LogsPagination): void {
+  updateLogsPagination(state: StateDraft, args: Pagination): void {
     state.logsPagination = args;
+  },
+
+  updateFtracePagination(state: StateDraft, args: Pagination): void {
+    state.ftracePagination = args;
+  },
+
+  updateFtraceFilter(state: StateDraft, patch: FtraceFilterPatch) {
+    const {excludedNames: diffs} = patch;
+    const excludedNames = state.ftraceFilter.excludedNames;
+    for (const [addRemove, name] of diffs) {
+      switch (addRemove) {
+        case 'add':
+          if (!excludedNames.some((excluded: string) => excluded === name)) {
+            excludedNames.push(name);
+          }
+          break;
+        case 'remove':
+          state.ftraceFilter.excludedNames =
+              state.ftraceFilter.excludedNames.filter(
+                  (excluded: string) => excluded !== name);
+          break;
+        default:
+          assertUnreachable(addRemove);
+          break;
+      }
+    }
   },
 
   startRecording(state: StateDraft, _: {}): void {
@@ -945,10 +974,6 @@ export const StateActions = {
     state.lastRecordingError = undefined;
   },
 
-  setAnalyzePageQuery(state: StateDraft, args: {query: string}): void {
-    state.analyzePageQuery = args.query;
-  },
-
   requestSelectedMetric(state: StateDraft, _: {}): void {
     if (!state.metrics.availableMetrics) throw Error('No metrics available');
     if (state.metrics.selectedIndex === undefined) {
@@ -1006,8 +1031,8 @@ export const StateActions = {
     state.searchIndex = args.index;
   },
 
-  setHoveredLogsTimestamp(state: StateDraft, args: {ts: number}) {
-    state.hoveredLogsTimestamp = args.ts;
+  setHoverCursorTimestamp(state: StateDraft, args: {ts: number}) {
+    state.hoverCursorTimestamp = args.ts;
   },
 
   setHoveredNoteTimestamp(state: StateDraft, args: {ts: number}) {
