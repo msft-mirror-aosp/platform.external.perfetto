@@ -18,6 +18,7 @@ import {
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
+import {Direction} from './event_set';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -306,6 +307,14 @@ export interface SliceSelection {
   id: number;
 }
 
+export interface DebugSliceSelection {
+  kind: 'DEBUG_SLICE';
+  id: number;
+  sqlTableName: string;
+  startS: number;
+  durationS: number;
+}
+
 export interface CounterSelection {
   kind: 'COUNTER';
   leftTs: number;
@@ -368,7 +377,8 @@ export interface LogSelection {
 export type Selection =
     (NoteSelection|SliceSelection|CounterSelection|HeapProfileSelection|
      CpuProfileSampleSelection|ChromeSliceSelection|ThreadStateSelection|
-     AreaSelection|PerfSamplesSelection|LogSelection)&{trackId?: string};
+     AreaSelection|PerfSamplesSelection|LogSelection|DebugSliceSelection)&
+    {trackId?: string};
 export type SelectionKind = Selection['kind'];  // 'THREAD_STATE' | 'SLICE' ...
 
 export interface Pagination {
@@ -437,7 +447,7 @@ export interface PivotTableAreaState {
   tracks: string[];
 }
 
-export type SortDirection = 'DESC'|'ASC';
+export type SortDirection = keyof typeof Direction;
 
 export interface PivotTableState {
   // Currently selected area, if null, pivot table is not going to be visible.
