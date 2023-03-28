@@ -104,7 +104,7 @@ static FlamegraphTableAndMergedCallsites BuildFlamegraphTableTreeStructure(
 
   std::unique_ptr<tables::ExperimentalFlamegraphNodesTable> tbl(
       new tables::ExperimentalFlamegraphNodesTable(
-          storage->mutable_string_pool(), nullptr));
+          storage->mutable_string_pool()));
 
   // FORWARD PASS:
   // Aggregate callstacks by frame name / mapping name. Use symbolization
@@ -133,8 +133,10 @@ static FlamegraphTableAndMergedCallsites BuildFlamegraphTableTreeStructure(
         tables::ExperimentalFlamegraphNodesTable::Row row{};
         if (parent_idx) {
           row.depth = tbl->depth()[*parent_idx] + 1;
+          row.parent_id = tbl->id()[*parent_idx];
         } else {
           row.depth = 0;
+          row.parent_id = base::nullopt;
         }
 
         // The 'ts' column is given a default value, taken from the query.
@@ -158,8 +160,6 @@ static FlamegraphTableAndMergedCallsites BuildFlamegraphTableTreeStructure(
         row.profile_type = profile_type;
         row.name = merged_callsite.frame_name;
         row.map_name = merged_callsite.mapping_name;
-        if (parent_idx)
-          row.parent_id = tbl->id()[*parent_idx];
         tbl->Insert(row);
         callsites_to_rowid[merged_callsite] =
             static_cast<uint32_t>(merged_callsites_to_table_idx.size() - 1);
@@ -405,7 +405,7 @@ BuildNativeCallStackSamplingFlamegraph(
   if (filtered.row_count() == 0) {
     std::unique_ptr<tables::ExperimentalFlamegraphNodesTable> empty_tbl(
         new tables::ExperimentalFlamegraphNodesTable(
-            storage->mutable_string_pool(), nullptr));
+            storage->mutable_string_pool()));
     return empty_tbl;
   }
 
