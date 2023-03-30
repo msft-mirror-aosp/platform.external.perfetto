@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/tables/android_tables_py.h"
-#include "src/trace_processor/tables/counter_tables_py.h"
-#include "src/trace_processor/tables/flow_tables_py.h"
-#include "src/trace_processor/tables/memory_tables_py.h"
-#include "src/trace_processor/tables/metadata_tables_py.h"
-#include "src/trace_processor/tables/profiler_tables_py.h"
-#include "src/trace_processor/tables/slice_tables_py.h"
-#include "src/trace_processor/tables/trace_proto_tables_py.h"
+#include "src/trace_processor/tables/android_tables.h"
+#include "src/trace_processor/tables/counter_tables.h"
+#include "src/trace_processor/tables/flow_tables.h"
+#include "src/trace_processor/tables/memory_tables.h"
+#include "src/trace_processor/tables/metadata_tables.h"
+#include "src/trace_processor/tables/profiler_tables.h"
+#include "src/trace_processor/tables/slice_tables.h"
+#include "src/trace_processor/tables/trace_proto_tables.h"
 #include "src/trace_processor/tables/track_tables_py.h"
 
 namespace perfetto {
@@ -32,15 +32,15 @@ MacroTable::~MacroTable() = default;
 }  // namespace macros_internal
 
 namespace tables {
-// android_tables_py.h
+// android_tables.h
 AndroidDumpstateTable::~AndroidDumpstateTable() = default;
 AndroidGameInterventionListTable::~AndroidGameInterventionListTable() = default;
 AndroidLogTable::~AndroidLogTable() = default;
 
-// counter_tables_py.h
+// counter_tables.h
 CounterTable::~CounterTable() = default;
 
-// metadata_tables_py.h
+// metadata_tables.h
 RawTable::~RawTable() = default;
 ArgTable::~ArgTable() = default;
 ExpMissingChromeProcTable::~ExpMissingChromeProcTable() = default;
@@ -52,7 +52,7 @@ ProcessTable::~ProcessTable() = default;
 FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 
-// profiler_tables_py.h
+// profiler_tables.h
 StackProfileMappingTable::~StackProfileMappingTable() = default;
 StackProfileFrameTable::~StackProfileFrameTable() = default;
 StackProfileCallsiteTable::~StackProfileCallsiteTable() = default;
@@ -70,7 +70,7 @@ PackageListTable::~PackageListTable() = default;
 ProfilerSmapsTable::~ProfilerSmapsTable() = default;
 GpuCounterGroupTable::~GpuCounterGroupTable() = default;
 
-// slice_tables_py.h
+// slice_tables.h
 SliceTable::~SliceTable() = default;
 FlowTable::~FlowTable() = default;
 SchedSliceTable::~SchedSliceTable() = default;
@@ -99,11 +99,11 @@ EnergyCounterTrackTable::~EnergyCounterTrackTable() = default;
 UidCounterTrackTable::~UidCounterTrackTable() = default;
 EnergyPerUidCounterTrackTable::~EnergyPerUidCounterTrackTable() = default;
 
-// trace_proto_tables_py.h
+// trace_proto_tables.h
 ExperimentalProtoPathTable::~ExperimentalProtoPathTable() = default;
 ExperimentalProtoContentTable::~ExperimentalProtoContentTable() = default;
 
-// memory_tables_py.h
+// memory_tables.h
 MemorySnapshotTable::~MemorySnapshotTable() = default;
 ProcessMemorySnapshotTable::~ProcessMemorySnapshotTable() = default;
 MemorySnapshotNodeTable::~MemorySnapshotNodeTable() = default;

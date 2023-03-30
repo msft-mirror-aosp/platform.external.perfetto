@@ -680,7 +680,6 @@ cc_library_shared {
         "src/android_internal/incident_service.cc",
         "src/android_internal/power_stats.cc",
         "src/android_internal/statsd_logging.cc",
-        "src/android_internal/statsd.cc",
         "src/android_internal/tracing_service_proxy.cc",
     ],
     shared_libs: [
@@ -700,7 +699,6 @@ cc_library_shared {
         "libstatssocket",
         "libtracingproxy",
         "libutils",
-	"libstatspull",
     ],
     static_libs: [
         "libhealthhalutils",
@@ -8224,7 +8222,6 @@ filegroup {
 filegroup {
     name: "perfetto_src_base_threading_threading",
     srcs: [
-        "src/base/threading/spawn.cc",
         "src/base/threading/stream_combinators.cc",
         "src/base/threading/thread_pool.cc",
     ],
@@ -8236,7 +8233,6 @@ filegroup {
     srcs: [
         "src/base/threading/channel_unittest.cc",
         "src/base/threading/future_unittest.cc",
-        "src/base/threading/spawn_unittest.cc",
         "src/base/threading/stream_unittest.cc",
         "src/base/threading/thread_pool_unittest.cc",
         "src/base/threading/util_unittest.cc",
@@ -8256,6 +8252,7 @@ filegroup {
         "src/base/logging_unittest.cc",
         "src/base/metatrace_unittest.cc",
         "src/base/no_destructor_unittest.cc",
+        "src/base/optional_unittest.cc",
         "src/base/paged_memory_unittest.cc",
         "src/base/periodic_task_unittest.cc",
         "src/base/scoped_file_unittest.cc",
@@ -9299,7 +9296,6 @@ filegroup {
         "src/trace_processor/importers/common/event_tracker.cc",
         "src/trace_processor/importers/common/flow_tracker.cc",
         "src/trace_processor/importers/common/global_args_tracker.cc",
-        "src/trace_processor/importers/common/metadata_tracker.cc",
         "src/trace_processor/importers/common/process_tracker.cc",
         "src/trace_processor/importers/common/slice_tracker.cc",
         "src/trace_processor/importers/common/slice_translation_table.cc",
@@ -9590,6 +9586,7 @@ filegroup {
         "src/trace_processor/importers/proto/memory_tracker_snapshot_module.cc",
         "src/trace_processor/importers/proto/memory_tracker_snapshot_parser.cc",
         "src/trace_processor/importers/proto/metadata_minimal_module.cc",
+        "src/trace_processor/importers/proto/metadata_tracker.cc",
         "src/trace_processor/importers/proto/network_trace_module.cc",
         "src/trace_processor/importers/proto/packet_analyzer.cc",
         "src/trace_processor/importers/proto/packet_sequence_state_generation.cc",
@@ -10163,13 +10160,7 @@ genrule {
     name: "perfetto_src_trace_processor_tables_tables_python",
     srcs: [
         "src/trace_processor/tables/android_tables.py",
-        "src/trace_processor/tables/counter_tables.py",
-        "src/trace_processor/tables/flow_tables.py",
-        "src/trace_processor/tables/memory_tables.py",
         "src/trace_processor/tables/metadata_tables.py",
-        "src/trace_processor/tables/profiler_tables.py",
-        "src/trace_processor/tables/slice_tables.py",
-        "src/trace_processor/tables/trace_proto_tables.py",
         "src/trace_processor/tables/track_tables.py",
     ],
     tools: [
@@ -10178,13 +10169,7 @@ genrule {
     cmd: "$(location perfetto_src_trace_processor_tables_tables_python_binary) --gen-dir=$(genDir) --inputs $(in) --outputs $(out)",
     out: [
         "src/trace_processor/tables/android_tables_py.h",
-        "src/trace_processor/tables/counter_tables_py.h",
-        "src/trace_processor/tables/flow_tables_py.h",
-        "src/trace_processor/tables/memory_tables_py.h",
         "src/trace_processor/tables/metadata_tables_py.h",
-        "src/trace_processor/tables/profiler_tables_py.h",
-        "src/trace_processor/tables/slice_tables_py.h",
-        "src/trace_processor/tables/trace_proto_tables_py.h",
         "src/trace_processor/tables/track_tables_py.h",
     ],
 }
@@ -10197,13 +10182,7 @@ python_binary_host {
         "python/generators/trace_processor_table/serialize.py",
         "python/generators/trace_processor_table/util.py",
         "src/trace_processor/tables/android_tables.py",
-        "src/trace_processor/tables/counter_tables.py",
-        "src/trace_processor/tables/flow_tables.py",
-        "src/trace_processor/tables/memory_tables.py",
         "src/trace_processor/tables/metadata_tables.py",
-        "src/trace_processor/tables/profiler_tables.py",
-        "src/trace_processor/tables/slice_tables.py",
-        "src/trace_processor/tables/trace_proto_tables.py",
         "src/trace_processor/tables/track_tables.py",
         "tools/gen_tp_table_headers.py",
     ],

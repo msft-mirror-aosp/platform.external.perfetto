@@ -36,8 +36,8 @@ namespace trace_processor {
 
 using Clock = protos::pbzero::ClockSnapshot::Clock;
 
-ClockTracker::ClockTracker(TraceProcessorContext* context)
-    : context_(context),
+ClockTracker::ClockTracker(TraceStorage* storage)
+    : storage_(storage),
       trace_time_clock_id_(protos::pbzero::BUILTIN_CLOCK_BOOTTIME) {}
 
 ClockTracker::~ClockTracker() = default;
@@ -67,7 +67,7 @@ uint32_t ClockTracker::AddSnapshot(
                       " cannot use incremental encoding; this is only "
                       "supported for sequence-scoped clocks.",
                       clock_id);
-        context_->storage->IncrementStats(stats::invalid_clock_snapshots);
+        storage_->IncrementStats(stats::invalid_clock_snapshots);
         return snapshot_id;
       }
       domain.unit_multiplier_ns = clock_ts.clock.unit_multiplier_ns;
@@ -83,7 +83,7 @@ uint32_t ClockTracker::AddSnapshot(
                     clock_id, clock_ts.clock.unit_multiplier_ns,
                     clock_ts.clock.is_incremental, domain.unit_multiplier_ns,
                     domain.is_incremental);
-      context_->storage->IncrementStats(stats::invalid_clock_snapshots);
+      storage_->IncrementStats(stats::invalid_clock_snapshots);
       return snapshot_id;
     }
     const int64_t timestamp_ns = clock_ts.timestamp * domain.unit_multiplier_ns;
@@ -95,7 +95,7 @@ uint32_t ClockTracker::AddSnapshot(
       PERFETTO_ELOG("Clock sync error: duplicate clock domain with id=%" PRIu64
                     " at snapshot %" PRIu32 ".",
                     clock_id, snapshot_id);
-      context_->storage->IncrementStats(stats::invalid_clock_snapshots);
+      storage_->IncrementStats(stats::invalid_clock_snapshots);
       return snapshot_id;
     }
 
@@ -119,7 +119,7 @@ uint32_t ClockTracker::AddSnapshot(
                       " not >= %" PRId64 ".",
                       clock_id, snapshot_id, timestamp_ns,
                       vect.timestamps_ns.back());
-        context_->storage->IncrementStats(stats::invalid_clock_snapshots);
+        storage_->IncrementStats(stats::invalid_clock_snapshots);
         return snapshot_id;
       }
 
@@ -220,12 +220,12 @@ base::StatusOr<int64_t> ClockTracker::ConvertSlowpath(ClockId src_clock_id,
   PERFETTO_DCHECK(!IsSequenceClock(src_clock_id));
   PERFETTO_DCHECK(!IsSequenceClock(target_clock_id));
 
-  context_->storage->IncrementStats(stats::clock_sync_cache_miss);
+  storage_->IncrementStats(stats::clock_sync_cache_miss);
 
   ClockPath path = FindPath(src_clock_id, target_clock_id);
   if (!path.valid()) {
     // Too many logs maybe emitted when path is invalid.
-    context_->storage->IncrementStats(stats::clock_sync_failure);
+    storage_->IncrementStats(stats::clock_sync_failure);
     return base::ErrStatus("No path from clock %" PRIu64 " to %" PRIu64
                            " at timestamp %" PRId64,
                            src_clock_id, target_clock_id, src_timestamp);

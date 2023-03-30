@@ -125,8 +125,7 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                         this.searchText === '' ? 'Selected' :
                                                  `Selected (Filtered)`),
                       m(Button, {
-                        label: this.searchText === '' ? 'Clear All' :
-                                                        'Clear Filtered',
+                        label: 'Clear All',
                         icon: DESELECT,
                         minimal: true,
                         onclick: () => {
@@ -149,11 +148,9 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                   m('span',
                     this.searchText === '' ? 'Options' : `Options (Filtered)`),
                   m(Button, {
-                    label: this.searchText === '' ? 'Select All' :
-                                                    'Select Filtered',
+                    label: 'Select All',
                     icon: SELECT_ALL,
                     minimal: true,
-                    compact: true,
                     onclick: () => {
                       const diffs = options.filter(({checked}) => !checked)
                                         .map(({id}) => ({id, checked: true}));
@@ -163,11 +160,9 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                     disabled: allChecked,
                   }),
                   m(Button, {
-                    label: this.searchText === '' ? 'Clear All' :
-                                                    'Clear Filtered',
+                    label: 'Select None',
                     icon: DESELECT,
                     minimal: true,
-                    compact: true,
                     onclick: () => {
                       const diffs = options.filter(({checked}) => checked)
                                         .map(({id}) => ({id, checked: false}));
@@ -193,7 +188,7 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
             globals.rafScheduler.scheduleFullRedraw();
           },
           value: this.searchText,
-          placeholder: 'Filter options...',
+          placeholder: 'Search...',
           extraClasses: 'pf-search-box',
         }),
         this.renderClearButton(),

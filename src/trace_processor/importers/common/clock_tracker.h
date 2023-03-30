@@ -30,9 +30,7 @@
 #include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/status_or.h"
 #include "perfetto/ext/base/string_utils.h"
-#include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
-#include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -118,9 +116,9 @@ class TraceProcessorContext;
 
 class ClockTracker {
  public:
-  using ClockId = int64_t;
+  using ClockId = uint64_t;
 
-  explicit ClockTracker(TraceProcessorContext*);
+  explicit ClockTracker(TraceStorage*);
   virtual ~ClockTracker();
 
   // Clock description.
@@ -155,7 +153,7 @@ class ClockTracker {
   // passed as argument to ClockTracker functions.
   static ClockId SeqenceToGlobalClock(uint32_t seq_id, uint32_t clock_id) {
     PERFETTO_DCHECK(IsSequenceClock(clock_id));
-    return (static_cast<int64_t>(seq_id) << 32) | clock_id;
+    return (static_cast<uint64_t>(seq_id) << 32) | clock_id;
   }
 
   // Appends a new snapshot for the given clock domains.
@@ -164,12 +162,6 @@ class ClockTracker {
   uint32_t AddSnapshot(const std::vector<ClockTimestamp>&);
 
   base::StatusOr<int64_t> ToTraceTime(ClockId clock_id, int64_t timestamp) {
-    if (PERFETTO_UNLIKELY(!trace_time_clock_id_used_for_conversion_)) {
-      context_->metadata_tracker->SetMetadata(
-          metadata::trace_time_clock_id,
-          Variadic::Integer(trace_time_clock_id_));
-      trace_time_clock_id_used_for_conversion_ = true;
-    }
     trace_time_clock_id_used_for_conversion_ = true;
     if (clock_id == trace_time_clock_id_)
       return timestamp;
@@ -197,8 +189,6 @@ class ClockTracker {
       return;
     }
     trace_time_clock_id_ = clock_id;
-    context_->metadata_tracker->SetMetadata(
-        metadata::trace_time_clock_id, Variadic::Integer(trace_time_clock_id_));
   }
 
   void set_cache_lookups_disabled_for_testing(bool v) {
@@ -338,7 +328,7 @@ class ClockTracker {
     return &it->second;
   }
 
-  TraceProcessorContext* const context_;
+  TraceStorage* const storage_;
   ClockId trace_time_clock_id_ = 0;
   std::map<ClockId, ClockDomain> clocks_;
   std::set<ClockGraphEdge> graph_;

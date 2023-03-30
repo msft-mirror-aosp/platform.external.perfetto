@@ -76,15 +76,13 @@ void TrackEventTracker::ReserveDescriptorThreadTrack(uint64_t uuid,
                                                      StringId name,
                                                      uint32_t pid,
                                                      uint32_t tid,
-                                                     int64_t timestamp,
-                                                     bool use_separate_track) {
+                                                     int64_t timestamp) {
   DescriptorTrackReservation reservation;
   reservation.min_timestamp = timestamp;
   reservation.parent_uuid = parent_uuid;
   reservation.pid = pid;
   reservation.tid = tid;
   reservation.name = name;
-  reservation.use_separate_track = use_separate_track;
 
   std::map<uint64_t, DescriptorTrackReservation>::iterator it;
   bool inserted;
@@ -163,21 +161,6 @@ void TrackEventTracker::ReserveDescriptorChildTrack(uint64_t uuid,
                 " doesn't match earlier one",
                 uuid);
   context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
-}
-
-TrackId TrackEventTracker::InsertThreadTrack(UniqueTid utid) {
-  tables::ThreadTrackTable::Row row;
-  row.utid = utid;
-  auto* thread_tracks = context_->storage->mutable_thread_track_table();
-  return thread_tracks->Insert(row).id;
-}
-
-TrackId TrackEventTracker::InternThreadTrack(UniqueTid utid) {
-  auto it = thread_tracks_.find(utid);
-  if (it != thread_tracks_.end()) {
-    return it->second;
-  }
-  return thread_tracks_[utid] = InsertThreadTrack(utid);
 }
 
 base::Optional<TrackId> TrackEventTracker::GetDescriptorTrack(
@@ -269,12 +252,8 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
     const ResolvedDescriptorTrack& track) {
   if (track.is_root_in_scope()) {
     switch (track.scope()) {
-      case ResolvedDescriptorTrack::Scope::kThread: {
-        if (track.use_separate_track()) {
-          return InternThreadTrack(track.utid());
-        }
+      case ResolvedDescriptorTrack::Scope::kThread:
         return context_->track_tracker->InternThreadTrack(track.utid());
-      }
       case ResolvedDescriptorTrack::Scope::kProcess:
         return context_->track_tracker->InternProcessTrack(track.upid());
       case ResolvedDescriptorTrack::Scope::kGlobal:
@@ -294,7 +273,11 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
         return thread_counter_tracks->Insert(row).id;
       }
 
-      return InsertThreadTrack(track.utid());
+      tables::ThreadTrackTable::Row row;
+      row.utid = track.utid();
+
+      auto* thread_tracks = context_->storage->mutable_thread_track_table();
+      return thread_tracks->Insert(row).id;
     }
     case ResolvedDescriptorTrack::Scope::kProcess: {
       if (track.is_counter()) {
@@ -439,8 +422,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
       descriptor_uuids_by_utid_[utid] = uuid;
     }
     return ResolvedDescriptorTrack::Thread(utid, false /* is_counter */,
-                                           true /* is_root*/,
-                                           reservation.use_separate_track);
+                                           true /* is_root*/);
   }
 
   if (reservation.pid) {
@@ -475,9 +457,9 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
     switch (parent_resolved_track->scope()) {
       case ResolvedDescriptorTrack::Scope::kThread:
         // If parent is a thread track, create another thread-associated track.
-        return ResolvedDescriptorTrack::Thread(
-            parent_resolved_track->utid(), reservation.is_counter,
-            false /* is_root*/, parent_resolved_track->use_separate_track());
+        return ResolvedDescriptorTrack::Thread(parent_resolved_track->utid(),
+                                               reservation.is_counter,
+                                               false /* is_root*/);
       case ResolvedDescriptorTrack::Scope::kProcess:
         // If parent is a process track, create another process-associated
         // track.
@@ -604,14 +586,12 @@ TrackEventTracker::ResolvedDescriptorTrack::Process(UniquePid upid,
 TrackEventTracker::ResolvedDescriptorTrack
 TrackEventTracker::ResolvedDescriptorTrack::Thread(UniqueTid utid,
                                                    bool is_counter,
-                                                   bool is_root,
-                                                   bool use_separate_track) {
+                                                   bool is_root) {
   ResolvedDescriptorTrack track;
   track.scope_ = Scope::kThread;
   track.is_counter_ = is_counter;
   track.is_root_in_scope_ = is_root;
   track.utid_ = utid;
-  track.use_separate_track_ = use_separate_track;
   return track;
 }
 

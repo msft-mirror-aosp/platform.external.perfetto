@@ -16,8 +16,6 @@
 
 #include "src/trace_processor/prelude/table_functions/experimental_counter_dur.h"
 
-#include "src/trace_processor/tables/counter_tables.h"
-
 namespace perfetto {
 namespace trace_processor {
 namespace tables {

@@ -339,7 +339,7 @@ class TrackDecider {
     for (; it.valid(); it.next()) {
       const kind = ASYNC_SLICE_TRACK_KIND;
       const rawName = it.name === null ? undefined : it.name;
-      const rawParentName = it.parentName === null ? undefined : it.parentName;
+      const rawParentName = it.parentName === null ? undefined : it.name;
       const name = TrackDecider.getTrackName({name: rawName, kind});
       const rawTrackIds = it.trackIds;
       const trackIds = rawTrackIds.split(',').map((v) => Number(v));
@@ -347,7 +347,7 @@ class TrackDecider {
       const maxDepth = it.maxDepth;
       let trackGroup = SCROLLING_TRACK_GROUP;
 
-      if (parentTrackId !== null) {
+      if (parentTrackId) {
         const groupId = parentIdToGroupId.get(parentTrackId);
         if (groupId === undefined) {
           trackGroup = uuidv4();

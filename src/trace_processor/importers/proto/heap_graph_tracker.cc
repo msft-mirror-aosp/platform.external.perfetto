@@ -21,7 +21,7 @@
 #include "perfetto/ext/base/string_splitter.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "src/trace_processor/importers/proto/profiler_util.h"
-#include "src/trace_processor/tables/profiler_tables_py.h"
+#include "src/trace_processor/tables/profiler_tables.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -118,7 +118,7 @@ base::Optional<ObjectTable::Id> GetReferredObj(const TraceStorage& storage,
       {refs_tbl.reference_set_id().eq(ref_set_id),
        refs_tbl.field_name().eq(NullTermStringView(field_name))});
   if (!refs_it) {
-    return base::nullopt;
+    return {};
   }
   return refs_it.owned_id();
 }
@@ -938,7 +938,7 @@ HeapGraphTracker::BuildFlamegraph(const int64_t current_ts,
 
   std::unique_ptr<tables::ExperimentalFlamegraphNodesTable> tbl(
       new tables::ExperimentalFlamegraphNodesTable(
-          storage_->mutable_string_pool()));
+          storage_->mutable_string_pool(), nullptr));
 
   auto it = roots_.find(std::make_pair(current_upid, current_ts));
   if (it == roots_.end()) {

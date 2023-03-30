@@ -69,7 +69,7 @@ class TableAsserter {
 TEST(ExperimentalFlatSlice, Smoke) {
   StringPool pool;
   TableInseter inserter;
-  tables::SliceTable table(&pool);
+  tables::SliceTable table(&pool, nullptr);
 
   // A simple stack on track 1.
   inserter.Insert(100, 10, 0, TrackId{1});
@@ -136,7 +136,7 @@ TEST(ExperimentalFlatSlice, Smoke) {
 TEST(ExperimentalFlatSlice, Bounds) {
   StringPool pool;
   TableInseter inserter;
-  tables::SliceTable table(&pool);
+  tables::SliceTable table(&pool, nullptr);
 
   /// Our timebounds is between 200 and 300.
   int64_t start = 200;

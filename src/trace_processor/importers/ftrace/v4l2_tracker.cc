@@ -168,9 +168,10 @@ void V4l2Tracker::ParseV4l2Event(uint64_t fld_id,
       evt.timecode_userbits2 = pb_evt.timecode_userbits2();
       evt.timecode_userbits3 = pb_evt.timecode_userbits3();
 
-      base::StackString<64> buf_name("vb2_v4l2_buf_queue minor=%" PRIu32
-                                     " seq=%" PRIu32 " type=0 index=0",
-                                     evt.device_minor, evt.sequence);
+      base::StackString<64> buf_name(
+          "vb2_v4l2_buf_queue minor=%" PRIu32 " seq=%" PRIu32 " type=%" PRIu32
+          " index=%" PRIu32,
+          evt.device_minor, evt.sequence, *evt.type, *evt.index);
 
       StringId buf_name_id =
           context_->storage->InternString(buf_name.string_view());
@@ -199,9 +200,10 @@ void V4l2Tracker::ParseV4l2Event(uint64_t fld_id,
       evt.timecode_userbits2 = pb_evt.timecode_userbits2();
       evt.timecode_userbits3 = pb_evt.timecode_userbits3();
 
-      base::StackString<64> buf_name("vb2_v4l2_buf_done minor=%" PRIu32
-                                     " seq=%" PRIu32 " type=0 index=0",
-                                     evt.device_minor, evt.sequence);
+      base::StackString<64> buf_name(
+          "vb2_v4l2_buf_done minor=%" PRIu32 " seq=%" PRIu32 " type=%" PRIu32
+          " index=%" PRIu32,
+          evt.device_minor, evt.sequence, *evt.type, *evt.index);
 
       StringId buf_name_id =
           context_->storage->InternString(buf_name.string_view());
@@ -230,9 +232,10 @@ void V4l2Tracker::ParseV4l2Event(uint64_t fld_id,
       evt.timecode_userbits2 = pb_evt.timecode_userbits2();
       evt.timecode_userbits3 = pb_evt.timecode_userbits3();
 
-      base::StackString<64> buf_name("vb2_v4l2_qbuf minor=%" PRIu32
-                                     " seq=%" PRIu32 " type=0 index=0",
-                                     evt.device_minor, evt.sequence);
+      base::StackString<64> buf_name(
+          "vb2_v4l2_qbuf minor=%" PRIu32 " seq=%" PRIu32 " type=%" PRIu32
+          " index=%" PRIu32,
+          evt.device_minor, evt.sequence, *evt.type, *evt.index);
 
       StringId buf_name_id =
           context_->storage->InternString(buf_name.string_view());
@@ -261,9 +264,10 @@ void V4l2Tracker::ParseV4l2Event(uint64_t fld_id,
       evt.timecode_userbits2 = pb_evt.timecode_userbits2();
       evt.timecode_userbits3 = pb_evt.timecode_userbits3();
 
-      base::StackString<64> buf_name("vb2_v4l2_qbuf minor=%" PRIu32
-                                     " seq=%" PRIu32 " type=0 index=0",
-                                     evt.device_minor, evt.sequence);
+      base::StackString<64> buf_name(
+          "vb2_v4l2_qbuf minor=%" PRIu32 " seq=%" PRIu32 " type=%" PRIu32
+          " index=%" PRIu32,
+          evt.device_minor, evt.sequence, *evt.type, *evt.index);
 
       StringId buf_name_id =
           context_->storage->InternString(buf_name.string_view());

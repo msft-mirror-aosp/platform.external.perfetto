@@ -19,9 +19,9 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
-#include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/proto/metadata_tracker.h"
 #include "src/trace_processor/importers/proto/packet_sequence_state.h"
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 #include "src/trace_processor/importers/proto/track_event_tracker.h"
@@ -114,8 +114,7 @@ ModuleResult TrackEventTokenizer::TokenizeTrackDescriptorPacket(
     track_event_tracker_->ReserveDescriptorThreadTrack(
         track.uuid(), track.parent_uuid(), name_id,
         static_cast<uint32_t>(thread.pid()),
-        static_cast<uint32_t>(thread.tid()), packet_timestamp,
-        track.disallow_merging_with_system_tracks());
+        static_cast<uint32_t>(thread.tid()), packet_timestamp);
   } else if (track.has_process()) {
     protos::pbzero::ProcessDescriptor::Decoder process(track.process());
 

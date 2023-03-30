@@ -401,7 +401,7 @@ export const WidgetsPage = createPage({
           initialOpts: {
             icon: true,
             showNumSelected: true,
-            repeatCheckedItemsAtTop: false,
+            repeatCheckedItemsAtTop: true,
           },
         }),
         m('h2', 'PopupMenu'),
