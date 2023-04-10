@@ -20,11 +20,12 @@ import os
 import subprocess
 import sys
 import tempfile
+from binascii import unhexlify
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import List, Tuple, Optional
 
-from google.protobuf import text_format
-from python.generators.diff_tests.testing import DiffTest, TestType
+from google.protobuf import text_format, message_factory, descriptor_pool
+from python.generators.diff_tests.testing import TestCase, TestType, BinaryProto
 from python.generators.diff_tests.utils import (
     ColorFormatter, create_message_factory, get_env, get_trace_descriptor_path,
     read_all_tests, serialize_python_trace, serialize_textproto_trace)
@@ -37,11 +38,11 @@ ROOT_DIR = os.path.dirname(
 # Performance result of running the test.
 @dataclass
 class PerfResult:
-  test: DiffTest
+  test: TestCase
   ingest_time_ns: int
   real_time_ns: int
 
-  def __init__(self, test: DiffTest, perf_lines: List[str]):
+  def __init__(self, test: TestCase, perf_lines: List[str]):
     self.test = test
 
     assert len(perf_lines) == 1
@@ -55,7 +56,7 @@ class PerfResult:
 # Data gathered from running the test.
 @dataclass
 class TestResult:
-  test: DiffTest
+  test: TestCase
   trace: str
   cmd: List[str]
   expected: str
@@ -63,9 +64,9 @@ class TestResult:
   passed: bool
   stderr: str
   exit_code: int
-  perf_result: PerfResult
+  perf_result: Optional[PerfResult]
 
-  def __init__(self, test: DiffTest, gen_trace_path: str, cmd: List[str],
+  def __init__(self, test: TestCase, gen_trace_path: str, cmd: List[str],
                expected_text: str, actual_text: str, stderr: str,
                exit_code: int, perf_lines: List[str]) -> None:
     self.test = test
@@ -76,14 +77,22 @@ class TestResult:
 
     # For better string formatting we often add whitespaces, which has to now
     # be removed.
-    self.expected = expected_text.lstrip('\n')
-    self.actual = actual_text.lstrip('\n')
+    def strip_whitespaces(text: str):
+      no_front_new_line_text = text.lstrip('\n')
+      return '\n'.join(s.strip() for s in no_front_new_line_text.split('\n'))
+
+    self.expected = strip_whitespaces(expected_text)
+    self.actual = strip_whitespaces(actual_text)
 
     expected_content = self.expected.replace('\r\n', '\n')
+
     actual_content = self.actual.replace('\r\n', '\n')
     self.passed = (expected_content == actual_content)
 
-    self.perf_result = PerfResult(self.test, perf_lines)
+    if self.exit_code == 0:
+      self.perf_result = PerfResult(self.test, perf_lines)
+    else:
+      self.perf_result = None
 
   def write_diff(self):
     expected_lines = self.expected.splitlines(True)
@@ -135,14 +144,48 @@ class TestResults:
 
 # Responsible for executing singular diff test.
 @dataclass
-class DiffTestExecutor:
-  test: DiffTest
+class TestCaseRunner:
+  test: TestCase
   trace_processor_path: str
   trace_descriptor_path: str
   colors: ColorFormatter
 
-  def __run_metrics_test(self, gen_trace_path: str,
+  def __output_to_text_proto(self, actual: str, out: BinaryProto) -> str:
+    """Deserializes a binary proto and returns its text representation.
+
+  Args:
+    actual: (string) HEX encoded serialized proto message
+    message_type: (string) Message type
+
+  Returns:
+    Text proto
+  """
+    try:
+      raw_data = unhexlify(actual.splitlines()[-1][1:-1])
+      out_path = os.path.dirname(self.trace_processor_path)
+      descriptor_paths = [
+          f.path
+          for f in os.scandir(
+              os.path.join(ROOT_DIR, out_path, 'gen', 'protos', 'perfetto',
+                           'trace_processor'))
+          if f.is_file() and os.path.splitext(f.name)[1] == '.descriptor'
+      ]
+      descriptor_paths.append(
+          os.path.join(ROOT_DIR, out_path, 'gen', 'protos', 'third_party',
+                       'pprof', 'profile.descriptor'))
+      proto = create_message_factory(descriptor_paths, out.message_type)()
+      proto.ParseFromString(raw_data)
+      try:
+        return out.post_processing(proto)
+      except:
+        return '<Proto post processing failed>'
+      return text_format.MessageToString(proto)
+    except:
+      return '<Invalid input for proto deserializaiton>'
+
+  def __run_metrics_test(self, trace_path: str,
                          metrics_message_factory) -> TestResult:
+
     if self.test.blueprint.is_out_file():
       with open(self.test.expected_path, 'r') as expected_file:
         expected = expected_file.read()
@@ -162,7 +205,7 @@ class DiffTestExecutor:
         '--metrics-output=%s' % ('json' if is_json_output else 'binary'),
         '--perf-file',
         tmp_perf_file.name,
-        gen_trace_path,
+        trace_path,
     ]
     tp = subprocess.Popen(
         cmd,
@@ -192,12 +235,11 @@ class DiffTestExecutor:
     perf_lines = [line.decode('utf8') for line in tmp_perf_file.readlines()]
     tmp_perf_file.close()
     os.remove(tmp_perf_file.name)
-    return TestResult(self.test,
-                      gen_trace_path, cmd, expected_text, actual_text,
+    return TestResult(self.test, trace_path, cmd, expected_text, actual_text,
                       stderr.decode('utf8'), tp.returncode, perf_lines)
 
   # Run a query based Diff Test.
-  def __run_query_test(self, gen_trace_path: str) -> TestResult:
+  def __run_query_test(self, trace_path: str) -> TestResult:
     # Fetch expected text.
     if self.test.expected_path:
       with open(self.test.expected_path, 'r') as expected_file:
@@ -223,7 +265,7 @@ class DiffTestExecutor:
         query,
         '--perf-file',
         tmp_perf_file.name,
-        gen_trace_path,
+        trace_path,
     ]
     tp = subprocess.Popen(
         cmd,
@@ -239,43 +281,59 @@ class DiffTestExecutor:
     tmp_perf_file.close()
     os.remove(tmp_perf_file.name)
 
-    return TestResult(self.test, gen_trace_path, cmd, expected,
-                      stdout.decode('utf8'), stderr.decode('utf8'),
-                      tp.returncode, perf_lines)
+    actual = stdout.decode('utf8')
+    if self.test.blueprint.is_out_binaryproto():
+      actual = self.__output_to_text_proto(actual, self.test.blueprint.out)
+
+    return TestResult(self.test, trace_path, cmd, expected, actual,
+                      stderr.decode('utf8'), tp.returncode, perf_lines)
 
   def __run(self, metrics_descriptor_paths: List[str],
             extension_descriptor_paths: List[str], keep_input,
             rebase) -> Tuple[TestResult, str]:
-    is_generated_trace = True
     # We can't use delete=True here. When using that on Windows, the
     # resulting file is opened in exclusive mode (in turn that's a subtle
     # side-effect of the underlying CreateFile(FILE_ATTRIBUTE_TEMPORARY))
     # and TP fails to open the passed path.
-    if self.test.trace_path.endswith('.py'):
-      gen_trace_file = tempfile.NamedTemporaryFile(delete=False)
-      serialize_python_trace(ROOT_DIR, self.trace_descriptor_path,
-                             self.test.trace_path, gen_trace_file)
-      gen_trace_path = os.path.realpath(gen_trace_file.name)
+    gen_trace_file = None
+    if self.test.blueprint.is_trace_file():
+      if self.test.trace_path.endswith('.py'):
+        gen_trace_file = tempfile.NamedTemporaryFile(delete=False)
+        serialize_python_trace(ROOT_DIR, self.trace_descriptor_path,
+                               self.test.trace_path, gen_trace_file)
 
-    elif self.test.trace_path.endswith('.textproto'):
+      elif self.test.trace_path.endswith('.textproto'):
+        gen_trace_file = tempfile.NamedTemporaryFile(delete=False)
+        serialize_textproto_trace(self.trace_descriptor_path,
+                                  extension_descriptor_paths,
+                                  self.test.trace_path, gen_trace_file)
+
+    elif self.test.blueprint.is_trace_textproto():
       gen_trace_file = tempfile.NamedTemporaryFile(delete=False)
-      serialize_textproto_trace(self.trace_descriptor_path,
-                                extension_descriptor_paths,
-                                self.test.trace_path, gen_trace_file)
-      gen_trace_path = os.path.realpath(gen_trace_file.name)
+      proto = create_message_factory([self.trace_descriptor_path] +
+                                     extension_descriptor_paths,
+                                     'perfetto.protos.Trace')()
+      text_format.Merge(self.test.blueprint.trace.contents, proto)
+      gen_trace_file.write(proto.SerializeToString())
+      gen_trace_file.flush()
 
     else:
-      gen_trace_file = None
-      gen_trace_path = self.test.trace_path
-      is_generated_trace = False
+      gen_trace_file = tempfile.NamedTemporaryFile(delete=False)
+      with open(gen_trace_file.name, 'w') as trace_file:
+        trace_file.write(self.test.blueprint.trace.contents)
+
+    if gen_trace_file:
+      trace_path = os.path.realpath(gen_trace_file.name)
+    else:
+      trace_path = self.test.trace_path
 
     str = f"{self.colors.yellow('[ RUN      ]')} {self.test.name}\n"
 
     if self.test.type == TestType.QUERY:
-      result = self.__run_query_test(gen_trace_path)
+      result = self.__run_query_test(trace_path)
     elif self.test.type == TestType.METRIC:
       result = self.__run_metrics_test(
-          gen_trace_path,
+          trace_path,
           create_message_factory(metrics_descriptor_paths,
                                  'perfetto.protos.TraceMetrics'))
     else:
@@ -283,20 +341,20 @@ class DiffTestExecutor:
 
     if gen_trace_file:
       if keep_input:
-        str += f"Saving generated input trace: {gen_trace_path}\n"
+        str += f"Saving generated input trace: {trace_path}\n"
       else:
         gen_trace_file.close()
-        os.remove(gen_trace_path)
+        os.remove(trace_path)
 
     def write_cmdlines():
       res = ""
-      if is_generated_trace:
+      if not gen_trace_file:
         res += 'Command to generate trace:\n'
         res += 'tools/serialize_test_trace.py '
         res += '--descriptor {} {} > {}\n'.format(
             os.path.relpath(self.trace_descriptor_path, ROOT_DIR),
             os.path.relpath(self.test.trace_path, ROOT_DIR),
-            os.path.relpath(gen_trace_path, ROOT_DIR))
+            os.path.relpath(trace_path, ROOT_DIR))
       res += f"Command line:\n{' '.join(result.cmd)}\n"
       return res
 
@@ -320,7 +378,7 @@ class DiffTestExecutor:
               f"query: {result.perf_result.real_time_ns / 1000000:.2f} ms)\n")
     return result, str
 
-  # Run a DiffTest.
+  # Run a TestCase.
   def execute(self, extension_descriptor_paths: List[str],
               metrics_descriptor: str, keep_input: bool,
               rebase: bool) -> Tuple[str, str, TestResult]:
@@ -348,16 +406,15 @@ class DiffTestExecutor:
 
 # Fetches and executes all diff viable tests.
 @dataclass
-class DiffTestSuiteRunner:
-  tests: List[DiffTest]
+class DiffTestsRunner:
+  tests: List[TestCase]
   trace_processor_path: str
   trace_descriptor_path: str
-  test_runners: List[DiffTestExecutor]
+  test_runners: List[TestCaseRunner]
 
-  def __init__(self, query_metric_filter: str, trace_filter: str,
-               trace_processor_path: str, trace_descriptor: str,
-               no_colors: bool):
-    self.tests = read_all_tests(query_metric_filter, trace_filter, ROOT_DIR)
+  def __init__(self, name_filter: str, trace_processor_path: str,
+               trace_descriptor: str, no_colors: bool):
+    self.tests = read_all_tests(name_filter, ROOT_DIR)
     self.trace_processor_path = trace_processor_path
 
     out_path = os.path.dirname(self.trace_processor_path)
@@ -367,8 +424,8 @@ class DiffTestSuiteRunner:
     color_formatter = ColorFormatter(no_colors)
     for test in self.tests:
       self.test_runners.append(
-          DiffTestExecutor(test, self.trace_processor_path,
-                           self.trace_descriptor_path, color_formatter))
+          TestCaseRunner(test, self.trace_processor_path,
+                         self.trace_descriptor_path, color_formatter))
 
   def run_all_tests(self, metrics_descriptor: str, keep_input: bool,
                     rebase: bool) -> TestResults:

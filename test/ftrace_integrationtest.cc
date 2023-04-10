@@ -110,7 +110,7 @@ TEST_F(PerfettoFtraceIntegrationTest, TestFtraceProducer) {
   helper.WaitForConsumerConnect();
 
   TraceConfig trace_config;
-  trace_config.add_buffers()->set_size_kb(1024);
+  trace_config.add_buffers()->set_size_kb(64);
   trace_config.set_duration_ms(3000);
 
   auto* ds_config = trace_config.add_data_sources()->mutable_config();
@@ -173,7 +173,7 @@ TEST_F(PerfettoFtraceIntegrationTest, TestFtraceFlush) {
   helper.StartTracing(trace_config);
 
   // Wait for traced_probes to start.
-  helper.WaitFor([&] { return ftrace_procfs_->IsTracingEnabled(); }, "ftrace");
+  helper.WaitFor([&] { return ftrace_procfs_->GetTracingOn(); }, "ftrace");
 
   // Do a first flush just to synchronize with the producer. The problem here
   // is that, on a Linux workstation, the producer can take several seconds just
@@ -319,7 +319,7 @@ TEST_F(PerfettoFtraceIntegrationTest, ReportFtraceFailuresInStats) {
   const auto& packets = helper.trace();
   ASSERT_GT(packets.size(), 0u);
 
-  base::Optional<protos::gen::FtraceStats> stats;
+  std::optional<protos::gen::FtraceStats> stats;
   for (const auto& packet : packets) {
     if (!packet.has_ftrace_stats() ||
         packet.ftrace_stats().phase() !=

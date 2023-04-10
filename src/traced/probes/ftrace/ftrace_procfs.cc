@@ -49,6 +49,10 @@ namespace {
 constexpr char kRssStatThrottledTrigger[] =
     "hist:keys=mm_id,member:bucket=size/0x80000"
     ":onchange($bucket).rss_stat_throttled(mm_id,curr,member,size)";
+
+constexpr char kSuspendResumeMinimalTrigger[] =
+    "hist:keys=start:size=128:onmatch(power.suspend_resume)"
+    ".trace(suspend_resume_minimal, start) if action == 'syscore_resume'";
 }
 
 void KernelLogWrite(const char* s) {
@@ -83,8 +87,7 @@ const char* const FtraceProcfs::kTracingPaths[] = {
 
 // static
 std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
-    const std::string& instance_path,
-    bool preserve_ftrace_buffer) {
+    const std::string& instance_path) {
   std::unique_ptr<FtraceProcfs> ftrace_procfs;
   size_t index = 0;
   while (!ftrace_procfs && kTracingPaths[index]) {
@@ -92,18 +95,15 @@ std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
     if (!instance_path.empty())
       path += instance_path;
 
-    ftrace_procfs = Create(path, preserve_ftrace_buffer);
+    ftrace_procfs = Create(path);
   }
   return ftrace_procfs;
 }
 
 // static
-std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(
-    const std::string& root,
-    bool preserve_ftrace_buffer) {
-  if (!preserve_ftrace_buffer && !CheckRootPath(root)) {
+std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(const std::string& root) {
+  if (!CheckRootPath(root))
     return nullptr;
-  }
   return std::unique_ptr<FtraceProcfs>(new FtraceProcfs(root));
 }
 
@@ -178,6 +178,12 @@ std::string FtraceProcfs::ReadEventFormat(const std::string& group,
                                           const std::string& name) const {
   std::string path = root_ + "events/" + group + "/" + name + "/format";
   return ReadFileIntoString(path);
+}
+
+std::string FtraceProcfs::GetCurrentTracer() {
+  std::string path = root_ + "current_tracer";
+  std::string current_tracer = ReadFileIntoString(path);
+  return base::StripSuffix(current_tracer, "\n");
 }
 
 bool FtraceProcfs::SetCurrentTracer(const std::string& tracer) {
@@ -275,9 +281,14 @@ bool FtraceProcfs::MaybeSetUpEventTriggers(const std::string& group,
                                            const std::string& name) {
   bool ret = true;
 
-  if (group == "synthetic" && name == "rss_stat_throttled") {
-    ret = RemoveAllEventTriggers("kmem", "rss_stat") &&
-          CreateEventTrigger("kmem", "rss_stat", kRssStatThrottledTrigger);
+  if (group == "synthetic") {
+    if (name == "rss_stat_throttled") {
+      ret = RemoveAllEventTriggers("kmem", "rss_stat") &&
+            CreateEventTrigger("kmem", "rss_stat", kRssStatThrottledTrigger);
+    } else if (name == "suspend_resume_minimal") {
+      ret = RemoveAllEventTriggers("power", "suspend_resume") &&
+            CreateEventTrigger("power", "suspend_resume", kSuspendResumeMinimalTrigger);
+    }
   }
 
   if (!ret) {
@@ -292,8 +303,13 @@ bool FtraceProcfs::MaybeTearDownEventTriggers(const std::string& group,
                                               const std::string& name) {
   bool ret = true;
 
-  if (group == "synthetic" && name == "rss_stat_throttled")
-    ret = RemoveAllEventTriggers("kmem", "rss_stat");
+  if (group == "synthetic") {
+    if (name == "rss_stat_throttled") {
+      ret = RemoveAllEventTriggers("kmem", "rss_stat");
+    } else if (name == "suspend_resume_minimal") {
+      ret = RemoveEventTrigger("power", "suspend_resume", kSuspendResumeMinimalTrigger);
+    }
+  }
 
   if (!ret) {
     PERFETTO_PLOG("Failed to tear down event triggers for: %s:%s",
@@ -407,30 +423,43 @@ bool FtraceProcfs::SetCpuBufferSizeInPages(size_t pages) {
   return WriteNumberToFile(path, pages * (base::kPageSize / 1024ul));
 }
 
-bool FtraceProcfs::EnableTracing() {
-  KernelLogWrite("perfetto: enabled ftrace\n");
-  PERFETTO_LOG("enabled ftrace in %s", root_.c_str());
-  std::string path = root_ + "tracing_on";
-  return WriteToFile(path, "1");
-}
-
-bool FtraceProcfs::DisableTracing() {
-  KernelLogWrite("perfetto: disabled ftrace\n");
-  PERFETTO_LOG("disabled ftrace in %s", root_.c_str());
-  std::string path = root_ + "tracing_on";
-  return WriteToFile(path, "0");
-}
-
-bool FtraceProcfs::SetTracingOn(bool enable) {
-  return enable ? EnableTracing() : DisableTracing();
-}
-
-bool FtraceProcfs::IsTracingEnabled() {
+bool FtraceProcfs::GetTracingOn() {
   std::string path = root_ + "tracing_on";
   char tracing_on = ReadOneCharFromFile(path);
   if (tracing_on == '\0')
     PERFETTO_PLOG("Failed to read %s", path.c_str());
   return tracing_on == '1';
+}
+
+bool FtraceProcfs::SetTracingOn(bool on) {
+  std::string path = root_ + "tracing_on";
+  if (!WriteToFile(path, on ? "1" : "0")) {
+    PERFETTO_PLOG("Failed to write %s", path.c_str());
+    return false;
+  }
+  if (on) {
+    KernelLogWrite("perfetto: enabled ftrace\n");
+    PERFETTO_LOG("enabled ftrace in %s", root_.c_str());
+  } else {
+    KernelLogWrite("perfetto: disabled ftrace\n");
+    PERFETTO_LOG("disabled ftrace in %s", root_.c_str());
+  }
+
+  return true;
+}
+
+bool FtraceProcfs::IsTracingAvailable() {
+  std::string current_tracer = GetCurrentTracer();
+
+  // Ftrace tracing is available if current_tracer == "nop".
+  // events/enable could be 0, 1, X or 0*. 0* means events would be
+  // dynamically enabled so we need to treat as event tracing is in use.
+  // However based on the discussion in asop/2328817, on Android events/enable
+  // is "X" after boot up. To avoid causing more problem, the decision is just
+  // look at current_tracer.
+  // As the discussion in asop/2328817, if GetCurrentTracer failed to
+  // read file and return "", we treat it as tracing is available.
+  return current_tracer == "nop" || current_tracer == "";
 }
 
 bool FtraceProcfs::SetClock(const std::string& clock_name) {
@@ -575,7 +604,7 @@ uint32_t FtraceProcfs::ReadEventId(const std::string& group,
   if (str.size() && str[str.size() - 1] == '\n')
     str.resize(str.size() - 1);
 
-  base::Optional<uint32_t> id = base::StringToUInt32(str);
+  std::optional<uint32_t> id = base::StringToUInt32(str);
   if (!id)
     return 0;
   return *id;

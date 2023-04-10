@@ -92,6 +92,7 @@ SELECT
           'id', cuj_id,
           'name', cuj_name,
           'process', process_metadata,
+          'layer_name', layer_name,
           'ts', COALESCE(boundary.ts, cuj.ts),
           'dur', COALESCE(boundary.dur, cuj.dur),
           'counter_metrics', (
@@ -115,7 +116,11 @@ SELECT
               'frame_dur_p50', CAST(PERCENTILE(f.dur, 50) AS INTEGER),
               'frame_dur_p90', CAST(PERCENTILE(f.dur, 90) AS INTEGER),
               'frame_dur_p95', CAST(PERCENTILE(f.dur, 95) AS INTEGER),
-              'frame_dur_p99', CAST(PERCENTILE(f.dur, 99) AS INTEGER))
+              'frame_dur_p99', CAST(PERCENTILE(f.dur, 99) AS INTEGER),
+              'frame_dur_ms_p50', PERCENTILE(f.dur / 1e6, 50),
+              'frame_dur_ms_p90', PERCENTILE(f.dur / 1e6, 90),
+              'frame_dur_ms_p95', PERCENTILE(f.dur / 1e6, 95),
+              'frame_dur_ms_p99', PERCENTILE(f.dur / 1e6, 99))
             FROM android_jank_cuj_frame f
             WHERE f.cuj_id = cuj.cuj_id),
           'timeline_metrics', (
@@ -129,7 +134,11 @@ SELECT
               'frame_dur_p50', CAST(PERCENTILE(f.dur, 50) AS INTEGER),
               'frame_dur_p90', CAST(PERCENTILE(f.dur, 90) AS INTEGER),
               'frame_dur_p95', CAST(PERCENTILE(f.dur, 95) AS INTEGER),
-              'frame_dur_p99', CAST(PERCENTILE(f.dur, 99) AS INTEGER))
+              'frame_dur_p99', CAST(PERCENTILE(f.dur, 99) AS INTEGER),
+              'frame_dur_ms_p50', PERCENTILE(f.dur / 1e6, 50),
+              'frame_dur_ms_p90', PERCENTILE(f.dur / 1e6, 90),
+              'frame_dur_ms_p95', PERCENTILE(f.dur / 1e6, 95),
+              'frame_dur_ms_p99', PERCENTILE(f.dur / 1e6, 99))
             FROM android_jank_cuj_frame_timeline f
             WHERE f.cuj_id = cuj.cuj_id),
           'frame', (
@@ -160,4 +169,5 @@ SELECT
         ))
       FROM android_jank_cuj cuj
       LEFT JOIN android_jank_cuj_boundary boundary USING (cuj_id)
+      LEFT JOIN android_jank_cuj_layer_name cuj_layer USING (cuj_id)
       ORDER BY cuj.cuj_id ASC));

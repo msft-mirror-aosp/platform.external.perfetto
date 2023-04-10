@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
+
 import {fromNs} from '../common/time';
 
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
-import {gridlines} from './gridline_helper';
+import {
+  TickGenerator,
+  TickType,
+  timeScaleForVisibleWindow,
+} from './gridline_helper';
 import {Panel, PanelSize} from './panel';
 
 // This is used to display the summary of search results.
@@ -31,9 +36,11 @@ export class TickmarkPanel extends Panel {
 
     ctx.fillStyle = '#999';
     ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
-    for (const xAndTime of gridlines(
-             size.width, visibleWindowTime, timeScale)) {
-      ctx.fillRect(xAndTime[0], 0, 1, size.height);
+    const relScale = timeScaleForVisibleWindow(TRACK_SHELL_WIDTH, size.width);
+    if (relScale.timeSpan.duration > 0 && relScale.widthPx > 0) {
+      for (const {type, position} of new TickGenerator(relScale)) {
+        if (type === TickType.MAJOR) ctx.fillRect(position, 0, 1, size.height);
+      }
     }
 
     const data = globals.searchSummary;

@@ -49,6 +49,10 @@ constexpr size_t kAllSyscallsId = kMaxSyscalls + 1;
 // and FtraceConfigMuxer::SetupClock() should be also changed accordingly.
 constexpr const char* kClocks[] = {"boot", "global", "local"};
 
+// optional monotonic raw clock.
+// Enabled by the "use_monotonic_raw_clock" option in the ftrace config.
+constexpr const char* kClockMonoRaw = "mono_raw";
+
 void AddEventGroup(const ProtoTranslationTable* table,
                    const std::string& group,
                    std::set<GroupAndName>* to) {
@@ -519,7 +523,7 @@ EventFilter FtraceConfigMuxer::BuildSyscallFilter(
   }
 
   for (const std::string& syscall : request.syscall_events()) {
-    base::Optional<size_t> id = syscalls_.GetByName(syscall);
+    std::optional<size_t> id = syscalls_.GetByName(syscall);
     if (!id.has_value()) {
       PERFETTO_ELOG("Can't enable %s, syscall not known", syscall.c_str());
       continue;
@@ -581,40 +585,56 @@ FtraceConfigMuxer::FtraceConfigMuxer(
     FtraceProcfs* ftrace,
     ProtoTranslationTable* table,
     SyscallTable syscalls,
-    std::map<std::string, std::vector<GroupAndName>> vendor_events)
+    std::map<std::string, std::vector<GroupAndName>> vendor_events,
+    bool secondary_instance)
     : ftrace_(ftrace),
       table_(table),
       syscalls_(std::move(syscalls)),
       current_state_(),
       ds_configs_(),
-      vendor_events_(vendor_events) {}
+      vendor_events_(vendor_events),
+      secondary_instance_(secondary_instance) {}
 FtraceConfigMuxer::~FtraceConfigMuxer() = default;
 
-FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
-                                              FtraceSetupErrors* errors) {
+bool FtraceConfigMuxer::SetupConfig(FtraceConfigId id,
+                                    const FtraceConfig& request,
+                                    FtraceSetupErrors* errors) {
   EventFilter filter;
-  bool is_ftrace_enabled = ftrace_->IsTracingEnabled();
   if (ds_configs_.empty()) {
     PERFETTO_DCHECK(active_configs_.empty());
 
-    // If someone outside of perfetto is using ftrace give up now.
-    if (!request.preserve_ftrace_buffer() && is_ftrace_enabled &&
-        !IsOldAtrace()) {
-      PERFETTO_ELOG("ftrace in use by non-Perfetto.");
-      return 0;
+    // If someone outside of perfetto is using a non-nop tracer, yield. We can't
+    // realistically figure out all notions of "in use" even if we look at
+    // set_event or events/enable, so this is all we check for.
+    if (!request.preserve_ftrace_buffer() && !ftrace_->IsTracingAvailable()) {
+      PERFETTO_ELOG(
+          "ftrace in use by non-Perfetto. Check that %s current_tracer is nop.",
+          ftrace_->GetRootPath().c_str());
+      return false;
     }
 
-    // Setup ftrace, without starting it. Setting buffers can be quite slow
-    // (up to hundreds of ms).
-    if (!request.preserve_ftrace_buffer())
-      SetupClock(request);
-    SetupBufferSize(request);
-  } else {
-    // Did someone turn ftrace off behind our back? If so give up.
-    if (!active_configs_.empty() && !is_ftrace_enabled && !IsOldAtrace()) {
-      PERFETTO_ELOG("ftrace disabled by non-Perfetto.");
-      return 0;
+    // Clear tracefs state, remembering which value of "tracing_on" to restore
+    // to after we're done, though we won't restore the rest of the tracefs
+    // state.
+    current_state_.saved_tracing_on = ftrace_->GetTracingOn();
+    if (!request.preserve_ftrace_buffer()) {
+      ftrace_->SetTracingOn(false);
+      // This will fail on release ("user") builds due to ACLs, but that's
+      // acceptable since the per-event enabling/disabling should still be
+      // balanced.
+      ftrace_->DisableAllEvents();
+      ftrace_->ClearTrace();
     }
+
+    // Set up the rest of the tracefs state, without starting it.
+    // Notes:
+    // * resizing buffers can be quite slow (up to hundreds of ms).
+    // * resizing buffers doesn't clear their existing contents, which matters
+    // to the preserve_ftrace_buffer option.
+    if (!request.preserve_ftrace_buffer()) {
+      SetupClock(request);
+    }
+    SetupBufferSize(request);
   }
 
   std::set<GroupAndName> events = GetFtraceEvents(request, table_);
@@ -632,11 +652,17 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
   }
 
   if (RequiresAtrace(request)) {
+    if (secondary_instance_) {
+      PERFETTO_ELOG(
+          "Secondary ftrace instances do not support atrace_categories and "
+          "atrace_apps options as they affect global state");
+      return false;
+    }
     if (IsOldAtrace() && !ds_configs_.empty()) {
       PERFETTO_ELOG(
           "Concurrent atrace sessions are not supported before Android P, "
           "bailing out.");
-      return 0;
+      return false;
     }
     UpdateAtrace(request, errors ? &errors->atrace_errors : nullptr);
   }
@@ -682,7 +708,7 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
   EventFilter syscall_filter = BuildSyscallFilter(filter, request);
   if (!SetSyscallEventFilter(syscall_filter)) {
     PERFETTO_ELOG("Failed to set raw_syscall ftrace filter in SetupConfig");
-    return 0;
+    return false;
   }
 
   // Kernel function tracing (function_graph).
@@ -698,19 +724,19 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
   // through a trace (but some might get added).
   if (request.enable_function_graph()) {
     if (!current_state_.funcgraph_on && !ftrace_->ClearFunctionFilters())
-      return 0;
+      return false;
     if (!current_state_.funcgraph_on && !ftrace_->ClearFunctionGraphFilters())
-      return 0;
+      return false;
     if (!ftrace_->AppendFunctionFilters(request.function_filters()))
-      return 0;
+      return false;
     if (!ftrace_->AppendFunctionGraphFilters(request.function_graph_roots()))
-      return 0;
+      return false;
     if (!current_state_.funcgraph_on &&
         !ftrace_->SetCurrentTracer("function_graph")) {
       PERFETTO_LOG(
           "Unable to enable function_graph tracing since a concurrent ftrace "
           "data source is using a different tracer");
-      return 0;
+      return false;
     }
     current_state_.funcgraph_on = true;
   }
@@ -718,7 +744,7 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
   auto compact_sched =
       CreateCompactSchedConfig(request, table_->compact_sched_format());
 
-  base::Optional<FtracePrintFilterConfig> ftrace_print_filter;
+  std::optional<FtracePrintFilterConfig> ftrace_print_filter;
   if (request.has_print_filter()) {
     ftrace_print_filter =
         FtracePrintFilterConfig::Create(request.print_filter(), table_);
@@ -732,7 +758,6 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
 
   std::vector<std::string> apps(request.atrace_apps());
   std::vector<std::string> categories(request.atrace_categories());
-  FtraceConfigId id = ++last_id_;
   ds_configs_.emplace(
       std::piecewise_construct, std::forward_as_tuple(id),
       std::forward_as_tuple(std::move(filter), std::move(syscall_filter),
@@ -741,7 +766,7 @@ FtraceConfigId FtraceConfigMuxer::SetupConfig(const FtraceConfig& request,
                             request.symbolize_ksyms(),
                             request.preserve_ftrace_buffer(),
                             GetSyscallsReturningFds(syscalls_)));
-  return id;
+  return true;
 }
 
 bool FtraceConfigMuxer::ActivateConfig(FtraceConfigId id) {
@@ -750,14 +775,10 @@ bool FtraceConfigMuxer::ActivateConfig(FtraceConfigId id) {
     return false;
   }
 
+  // Enable tracing_on to activate ftrace ring buffer before activate the first
+  // config.
   if (active_configs_.empty()) {
-    if (!ds_configs_.at(id).preserve_ftrace_buffer &&
-        ftrace_->IsTracingEnabled() && !IsOldAtrace()) {
-      // If someone outside of perfetto is using ftrace give up now.
-      PERFETTO_ELOG("ftrace in use by non-Perfetto.");
-      return false;
-    }
-    if (!ftrace_->EnableTracing()) {
+    if (!ftrace_->SetTracingOn(true)) {
       PERFETTO_ELOG("Failed to enable ftrace.");
       return false;
     }
@@ -812,14 +833,14 @@ bool FtraceConfigMuxer::RemoveConfig(FtraceConfigId config_id) {
       current_state_.ftrace_events.DisableEvent(event->ftrace_event_id);
   }
 
-  // If there aren't any more active configs, disable ftrace.
   auto active_it = active_configs_.find(config_id);
   if (active_it != active_configs_.end()) {
     active_configs_.erase(active_it);
     if (active_configs_.empty()) {
-      // This was the last active config, disable ftrace.
-      if (!ftrace_->DisableTracing())
-        PERFETTO_ELOG("Failed to disable ftrace.");
+      // This was the last active config for now, but potentially more dormant
+      // configs need to be activated. We are not interested in reading while no
+      // active configs so diasble tracing_on here.
+      ftrace_->SetTracingOn(false);
     }
   }
 
@@ -831,6 +852,7 @@ bool FtraceConfigMuxer::RemoveConfig(FtraceConfigId config_id) {
       current_state_.cpu_buffer_size_pages = 1;
     ftrace_->DisableAllEvents();
     ftrace_->ClearTrace();
+    ftrace_->SetTracingOn(current_state_.saved_tracing_on);
   }
 
   if (current_state_.atrace_on) {
@@ -879,19 +901,25 @@ const FtraceDataSourceConfig* FtraceConfigMuxer::GetDataSourceConfig(
   return &ds_configs_.at(id);
 }
 
-void FtraceConfigMuxer::SetupClock(const FtraceConfig&) {
+void FtraceConfigMuxer::SetupClock(const FtraceConfig& config) {
   std::string current_clock = ftrace_->GetClock();
   std::set<std::string> clocks = ftrace_->AvailableClocks();
 
-  for (size_t i = 0; i < base::ArraySize(kClocks); i++) {
-    std::string clock = std::string(kClocks[i]);
-    if (!clocks.count(clock))
-      continue;
-    if (current_clock == clock)
+  if (config.has_use_monotonic_raw_clock() &&
+      config.use_monotonic_raw_clock() && clocks.count(kClockMonoRaw)) {
+    ftrace_->SetClock(kClockMonoRaw);
+    current_clock = kClockMonoRaw;
+  } else {
+    for (size_t i = 0; i < base::ArraySize(kClocks); i++) {
+      std::string clock = std::string(kClocks[i]);
+      if (!clocks.count(clock))
+        continue;
+      if (current_clock == clock)
+        break;
+      ftrace_->SetClock(clock);
+      current_clock = clock;
       break;
-    ftrace_->SetClock(clock);
-    current_clock = clock;
-    break;
+    }
   }
 
   namespace pb0 = protos::pbzero;
@@ -904,6 +932,8 @@ void FtraceConfigMuxer::SetupClock(const FtraceConfig&) {
     current_state_.ftrace_clock = pb0::FTRACE_CLOCK_GLOBAL;
   } else if (current_clock == "local") {
     current_state_.ftrace_clock = pb0::FTRACE_CLOCK_LOCAL;
+  } else if (current_clock == kClockMonoRaw) {
+    current_state_.ftrace_clock = pb0::FTRACE_CLOCK_MONO_RAW;
   } else {
     current_state_.ftrace_clock = pb0::FTRACE_CLOCK_UNKNOWN;
   }
