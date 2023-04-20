@@ -12,18 +12,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {Anchor} from './anchor';
+import {classNames} from './classnames';
 import {globals} from './globals';
+import {LIBRARY_ADD_CHECK} from './icons';
 import {createPage} from './pages';
+import {PopupMenuButton} from './popup_menu';
 import {TableShowcase} from './tables/table_showcase';
 import {Button} from './widgets/button';
 import {Checkbox} from './widgets/checkbox';
 import {EmptyState} from './widgets/empty_state';
+import {Icon} from './widgets/icon';
+import {Menu, MenuDivider, MenuItem, PopupMenu2} from './widgets/menu';
+import {MultiSelect, MultiSelectDiff} from './widgets/multiselect';
 import {Popup, PopupPosition} from './widgets/popup';
 import {Portal} from './widgets/portal';
+import {Select} from './widgets/select';
+import {Spinner} from './widgets/spinner';
+import {Switch} from './widgets/switch';
 import {TextInput} from './widgets/text_input';
+import {Tree, TreeLayout, TreeNode} from './widgets/tree';
+
+const options: {[key: string]: boolean} = {
+  foobar: false,
+  foo: false,
+  bar: false,
+  baz: false,
+  qux: false,
+  quux: false,
+  corge: false,
+  grault: false,
+  garply: false,
+  waldo: false,
+  fred: false,
+  plugh: false,
+  xyzzy: false,
+  thud: false,
+};
 
 function PortalButton() {
   let portalOpen = false;
@@ -105,6 +132,7 @@ type Options = {
 interface WidgetShowcaseAttrs {
   initialOpts?: Options;
   renderWidget: (options: any) => any;
+  wide?: boolean;
 }
 
 class EnumOption {
@@ -144,7 +172,7 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
     }
   }
 
-  view({attrs: {renderWidget}}: m.CVnode<WidgetShowcaseAttrs>) {
+  view({attrs: {renderWidget, wide}}: m.CVnode<WidgetShowcaseAttrs>) {
     const listItems = [];
 
     if (this.opts) {
@@ -159,7 +187,13 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       m(
           '.widget-block',
           m(
-              '.widget-container',
+              'div',
+              {
+                class: classNames(
+                    'widget-container',
+                    wide && 'widget-container-wide',
+                    ),
+              },
               renderWidget(this.optValues),
               ),
           this.renderOptions(listItems),
@@ -195,7 +229,7 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       return m('option', {value: option}, option);
     });
     return m(
-        'select',
+        Select,
         {
           value: this.optValues[key],
           onchange: (e: Event) => {
@@ -216,14 +250,16 @@ export const WidgetsPage = createPage({
         m('h1', 'Widgets'),
         m('h2', 'Button'),
         m(WidgetShowcase, {
-          renderWidget: ({label, icon, ...rest}) => m(Button, {
+          renderWidget: ({label, icon, rightIcon, ...rest}) => m(Button, {
             icon: icon ? 'send' : undefined,
+            rightIcon: rightIcon ? 'arrow_forward' : undefined,
             label: label ? 'Button' : '',
             ...rest,
           }),
           initialOpts: {
             label: true,
-            icon: false,
+            icon: true,
+            rightIcon: false,
             disabled: false,
             minimal: false,
             active: false,
@@ -237,6 +273,15 @@ export const WidgetsPage = createPage({
             disabled: false,
           },
         }),
+        m('h2', 'Switch'),
+        m(WidgetShowcase, {
+          renderWidget: ({label, ...rest}: any) =>
+              m(Switch, {label: label ? 'Switch' : undefined, ...rest}),
+          initialOpts: {
+            label: true,
+            disabled: false,
+          },
+        }),
         m('h2', 'Text Input'),
         m(WidgetShowcase, {
           renderWidget: ({placeholder, ...rest}) => m(TextInput, {
@@ -245,6 +290,20 @@ export const WidgetsPage = createPage({
           }),
           initialOpts: {
             placeholder: true,
+            disabled: false,
+          },
+        }),
+        m('h2', 'Select'),
+        m(WidgetShowcase, {
+          renderWidget: (opts) =>
+              m(Select,
+                opts,
+                [
+                  m('option', {value: 'foo', label: 'Foo'}),
+                  m('option', {value: 'bar', label: 'Bar'}),
+                  m('option', {value: 'baz', label: 'Baz'}),
+                ]),
+          initialOpts: {
             disabled: false,
           },
         }),
@@ -278,7 +337,7 @@ export const WidgetsPage = createPage({
         }),
         m('h2', 'Table'),
         m(WidgetShowcase,
-          {renderWidget: () => m(TableShowcase), initialOpts: {}}),
+          {renderWidget: () => m(TableShowcase), initialOpts: {}, wide: true}),
         m('h2', 'Portal'),
         m('p', `A portal is a div rendered out of normal flow of the
         hierarchy.`),
@@ -324,6 +383,207 @@ export const WidgetsPage = createPage({
         m(WidgetShowcase, {
           renderWidget: (opts) => m(ControlledPopup, opts),
           initialOpts: {},
+        }),
+        m('h2', 'Icon'),
+        m(WidgetShowcase, {
+          renderWidget: (opts) => m(Icon, {icon: 'star', ...opts}),
+          initialOpts: {filled: false},
+        }),
+        m('h2', 'MultiSelect'),
+        m(WidgetShowcase, {
+          renderWidget: ({icon, ...rest}) => m(MultiSelect, {
+            options: Object.entries(options).map(([key, value]) => {
+              return {
+                id: key,
+                name: key,
+                checked: value,
+              };
+            }),
+            popupPosition: PopupPosition.Top,
+            label: 'Multi Select',
+            icon: icon ? LIBRARY_ADD_CHECK : undefined,
+            onChange: (diffs: MultiSelectDiff[]) => {
+              diffs.forEach(({id, checked}) => {
+                options[id] = checked;
+              });
+              globals.rafScheduler.scheduleFullRedraw();
+            },
+            ...rest,
+          }),
+          initialOpts: {
+            icon: true,
+            showNumSelected: true,
+            repeatCheckedItemsAtTop: false,
+          },
+        }),
+        m('h2', 'PopupMenu'),
+        m(WidgetShowcase, {
+          renderWidget: () => {
+            return m(PopupMenuButton, {
+              icon: 'description',
+              items: [
+                {itemType: 'regular', text: 'New', callback: () => {}},
+                {itemType: 'regular', text: 'Open', callback: () => {}},
+                {itemType: 'regular', text: 'Save', callback: () => {}},
+                {itemType: 'regular', text: 'Delete', callback: () => {}},
+                {
+                  itemType: 'group',
+                  text: 'Share',
+                  itemId: 'foo',
+                  children: [
+                    {itemType: 'regular', text: 'Friends', callback: () => {}},
+                    {itemType: 'regular', text: 'Family', callback: () => {}},
+                    {itemType: 'regular', text: 'Everyone', callback: () => {}},
+                  ],
+                },
+              ],
+            });
+          },
+        }),
+        m('h2', 'Menu'),
+        m(WidgetShowcase, {
+          renderWidget: () => m(
+              Menu,
+              m(MenuItem, {label: 'New', icon: 'add'}),
+              m(MenuItem, {label: 'Open', icon: 'folder_open'}),
+              m(MenuItem, {label: 'Save', icon: 'save', disabled: true}),
+              m(MenuDivider),
+              m(MenuItem, {label: 'Delete', icon: 'delete'}),
+              m(MenuDivider),
+              m(
+                  MenuItem,
+                  {label: 'Share', icon: 'share'},
+                  m(MenuItem, {label: 'Everyone', icon: 'public'}),
+                  m(MenuItem, {label: 'Friends', icon: 'group'}),
+                  m(
+                      MenuItem,
+                      {label: 'Specific people', icon: 'person_add'},
+                      m(MenuItem, {label: 'Alice', icon: 'person'}),
+                      m(MenuItem, {label: 'Bob', icon: 'person'}),
+                      ),
+                  ),
+              m(
+                  MenuItem,
+                  {label: 'More', icon: 'more_horiz'},
+                  m(MenuItem, {label: 'Query', icon: 'database'}),
+                  m(MenuItem, {label: 'Download', icon: 'download'}),
+                  m(MenuItem, {label: 'Clone', icon: 'copy_all'}),
+                  ),
+              ),
+
+        }),
+        m('h2', 'PopupMenu2'),
+        m(WidgetShowcase, {
+          renderWidget: (opts) => m(
+              PopupMenu2,
+              {
+                trigger: m(Button, {label: 'Menu', icon: 'arrow_drop_down'}),
+                ...opts,
+              },
+              m(MenuItem, {label: 'New', icon: 'add'}),
+              m(MenuItem, {label: 'Open', icon: 'folder_open'}),
+              m(MenuItem, {label: 'Save', icon: 'save', disabled: true}),
+              m(MenuDivider),
+              m(MenuItem, {label: 'Delete', icon: 'delete'}),
+              m(MenuDivider),
+              m(
+                  MenuItem,
+                  {label: 'Share', icon: 'share'},
+                  m(MenuItem, {label: 'Everyone', icon: 'public'}),
+                  m(MenuItem, {label: 'Friends', icon: 'group'}),
+                  m(
+                      MenuItem,
+                      {label: 'Specific people', icon: 'person_add'},
+                      m(MenuItem, {label: 'Alice', icon: 'person'}),
+                      m(MenuItem, {label: 'Bob', icon: 'person'}),
+                      ),
+                  ),
+              m(
+                  MenuItem,
+                  {label: 'More', icon: 'more_horiz'},
+                  m(MenuItem, {label: 'Query', icon: 'database'}),
+                  m(MenuItem, {label: 'Download', icon: 'download'}),
+                  m(MenuItem, {label: 'Clone', icon: 'copy_all'}),
+                  ),
+              ),
+          initialOpts: {
+            popupPosition: new EnumOption(
+                PopupPosition.Bottom,
+                Object.values(PopupPosition),
+                ),
+          },
+        }),
+        m('h2', 'Spinner'),
+        m('p', `Simple spinner, rotates forever. Width and height match the font
+         size.`),
+        m(WidgetShowcase, {
+          renderWidget: ({fontSize, easing}) =>
+              m('', {style: {fontSize}}, m(Spinner, {easing})),
+          initialOpts: {
+            fontSize: new EnumOption(
+                '16px',
+                ['12px', '16px', '24px', '32px', '64px', '128px'],
+                ),
+            easing: false,
+          },
+        }),
+        m('h2', 'Tree'),
+        m(WidgetShowcase, {
+          renderWidget: (opts) => m(
+              Tree,
+              opts,
+              m(TreeNode, {left: 'Name', right: 'my_event'}),
+              m(TreeNode, {left: 'CPU', right: '2'}),
+              m(TreeNode, {
+                left: 'SQL',
+                right: m(
+                    PopupMenu2,
+                    {
+                      trigger: m(Anchor, {
+                        text: 'SELECT * FROM raw WHERE id = 123',
+                        icon: 'unfold_more',
+                      }),
+                    },
+                    m(MenuItem, {
+                      label: 'Copy SQL Query',
+                      icon: 'content_copy',
+                    }),
+                    m(MenuItem, {
+                      label: 'Execute Query in new tab',
+                      icon: 'open_in_new',
+                    }),
+                    ),
+              }),
+              m(TreeNode, {
+                left: 'Thread',
+                right: m(Anchor, {text: 'my_thread[456]', icon: 'open_in_new'}),
+              }),
+              m(TreeNode, {
+                left: 'Process',
+                right: m(Anchor, {text: '/bin/foo[789]', icon: 'open_in_new'}),
+              }),
+              m(
+                  TreeNode,
+                  {left: 'Args', right: 'foo: bar, baz: qux'},
+                  m(TreeNode, {left: 'foo', right: 'bar'}),
+                  m(TreeNode, {left: 'baz', right: 'qux'}),
+                  m(
+                      TreeNode,
+                      {left: 'quux'},
+                      m(TreeNode, {left: '[0]', right: 'corge'}),
+                      m(TreeNode, {left: '[1]', right: 'grault'}),
+                      m(TreeNode, {left: '[2]', right: 'garply'}),
+                      m(TreeNode, {left: '[3]', right: 'waldo'}),
+                      ),
+                  ),
+              ),
+          initialOpts: {
+            layout: new EnumOption(
+                TreeLayout.Grid,
+                Object.values(TreeLayout),
+                ),
+          },
+          wide: true,
         }),
     );
   },

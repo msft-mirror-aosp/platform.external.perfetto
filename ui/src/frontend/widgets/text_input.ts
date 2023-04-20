@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
+import {classNames} from '../classnames';
 
 export interface TextInputAttrs {
   [htmlAttrs: string]: any;
+  extraClasses?: string|string[];
 }
 
 // For now, this component is just a simple wrapper around a plain old input
@@ -25,6 +27,13 @@ export interface TextInputAttrs {
 // become more apparent.
 export class TextInput implements m.ClassComponent<TextInputAttrs> {
   view({attrs}: m.CVnode<TextInputAttrs>) {
-    return m('input.pf-text-input', attrs);
+    const {extraClasses = '', ...htmlAttrs} = attrs;
+    const classes = classNames(extraClasses);
+    return m('input.pf-text-input', {
+      class: classes,
+      // Stop keydown events from triggering hotkeys
+      onkeydown: (e: Event) => e.stopPropagation(),
+      ...htmlAttrs,
+    });
   }
 }

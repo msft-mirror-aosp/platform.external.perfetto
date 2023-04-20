@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {SortDirection} from '../common/state';
 
@@ -172,13 +172,16 @@ export class PopupMenuButton implements m.ClassComponent<PopupMenuButtonAttrs> {
   view(vnode: m.Vnode<PopupMenuButtonAttrs, this>) {
     return m(
         '.dropdown',
-        m('i.material-icons',
-          {
-            onclick: () => {
-              this.setVisible(!this.popupShown);
+        m(
+            '.dropdown-button',
+            {
+              onclick: () => {
+                this.setVisible(!this.popupShown);
+              },
             },
-          },
-          vnode.attrs.icon),
+            vnode.children,
+            m('i.material-icons', vnode.attrs.icon),
+            ),
         m(this.popupShown ? '.popup-menu.opened' : '.popup-menu.closed',
           vnode.attrs.items.map((item) => this.renderItem(item))));
   }

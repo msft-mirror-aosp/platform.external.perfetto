@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {sqliteString} from '../base/string_utils';
 import {Actions} from '../common/actions';
@@ -28,9 +28,6 @@ import {
   SortDirection,
 } from '../common/state';
 import {fromNs, timeToCode} from '../common/time';
-import {
-  PivotTableController,
-} from '../controller/pivot_table_controller';
 
 import {globals} from './globals';
 import {Panel} from './panel';
@@ -49,6 +46,7 @@ import {
   TableColumn,
 } from './pivot_table_types';
 import {PopupMenuButton, popupMenuIcon, PopupMenuItem} from './popup_menu';
+import {runQueryInNewTab} from './query_result_tab';
 import {ReorderableCell, ReorderableCellGroup} from './reorderable_cells';
 import {AttributeModalHolder} from './tables/attribute_modal_holder';
 
@@ -85,6 +83,8 @@ function renderDrillFilter(filter: DrillFilter): string {
     return `${column} = ${filter.value}`;
   } else if (filter.value instanceof Uint8Array) {
     throw new Error(`BLOB as DrillFilter not implemented`);
+  } else if (typeof filter.value === 'bigint') {
+    return `${column} = ${filter.value}`;
   }
   return `${column} = ${sqliteString(filter.value)}`;
 }
@@ -147,11 +147,7 @@ export class PivotTable extends Panel<PivotTableAttrs> {
               `;
               // TODO(ddrone): the UI of running query as if it was a canned or
               // custom query is a temporary one, replace with a proper UI.
-              globals.dispatch(Actions.executeQuery({
-                queryId: `pivot_table_details_${
-                    PivotTableController.detailsCount++}`,
-                query,
-              }));
+              runQueryInNewTab(query, 'Pivot table details');
             },
           },
           m('i.material-icons', 'arrow_right')));
