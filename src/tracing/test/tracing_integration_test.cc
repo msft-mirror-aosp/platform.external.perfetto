@@ -16,6 +16,7 @@
 
 #include <cinttypes>
 
+#include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "perfetto/ext/tracing/core/consumer.h"
@@ -58,19 +59,26 @@ class MockProducer : public Producer {
   ~MockProducer() override {}
 
   // Producer implementation.
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD2(SetupDataSource,
-               void(DataSourceInstanceID, const DataSourceConfig&));
-  MOCK_METHOD2(StartDataSource,
-               void(DataSourceInstanceID, const DataSourceConfig&));
-  MOCK_METHOD1(StopDataSource, void(DataSourceInstanceID));
-  MOCK_METHOD0(uid, uid_t());
-  MOCK_METHOD0(OnTracingSetup, void());
-  MOCK_METHOD3(Flush,
-               void(FlushRequestID, const DataSourceInstanceID*, size_t));
-  MOCK_METHOD2(ClearIncrementalState,
-               void(const DataSourceInstanceID*, size_t));
+  MOCK_METHOD(void, OnConnect, (), (override));
+  MOCK_METHOD(void, OnDisconnect, (), (override));
+  MOCK_METHOD(void,
+              SetupDataSource,
+              (DataSourceInstanceID, const DataSourceConfig&),
+              (override));
+  MOCK_METHOD(void,
+              StartDataSource,
+              (DataSourceInstanceID, const DataSourceConfig&),
+              (override));
+  MOCK_METHOD(void, StopDataSource, (DataSourceInstanceID), (override));
+  MOCK_METHOD(void, OnTracingSetup, (), (override));
+  MOCK_METHOD(void,
+              Flush,
+              (FlushRequestID, const DataSourceInstanceID*, size_t),
+              (override));
+  MOCK_METHOD(void,
+              ClearIncrementalState,
+              (const DataSourceInstanceID*, size_t),
+              (override));
 };
 
 class MockConsumer : public Consumer {
@@ -78,15 +86,18 @@ class MockConsumer : public Consumer {
   ~MockConsumer() override {}
 
   // Producer implementation.
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD1(OnTracingDisabled, void(const std::string& /*error*/));
-  MOCK_METHOD2(OnTracePackets, void(std::vector<TracePacket>*, bool));
-  MOCK_METHOD1(OnDetach, void(bool));
-  MOCK_METHOD2(OnAttach, void(bool, const TraceConfig&));
-  MOCK_METHOD2(OnTraceStats, void(bool, const TraceStats&));
-  MOCK_METHOD1(OnObservableEvents, void(const ObservableEvents&));
-  MOCK_METHOD2(OnSessionCloned, void(bool, const std::string&));
+  MOCK_METHOD(void, OnConnect, (), (override));
+  MOCK_METHOD(void, OnDisconnect, (), (override));
+  MOCK_METHOD(void,
+              OnTracingDisabled,
+              (const std::string& /*error*/),
+              (override));
+  MOCK_METHOD(void, OnTracePackets, (std::vector<TracePacket>*, bool));
+  MOCK_METHOD(void, OnDetach, (bool), (override));
+  MOCK_METHOD(void, OnAttach, (bool, const TraceConfig&), (override));
+  MOCK_METHOD(void, OnTraceStats, (bool, const TraceStats&), (override));
+  MOCK_METHOD(void, OnObservableEvents, (const ObservableEvents&), (override));
+  MOCK_METHOD(void, OnSessionCloned, (bool, const std::string&), (override));
 
   // Workaround, gmock doesn't support yet move-only types, passing a pointer.
   void OnTraceData(std::vector<TracePacket> packets, bool has_more) {
@@ -435,11 +446,10 @@ TEST_F(TracingIntegrationTest, WriteIntoFile) {
 
   // Check that |tmp_file| contains a valid trace.proto message.
   ASSERT_EQ(0, lseek(tmp_file.fd(), 0, SEEK_SET));
-  char tmp_buf[1024];
-  ssize_t rsize = read(tmp_file.fd(), tmp_buf, sizeof(tmp_buf));
-  ASSERT_GT(rsize, 0);
+  std::string trace_contents;
+  ASSERT_TRUE(base::ReadFileDescriptor(tmp_file.fd(), &trace_contents));
   protos::gen::Trace tmp_trace;
-  ASSERT_TRUE(tmp_trace.ParseFromArray(tmp_buf, static_cast<size_t>(rsize)));
+  ASSERT_TRUE(tmp_trace.ParseFromString(trace_contents));
   size_t num_test_packet = 0;
   size_t num_clock_snapshot_packet = 0;
   size_t num_system_info_packet = 0;

@@ -16,11 +16,11 @@
 
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 
+#include <optional>
 #include <string>
 
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/protozero/proto_decoder.h"
@@ -28,9 +28,9 @@
 #include "perfetto/trace_processor/status.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
+#include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/ftrace/ftrace_module.h"
-#include "src/trace_processor/importers/proto/metadata_tracker.h"
 #include "src/trace_processor/importers/proto/packet_analyzer.h"
 #include "src/trace_processor/importers/proto/packet_sequence_state.h"
 #include "src/trace_processor/importers/proto/proto_incremental_state.h"
@@ -362,22 +362,36 @@ util::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
                                   clk.is_incremental());
   }
 
-  uint32_t snapshot_id = context_->clock_tracker->AddSnapshot(clock_timestamps);
+  base::StatusOr<uint32_t> snapshot_id =
+      context_->clock_tracker->AddSnapshot(clock_timestamps);
+  if (!snapshot_id.ok()) {
+    PERFETTO_ELOG("%s", snapshot_id.status().c_message());
+    return base::OkStatus();
+  }
+
+  std::optional<int64_t> trace_time_from_snapshot =
+      context_->clock_tracker->ToTraceTimeFromSnapshot(clock_timestamps);
 
   // Add the all the clock snapshots to the clock snapshot table.
-  base::Optional<int64_t> trace_ts_for_check;
+  std::optional<int64_t> trace_ts_for_check;
   for (const auto& clock_timestamp : clock_timestamps) {
     // If the clock is incremental, we need to use 0 to map correctly to
     // |absolute_timestamp|.
     int64_t ts_to_convert =
         clock_timestamp.clock.is_incremental ? 0 : clock_timestamp.timestamp;
+    // Even if we have trace time from snapshot, we still run ToTraceTime to
+    // optimise future conversions.
     base::StatusOr<int64_t> opt_trace_ts = context_->clock_tracker->ToTraceTime(
         clock_timestamp.clock.id, ts_to_convert);
+
     if (!opt_trace_ts.ok()) {
-      // This can happen if |AddSnapshot| failed to resolve this clock. Just
-      // ignore this and move on.
-      PERFETTO_DLOG("%s", opt_trace_ts.status().c_message());
-      continue;
+      // This can happen if |AddSnapshot| failed to resolve this clock, e.g. if
+      // clock is not monotonic. Try to fetch trace time from snapshot.
+      if (!trace_time_from_snapshot) {
+        PERFETTO_DLOG("%s", opt_trace_ts.status().c_message());
+        continue;
+      }
+      opt_trace_ts = *trace_time_from_snapshot;
     }
 
     // Double check that all the clocks in this snapshot resolve to the same
@@ -391,15 +405,15 @@ util::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
     row.clock_id = static_cast<int64_t>(clock_timestamp.clock.id);
     row.clock_value = clock_timestamp.timestamp;
     row.clock_name = GetBuiltinClockNameOrNull(clock_timestamp.clock.id);
-    row.snapshot_id = snapshot_id;
+    row.snapshot_id = *snapshot_id;
 
     context_->storage->mutable_clock_snapshot_table()->Insert(row);
   }
   return util::OkStatus();
 }
 
-base::Optional<StringId> ProtoTraceReader::GetBuiltinClockNameOrNull(
-    uint64_t clock_id) {
+std::optional<StringId> ProtoTraceReader::GetBuiltinClockNameOrNull(
+    int64_t clock_id) {
   switch (clock_id) {
     case protos::pbzero::ClockSnapshot::Clock::REALTIME:
       return context_->storage->InternString("REALTIME");
@@ -414,7 +428,7 @@ base::Optional<StringId> ProtoTraceReader::GetBuiltinClockNameOrNull(
     case protos::pbzero::ClockSnapshot::Clock::BOOTTIME:
       return context_->storage->InternString("BOOTTIME");
     default:
-      return base::nullopt;
+      return std::nullopt;
   }
 }
 

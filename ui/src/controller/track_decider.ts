@@ -63,13 +63,6 @@ import {
 import {PROCESS_SUMMARY_TRACK} from '../tracks/process_summary';
 import {THREAD_STATE_TRACK_KIND} from '../tracks/thread_state';
 
-const NULL_TRACKS_FLAG = featureFlags.register({
-  id: 'nullTracks',
-  name: 'Null tracks',
-  description: 'Display some empty tracks.',
-  defaultValue: false,
-});
-
 const TRACKS_V2_FLAG = featureFlags.register({
   id: 'tracksV2.1',
   name: 'Tracks V2',
@@ -198,26 +191,6 @@ class TrackDecider {
     return 'Unknown';
   }
 
-  addNullTracks(): void {
-    this.tracksToAdd.push({
-      engineId: this.engineId,
-      kind: NULL_TRACK_KIND,
-      trackSortKey: PrimaryTrackSortKey.NULL_TRACK,
-      name: `Null track foo`,
-      trackGroup: SCROLLING_TRACK_GROUP,
-      config: {},
-    });
-
-    this.tracksToAdd.push({
-      engineId: this.engineId,
-      kind: NULL_TRACK_KIND,
-      trackSortKey: PrimaryTrackSortKey.NULL_TRACK,
-      name: `Null track bar`,
-      trackGroup: SCROLLING_TRACK_GROUP,
-      config: {},
-    });
-  }
-
   async addCpuSchedulingTracks(): Promise<void> {
     const cpus = await this.engine.getCpus();
     for (const cpu of cpus) {
@@ -339,7 +312,7 @@ class TrackDecider {
     for (; it.valid(); it.next()) {
       const kind = ASYNC_SLICE_TRACK_KIND;
       const rawName = it.name === null ? undefined : it.name;
-      const rawParentName = it.parentName === null ? undefined : it.name;
+      const rawParentName = it.parentName === null ? undefined : it.parentName;
       const name = TrackDecider.getTrackName({name: rawName, kind});
       const rawTrackIds = it.trackIds;
       const trackIds = rawTrackIds.split(',').map((v) => Number(v));
@@ -347,7 +320,7 @@ class TrackDecider {
       const maxDepth = it.maxDepth;
       let trackGroup = SCROLLING_TRACK_GROUP;
 
-      if (parentTrackId) {
+      if (parentTrackId !== null) {
         const groupId = parentIdToGroupId.get(parentTrackId);
         if (groupId === undefined) {
           trackGroup = uuidv4();
@@ -1762,13 +1735,9 @@ class TrackDecider {
   }
 
   async decideTracks(): Promise<DeferredAction[]> {
-    // Add first the global tracks that don't require per-process track groups.
-    if (NULL_TRACKS_FLAG.get()) {
-      await this.addNullTracks();
-    }
-
     await this.defineMaxLayoutDepthSqlFunction();
 
+    // Add first the global tracks that don't require per-process track groups.
     await this.addCpuSchedulingTracks();
     await this.addFtraceTrack(
         this.engine.getProxy('TrackDecider::addFtraceTrack'));

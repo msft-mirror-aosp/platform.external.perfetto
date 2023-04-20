@@ -16,9 +16,10 @@
 
 #include "src/trace_processor/importers/common/clock_tracker.h"
 
+#include <optional>
 #include <random>
 
-#include "perfetto/ext/base/optional.h"
+#include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "test/gtest_and_gmock.h"
@@ -31,9 +32,15 @@ namespace trace_processor {
 
 class ClockTrackerTest : public ::testing::Test {
  public:
+  ClockTrackerTest() {
+    context_.storage.reset(new TraceStorage());
+    context_.metadata_tracker.reset(
+        new MetadataTracker(context_.storage.get()));
+  }
+
   // using ClockId = uint64_t;
-  TraceStorage storage_;
-  ClockTracker ct_{&storage_};
+  TraceProcessorContext context_;
+  ClockTracker ct_{&context_};
   base::StatusOr<int64_t> Convert(ClockTracker::ClockId src_clock_id,
                                   int64_t src_timestamp,
                                   ClockTracker::ClockId target_clock_id) {
@@ -80,6 +87,15 @@ TEST_F(ClockTrackerTest, ClockDomainConversions) {
             static_cast<int64_t>(100000 - 1000 + 1e6));
 }
 
+TEST_F(ClockTrackerTest, ToTraceTimeFromSnapshot) {
+  EXPECT_FALSE(ct_.ToTraceTime(REALTIME, 0).ok());
+
+  EXPECT_EQ(*ct_.ToTraceTimeFromSnapshot({{REALTIME, 10}, {BOOTTIME, 10010}}),
+            10010);
+  EXPECT_EQ(ct_.ToTraceTimeFromSnapshot({{MONOTONIC, 10}, {REALTIME, 10010}}),
+            std::nullopt);
+}
+
 // When a clock moves backwards conversions *from* that clock are forbidden
 // but conversions *to* that clock should still work.
 // Think to the case of REALTIME going backwards from 3AM to 2AM during DST day.
@@ -98,16 +114,16 @@ TEST_F(ClockTrackerTest, RealTimeClockMovingBackwards) {
 
   // Now only BOOTIME -> REALTIME conversion should be possible.
   EXPECT_FALSE(ct_.ToTraceTime(REALTIME, 11).ok());
-  EXPECT_EQ(*ct_.FromTraceTime(REALTIME, 10011), 11);
-  EXPECT_EQ(*ct_.FromTraceTime(REALTIME, 10029), 29);
-  EXPECT_EQ(*ct_.FromTraceTime(REALTIME, 40030), 30);
-  EXPECT_EQ(*ct_.FromTraceTime(REALTIME, 40040), 40);
+  EXPECT_EQ(*Convert(BOOTTIME, 10011, REALTIME), 11);
+  EXPECT_EQ(*Convert(BOOTTIME, 10029, REALTIME), 29);
+  EXPECT_EQ(*Convert(BOOTTIME, 40030, REALTIME), 30);
+  EXPECT_EQ(*Convert(BOOTTIME, 40040, REALTIME), 40);
 
   ct_.AddSnapshot({{BOOTTIME, 50000}, {REALTIME, 50}});
-  EXPECT_EQ(*ct_.FromTraceTime(REALTIME, 50005), 55);
+  EXPECT_EQ(*Convert(BOOTTIME, 50005, REALTIME), 55);
 
   ct_.AddSnapshot({{BOOTTIME, 60020}, {REALTIME, 20}});
-  EXPECT_EQ(*ct_.FromTraceTime(REALTIME, 60020), 20);
+  EXPECT_EQ(*Convert(BOOTTIME, 60020, REALTIME), 20);
 }
 
 // Simulate the following scenario:
@@ -285,16 +301,6 @@ TEST_F(ClockTrackerTest, CacheDoesntAffectResults) {
       ASSERT_EQ(not_cached.value(), cached.value());
     }
   }
-}
-
-TEST_F(ClockTrackerTest, FromTraceTimeAsISO8601) {
-  EXPECT_FALSE(ct_.FromTraceTimeAsISO8601(0).ok());
-
-  ct_.AddSnapshot({{REALTIME, 1603224822123456789}, {BOOTTIME, 42}});
-  ct_.AddSnapshot({{REALTIME, 1641092645000000001}, {BOOTTIME, 43}});
-
-  EXPECT_EQ(*ct_.FromTraceTimeAsISO8601(42), "2020-10-20T20:13:42.123456789");
-  EXPECT_EQ(*ct_.FromTraceTimeAsISO8601(43), "2022-01-02T03:04:05.000000001");
 }
 
 }  // namespace

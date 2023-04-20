@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Need to turn off Long
+import '../common/query_result';
+
 import {Patch, produce} from 'immer';
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {defer} from '../base/deferred';
 import {assertExists, reportError, setErrorHandler} from '../base/logging';
@@ -25,10 +28,10 @@ import {pluginManager, pluginRegistry} from '../common/plugins';
 import {onSelectionChanged} from '../common/selection_observer';
 import {State} from '../common/state';
 import {initWasm} from '../common/wasm_engine_proxy';
+import {initController, runControllers} from '../controller';
 import {
   isGetCategoriesResponse,
 } from '../controller/chrome_proxy_record_controller';
-import {initController, runControllers} from '../controller/index';
 
 import {AnalyzePage} from './analyze_page';
 import {initCssConstants} from './css_constants';
