@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "perfetto/base/build_config.h"
@@ -123,6 +124,17 @@ class StopArgsImpl : public DataSourceBase::StopArgs {
   }
 
   mutable std::function<void()> async_stop_closure;
+};
+
+class FlushArgsImpl : public DataSourceBase::FlushArgs {
+ public:
+  std::function<void()> HandleFlushAsynchronously() const override {
+    auto closure = std::move(async_flush_closure);
+    async_flush_closure = std::function<void()>();
+    return closure;
+  }
+
+  mutable std::function<void()> async_flush_closure;
 };
 
 uint64_t ComputeConfigHash(const DataSourceConfig& config) {
@@ -318,12 +330,27 @@ void TracingMuxerImpl::ProducerImpl::StopDataSource(DataSourceInstanceID id) {
   muxer_->StopDataSource_AsyncBegin(backend_id_, id);
 }
 
-void TracingMuxerImpl::ProducerImpl::Flush(FlushRequestID flush_id,
-                                           const DataSourceInstanceID*,
-                                           size_t) {
-  // Flush is not plumbed for now, we just ack straight away.
+void TracingMuxerImpl::ProducerImpl::Flush(
+    FlushRequestID flush_id,
+    const DataSourceInstanceID* instances,
+    size_t instance_count) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  service_->NotifyFlushComplete(flush_id);
+  bool all_handled = true;
+  if (muxer_) {
+    for (size_t i = 0; i < instance_count; i++) {
+      DataSourceInstanceID ds_id = instances[i];
+      bool handled =
+          muxer_->FlushDataSource_AsyncBegin(backend_id_, ds_id, flush_id);
+      if (!handled) {
+        pending_flushes_[flush_id].insert(ds_id);
+        all_handled = false;
+      }
+    }
+  }
+
+  if (all_handled) {
+    service_->NotifyFlushComplete(flush_id);
+  }
 }
 
 void TracingMuxerImpl::ProducerImpl::ClearIncrementalState(
@@ -367,6 +394,37 @@ void TracingMuxerImpl::ProducerImpl::SendOnConnectTriggers() {
   }
   if (!triggers.empty()) {
     service_->ActivateTriggers(triggers);
+  }
+}
+
+void TracingMuxerImpl::ProducerImpl::NotifyFlushForDataSourceDone(
+    DataSourceInstanceID ds_id,
+    FlushRequestID flush_id) {
+  if (!connected_) {
+    return;
+  }
+
+  {
+    auto it = pending_flushes_.find(flush_id);
+    if (it == pending_flushes_.end()) {
+      return;
+    }
+    std::set<DataSourceInstanceID>& ds_ids = it->second;
+    ds_ids.erase(ds_id);
+  }
+
+  std::optional<DataSourceInstanceID> biggest_flush_id;
+  for (auto it = pending_flushes_.begin(); it != pending_flushes_.end();) {
+    if (it->second.empty()) {
+      biggest_flush_id = it->first;
+      it = pending_flushes_.erase(it);
+    } else {
+      break;
+    }
+  }
+
+  if (biggest_flush_id) {
+    service_->NotifyFlushComplete(*biggest_flush_id);
   }
 }
 
@@ -1610,6 +1668,82 @@ void TracingMuxerImpl::ClearDataSourceIncrementalState(
       1, std::memory_order_relaxed);
 }
 
+bool TracingMuxerImpl::FlushDataSource_AsyncBegin(
+    TracingBackendId backend_id,
+    DataSourceInstanceID instance_id,
+    FlushRequestID flush_id) {
+  PERFETTO_DLOG("Flushing data source %" PRIu64, instance_id);
+  auto ds = FindDataSource(backend_id, instance_id);
+  if (!ds) {
+    PERFETTO_ELOG("Could not find data source to flush");
+    return true;
+  }
+
+  uint32_t backend_connection_id = ds.internal_state->backend_connection_id;
+
+  FlushArgsImpl flush_args;
+  flush_args.internal_instance_index = ds.instance_idx;
+  flush_args.async_flush_closure = [this, backend_id, backend_connection_id,
+                                    instance_id, ds, flush_id] {
+    // TracingMuxerImpl is long lived, capturing |this| is okay.
+    // The notification closure can be moved out of the StopArgs by the
+    // embedder to handle stop asynchronously. The embedder might then
+    // call the closure on a different thread than the current one, hence
+    // this nested PostTask().
+    task_runner_->PostTask(
+        [this, backend_id, backend_connection_id, instance_id, ds, flush_id] {
+          FlushDataSource_AsyncEnd(backend_id, backend_connection_id,
+                                   instance_id, ds, flush_id);
+        });
+  };
+  {
+    std::unique_lock<std::recursive_mutex> lock;
+    if (ds.requires_callbacks_under_lock)
+      lock = std::unique_lock<std::recursive_mutex>(ds.internal_state->lock);
+    ds.internal_state->data_source->OnFlush(flush_args);
+  }
+
+  // |async_flush_closure| is moved out of |flush_args| if the producer
+  // requested to handle the flush asynchronously.
+  bool handled = static_cast<bool>(flush_args.async_flush_closure);
+  return handled;
+}
+
+void TracingMuxerImpl::FlushDataSource_AsyncEnd(
+    TracingBackendId backend_id,
+    uint32_t backend_connection_id,
+    DataSourceInstanceID instance_id,
+    const FindDataSourceRes& ds,
+    FlushRequestID flush_id) {
+  PERFETTO_DLOG("Ending async flush of data source %" PRIu64, instance_id);
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+
+  // Check that the data source instance is still active and was not modified
+  // while it was being flushed.
+  if (!ds.static_state->TryGet(ds.instance_idx) ||
+      ds.internal_state->backend_id != backend_id ||
+      ds.internal_state->backend_connection_id != backend_connection_id ||
+      ds.internal_state->data_source_instance_id != instance_id) {
+    PERFETTO_ELOG("Async flush of data source %" PRIu64
+                  " failed. This might be due to the data source being stopped "
+                  "in the meantime",
+                  instance_id);
+    return;
+  }
+
+  // |producer_backends_| is append-only, Backend instances are always valid.
+  PERFETTO_CHECK(backend_id < producer_backends_.size());
+  RegisteredProducerBackend& backend = *FindProducerBackendById(backend_id);
+
+  ProducerImpl* producer = backend.producer.get();
+  if (!producer)
+    return;
+
+  if (producer->connected_) {
+    producer->NotifyFlushForDataSourceDone(instance_id, flush_id);
+  }
+}
+
 void TracingMuxerImpl::SyncProducersForTesting() {
   std::mutex mutex;
   std::condition_variable cv;
@@ -2036,6 +2170,25 @@ void TracingMuxerImpl::OnProducerDisconnected(ProducerImpl* producer) {
   for (RegisteredProducerBackend& backend : producer_backends_) {
     if (backend.producer.get() != producer)
       continue;
+
+    // The tracing service is disconnected. It does not make sense to keep
+    // tracing (we wouldn't be able to commit). On reconnection, the tracing
+    // service will restart the data sources.
+    for (const auto& rds : data_sources_) {
+      DataSourceStaticState* static_state = rds.static_state;
+      for (uint32_t i = 0; i < kMaxDataSourceInstances; i++) {
+        auto* internal_state = static_state->TryGet(i);
+        if (internal_state && internal_state->backend_id == backend.id &&
+            internal_state->backend_connection_id ==
+                backend.producer->connection_id_.load(
+                    std::memory_order_relaxed)) {
+          StopDataSource_AsyncBeginImpl(
+              FindDataSourceRes(static_state, internal_state, i,
+                                rds.requires_callbacks_under_lock));
+        }
+      }
+    }
+
     // Try reconnecting the disconnected producer. If the connection succeeds,
     // all the data sources will be automatically re-registered.
     if (producer->connection_id_.load(std::memory_order_relaxed) >
@@ -2046,19 +2199,13 @@ void TracingMuxerImpl::OnProducerDisconnected(ProducerImpl* producer) {
       PERFETTO_ELOG("Producer disconnected too many times; not reconnecting");
       continue;
     }
+
     backend.producer->Initialize(
         backend.backend->ConnectProducer(backend.producer_conn_args));
     // Don't use producer-provided SMBs for the next connection unless startup
     // tracing requires it again.
     backend.producer_conn_args.use_producer_provided_smb = false;
   }
-
-  // Increment the generation counter to atomically ensure that:
-  // 1. Old trace writers from the severed connection eventually get cleaned up
-  //    by DestroyStoppedTraceWritersForCurrentThread().
-  // 2. No new trace writers can be created for the SharedMemoryArbiter from the
-  //    old connection.
-  TracingMuxer::generation_++;
 }
 
 void TracingMuxerImpl::SweepDeadBackends() {
@@ -2492,11 +2639,12 @@ void TracingMuxerImpl::ResetForTesting() {
 
   base::WaitableEvent reset_done;
   auto do_reset = [muxer, &reset_done] {
+    muxer->DestroyStoppedTraceWritersForCurrentThread();
     // Unregister all data sources so they don't interfere with any future
     // tracing sessions.
     for (RegisteredDataSource& rds : muxer->data_sources_) {
       for (RegisteredProducerBackend& backend : muxer->producer_backends_) {
-        if (!backend.producer->service_)
+        if (!backend.producer->service_ || !backend.producer->connected_)
           continue;
         backend.producer->service_->UnregisterDataSource(rds.descriptor.name());
       }
@@ -2533,6 +2681,12 @@ void TracingMuxerImpl::ResetForTesting() {
 
     g_prev_instance = muxer;
     instance_ = TracingMuxerFake::Get();
+
+    // Call the user provided cleanups on the muxer thread.
+    for (auto& cb : muxer->reset_callbacks_) {
+      cb();
+    }
+
     reset_done.Notify();
   };
 
@@ -2541,9 +2695,15 @@ void TracingMuxerImpl::ResetForTesting() {
   if (muxer->task_runner_->RunsTasksOnCurrentThread()) {
     do_reset();
   } else {
+    muxer->DestroyStoppedTraceWritersForCurrentThread();
     muxer->task_runner_->PostTask(std::move(do_reset));
     reset_done.Wait();
+    // Call the user provided cleanups also on this thread.
+    for (auto& cb : muxer->reset_callbacks_) {
+      cb();
+    }
   }
+  muxer->reset_callbacks_.clear();
 }
 
 // static
@@ -2580,6 +2740,10 @@ void TracingMuxerImpl::Shutdown() {
     shutdown_done.Notify();
   });
   shutdown_done.Wait();
+}
+
+void TracingMuxerImpl::AppendResetForTestingCallback(std::function<void()> cb) {
+  reset_callbacks_.push_back(std::move(cb));
 }
 
 TracingMuxer::~TracingMuxer() = default;

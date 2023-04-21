@@ -15,6 +15,7 @@
 .widgets-page {
   padding: 20px;
   font-size: 16px;
+  overflow: auto;
 
   h1 {
     margin: 32px 0 0 0;
@@ -56,16 +57,21 @@
 
   .widget-container {
     display: flex;
-    width: 300px;
-    height: 250px;
+    min-width: 300px;
+    min-height: 250px;
     border-radius: 3px;
     box-shadow: inset 2px 2px 10px #00000020;
     border: dashed 1px gray;
     margin: 10px 0 10px 0;
+    padding: 16px;
 
     & > * {
       margin: auto;
       vertical-align: middle;
     }
+  }
+
+  .widget-container-wide {
+    min-width: 450px;
   }
 }

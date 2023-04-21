@@ -123,6 +123,7 @@ class Android(TestSuite):
           client_thread,
           client_upid,
           client_utid,
+          client_tid,
           is_main_thread,
           client_ts,
           client_dur,
@@ -131,6 +132,7 @@ class Android(TestSuite):
           server_thread,
           server_upid,
           server_utid,
+          server_tid,
           server_ts,
           server_dur
         FROM android_sync_binder_metrics_by_txn
@@ -139,8 +141,8 @@ class Android(TestSuite):
         LIMIT 1;
       """,
         out=Csv("""
-      "aidl_name","binder_txn_id","client_process","client_thread","client_upid","client_utid","is_main_thread","client_ts","client_dur","binder_reply_id","server_process","server_thread","server_upid","server_utid","server_ts","server_dur"
-      "AIDL::java::ISensorPrivacyManager::isSensorPrivacyEnabled::server",34382,"/system/bin/audioserver","audioserver",281,281,1,25505818197,3125407,34383,"system_server","binder:641_4",311,539,25505891588,3000749
+        "aidl_name","binder_txn_id","client_process","client_thread","client_upid","client_utid","client_tid","is_main_thread","client_ts","client_dur","binder_reply_id","server_process","server_thread","server_upid","server_utid","server_tid","server_ts","server_dur"
+        "AIDL::java::ISensorPrivacyManager::isSensorPrivacyEnabled::server",34382,"/system/bin/audioserver","audioserver",281,281,492,1,25505818197,3125407,34383,"system_server","binder:641_4",311,539,1596,25505891588,3000749
       """))
 
   def test_binder_sync_binder_thread_state(self):
@@ -150,7 +152,11 @@ class Android(TestSuite):
       SELECT IMPORT('android.binder');
       SELECT
         binder_txn_id,
+        client_ts,
+        client_tid,
         binder_reply_id,
+        server_ts,
+        server_tid,
         thread_state_type,
         thread_state,
         thread_state_dur,
@@ -160,14 +166,14 @@ class Android(TestSuite):
       ORDER BY thread_state_dur;
       """,
         out=Csv("""
-      "binder_txn_id","binder_reply_id","thread_state_type","thread_state","thread_state_dur","thread_state_count"
-      34382,34383,"binder_reply","R+",10030,1
-      34382,34383,"binder_txn","Running",26597,2
-      34382,34383,"binder_txn","R",38947,1
-      34382,34383,"binder_reply","Running",533663,3
-      34382,34383,"binder_reply","D",864664,1
-      34382,34383,"binder_reply","R",1592392,1
-      34382,34383,"binder_txn","S",3059863,1
+      "binder_txn_id","client_ts","client_tid","binder_reply_id","server_ts","server_tid","thread_state_type","thread_state","thread_state_dur","thread_state_count"
+      34382,25505818197,492,34383,25505891588,1596,"binder_reply","R+",10030,1
+      34382,25505818197,492,34383,25505891588,1596,"binder_txn","Running",26597,2
+      34382,25505818197,492,34383,25505891588,1596,"binder_txn","R",38947,1
+      34382,25505818197,492,34383,25505891588,1596,"binder_reply","Running",533663,3
+      34382,25505818197,492,34383,25505891588,1596,"binder_reply","D",864664,1
+      34382,25505818197,492,34383,25505891588,1596,"binder_reply","R",1592392,1
+      34382,25505818197,492,34383,25505891588,1596,"binder_txn","S",3059863,1
       """))
 
   def test_binder_sync_binder_blocked_function(self):
@@ -177,7 +183,11 @@ class Android(TestSuite):
       SELECT IMPORT('android.binder');
       SELECT
         binder_txn_id,
+        client_ts,
+        client_tid,
         binder_reply_id,
+        server_ts,
+        server_tid,
         thread_state_type,
         blocked_function,
         blocked_function_dur,
@@ -187,8 +197,8 @@ class Android(TestSuite):
       ORDER BY blocked_function_dur;
       """,
         out=Csv("""
-      "binder_txn_id","binder_reply_id","thread_state_type","blocked_function","blocked_function_dur","blocked_function_count"
-      34382,34383,"binder_reply","filemap_fault",864664,1
+      "binder_txn_id","client_ts","client_tid","binder_reply_id","server_ts","server_tid","thread_state_type","blocked_function","blocked_function_dur","blocked_function_count"
+      34382,25505818197,492,34383,25505891588,1596,"binder_reply","filemap_fault",864664,1
       """))
 
   def test_binder_metric(self):
@@ -196,3 +206,122 @@ class Android(TestSuite):
         trace=DataPath('android_binder_metric_trace.atr'),
         query=Metric('android_binder'),
         out=Path('android_binder_metric.out'))
+
+  def test_android_blocking_calls_cuj(self):
+    return DiffTestBlueprint(
+        trace=Path('android_blocking_calls_cuj_metric.py'),
+        query=Metric('android_blocking_calls_cuj_metric'),
+        out=Path('android_blocking_calls_cuj_metric.out'))
+
+  def test_android_blocking_calls_on_jank_cujs(self):
+    return DiffTestBlueprint(
+        trace=Path('../graphics/android_jank_cuj.py'),
+        query=Metric('android_blocking_calls_cuj_metric'),
+        out=Path('android_blocking_calls_on_jank_cuj_metric.out'))
+
+  def test_android_slices_standardization_for_aggregation(self):
+    return DiffTestBlueprint(
+        trace=Path('android_slice_standardization.py'),
+        query="""
+        SELECT IMPORT('android.slices');
+        SELECT ANDROID_STANDARDIZE_SLICE_NAME(slice.name) name
+        FROM slice
+        ORDER BY name;
+        """,
+        out=Path('android_slice_standardization.out'))
+
+  def test_monitor_contention_extraction(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      SELECT IMPORT('android.monitor_contention');
+      SELECT
+        *
+      FROM android_monitor_contention
+      WHERE binder_reply_id IS NOT NULL
+      ORDER BY dur DESC
+      LIMIT 1;
+      """,
+        out=Csv("""
+        "blocking_method","blocked_method","short_blocking_method","short_blocked_method","blocking_src","blocked_src","waiter_count","blocked_utid","blocked_thread_name","blocking_utid","blocking_thread_name","blocking_tid","upid","process_name","id","ts","dur","track_id","is_blocked_thread_main","is_blocking_thread_main","binder_reply_id","binder_reply_ts","binder_reply_tid"
+        "boolean com.android.server.am.ActivityManagerService.forceStopPackageLocked(java.lang.String, int, boolean, boolean, boolean, boolean, boolean, int, java.lang.String)","boolean com.android.server.am.ActivityManagerService.isUidActive(int, java.lang.String)","com.android.server.am.ActivityManagerService.forceStopPackageLocked","com.android.server.am.ActivityManagerService.isUidActive","ActivityManagerService.java:4484","ActivityManagerService.java:7325",0,656,"binder:642_12",495,"binder:642_1",657,250,"system_server",291,1737056375519,37555955,1235,0,0,285,1737055785896,2720
+      """))
+
+  def test_monitor_contention_chain_blocked_functions(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      SELECT IMPORT('android.monitor_contention');
+      SELECT
+        *
+      FROM android_monitor_contention_chain_blocked_functions_by_txn
+      WHERE id = 13934
+      ORDER BY blocked_function_dur;
+      """,
+        out=Csv("""
+        "id","blocked_function","blocked_function_dur","blocked_function_count"
+        13934,"blkdev_issue_flush",11950576,1
+      """))
+
+  def test_monitor_contention_chain_thread_states(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      SELECT IMPORT('android.monitor_contention');
+      SELECT
+        *
+      FROM android_monitor_contention_chain_thread_state_by_txn
+      WHERE id = 13934
+      ORDER BY thread_state_dur;
+      """,
+        out=Csv("""
+        "id","thread_state","thread_state_dur","thread_state_count"
+        13934,"R+",7649,1
+        13934,"R",300606,3
+        13934,"Running",649961,3
+        13934,"D",11950576,1
+      """))
+
+  def test_monitor_contention_chain_extraction(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      SELECT IMPORT('android.monitor_contention');
+      SELECT
+        IIF(parent_id IS NULL, "", parent_id) AS parent_id,
+        blocking_method,
+        blocked_method,
+        short_blocking_method,
+        short_blocked_method,
+        blocking_src,
+        blocked_src,
+        waiter_count,
+        blocked_utid,
+        blocked_thread_name,
+        blocking_utid,
+        blocking_thread_name,
+        upid,
+        process_name,
+        id,
+        ts,
+        dur,
+        track_id,
+        is_blocked_thread_main,
+        is_blocking_thread_main,
+        IIF(binder_reply_id IS NULL, "", binder_reply_id) AS binder_reply_id,
+        IIF(binder_reply_ts IS NULL, "", binder_reply_ts) AS binder_reply_ts,
+        IIF(binder_reply_tid IS NULL, "", binder_reply_tid) AS binder_reply_tid
+      FROM android_monitor_contention_chain
+      ORDER BY dur DESC
+      LIMIT 1;
+      """,
+        out=Csv("""
+        "parent_id","blocking_method","blocked_method","short_blocking_method","short_blocked_method","blocking_src","blocked_src","waiter_count","blocked_utid","blocked_thread_name","blocking_utid","blocking_thread_name","upid","process_name","id","ts","dur","track_id","is_blocked_thread_main","is_blocking_thread_main","binder_reply_id","binder_reply_ts","binder_reply_tid"
+        "","void com.android.server.am.ActivityManagerService.forceStopPackage(java.lang.String, int)","boolean com.android.server.am.ActivityManagerService.unbindService(android.app.IServiceConnection)","com.android.server.am.ActivityManagerService.forceStopPackage","com.android.server.am.ActivityManagerService.unbindService","ActivityManagerService.java:3992","ActivityManagerService.java:12719",0,640,"StorageUserConn",495,"binder:642_1",250,"system_server",327,1737063410007,46114664,1238,0,0,"","",""
+      """))
+
+  def test_monitor_contention_metric(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query=Metric('android_monitor_contention'),
+        out=Path('android_monitor_contention.out'))

@@ -23,6 +23,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "perfetto/base/compiler.h"
@@ -139,6 +141,11 @@ struct TracingInitArgs {
   // explicitly specified as kSystemBackend: kUndefinedBackend will consider
   // only already instantiated backends.
   bool enable_system_consumer = true;
+
+  // When true, sets disallow_merging_with_system_tracks in TrackDescriptor,
+  // making sure that Trace Processor doesn't merge track event and system
+  // event tracks for the same thread.
+  bool disallow_merging_with_system_tracks = false;
 
  protected:
   friend class Tracing;
