@@ -91,6 +91,7 @@
 #include "protos/perfetto/trace/track_event/thread_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_descriptor.gen.h"
 #include "protos/perfetto/trace/track_event/track_event.gen.h"
+#include "protos/perfetto/trace/trigger.gen.h"
 
 // Events in categories starting with "dynamic" will use dynamic category
 // lookup.
@@ -187,6 +188,7 @@ using perfetto::TracingInitArgs;
 using perfetto::internal::TrackEventInternal;
 using ::testing::_;
 using ::testing::ContainerEq;
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::Invoke;
@@ -312,6 +314,8 @@ class MockTracingMuxer : public perfetto::internal::TracingMuxer {
       InterceptorFactory,
       perfetto::InterceptorBase::TLSFactory,
       perfetto::InterceptorBase::TracePacketCallback) override {}
+
+  void ActivateTriggers(const std::vector<std::string>&, uint32_t) override {}
 
   std::vector<DataSource> data_sources;
 
@@ -452,11 +456,13 @@ class PerfettoApiTest : public ::testing::TestWithParam<perfetto::BackendType> {
     g_test_tracing_policy->should_allow_consumer_connection = true;
 
     // Start a fresh system service for this test, tearing down any previous
-    // service that was running. If the system backend isn't supported, skip all
-    // system backend tests.
-    if (GetParam() == perfetto::kSystemBackend &&
-        !perfetto::test::StartSystemService()) {
-      GTEST_SKIP();
+    // service that was running.
+    if (GetParam() == perfetto::kSystemBackend) {
+      system_service_ = perfetto::test::SystemService::Start();
+      // If the system backend isn't supported, skip all system backend tests.
+      if (!system_service_.valid()) {
+        GTEST_SKIP();
+      }
     }
 
     EXPECT_FALSE(perfetto::Tracing::IsInitialized());
@@ -785,6 +791,7 @@ class PerfettoApiTest : public ::testing::TestWithParam<perfetto::BackendType> {
     return 0;
   }
 
+  perfetto::test::SystemService system_service_;
   std::map<std::string, TestDataSourceHandle> data_sources_;
   std::list<TestTracingSessionHandle> sessions_;  // Needs stable pointers.
 };
@@ -4950,6 +4957,84 @@ TEST_P(PerfettoApiTest, EmptyEvent) {
                       return packet.has_track_event();
                     });
   EXPECT_EQ(it, trace.packet().end());
+}
+
+TEST_P(PerfettoApiTest, ActivateTriggers) {
+  // Create a new trace session without any data sources configured.
+  perfetto::TraceConfig cfg;
+  cfg.add_buffers()->set_size_kb(1024);
+  perfetto::TraceConfig::TriggerConfig* tr_cfg = cfg.mutable_trigger_config();
+  tr_cfg->set_trigger_mode(perfetto::TraceConfig::TriggerConfig::STOP_TRACING);
+  tr_cfg->set_trigger_timeout_ms(5000);
+  perfetto::TraceConfig::TriggerConfig::Trigger* trigger =
+      tr_cfg->add_triggers();
+  trigger->set_name("trigger1");
+  auto* tracing_session = NewTrace(cfg);
+  tracing_session->get()->StartBlocking();
+
+  perfetto::Tracing::ActivateTriggers({"trigger2", "trigger1"}, 10000);
+
+  bool done = false;
+  std::mutex mutex;
+  std::condition_variable cv;
+  std::unique_lock<std::mutex> lock(mutex);
+  tracing_session->get()->SetOnStopCallback([&]() {
+    std::lock_guard<std::mutex> inner_lock(mutex);
+    done = true;
+    cv.notify_one();
+  });
+  cv.wait(lock, [&done] { return done; });
+
+  std::vector<char> bytes = tracing_session->get()->ReadTraceBlocking();
+  perfetto::protos::gen::Trace parsed_trace;
+  ASSERT_TRUE(parsed_trace.ParseFromArray(bytes.data(), bytes.size()));
+  EXPECT_THAT(
+      parsed_trace,
+      Property(&perfetto::protos::gen::Trace::packet,
+               Contains(Property(
+                   &perfetto::protos::gen::TracePacket::trigger,
+                   Property(&perfetto::protos::gen::Trigger::trigger_name,
+                            "trigger1")))));
+}
+
+TEST(PerfettoApiInitTest, DisableSystemConsumer) {
+  g_test_tracing_policy->should_allow_consumer_connection = true;
+
+  auto system_service = perfetto::test::SystemService::Start();
+  // If the system backend isn't supported, skip
+  if (!system_service.valid()) {
+    GTEST_SKIP();
+  }
+
+  EXPECT_FALSE(perfetto::Tracing::IsInitialized());
+  TracingInitArgs args;
+  args.backends = perfetto::kSystemBackend;
+  args.tracing_policy = g_test_tracing_policy;
+  args.enable_system_consumer = false;
+  perfetto::Tracing::Initialize(args);
+
+  // If this wasn't the first test to run in this process, any producers
+  // connected to the old system service will have been disconnected by the
+  // service restarting above. Wait for all producers to connect again before
+  // proceeding with the test.
+  perfetto::test::SyncProducers();
+
+  perfetto::test::DisableReconnectLimit();
+
+  std::unique_ptr<perfetto::TracingSession> ts =
+      perfetto::Tracing::NewTrace(perfetto::kSystemBackend);
+
+  // Creating the consumer should cause an asynchronous disconnect error.
+  WaitableTestEvent got_error;
+  ts->SetOnErrorCallback([&](perfetto::TracingError error) {
+    EXPECT_EQ(perfetto::TracingError::kDisconnected, error.code);
+    EXPECT_FALSE(error.message.empty());
+    got_error.Notify();
+  });
+  got_error.Wait();
+  ts.reset();
+
+  perfetto::Tracing::ResetForTesting();
 }
 
 struct BackendTypeAsString {
