@@ -12,17 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
+import {classNames} from '../classnames';
 
 export interface IconAttrs {
+  // The material icon name.
   icon: string;
+  // Whether to show the filled version of the icon.
+  // Defaults to false.
   filled?: boolean;
+  // List of space separated class names forwarded to the icon.
+  className?: string;
 }
 
 export class Icon implements m.ClassComponent<IconAttrs> {
   view(vnode: m.Vnode<IconAttrs>): m.Child {
+    const classes = classNames(vnode.attrs.className);
     return m(
         vnode.attrs.filled ? 'i.material-icons-filled' : 'i.material-icons',
+        {class: classes},
         vnode.attrs.icon);
   }
 }

@@ -209,7 +209,7 @@ For example, to find the type of track for `measure` events, the following query
 could be used.
 
 ```sql
-SELECT type
+SELECT track.type
 FROM slice
 JOIN track ON track.id = slice.track_id
 WHERE slice.name = 'measure'
@@ -311,7 +311,8 @@ SELECT
   cpu,
   value as freq
 FROM counter
-JOIN cpu_counter_track ON counter.track_id = cpu_counter_track.id;
+JOIN cpu_counter_track ON counter.track_id = cpu_counter_track.id
+WHERE cpu_counter_track.name = 'cpufreq';
 
 -- Create the span joined table which combines cpu frequency with
 -- scheduling slices.

@@ -15,8 +15,6 @@
 .analyze-page {
   overflow-y: auto;
   overflow-x: hidden;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
   .query-input {
     width: 100%;
     background-color: #111;

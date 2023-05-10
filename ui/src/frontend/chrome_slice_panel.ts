@@ -12,42 +12,91 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {sqliteString} from '../base/string_utils';
-import {Actions, DeferredAction} from '../common/actions';
+import {Actions} from '../common/actions';
 import {Arg, ArgsTree, isArgTreeArray, isArgTreeMap} from '../common/arg_types';
 import {timeToCode} from '../common/time';
 
 import {FlowPoint, globals, SliceDetails} from './globals';
 import {PanelSize} from './panel';
 import {PopupMenuButton, PopupMenuItem} from './popup_menu';
+import {runQueryInNewTab} from './query_result_tab';
 import {verticalScrollToTrack} from './scroll_helper';
 import {SlicePanel} from './slice_panel';
 
 interface ContextMenuItem {
   name: string;
   shouldDisplay(slice: SliceDetails): boolean;
-  getAction(slice: SliceDetails): DeferredAction;
+  getAction(slice: SliceDetails): void;
 }
 
 const ITEMS: ContextMenuItem[] = [
   {
     name: 'Average duration',
     shouldDisplay: (slice: SliceDetails) => slice.name !== undefined,
-    getAction: (slice: SliceDetails) => Actions.executeQuery({
-      queryId: 'command',
-      query: `SELECT AVG(dur) / 1e9 FROM slice WHERE name = '${slice.name!}'`,
-    }),
+    getAction: (slice: SliceDetails) => runQueryInNewTab(
+        `SELECT AVG(dur) / 1e9 FROM slice WHERE name = '${slice.name!}'`,
+        `${slice.name} average dur`,
+        ),
   },
   {
     name: 'Binder by TXN',
     shouldDisplay: () => true,
-    getAction: () => Actions.executeQuery({
-      queryId: 'command',
-      query:
-          `SELECT IMPORT('android.binder'); SELECT * FROM android_sync_binder_metrics_by_txn ORDER BY client_dur DESC`,
-    }),
+    getAction: () => runQueryInNewTab(
+        `SELECT IMPORT('android.binder');
+
+         SELECT *
+         FROM android_sync_binder_metrics_by_txn
+         ORDER BY client_dur DESC`,
+        'Binder by TXN',
+        ),
+  },
+  {
+    name: 'Lock graph',
+    shouldDisplay: (slice: SliceDetails) => slice.id !== undefined,
+    getAction: (slice: SliceDetails) => runQueryInNewTab(
+        `SELECT IMPORT('android.monitor_contention');
+         DROP TABLE IF EXISTS FAST;
+         CREATE TABLE FAST
+         AS
+         WITH slice_process AS (
+         SELECT process.name, process.upid FROM slice
+         JOIN thread_track ON thread_track.id = slice.track_id
+         JOIN thread USING(utid)
+         JOIN process USING(upid)
+         WHERE slice.id = ${slice.id!}
+         )
+         SELECT *,
+         IIF(blocked_thread_name LIKE 'binder:%', 'binder', blocked_thread_name)
+          AS blocked_thread_name_norm,
+         IIF(blocking_thread_name LIKE 'binder:%', 'binder', blocking_thread_name)
+          AS blocking_thread_name_norm
+         FROM android_monitor_contention_chain, slice_process
+         WHERE android_monitor_contention_chain.upid = slice_process.upid;
+
+         WITH
+         R AS (
+         SELECT
+           id,
+           dur,
+           CAT_STACKS(blocked_thread_name_norm || ':' || short_blocked_method,
+             blocking_thread_name_norm || ':' || short_blocking_method) AS stack
+         FROM FAST
+         WHERE parent_id IS NULL
+         UNION ALL
+         SELECT
+         c.id,
+         c.dur AS dur,
+         CAT_STACKS(stack, blocking_thread_name_norm || ':' || short_blocking_method) AS stack
+         FROM FAST c, R AS p
+         WHERE p.id = c.parent_id
+         )
+         SELECT TITLE.process_name, EXPERIMENTAL_PROFILE(stack, 'duration', 'ns', dur) AS pprof
+         FROM R, (SELECT process_name FROM FAST LIMIT 1) TITLE;`,
+        'Lock graph',
+        ),
   },
 ];
 
@@ -56,9 +105,7 @@ function getSliceContextMenuItems(slice: SliceDetails): PopupMenuItem[] {
     return {
       itemType: 'regular',
       text: item.name,
-      callback: () => {
-        globals.dispatch(item.getAction(slice));
-      },
+      callback: () => item.getAction(slice),
     };
   });
 }
@@ -328,16 +375,15 @@ export class ChromeSliceDetailsPanel extends SlicePanel {
         itemType: 'regular',
         text: 'Find slices with the same arg value',
         callback: () => {
-          globals.dispatch(Actions.executeQuery({
-            queryId: `slices_with_arg_value_${fullKey}=${argValue}`,
-            query: `
+          runQueryInNewTab(
+              `
               select slice.*
               from slice
               join args using (arg_set_id)
               where key=${sqliteString(fullKey)} and display_value=${
-                sqliteString(argValue)}
+                  sqliteString(argValue)}
           `,
-          }));
+              `Arg: ${sqliteString(fullKey)}=${sqliteString(argValue)}`);
         },
       },
       {
