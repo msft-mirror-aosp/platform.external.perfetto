@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2023 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,24 +14,20 @@
  * limitations under the License.
  */
 
-#include "perfetto/tracing/internal/system_tracing_backend.h"
+package android.perfetto.cts.app;
 
-#include "perfetto/base/logging.h"
+import android.app.Activity;
+import android.os.Bundle;
 
-namespace perfetto {
-namespace internal {
-
-// static
-TracingBackend* SystemTracingBackend::GetInstance() {
-  PERFETTO_FATAL("System tracing not implemented");
-  return nullptr;
+public class JavaOomActivity extends Activity {
+    @Override
+    public void onCreate(Bundle state) {
+        super.onCreate(state);
+        new Thread(() -> {
+            try {
+                byte[] alloc = new byte[Integer.MAX_VALUE];
+            } catch (OutOfMemoryError e) {
+            }
+        }).start();
+    }
 }
-
-// static
-TracingBackend* SystemTracingProducerOnlyBackend::GetInstance() {
-  PERFETTO_FATAL("System tracing not implemented");
-  return nullptr;
-}
-
-}  // namespace internal
-}  // namespace perfetto
