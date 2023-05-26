@@ -31,16 +31,6 @@
 namespace perfetto {
 namespace trace_processor {
 
-// Those structs enable overloading std::visit, which makes code a lot
-// cleaner. For details go to
-// https://en.cppreference.com/w/cpp/utility/variant/visit
-template <class... Ts>
-struct overloaded : Ts... {
-  using Ts::operator()...;
-};
-template <class... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
-
 // Stores a list of row indicies in a space efficient manner. One or more
 // columns can refer to the same RowMap. The RowMap defines the access pattern
 // to iterate on rows.
@@ -87,6 +77,7 @@ class RowMap {
  public:
   using InputRow = uint32_t;
   using OutputIndex = uint32_t;
+  using IndexVector = std::vector<OutputIndex>;
 
   struct Range {
     Range(OutputIndex start_index, OutputIndex end_index)
@@ -116,43 +107,55 @@ class RowMap {
 
     // Forwards the iterator to the next row of the RowMap.
     void Next() {
-      std::visit(
-          overloaded{[this](const Range&) { ++ordinal_; },
-                     [this](const BitVector&) { set_bits_it_->Next(); },
-                     [this](const std::vector<OutputIndex>&) { ++ordinal_; }},
-          rm_->data_);
+      if (std::get_if<Range>(&rm_->data_)) {
+        ++ordinal_;
+      } else if (std::get_if<BitVector>(&rm_->data_)) {
+        set_bits_it_->Next();
+      } else if (std::get_if<IndexVector>(&rm_->data_)) {
+        ++ordinal_;
+      }
     }
 
     // Returns if the iterator is still valid.
     operator bool() const {
-      return std::visit(
-          overloaded{[this](const Range& r) { return ordinal_ < r.end; },
-                     [this](const BitVector&) { return bool(*set_bits_it_); },
-                     [this](const std::vector<OutputIndex>& vec) {
-                       return ordinal_ < vec.size();
-                     }},
-          rm_->data_);
+      if (auto* range = std::get_if<Range>(&rm_->data_)) {
+        return ordinal_ < range->end;
+      }
+      if (std::get_if<BitVector>(&rm_->data_)) {
+        return bool(*set_bits_it_);
+      }
+      if (auto* vec = std::get_if<IndexVector>(&rm_->data_)) {
+        return ordinal_ < vec->size();
+      }
+      PERFETTO_FATAL("Didn't match any variant type.");
     }
 
     // Returns the index pointed to by this iterator.
     OutputIndex index() const {
-      return std::visit(
-          overloaded{[this](const Range&) { return ordinal_; },
-                     [this](const BitVector&) { return set_bits_it_->index(); },
-                     [this](const std::vector<OutputIndex>& vec) {
-                       return vec[ordinal_];
-                     }},
-          rm_->data_);
+      if (std::get_if<Range>(&rm_->data_)) {
+        return ordinal_;
+      }
+      if (std::get_if<BitVector>(&rm_->data_)) {
+        return set_bits_it_->index();
+      }
+      if (auto* vec = std::get_if<IndexVector>(&rm_->data_)) {
+        return (*vec)[ordinal_];
+      }
+      PERFETTO_FATAL("Didn't match any variant type.");
     }
 
     // Returns the row of the index the iterator points to.
     InputRow row() const {
-      return std::visit(
-          overloaded{
-              [this](const Range& r) { return ordinal_ - r.start; },
-              [this](const BitVector&) { return set_bits_it_->ordinal(); },
-              [this](const std::vector<OutputIndex>&) { return ordinal_; }},
-          rm_->data_);
+      if (auto* range = std::get_if<Range>(&rm_->data_)) {
+        return ordinal_ - range->start;
+      }
+      if (std::get_if<BitVector>(&rm_->data_)) {
+        return set_bits_it_->ordinal();
+      }
+      if (std::get_if<IndexVector>(&rm_->data_)) {
+        return ordinal_;
+      }
+      PERFETTO_FATAL("Didn't match any variant type.");
     }
 
    private:
@@ -185,10 +188,10 @@ class RowMap {
          OptimizeFor optimize_for = OptimizeFor::kMemory);
 
   // Creates a RowMap backed by a BitVector.
-  explicit RowMap(BitVector bit_vector);
+  explicit RowMap(BitVector);
 
   // Creates a RowMap backed by an std::vector<uint32_t>.
-  explicit RowMap(std::vector<OutputIndex> vec);
+  explicit RowMap(IndexVector);
 
   RowMap(const RowMap&) noexcept = delete;
   RowMap& operator=(const RowMap&) = delete;
@@ -211,13 +214,16 @@ class RowMap {
   // Returns the size of the RowMap; that is the number of indices in the
   // RowMap.
   uint32_t size() const {
-    return std::visit(
-        overloaded{[](const Range& r) { return r.size(); },
-                   [](const BitVector& bv) { return bv.CountSetBits(); },
-                   [](const std::vector<OutputIndex>& vec) {
-                     return static_cast<uint32_t>(vec.size());
-                   }},
-        data_);
+    if (auto* range = std::get_if<Range>(&data_)) {
+      return range->size();
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      return bv->CountSetBits();
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      return static_cast<uint32_t>(vec->size());
+    }
+    NoVariantMatched();
   }
 
   // Returns whether this rowmap is empty.
@@ -225,52 +231,52 @@ class RowMap {
 
   // Returns the index at the given |row|.
   OutputIndex Get(InputRow row) const {
-    return std::visit(
-        overloaded{[row](const Range r) { return GetRange(r, row); },
-                   [row](const BitVector& bv) { return GetBitVector(bv, row); },
-                   [row](const std::vector<OutputIndex>& vec) {
-                     return GetIndexVector(vec, row);
-                   }},
-        data_);
+    if (auto* range = std::get_if<Range>(&data_)) {
+      return GetRange(*range, row);
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      return GetBitVector(*bv, row);
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      return GetIndexVector(*vec, row);
+    }
+    NoVariantMatched();
   }
 
   // Returns whether the RowMap contains the given index.
   bool Contains(OutputIndex index) const {
-    return std::visit(overloaded{[index](const Range& r) {
-                                   return index >= r.start && index < r.end;
-                                 },
-                                 [index](const BitVector& bv) {
-                                   return index < bv.size() && bv.IsSet(index);
-                                 },
-                                 [index](const std::vector<OutputIndex>& vec) {
-                                   return std::find(vec.begin(), vec.end(),
-                                                    index) != vec.end();
-                                 }},
-                      data_);
+    if (auto* range = std::get_if<Range>(&data_)) {
+      return index >= range->start && index < range->end;
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      return index < bv->size() && bv->IsSet(index);
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      return std::find(vec->begin(), vec->end(), index) != vec->end();
+    }
+    NoVariantMatched();
   }
 
   // Returns the first row of the given |index| in the RowMap.
   std::optional<InputRow> RowOf(OutputIndex index) const {
-    return std::visit(
-        overloaded{[index](const Range& r) -> std::optional<InputRow> {
-                     if (index < r.start || index >= r.end)
-                       return std::nullopt;
-                     return index - r.start;
-                   },
-                   [index](const BitVector& bv) {
-                     return index < bv.size() && bv.IsSet(index)
-                                ? std::make_optional(bv.CountSetBits(index))
-                                : std::nullopt;
-                   },
-                   [index](const std::vector<OutputIndex>& vec) {
-                     auto it = std::find(vec.begin(), vec.end(), index);
-                     return it != vec.end()
-                                ? std::make_optional(static_cast<InputRow>(
-                                      std::distance(vec.begin(), it)))
-                                : std::nullopt;
-                   }},
-        data_);
-  }  // namespace trace_processor
+    if (auto* range = std::get_if<Range>(&data_)) {
+      if (index < range->start || index >= range->end)
+        return std::nullopt;
+      return index - range->start;
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      return index < bv->size() && bv->IsSet(index)
+                 ? std::make_optional(bv->CountSetBits(index))
+                 : std::nullopt;
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      auto it = std::find(vec->begin(), vec->end(), index);
+      return it != vec->end() ? std::make_optional(static_cast<InputRow>(
+                                    std::distance(vec->begin(), it)))
+                              : std::nullopt;
+    }
+    NoVariantMatched();
+  }
 
   // Performs an ordered insert of the index into the current RowMap
   // (precondition: this RowMap is ordered based on the indices it contains).
@@ -287,32 +293,36 @@ class RowMap {
   // the RowMap is in range or BitVector mode but is a required condition for
   // IndexVector mode.
   void Insert(OutputIndex index) {
-    std::visit(
-        overloaded{[this, index](Range& r) {
-                     if (index == r.end) {
-                       // Fast path: if we're just appending to the end
-                       // of the range, we can stay in range mode and
-                       // just bump the end index.
-                       r.end++;
-                       return;
-                     }
+    if (auto* range = std::get_if<Range>(&data_)) {
+      if (index == range->end) {
+        // Fast path: if we're just appending to the end
+        // of the range, we can stay in range mode and
+        // just bump the end index.
+        range->end++;
+        return;
+      }
 
-                     // Slow path: the insert is somewhere else other
-                     // than the end. This means we need to switch to
-                     // using a BitVector instead.
-                     BitVector bv;
-                     bv.Resize(r.start, false);
-                     bv.Resize(r.end, true);
-                     InsertIntoBitVector(bv, index);
-                     data_ = std::move(bv);
-                   },
-                   [index](BitVector& bv) { InsertIntoBitVector(bv, index); },
-                   [index](std::vector<OutputIndex>& vec) {
-                     PERFETTO_DCHECK(std::is_sorted(vec.begin(), vec.end()));
-                     auto it = std::upper_bound(vec.begin(), vec.end(), index);
-                     vec.insert(it, index);
-                   }},
-        data_);
+      // Slow path: the insert is somewhere else other
+      // than the end. This means we need to switch to
+      // using a BitVector instead.
+      BitVector bv;
+      bv.Resize(range->start, false);
+      bv.Resize(range->end, true);
+      InsertIntoBitVector(bv, index);
+      data_ = std::move(bv);
+      return;
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      InsertIntoBitVector(*bv, index);
+      return;
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      PERFETTO_DCHECK(std::is_sorted(vec->begin(), vec->end()));
+      auto it = std::upper_bound(vec->begin(), vec->end(), index);
+      vec->insert(it, index);
+      return;
+    }
+    NoVariantMatched();
   }
 
   // Updates this RowMap by 'picking' the indices given by |picker|.
@@ -371,47 +381,52 @@ class RowMap {
   void Clear() { *this = RowMap(); }
 
   template <typename Comparator = bool(uint32_t, uint32_t)>
-  void StableSort(std::vector<uint32_t>* out, Comparator c) const {
-    std::visit(
-        overloaded{
-            [out, c](const Range& r) {
-              std::stable_sort(out->begin(), out->end(),
-                               [r, c](uint32_t a, uint32_t b) {
-                                 return c(GetRange(r, a), GetRange(r, b));
-                               });
-            },
-            [out, c](const BitVector& bv) {
-              std::stable_sort(
-                  out->begin(), out->end(), [&bv, c](uint32_t a, uint32_t b) {
-                    return c(GetBitVector(bv, a), GetBitVector(bv, b));
-                  });
-            },
-            [out, c](const std::vector<OutputIndex>& vec) {
-              std::stable_sort(
-                  out->begin(), out->end(), [vec, c](uint32_t a, uint32_t b) {
-                    return c(GetIndexVector(vec, a), GetIndexVector(vec, b));
-                  });
-            }},
-        data_);
+  void StableSort(IndexVector* out, Comparator c) const {
+    if (auto* range = std::get_if<Range>(&data_)) {
+      std::stable_sort(out->begin(), out->end(),
+                       [range, c](uint32_t a, uint32_t b) {
+                         return c(GetRange(*range, a), GetRange(*range, b));
+                       });
+      return;
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      std::stable_sort(out->begin(), out->end(),
+                       [&bv, c](uint32_t a, uint32_t b) {
+                         return c(GetBitVector(*bv, a), GetBitVector(*bv, b));
+                       });
+      return;
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      std::stable_sort(
+          out->begin(), out->end(), [vec, c](uint32_t a, uint32_t b) {
+            return c(GetIndexVector(*vec, a), GetIndexVector(*vec, b));
+          });
+      return;
+    }
+    NoVariantMatched();
   }
 
   // Filters the indices in |out| by keeping those which meet |p|.
   template <typename Predicate = bool(OutputIndex)>
   void Filter(Predicate p) {
-    std::visit(overloaded{[p, this](Range& r) { data_ = FilterRange(p, r); },
-                          [p](BitVector& bv) {
-                            for (auto it = bv.IterateSetBits(); it; it.Next()) {
-                              if (!p(it.index()))
-                                it.Clear();
-                            }
-                          },
-                          [p](std::vector<OutputIndex>& vec) {
-                            auto ret = std::remove_if(
-                                vec.begin(), vec.end(),
+    if (auto* range = std::get_if<Range>(&data_)) {
+      data_ = FilterRange(p, *range);
+      return;
+    }
+    if (auto* bv = std::get_if<BitVector>(&data_)) {
+      for (auto it = bv->IterateSetBits(); it; it.Next()) {
+        if (!p(it.index()))
+          it.Clear();
+      }
+      return;
+    }
+    if (auto* vec = std::get_if<IndexVector>(&data_)) {
+      auto ret = std::remove_if(vec->begin(), vec->end(),
                                 [p](uint32_t i) { return !p(i); });
-                            vec.erase(ret, vec.end());
-                          }},
-               data_);
+      vec->erase(ret, vec->end());
+      return;
+    }
+    NoVariantMatched();
   }
 
   // Returns the iterator over the rows in this RowMap.
@@ -425,11 +440,11 @@ class RowMap {
 
   // Returns if the RowMap is internally represented using an index vector.
   bool IsIndexVector() const {
-    return std::holds_alternative<std::vector<OutputIndex>>(data_);
+    return std::holds_alternative<IndexVector>(data_);
   }
 
  private:
-  using Variant = std::variant<Range, BitVector, std::vector<OutputIndex>>;
+  using Variant = std::variant<Range, BitVector, IndexVector>;
 
   explicit RowMap(Range);
 
@@ -440,7 +455,7 @@ class RowMap {
   friend class ColumnStorageOverlay;
 
   template <typename Predicate>
-  static Variant FilterRange(Predicate p, Range r) {
+  Variant FilterRange(Predicate p, Range r) {
     uint32_t count = r.size();
 
     // Optimization: if we are only going to scan a few indices, it's not
@@ -456,10 +471,11 @@ class RowMap {
     // If either of the conditions hold which make it better to use an
     // index vector, use it instead. Alternatively, if we are optimizing for
     // lookup speed, we also want to use an index vector.
-    if (is_small_range || index_vector_cost_ub <= bit_vector_cost) {
+    if (is_small_range || index_vector_cost_ub <= bit_vector_cost ||
+        optimize_for_ == OptimizeFor::kLookupSpeed) {
       // Try and strike a good balance between not making the vector too
       // big and good performance.
-      std::vector<uint32_t> iv(std::min(kSmallRangeLimit, count));
+      IndexVector iv(std::min(kSmallRangeLimit, count));
 
       uint32_t out_i = 0;
       for (uint32_t i = 0; i < count; ++i) {
@@ -494,7 +510,7 @@ class RowMap {
     return bv.IndexOfNthSet(row);
   }
   PERFETTO_ALWAYS_INLINE static OutputIndex GetIndexVector(
-      const std::vector<OutputIndex> vec,
+      const IndexVector& vec,
       uint32_t row) {
     return vec[row];
   }
@@ -509,6 +525,10 @@ class RowMap {
     if (row > bv.size())
       bv.Resize(row + 1, false);
     bv.Set(row);
+  }
+
+  PERFETTO_NORETURN void NoVariantMatched() const {
+    PERFETTO_FATAL("Didn't match any variant type.");
   }
 
   Variant data_;
