@@ -43,6 +43,7 @@ android_startup {
         apk_version_code: 123
         debuggable: false
       }
+      pid: 3
     }
     report_fully_drawn {
       dur_ns: 198000000000
@@ -63,10 +64,9 @@ android_startup {
       dex2oat_dur_ns: 0
     }
     startup_type: "warm"
-    slow_start_reason: "Main Thread - Time spent in Running state"
     slow_start_reason: "Main Thread - Time spent in Runnable state"
     slow_start_reason: "Main Thread - Time spent in interruptible sleep state"
     slow_start_reason: "Main Thread - Time spent in Blocking I/O"
-    slow_start_reason: "Potential CPU contention with init"
+    slow_start_reason: "Potential CPU contention with another process"
   }
 }

@@ -16,9 +16,12 @@ import {RecordConfig} from '../controller/record_config_types';
 import {
   Aggregation,
   PivotTree,
-  RegularColumn,
   TableColumn,
-} from '../frontend/pivot_table_redux_types';
+} from '../frontend/pivot_table_types';
+import {TopLevelScrollSelection} from '../tracks/scroll_jank/scroll_track';
+
+import {Direction} from './event_set';
+import {TPDuration, TPTime} from './time';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -39,9 +42,9 @@ export interface OmniboxState {
 }
 
 export interface VisibleState extends Timestamped {
-  startSec: number;
-  endSec: number;
-  resolution: number;
+  start: TPTime;
+  end: TPTime;
+  resolution: TPDuration;
 }
 
 export interface AreaSelection {
@@ -59,8 +62,8 @@ export interface AreaSelection {
 export type AreaById = Area&{id: string};
 
 export interface Area {
-  startSec: number;
-  endSec: number;
+  start: TPTime;
+  end: TPTime;
   tracks: string[];
 }
 
@@ -98,7 +101,10 @@ export const MAX_TIME = 180;
 // 26: Add tags for filtering Android log entries.
 // 27. Add a text entry for filtering Android log entries.
 // 28. Add a boolean indicating if non matching log entries are hidden.
-export const STATE_VERSION = 28;
+// 29. Add ftrace state. <-- Borked, state contains a non-serializable object.
+// 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
+// 31. Convert all timestamps to bigints.
+export const STATE_VERSION = 31;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -266,8 +272,8 @@ export interface PermalinkConfig {
 }
 
 export interface TraceTime {
-  startSec: number;
-  endSec: number;
+  start: TPTime;
+  end: TPTime;
 }
 
 export interface FrontendLocalState {
@@ -282,7 +288,7 @@ export interface Status {
 export interface Note {
   noteType: 'DEFAULT';
   id: string;
-  timestamp: number;
+  timestamp: TPTime;
   color: string;
   text: string;
 }
@@ -305,10 +311,18 @@ export interface SliceSelection {
   id: number;
 }
 
+export interface DebugSliceSelection {
+  kind: 'DEBUG_SLICE';
+  id: number;
+  sqlTableName: string;
+  start: TPTime;
+  duration: TPDuration;
+}
+
 export interface CounterSelection {
   kind: 'COUNTER';
-  leftTs: number;
-  rightTs: number;
+  leftTs: TPTime;
+  rightTs: TPTime;
   id: number;
 }
 
@@ -316,7 +330,7 @@ export interface HeapProfileSelection {
   kind: 'HEAP_PROFILE';
   id: number;
   upid: number;
-  ts: number;
+  ts: TPTime;
   type: ProfileType;
 }
 
@@ -324,16 +338,16 @@ export interface PerfSamplesSelection {
   kind: 'PERF_SAMPLES';
   id: number;
   upid: number;
-  leftTs: number;
-  rightTs: number;
+  leftTs: TPTime;
+  rightTs: TPTime;
   type: ProfileType;
 }
 
 export interface FlamegraphState {
   kind: 'FLAMEGRAPH_STATE';
   upids: number[];
-  startNs: number;
-  endNs: number;
+  start: TPTime;
+  end: TPTime;
   type: ProfileType;
   viewingOption: FlamegraphStateViewingOption;
   focusRegex: string;
@@ -367,12 +381,19 @@ export interface LogSelection {
 export type Selection =
     (NoteSelection|SliceSelection|CounterSelection|HeapProfileSelection|
      CpuProfileSampleSelection|ChromeSliceSelection|ThreadStateSelection|
-     AreaSelection|PerfSamplesSelection|LogSelection)&{trackId?: string};
+     AreaSelection|PerfSamplesSelection|LogSelection|DebugSliceSelection|
+     TopLevelScrollSelection)&{trackId?: string};
 export type SelectionKind = Selection['kind'];  // 'THREAD_STATE' | 'SLICE' ...
 
-export interface LogsPagination {
+export interface Pagination {
   offset: number;
   count: number;
+}
+
+export type StringListPatch = ['add' | 'remove', string];
+
+export interface FtraceFilterPatch {
+  excludedNames: StringListPatch[];
 }
 
 export interface RecordingTarget {
@@ -403,48 +424,48 @@ export interface MetricsState {
 // Auxiliary metadata needed to parse the query result, as well as to render it
 // correctly. Generated together with the text of query and passed without the
 // change to the query response.
-export interface PivotTableReduxQueryMetadata {
+export interface PivotTableQueryMetadata {
   pivotColumns: TableColumn[];
   aggregationColumns: Aggregation[];
   countIndex: number;
 }
 
 // Everything that's necessary to run the query for pivot table
-export interface PivotTableReduxQuery {
+export interface PivotTableQuery {
   text: string;
-  metadata: PivotTableReduxQueryMetadata;
+  metadata: PivotTableQueryMetadata;
 }
 
 // Pivot table query result
-export interface PivotTableReduxResult {
+export interface PivotTableResult {
   // Hierarchical pivot structure on top of rows
   tree: PivotTree;
   // Copy of the query metadata from the request, bundled up with the query
   // result to ensure the correct rendering.
-  metadata: PivotTableReduxQueryMetadata;
+  metadata: PivotTableQueryMetadata;
 }
 
 // Input parameters to check whether the pivot table needs to be re-queried.
-export interface PivotTableReduxAreaState {
+export interface PivotTableAreaState {
   areaId: string;
   tracks: string[];
 }
 
-export type SortDirection = 'DESC'|'ASC';
+export type SortDirection = keyof typeof Direction;
 
-export interface PivotTableReduxState {
+export interface PivotTableState {
   // Currently selected area, if null, pivot table is not going to be visible.
-  selectionArea?: PivotTableReduxAreaState;
+  selectionArea?: PivotTableAreaState;
 
   // Query response
-  queryResult: PivotTableReduxResult|null;
+  queryResult: PivotTableResult|null;
 
   // Selected pivots for tables other than slice.
   // Because of the query generation, pivoting happens first on non-slice
   // pivots; therefore, those can't be put after slice pivots. In order to
   // maintain the separation more clearly, slice and non-slice pivots are
   // located in separate arrays.
-  selectedPivots: RegularColumn[];
+  selectedPivots: TableColumn[];
 
   // Selected aggregation columns. Stored same way as pivots.
   selectedAggregations: Aggregation[];
@@ -477,7 +498,7 @@ export type LoadedConfig =
     LoadedConfigNone|LoadedConfigAutomatic|LoadedConfigNamed;
 
 export interface NonSerializableState {
-  pivotTableRedux: PivotTableReduxState;
+  pivotTable: PivotTableState;
 }
 
 export interface LogFilteringCriteria {
@@ -485,6 +506,13 @@ export interface LogFilteringCriteria {
   tags: string[];
   textEntry: string;
   hideNonMatching: boolean;
+}
+
+export interface FtraceFilterState {
+  // We use an exclude list rather than include list for filtering events, as we
+  // want to include all events by default but we won't know what names are
+  // present initially.
+  excludedNames: string[];
 }
 
 export interface State {
@@ -523,7 +551,9 @@ export interface State {
   status: Status;
   currentSelection: Selection|null;
   currentFlamegraphState: FlamegraphState|null;
-  logsPagination: LogsPagination;
+  logsPagination: Pagination;
+  ftracePagination: Pagination;
+  ftraceFilter: FtraceFilterState;
   traceConversionInProgress: boolean;
   visualisedArgs: string[];
 
@@ -544,8 +574,8 @@ export interface State {
   // Hovered and focused events
   hoveredUtid: number;
   hoveredPid: number;
-  hoveredLogsTimestamp: number;
-  hoveredNoteTimestamp: number;
+  hoverCursorTimestamp: TPTime;
+  hoveredNoteTimestamp: TPTime;
   highlightedSliceId: number;
   focusedFlowIdLeft: number;
   focusedFlowIdRight: number;
@@ -568,7 +598,6 @@ export interface State {
 
   fetchChromeCategories: boolean;
   chromeCategories: string[]|undefined;
-  analyzePageQuery?: string;
 
   // Special key: this part of the state is not going to be serialized when
   // using permalink. Can be used to store those parts of the state that can't
@@ -583,8 +612,8 @@ export interface State {
 }
 
 export const defaultTraceTime = {
-  startSec: 0,
-  endSec: 10,
+  start: 0n,
+  end: BigInt(10e9),
 };
 
 export declare type RecordMode =
@@ -636,9 +665,9 @@ export function hasActiveProbes(config: RecordConfig) {
 
 export function getDefaultRecordingTargets(): RecordingTarget[] {
   return [
-    {os: 'Q', name: 'Android Q+'},
-    {os: 'P', name: 'Android P'},
-    {os: 'O', name: 'Android O-'},
+    {os: 'Q', name: 'Android Q+ / 10+'},
+    {os: 'P', name: 'Android P / 9'},
+    {os: 'O', name: 'Android O- / 8-'},
     {os: 'C', name: 'Chrome'},
     {os: 'CrOS', name: 'Chrome OS (system trace)'},
     {os: 'L', name: 'Linux desktop'},
@@ -646,7 +675,7 @@ export function getDefaultRecordingTargets(): RecordingTarget[] {
 }
 
 export function getBuiltinChromeCategoryList(): string[] {
-  // List of static Chrome categories, last updated at 2022-12-05 from HEAD of
+  // List of static Chrome categories, last updated at 2023-04-04 from HEAD of
   // Chromium's //base/trace_event/builtin_categories.h.
   return [
     'accessibility',
@@ -664,7 +693,6 @@ export function getBuiltinChromeCategoryList(): string[] {
     'blink.resource',
     'blink.user_timing',
     'blink.worker',
-    'blink_gc',
     'blink_style',
     'Blob',
     'browser',
@@ -679,7 +707,6 @@ export function getBuiltinChromeCategoryList(): string[] {
     'cast.mdns',
     'cast.mdns.socket',
     'cast.stream',
-    'catan_investigation',
     'cc',
     'cc.debug',
     'cdp.perf',
@@ -702,6 +729,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'DXVA_Decoding',
     'evdev',
     'event',
+    'event_latency',
     'exo',
     'extensions',
     'explore_sites',
@@ -712,6 +740,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'GAMEPAD',
     'gpu',
     'gpu.angle',
+    'gpu.angle.texture_metrics',
     'gpu.capture',
     'headless',
     'history',
@@ -744,6 +773,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'offline_pages',
     'omnibox',
     'oobe',
+    'openscreen',
     'ozone',
     'partition_alloc',
     'passwords',
@@ -761,6 +791,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'renderer',
     'renderer_host',
     'renderer.scheduler',
+    'resources',
     'RLZ',
     'ServiceWorker',
     'SiteEngagement',
@@ -783,7 +814,6 @@ export function getBuiltinChromeCategoryList(): string[] {
     'sync',
     'system_apps',
     'test_gpu',
-    'thread_pool',
     'toplevel',
     'toplevel.flow',
     'ui',
@@ -798,6 +828,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'wakeup.flow',
     'wayland',
     'webaudio',
+    'webengine.fidl',
     'weblayer',
     'WebCore',
     'webrtc',
@@ -807,19 +838,23 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-animation-worklet',
     'disabled-by-default-audio',
     'disabled-by-default-audio-worklet',
+    'disabled-by-default-audio.latency',
     'disabled-by-default-base',
     'disabled-by-default-blink.debug',
     'disabled-by-default-blink.debug.display_lock',
     'disabled-by-default-blink.debug.layout',
+    'disabled-by-default-blink.debug.layout.scrollbars',
     'disabled-by-default-blink.debug.layout.trees',
     'disabled-by-default-blink.feature_usage',
     'disabled-by-default-blink.image_decoding',
     'disabled-by-default-blink.invalidation',
     'disabled-by-default-identifiability',
+    'disabled-by-default-identifiability.high_entropy_api',
     'disabled-by-default-cc',
     'disabled-by-default-cc.debug',
     'disabled-by-default-cc.debug.cdp-perf',
     'disabled-by-default-cc.debug.display_items',
+    'disabled-by-default-cc.debug.lcd_text',
     'disabled-by-default-cc.debug.picture',
     'disabled-by-default-cc.debug.scheduler',
     'disabled-by-default-cc.debug.scheduler.frames',
@@ -896,6 +931,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-viz.surface_lifetime',
     'disabled-by-default-viz.triangles',
     'disabled-by-default-webaudio.audionode',
+    'disabled-by-default-webgpu',
     'disabled-by-default-webrtc',
     'disabled-by-default-worker.scheduler',
     'disabled-by-default-xr.debug',

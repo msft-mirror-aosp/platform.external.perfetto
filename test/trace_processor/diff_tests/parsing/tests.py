@@ -175,7 +175,7 @@ class Parsing(TestSuite):
         trace=DataPath('lmk_userspace.pb'),
         query="""
         SELECT to_ftrace(id)
-        FROM raw;
+        FROM ftrace_event;
         """,
         out=Path('print_systrace_lmk_userspace.out'))
 
@@ -272,7 +272,7 @@ class Parsing(TestSuite):
         trace=Path('print_systrace_unsigned.py'),
         query="""
         SELECT to_ftrace(id)
-        FROM raw;
+        FROM ftrace_event;
         """,
         out=Path('print_systrace_unsigned.out'))
 
@@ -299,7 +299,7 @@ class Parsing(TestSuite):
         """),
         query="""
         SELECT to_ftrace(id)
-        FROM raw;
+        FROM ftrace_event;
         """,
         out=Path('cgroup_attach_task_pre_s_print_systrace.out'))
 
@@ -326,7 +326,7 @@ class Parsing(TestSuite):
         """),
         query="""
         SELECT to_ftrace(id)
-        FROM raw;
+        FROM ftrace_event;
         """,
         out=Path('cgroup_attach_task_post_s_print_systrace.out'))
 
@@ -636,7 +636,10 @@ class Parsing(TestSuite):
           timestamp: 101000002
           chrome_metadata {
             background_tracing_metadata {
-              triggered_rule {}
+              triggered_rule {
+                name_hash: 1595654158
+              }
+              scenario_name_hash: 3005533841
             }
             chrome_version_code: 101
             enabled_categories: "cat1,cat2,cat3"
@@ -916,7 +919,7 @@ class Parsing(TestSuite):
         trace=Path('sched_blocked_reason_symbolized.textproto'),
         query="""
         SELECT to_ftrace(id) AS line
-        FROM raw;
+        FROM ftrace_event;
         """,
         out=Path('sched_blocked_reason_symbolized_to_systrace.out'))
 

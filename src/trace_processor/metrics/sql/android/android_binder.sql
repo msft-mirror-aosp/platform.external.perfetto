@@ -39,17 +39,19 @@ SELECT AndroidBinderMetric(
     SELECT RepeatedField(
       AndroidBinderMetric_UnaggregatedTxnBreakdown(
         'aidl_name', aidl_name,
-        'binder_txn_id', binder_txn_id,
         'client_process', client_process,
         'client_thread', client_thread,
         'is_main_thread', is_main_thread,
         'client_ts', client_ts,
         'client_dur', client_dur,
-        'binder_reply_id', binder_reply_id,
+        'client_tid', client_tid,
+        'client_pid', client_pid,
         'server_process', server_process,
         'server_thread', server_thread,
         'server_ts', server_ts,
         'server_dur', server_dur,
+        'server_tid', server_tid,
+        'server_pid', server_pid,
         'thread_states', (
           SELECT RepeatedField(
             AndroidBinderMetric_ThreadStateBreakdown(

@@ -42,10 +42,58 @@ message AndroidProcessMetadata {
   // https://developer.android.com/guide/topics/manifest/manifest-element#uid
   repeated Package packages_for_uid = 8;
 
+  // Pid of the process name.
+  optional int64 pid = 9;
+
   reserved 3, 4, 5, 6;
 }
 
 // End of protos/perfetto/metrics/android/process_metadata.proto
+
+// Begin of protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto
+
+// Blocking calls inside Android CUJs. Shows count and total duration for each.
+message AndroidBlockingCallsCujMetric {
+  repeated Cuj cuj = 1;
+
+  // Next id: 7
+  message Cuj {
+    // ID of the CUJ that is unique within the trace.
+    optional int32 id = 1;
+
+    // Name of the CUJ, extracted from the CUJ jank or latency trace marker.
+    // For example SHADE_EXPAND_COLLAPSE from J<SHADE_EXPAND_COLLAPSE>.
+    optional string name = 2;
+
+    // Details about the process (uid, version, etc)
+    optional AndroidProcessMetadata process = 3;
+
+    // ts of the CUJ trace marker slice, in ns.
+    optional int64 ts = 4;
+
+    // dur of the CUJ trace marker slice, in ns.
+    optional int64 dur = 5;
+
+    // List of blocking calls on the process main thread.
+    repeated BlockingCall blocking_calls = 6;
+  }
+
+  // Blocking call on the main thread.
+  message BlockingCall {
+    // Name of the blocking call
+    optional string name = 1;
+    // Number of times it happened within the CUJ
+    optional int64 cnt = 2;
+    // Total duration within the CUJ
+    optional int64 total_dur_ms = 3;
+    // Maximal duration within the CUJ
+    optional int64 max_dur_ms = 4;
+    // Minimal duration within the CUJ
+    optional int64 min_dur_ms = 5;
+  }
+}
+
+// End of protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto
 
 // Begin of protos/perfetto/metrics/android/android_frame_timeline_metric.proto
 
@@ -68,12 +116,14 @@ message AndroidFrameTimelineMetric {
     optional double frame_dur_ms_p90 = 15;
     optional double frame_dur_ms_p95 = 16;
     optional double frame_dur_ms_p99 = 17;
+    optional int64 dropped_frames = 18;
 
     reserved 1, 2;
   }
 
   optional int64 total_frames = 4;
   optional int64 missed_app_frames = 5;
+  optional int64 dropped_frames = 6;
 
   repeated ProcessBreakdown process = 2;
 
@@ -155,14 +205,16 @@ message AndroidBinderMetric {
     // General
     optional string aidl_name = 1;
     // Client
-    optional uint32 binder_txn_id = 2;
+    // Removed: was binder_txn_id
+    reserved 2;
     optional string client_process = 3;
     optional string client_thread = 4;
     optional bool is_main_thread = 5;
     optional int64 client_ts = 6;
     optional int64 client_dur = 7;
     // Server
-    optional uint32 binder_reply_id = 8;
+    // Removed: was binder_reply_id
+    reserved 8;
     optional string server_process = 9;
     optional string server_thread = 10;
     optional int64 server_ts = 11;
@@ -170,6 +222,12 @@ message AndroidBinderMetric {
     // Aggregations
     repeated ThreadStateBreakdown thread_states = 13;
     repeated BlockedFunctionBreakdown blocked_functions = 14;
+
+    optional uint32 client_tid = 15;
+    optional uint32 server_tid = 16;
+
+    optional uint32 client_pid = 17;
+    optional uint32 server_pid = 18;
   }
 
   message ThreadStateBreakdown {
@@ -534,6 +592,10 @@ message AndroidHwcomposerMetrics {
   // (non-weighted average)
   optional double composition_sf_cached_layers = 5;
 
+  // Counts the number of composition rounded corner decoration layers in the trace.
+  // (non-weighted average)
+  optional double composition_rcd_layers = 15;
+
   // Counts how many times validateDisplay is skipped.
   optional int32 skipped_validation_count = 6;
 
@@ -578,6 +640,58 @@ message AndroidHwcomposerMetrics {
 
   // DPU Vote Metrics for each thread track
   repeated DpuVoteMetrics dpu_vote_metrics = 14;
+
+  message MetricsPerDisplay {
+    // Display ID in HWC
+    optional string display_id = 1;
+
+    // Counts the number of composition total layers in the trace. (non-weighted average)
+    optional double composition_total_layers = 2;
+
+    // Counts the number of composition dpu layers in the trace. (non-weighted average)
+    optional double composition_dpu_layers = 3;
+
+    // Counts the number of composition gpu layers in the trace. (non-weighted average)
+    optional double composition_gpu_layers = 4;
+
+    // Counts the number of composition dpu cached layers in the trace. (non-weighted average)
+    optional double composition_dpu_cached_layers = 5;
+
+    // Counts the number of composition surfaceflinger cached layers in the trace.
+    // (non-weighted average)
+    optional double composition_sf_cached_layers = 6;
+
+    // Counts the number of composition rounded corner decoration layers in the trace.
+    // (non-weighted average)
+    optional double composition_rcd_layers = 7;
+
+    // Counts how many times validateDisplay is skipped.
+    optional int32 skipped_validation_count = 8;
+
+    // Counts how many times validateDisplay cannot be skipped.
+    optional int32 unskipped_validation_count = 9;
+
+    // Counts how many times validateDisplay is already separated from presentDisplay
+    // since the beginning.
+    optional int32 separated_validation_count = 10;
+
+    // Counts how many unhandled validation cases which might be caused by errors.
+    optional int32 unknown_validation_count = 11;
+
+    // the average of overall hwcomposer execution time.
+    optional double avg_all_execution_time_ms = 12;
+
+    // the average of hwcomposer execution time for skipped validation cases.
+    optional double avg_skipped_execution_time_ms = 13;
+
+    // the average of hwcomposer execution time for unskipped validation cases.
+    optional double avg_unskipped_execution_time_ms = 14;
+
+    // the average of hwcomposer execution time for separated validation cases.
+    optional double avg_separated_execution_time_ms = 15;
+  }
+
+  repeated MetricsPerDisplay metrics_per_display = 16;
 }
 
 // End of protos/perfetto/metrics/android/hwcomposer.proto
@@ -734,7 +848,7 @@ message AndroidIrqRuntimeMetric {
 message AndroidJankCujMetric {
   repeated Cuj cuj = 1;
 
-  // Next id: 11
+  // Next id: 12
   message Cuj {
     // ID of the CUJ that is unique within the trace.
     optional int32 id = 1;
@@ -767,9 +881,12 @@ message AndroidJankCujMetric {
 
     // Metrics extracted from the trace slices.
     optional Metrics trace_metrics = 9;
+
+    // Layer name of the surface where the cuj is drawn.
+    optional string layer_name = 11;
   }
 
-  // Next id: 8
+  // Next id: 10
   message Frame {
     // Index of the frame within the single user journey.
     optional int64 frame_number = 1;
@@ -787,9 +904,17 @@ message AndroidJankCujMetric {
 
     // Whether SF missed the frame deadline.
     optional bool sf_missed = 6;
+
+    // Whether the SF callback missed before emitting jank metrics.
+    // SF callback is used to get the jank classification.
+    optional bool sf_callback_missed = 8;
+
+    // Whether the HWUI callback missed before emitting jank metrics.
+    // HWUI callback is used to get the frame duration.
+    optional bool hwui_callback_missed = 9;
   }
 
-  // Next id: 16
+  // Next id: 18
   message Metrics {
     // Overall number of frames within the CUJ.
     optional int64 total_frames = 1;
@@ -845,6 +970,12 @@ message AndroidJankCujMetric {
     // P99 frame duration in milliseconds.
     // Not available in counter_metrics.
     optional double frame_dur_ms_p99 = 15;
+
+    // Number of frames with missed SF callback.
+    optional int64 sf_callback_missed_frames = 16;
+
+    // Number of frames with missed HWUI callback.
+    optional int64 hwui_callback_missed_frames = 17;
   }
 }
 
@@ -894,7 +1025,7 @@ message JavaHeapStats {
     optional int64 obj_count = 3;
   }
 
-  // Next id: 10
+  // Next id: 11
   message Sample {
     optional int64 ts = 1;
     // Size of the Java heap in bytes
@@ -913,6 +1044,8 @@ message JavaHeapStats {
 
     // ART root objects
     repeated HeapRoots roots = 7;
+    // OOM adjustment score
+    optional int64 oom_score_adj = 10;
   }
 
   // Heap stats per process. One sample per dump (can be > 1 if continuous
@@ -1054,6 +1187,62 @@ message AndroidMemoryUnaggregatedMetric {
 }
 
 // End of protos/perfetto/metrics/android/mem_unagg_metric.proto
+
+// Begin of protos/perfetto/metrics/android/monitor_contention_metric.proto
+
+// This metric provides information about the monitor contention graph in a
+// trace
+message AndroidMonitorContentionMetric {
+  // Next field id: 24
+  message Node {
+    // Global context
+    optional int64 node_parent_id = 1;
+    optional int64 node_id = 2;
+    optional int64 ts = 3;
+    optional int64 dur = 4;
+    optional string process_name = 14;
+    optional uint32 pid = 23;
+    optional uint32 waiter_count = 11;
+    repeated ThreadStateBreakdown thread_states = 19;
+    repeated BlockedFunctionBreakdown blocked_functions = 20;
+
+    // Blocking context
+    optional string blocking_method = 5;
+    optional string short_blocking_method = 7;
+    optional string blocking_src = 9;
+    optional string blocking_thread_name = 13;
+    optional bool is_blocking_thread_main = 16;
+    optional uint32 blocking_thread_tid = 22;
+
+    // Blocked context
+    optional string blocked_method = 6;
+    optional string short_blocked_method = 8;
+    optional string blocked_src = 10;
+    optional string blocked_thread_name = 12;
+    optional bool is_blocked_thread_main = 15;
+    optional uint32 blocked_thread_tid = 21;
+
+    // Binder context
+    optional int64 binder_reply_ts = 17;
+    optional uint32 binder_reply_tid = 18;
+  }
+
+  message ThreadStateBreakdown {
+    optional string thread_state = 1;
+    optional int64 thread_state_dur = 2;
+    optional int64 thread_state_count = 3;
+  }
+
+  message BlockedFunctionBreakdown {
+    optional string blocked_function = 1;
+    optional int64 blocked_function_dur = 2;
+    optional int64 blocked_function_count = 3;
+  }
+
+  repeated Node node = 1;
+}
+
+// End of protos/perfetto/metrics/android/monitor_contention_metric.proto
 
 // Begin of protos/perfetto/metrics/android/multiuser_metric.proto
 
@@ -1420,7 +1609,7 @@ message AndroidStartupMetric {
 
   // Timing information spanning the intent received by the
   // activity manager to the first frame drawn.
-  // Next id: 33.
+  // Next id: 35.
   message ToFirstFrame {
     // The duration between the intent received and first frame.
     optional int64 dur_ns = 1;
@@ -1490,6 +1679,14 @@ message AndroidStartupMetric {
     // |time_lock_contention_thread_main|.
     optional Slice time_monitor_contention_thread_main = 32;
 
+    // Time spent in opening dex files on the main thread of the process
+    // being started up.
+    optional Slice time_dex_open_thread_main = 33;
+
+    // Time spent in dlopening .so files on the main thread of the process
+    // being started up.
+    optional Slice time_dlopen_thread_main = 34;
+
     // Removed: was other_process_to_activity_cpu_ratio.
     reserved 12;
 
@@ -1542,6 +1739,13 @@ message AndroidStartupMetric {
     optional string location = 4;
   }
 
+  // Contains the name and duration of class verification occurred during
+  // the startup.
+  message VerifyClass {
+    optional string name = 1;
+    optional int64 dur_ns = 2;
+  }
+
   // Contains timestamps of important events which occurred during the
   // startup.
   message EventTimestamps {
@@ -1582,7 +1786,7 @@ message AndroidStartupMetric {
     optional int64 dex2oat_dur_ns = 7;
   }
 
-  // Next id: 19
+  // Next id: 21
   message Startup {
     // Random id uniquely identifying an app startup in this trace.
     optional uint32 startup_id = 1;
@@ -1634,6 +1838,12 @@ message AndroidStartupMetric {
 
     // Contains information about the status of odex files.
     repeated OptimizationStatus optimization_status = 12;
+
+    // Contains information about the class verification.
+    repeated VerifyClass verify_class = 19;
+
+    // Contains the dlopen file names.
+    repeated string dlopen_file = 20;
 
     // Package name of startups running concurrent to the launch.
     repeated string startup_concurrent_to_launch = 18;
@@ -1693,6 +1903,34 @@ message AndroidSurfaceflingerMetric {
   // This also equals to the total duration of
   // "waiting for GPU completion <fence_num>" in SurfaceFlinger.
   optional double total_non_empty_gpu_waiting_dur_ms = 9;
+
+  message MetricsPerDisplay {
+    // Display ID in SF
+    optional string display_id = 1;
+
+    // Counts the number of missed frames in the trace.
+    optional uint32 missed_frames = 2;
+
+    // Counts the number of missed HWC frames in the trace.
+    optional uint32 missed_hwc_frames = 3;
+
+    // Counts the number of missed GPU frames in the trace.
+    optional uint32 missed_gpu_frames = 4;
+
+    // Calculate the number of missed frames divided by
+    // total frames
+    optional double missed_frame_rate = 5;
+
+    // Calculate the number of missed HWC frames divided by
+    // total HWC frames
+    optional double missed_hwc_frame_rate = 6;
+
+    // Calculate the number of missed GPU frames divided by
+    // total GPU frames
+    optional double missed_gpu_frame_rate = 7;
+  }
+
+  repeated MetricsPerDisplay metrics_per_display = 10;
 }
 
 // End of protos/perfetto/metrics/android/surfaceflinger.proto
@@ -1804,7 +2042,7 @@ message TraceAnalysisStats {
 
 // Root message for all Perfetto-based metrics.
 //
-// Next id: 49
+// Next id: 50
 message TraceMetrics {
   reserved 4, 10, 13, 14, 16, 19;
 
@@ -1936,6 +2174,11 @@ message TraceMetrics {
   // Metrics for app deadline missed.
   optional AndroidFrameTimelineMetric android_frame_timeline_metric = 47;
 
+  // Blocking calls (e.g. binder calls) for CUJs (important UI transitions).
+  optional AndroidBlockingCallsCujMetric android_blocking_calls_cuj_metric = 49;
+
+  optional AndroidMonitorContentionMetric android_monitor_contention = 50;
+
   // Demo extensions.
   extensions 450 to 499;
 
@@ -1944,6 +2187,9 @@ message TraceMetrics {
 
   // Chrome metrics.
   extensions 1001 to 2000;
+
+  // WebView metrics.
+  extensions 2001 to 2500;
 }
 
 // End of protos/perfetto/metrics/metrics.proto

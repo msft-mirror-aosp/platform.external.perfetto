@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {fromNs} from '../common/time';
+import {TPTime} from '../common/time';
+
 import {globals} from './globals';
 
 // Type-safe aliases for various flavours of ints Trace Processor exposes
@@ -25,13 +26,19 @@ import {globals} from './globals';
 
 // Timestamp (in nanoseconds) in the same time domain as Trace Processor is
 // exposing.
-export type TPTimestamp = number&{
+export type TPTimestamp = TPTime&{
   __type: 'TPTimestamp'
 }
 
+export function asTPTimestamp(v: bigint): TPTimestamp;
+export function asTPTimestamp(v?: bigint): TPTimestamp|undefined;
+export function asTPTimestamp(v?: bigint): TPTimestamp|undefined {
+  return v as (TPTimestamp | undefined);
+}
+
 // TODO: unify this with common/time.ts.
-export function toTraceTime(ts: TPTimestamp): number {
-  return fromNs(ts) - globals.state.traceTime.startSec;
+export function toTraceTime(ts: TPTimestamp): TPTime {
+  return ts - globals.state.traceTime.start;
 }
 
 // Unique id for a process, id into |process| table.

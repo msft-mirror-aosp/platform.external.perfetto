@@ -14,9 +14,13 @@
 
 import {Actions} from '../common/actions';
 import {EngineProxy} from '../common/engine';
-import {NUM, NUM_NULL, STR_NULL} from '../common/query_result';
+import {LONG, NUM, NUM_NULL, STR_NULL} from '../common/query_result';
 import {translateState} from '../common/thread_state';
-import {fromNs, timeToCode} from '../common/time';
+import {
+  TPDuration,
+  TPTime,
+  tpTimeToCode,
+} from '../common/time';
 
 import {copyToClipboard} from './clipboard';
 import {globals} from './globals';
@@ -26,8 +30,6 @@ import {
   asUtid,
   SchedSqlId,
   ThreadStateSqlId,
-  toTraceTime,
-  TPTimestamp,
 } from './sql_types';
 import {
   constraintsToQueryFragment,
@@ -50,9 +52,9 @@ export interface ThreadState {
   // Id of the corresponding entry in the |sched| table.
   schedSqlId?: SchedSqlId;
   // Timestamp of the the beginning of this thread state in nanoseconds.
-  ts: TPTimestamp;
+  ts: TPTime;
   // Duration of this thread state in nanoseconds.
-  dur: number;
+  dur: TPDuration;
   // CPU id if this thread state corresponds to a thread running on the CPU.
   cpu?: number;
   // Human-readable name of this thread state.
@@ -88,8 +90,8 @@ export async function getThreadStateFromConstraints(
   const it = query.iter({
     threadStateSqlId: NUM,
     schedSqlId: NUM_NULL,
-    ts: NUM,
-    dur: NUM,
+    ts: LONG,
+    dur: LONG,
     cpu: NUM_NULL,
     state: STR_NULL,
     blockedFunction: STR_NULL,
@@ -109,7 +111,7 @@ export async function getThreadStateFromConstraints(
     result.push({
       threadStateSqlId: it.threadStateSqlId as ThreadStateSqlId,
       schedSqlId: fromNumNull(it.schedSqlId) as (SchedSqlId | undefined),
-      ts: it.ts as TPTimestamp,
+      ts: it.ts,
       dur: it.dur,
       cpu: fromNumNull(it.cpu),
       state: translateState(it.state || undefined, ioWait),
@@ -125,7 +127,7 @@ export async function getThreadStateFromConstraints(
 export async function getThreadState(
     engine: EngineProxy, id: number): Promise<ThreadState|undefined> {
   const result = await getThreadStateFromConstraints(engine, {
-    where: [`id=${id}`],
+    filters: [`id=${id}`],
   });
   if (result.length > 1) {
     throw new Error(`thread_state table has more than one row with id ${id}`);
@@ -136,7 +138,7 @@ export async function getThreadState(
   return result[0];
 }
 
-export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: TPTimestamp) {
+export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: TPTime) {
   let trackId: string|undefined;
   for (const track of Object.values(globals.state.tracks)) {
     if (track.kind === 'CpuSliceTrack' &&
@@ -152,10 +154,8 @@ export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: TPTimestamp) {
 }
 
 function stateToValue(
-    state: string,
-    cpu: number|undefined,
-    id: SchedSqlId|undefined,
-    ts: TPTimestamp): Value|null {
+    state: string, cpu: number|undefined, id: SchedSqlId|undefined, ts: TPTime):
+    Value|null {
   if (!state) {
     return null;
   }
@@ -175,8 +175,9 @@ function stateToValue(
 export function threadStateToDict(state: ThreadState): Dict {
   const result: {[name: string]: Value|null} = {};
 
-  result['Start time'] = value(timeToCode(toTraceTime(state.ts)));
-  result['Duration'] = value(timeToCode(fromNs(state.dur)));
+  result['Start time'] =
+      value(tpTimeToCode(state.ts - globals.state.traceTime.start));
+  result['Duration'] = value(tpTimeToCode(state.dur));
   result['State'] =
       stateToValue(state.state, state.cpu, state.schedSqlId, state.ts);
   result['Blocked function'] = maybeValue(state.blockedFunction);
