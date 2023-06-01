@@ -3472,7 +3472,8 @@ TEST_P(PerfettoApiTest, TrackEventEventNameDynamicString) {
       "foo", perfetto::DynamicString{std::string("Event5")},
       ::perfetto::protos::pbzero::TrackEvent::TYPE_SLICE_END);
   PERFETTO_INTERNAL_TRACK_EVENT(
-      "foo", "Event6", ::perfetto::protos::pbzero::TrackEvent::TYPE_SLICE_END);
+      "foo", perfetto::StaticString{"Event6"},
+      ::perfetto::protos::pbzero::TrackEvent::TYPE_SLICE_END);
 
   auto slices = StopSessionAndReadSlicesFromTrace(tracing_session);
   ASSERT_EQ(6u, slices.size());
@@ -3516,6 +3517,21 @@ TEST_P(PerfettoApiTest, TrackEventDynamicStringInDebugArgs) {
   EXPECT_EQ("B:foo.Event6(arg1=(string)arg1_value6)", slices[5]);
   EXPECT_EQ("B:foo.Event7(arg1=(string)arg1_value7)", slices[6]);
   EXPECT_EQ("B:foo.Event8(new_arg1=(int)5)", slices[7]);
+}
+
+TEST_P(PerfettoApiTest, TrackEventLegacyNullStringInArgs) {
+  auto* tracing_session = NewTraceWithCategories({"foo"});
+  tracing_session->get()->StartBlocking();
+
+  const char* null_str = nullptr;
+
+  TRACE_EVENT1("foo", "Event1", "arg1", null_str);
+  TRACE_EVENT1("foo", "Event2", "arg1", TRACE_STR_COPY(null_str));
+
+  auto slices = StopSessionAndReadSlicesFromTrace(tracing_session);
+  ASSERT_EQ(2u, slices.size());
+  EXPECT_EQ("B:foo.Event1(arg1=(string)NULL)", slices[0]);
+  EXPECT_EQ("B:foo.Event2(arg1=(string)NULL)", slices[1]);
 }
 
 TEST_P(PerfettoApiTest, FilterDynamicEventName) {

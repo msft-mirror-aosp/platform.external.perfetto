@@ -58,7 +58,7 @@ RowMap Select(Range range, const BitVector& selector) {
   return RowMap(std::move(bv));
 }
 
-RowMap Select(Range range, const std::vector<RowMap::OutputIndex>& selector) {
+RowMap Select(Range range, const std::vector<OutputIndex>& selector) {
   std::vector<uint32_t> iv(selector.size());
   for (uint32_t i = 0; i < selector.size(); ++i) {
     PERFETTO_DCHECK(selector[i] < range.size());
@@ -179,22 +179,7 @@ Variant IntersectInternal(std::vector<OutputIndex>& first,
 }
 
 Variant IntersectInternal(Range range, const BitVector& bv) {
-  uint32_t start = std::max(range.start, bv.IndexOfNthSet(0));
-  uint32_t end = std::min(range.end, bv.size());
-  if (start >= end) {
-    return Range{};
-  }
-  BitVector new_bv = BitVector(end, false);
-  auto it = bv.IterateSetBits();
-  // Scroll the iterator past start.
-  while (it.index() < start) {
-    it.Next();
-  }
-  // Fill all of the values until end.
-  for (; it && it.index() < end; it.Next()) {
-    new_bv.Set(it.index());
-  }
-  return std::move(new_bv);
+  return bv.IntersectRange(range.start, range.end);
 }
 
 Variant IntersectInternal(BitVector& bv, Range range) {
@@ -246,14 +231,19 @@ RowMap::RowMap(Range r) : data_(r) {}
 RowMap::RowMap(BitVector bit_vector) : data_(std::move(bit_vector)) {}
 
 // Creates a RowMap backed by an std::vector<uint32_t>.
-RowMap::RowMap(std::vector<OutputIndex> vec) : data_(vec) {}
+RowMap::RowMap(IndexVector vec) : data_(vec) {}
 
 RowMap RowMap::Copy() const {
-  return std::visit(
-      overloaded{[](Range r) { return RowMap(r); },
-                 [](const BitVector& bv) { return RowMap(bv.Copy()); },
-                 [](std::vector<OutputIndex> vec) { return RowMap(vec); }},
-      data_);
+  if (auto* range = std::get_if<Range>(&data_)) {
+    return RowMap(*range);
+  }
+  if (auto* bv = std::get_if<BitVector>(&data_)) {
+    return RowMap(bv->Copy());
+  }
+  if (auto* vec = std::get_if<IndexVector>(&data_)) {
+    return RowMap(*vec);
+  }
+  NoVariantMatched();
 }
 
 RowMap RowMap::SelectRowsSlow(const RowMap& selector) const {
@@ -273,13 +263,14 @@ void RowMap::Intersect(const RowMap& second) {
 }
 
 RowMap::Iterator::Iterator(const RowMap* rm) : rm_(rm) {
-  std::visit(overloaded{[this](const Range& r) { ordinal_ = r.start; },
-                        [this](const BitVector& bv) {
-                          set_bits_it_.reset(new BitVector::SetBitsIterator(
-                              (&bv)->IterateSetBits()));
-                        },
-                        [](const std::vector<OutputIndex>&) { return; }},
-             rm_->data_);
+  if (auto* range = std::get_if<Range>(&rm_->data_)) {
+    ordinal_ = range->start;
+    return;
+  }
+  if (auto* bv = std::get_if<BitVector>(&rm_->data_)) {
+    set_bits_it_.reset(new BitVector::SetBitsIterator(bv->IterateSetBits()));
+    return;
+  }
 }
 }  // namespace trace_processor
 }  // namespace perfetto
