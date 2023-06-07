@@ -19,11 +19,13 @@
     "persistent": false
   },
   "externally_connectable": {
+    // Only allow Perfetto UI hosts to connect to the extension. Do not add
+    // other domains here without assessing the security impact of allowing any
+    // content hosted on these domains to record Chrome traces.
     "matches": [
       "*://localhost/*",
       "*://127.0.0.1/*",
-      "https://*.perfetto.dev/*",
-      "https://storage.googleapis.com/*"
+      "https://*.perfetto.dev/*"
     ]
   }
 }

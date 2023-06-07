@@ -104,6 +104,7 @@ export const MAX_TIME = 180;
 // 29. Add ftrace state. <-- Borked, state contains a non-serializable object.
 // 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
 // 31. Convert all timestamps to bigints.
+// 32. Add pendingDeeplink.
 export const STATE_VERSION = 31;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
@@ -515,6 +516,12 @@ export interface FtraceFilterState {
   excludedNames: string[];
 }
 
+export interface PendingDeeplinkState {
+  ts?: string;
+  dur?: string;
+  tid?: string;
+}
+
 export interface State {
   version: number;
   nextId: string;
@@ -609,6 +616,10 @@ export interface State {
 
   // Omnibox info.
   omniboxState: OmniboxState;
+
+  // Pending deeplink which will happen when we first finish opening a
+  // trace.
+  pendingDeeplink?: PendingDeeplinkState;
 }
 
 export const defaultTraceTime = {
@@ -675,12 +686,13 @@ export function getDefaultRecordingTargets(): RecordingTarget[] {
 }
 
 export function getBuiltinChromeCategoryList(): string[] {
-  // List of static Chrome categories, last updated at 2023-04-04 from HEAD of
+  // List of static Chrome categories, last updated at 2023-05-30 from HEAD of
   // Chromium's //base/trace_event/builtin_categories.h.
   return [
     'accessibility',
     'AccountFetcherService',
     'android_webview',
+    'android_webview.timeline',
     'aogh',
     'audio',
     'base',
