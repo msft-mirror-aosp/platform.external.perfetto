@@ -354,16 +354,28 @@ perfetto_cc_binary(
         ":libperfetto_client_experimental",
         ":protos_perfetto_common_cpp",
         ":protos_perfetto_common_zero",
+        ":protos_perfetto_config_android_cpp",
         ":protos_perfetto_config_android_zero",
+        ":protos_perfetto_config_cpp",
+        ":protos_perfetto_config_ftrace_cpp",
         ":protos_perfetto_config_ftrace_zero",
+        ":protos_perfetto_config_gpu_cpp",
         ":protos_perfetto_config_gpu_zero",
+        ":protos_perfetto_config_inode_file_cpp",
         ":protos_perfetto_config_inode_file_zero",
+        ":protos_perfetto_config_interceptors_cpp",
         ":protos_perfetto_config_interceptors_zero",
+        ":protos_perfetto_config_power_cpp",
         ":protos_perfetto_config_power_zero",
+        ":protos_perfetto_config_process_stats_cpp",
         ":protos_perfetto_config_process_stats_zero",
+        ":protos_perfetto_config_profiling_cpp",
         ":protos_perfetto_config_profiling_zero",
+        ":protos_perfetto_config_statsd_cpp",
         ":protos_perfetto_config_statsd_zero",
+        ":protos_perfetto_config_sys_stats_cpp",
         ":protos_perfetto_config_sys_stats_zero",
+        ":protos_perfetto_config_system_info_cpp",
         ":protos_perfetto_config_system_info_zero",
         ":protos_perfetto_config_track_event_cpp",
         ":protos_perfetto_config_track_event_zero",
@@ -1310,8 +1322,8 @@ perfetto_filegroup(
         "src/trace_processor/db/column_storage.h",
         "src/trace_processor/db/column_storage_overlay.h",
         "src/trace_processor/db/compare.h",
-        "src/trace_processor/db/null_overlay.cc",
-        "src/trace_processor/db/null_overlay.h",
+        "src/trace_processor/db/query_executor.cc",
+        "src/trace_processor/db/query_executor.h",
         "src/trace_processor/db/table.cc",
         "src/trace_processor/db/table.h",
         "src/trace_processor/db/typed_column.h",
@@ -1897,6 +1909,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/chrome/scroll_jank_cause_blocking_touch_move.sql",
         "src/trace_processor/metrics/sql/chrome/scroll_jank_cause_get_bitmap.sql",
         "src/trace_processor/metrics/sql/chrome/scroll_jank_cause_queuing_delay.sql",
+        "src/trace_processor/metrics/sql/chrome/scroll_jank_v3.sql",
         "src/trace_processor/metrics/sql/chrome/sufficient_chrome_processes.sql",
         "src/trace_processor/metrics/sql/chrome/test_chrome_metric.sql",
         "src/trace_processor/metrics/sql/chrome/touch_flow_event.sql",
@@ -2224,9 +2237,11 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_stdlib_chrome_chrome_sql",
     srcs = [
+        "src/trace_processor/stdlib/chrome/chrome_scroll_janks.sql",
         "src/trace_processor/stdlib/chrome/chrome_scrolls.sql",
         "src/trace_processor/stdlib/chrome/cpu_powerups.sql",
         "src/trace_processor/stdlib/chrome/histograms.sql",
+        "src/trace_processor/stdlib/chrome/metadata.sql",
         "src/trace_processor/stdlib/chrome/speedometer.sql",
     ],
 )
@@ -2250,6 +2265,7 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/stdlib/experimental/android_broadcast.sql",
         "src/trace_processor/stdlib/experimental/proto_path.sql",
+        "src/trace_processor/stdlib/experimental/slices.sql",
     ],
 )
 
@@ -5626,4 +5642,9 @@ perfetto_py_binary(
     data = ["CHANGELOG"],
     main = "tools/write_version_header.py",
     python_version = "PY3",
+)
+
+exports_files(
+    ["ui/src/assets/favicon.png"],
+    visibility = PERFETTO_CONFIG.public_visibility,
 )

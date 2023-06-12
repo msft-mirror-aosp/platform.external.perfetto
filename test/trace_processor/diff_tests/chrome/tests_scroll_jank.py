@@ -65,6 +65,33 @@ class ChromeScrollJank(TestSuite):
         """,
         out=Path('event_latency_to_breakdowns.out'))
 
+  def test_chrome_frames_with_missed_vsyncs(self):
+    return DiffTestBlueprint(
+        trace=DataPath('chrome_input_with_frame_view.pftrace'),
+        query="""
+        SELECT RUN_METRIC('chrome/scroll_jank_v3.sql');
+
+        SELECT
+          cause_of_jank,
+          sub_cause_of_jank,
+          delay_since_last_frame,
+          vsync_interval
+        FROM chrome_janky_frames;
+        """,
+        out=Path('scroll_jank_v3.out'))
+
+  def test_chrome_frames_with_missed_vsyncs_percentage(self):
+    return DiffTestBlueprint(
+        trace=DataPath('chrome_input_with_frame_view.pftrace'),
+        query="""
+        SELECT RUN_METRIC('chrome/scroll_jank_v3.sql');
+
+        SELECT
+          delayed_frame_percentage
+        FROM chrome_janky_frames_percentage;
+        """,
+        out=Path('scroll_jank_v3_percentage.out'))
+
   def test_event_latency_scroll_jank(self):
     return DiffTestBlueprint(
         trace=DataPath('event_latency_with_args.perfetto-trace'),
@@ -538,7 +565,28 @@ class ChromeScrollJank(TestSuite):
         "id","ts","dur","scroll_start_ts","scroll_end_ts"
         5678,0,55000000,0,45000000
         5679,60000000,40000000,60000000,90000000
-        5680,120000000,70000000,120000000,-1
+        5680,80000000,30000000,80000000,100000000
+        5681,120000000,70000000,120000000,-1
+        """))
+
+  def test_chrome_scroll_intervals(self):
+    return DiffTestBlueprint(
+        trace=Path('chrome_scroll_check.py'),
+        query="""
+        SELECT IMPORT('chrome.chrome_scrolls');
+
+        SELECT
+          id,
+          ts,
+          dur
+        FROM chrome_scrolling_intervals
+        ORDER by id;
+        """,
+        out=Csv("""
+        "id","ts","dur"
+        1,0,55000000
+        2,60000000,50000000
+        3,120000000,70000000
         """))
 
   def test_chrome_scroll_jank_v2(self):

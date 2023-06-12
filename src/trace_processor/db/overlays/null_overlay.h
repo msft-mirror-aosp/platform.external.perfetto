@@ -27,11 +27,12 @@ namespace overlays {
 // using BitVector.
 class NullOverlay : public StorageOverlay {
  public:
-  explicit NullOverlay(BitVector* null) : non_null_(std::move(null)) {}
+  explicit NullOverlay(const BitVector* null) : non_null_(std::move(null)) {}
 
   StorageRange MapToStorageRange(TableRange) const override;
 
-  TableBitVector MapToTableBitVector(StorageBitVector) const override;
+  TableBitVector MapToTableBitVector(StorageBitVector,
+                                     OverlayOp) const override;
 
   BitVector IsStorageLookupRequired(OverlayOp,
                                     const TableIndexVector&) const override;
@@ -44,7 +45,7 @@ class NullOverlay : public StorageOverlay {
 
  private:
   // Non null data in the overlay.
-  BitVector* non_null_;
+  const BitVector* non_null_;
 };
 
 }  // namespace overlays

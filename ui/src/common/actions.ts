@@ -62,6 +62,7 @@ import {
   VisibleState,
 } from './state';
 import {TPDuration, TPTime} from './time';
+import {SqlObjectDetailsTabConfig} from '../frontend/details_panel';
 
 export const DEBUG_SLICE_TRACK_KIND = 'DebugSliceTrack';
 
@@ -126,6 +127,9 @@ function generateNextId(draft: StateDraft): string {
 // tracks are removeable.
 function removeTrack(state: StateDraft, trackId: string) {
   const track = state.tracks[trackId];
+  if (track === undefined) {
+    return;
+  }
   delete state.tracks[trackId];
 
   const removeTrackId = (arr: string[]) => {
@@ -136,7 +140,10 @@ function removeTrack(state: StateDraft, trackId: string) {
   if (track.trackGroup === SCROLLING_TRACK_GROUP) {
     removeTrackId(state.scrollingTracks);
   } else if (track.trackGroup !== undefined) {
-    removeTrackId(state.trackGroups[track.trackGroup].tracks);
+    const trackGroup = state.trackGroups[track.trackGroup];
+    if (trackGroup !== undefined) {
+      removeTrackId(trackGroup.tracks);
+    }
   }
   state.pinnedTracks = state.pinnedTracks.filter((id) => id !== trackId);
 }
@@ -227,7 +234,10 @@ export const StateActions = {
       if (track.trackGroup === SCROLLING_TRACK_GROUP) {
         state.scrollingTracks.push(id);
       } else if (track.trackGroup !== undefined) {
-        assertExists(state.trackGroups[track.trackGroup]).tracks.push(id);
+        const group = state.trackGroups[track.trackGroup];
+        if (group !== undefined) {
+          group.tracks.push(id);
+        }
       }
     });
   },
@@ -296,8 +306,10 @@ export const StateActions = {
 
   removeDebugTrack(state: StateDraft, args: {trackId: string}): void {
     const track = state.tracks[args.trackId];
-    assertTrue(track.kind === DEBUG_SLICE_TRACK_KIND);
-    removeTrack(state, args.trackId);
+    if (track !== undefined) {
+      assertTrue(track.kind === DEBUG_SLICE_TRACK_KIND);
+      removeTrack(state, args.trackId);
+    }
   },
 
   removeVisualisedArgTracks(state: StateDraft, args: {trackIds: string[]}) {
@@ -803,20 +815,25 @@ export const StateActions = {
     };
   },
 
-  selectTopLevelScrollSlice(state: StateDraft, args: {
+  selectBasicSqlSlice(state: StateDraft, args: {
     id: number,
     sqlTableName: string,
     start: TPTime,
-    duration: TPTime,
+    duration: TPDuration,
     trackId: string,
+    detailsPanelConfig: {
+      kind: string,
+      config: SqlObjectDetailsTabConfig
+    },
   }): void {
     state.currentSelection = {
-      kind: 'TOP_LEVEL_SCROLL',
+      kind: 'BASIC_SQL_OBJECT',
       id: args.id,
       sqlTableName: args.sqlTableName,
       start: args.start,
       duration: args.duration,
       trackId: args.trackId,
+      detailsPanelConfig: args.detailsPanelConfig,
     };
   },
 

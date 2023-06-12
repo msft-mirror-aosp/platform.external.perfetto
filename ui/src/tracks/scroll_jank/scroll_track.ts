@@ -24,7 +24,6 @@ import {
   SCROLLING_TRACK_GROUP,
   Selection,
 } from '../../common/state';
-import {TPTime} from '../../common/time';
 import {OnSliceClickArgs} from '../../frontend/base_slice_track';
 import {globals} from '../../frontend/globals';
 import {
@@ -33,25 +32,12 @@ import {
 } from '../../frontend/named_slice_track';
 import {NewTrackArgs, Track} from '../../frontend/track';
 import {DecideTracksResult} from '../chrome_scroll_jank';
-
-export const TOP_LEVEL_SCROLL_KIND = 'TOP_LEVEL_SCROLL';
-
-export interface TopLevelScrollSelection {
-  kind: 'TOP_LEVEL_SCROLL';
-  id: number;
-  sqlTableName: string;
-  start: TPTime;
-  duration: TPTime;
-}
+import {GenericSliceDetailsTab, Columns} from '../../frontend/generic_slice_details_tab';
 
 export {Data} from '../chrome_slices';
 
-interface TopLevelScrollTrackTypes extends NamedSliceTrackTypes {}
-
-export class TopLevelScrollTrack extends
-    NamedSliceTrack<TopLevelScrollTrackTypes> {
+export class TopLevelScrollTrack extends NamedSliceTrack {
   static readonly kind = 'org.chromium.TopLevelScrolls.scrolls';
-  createdModels = false;
 
   static create(args: NewTrackArgs): Track {
     return new TopLevelScrollTrack(args);
@@ -62,9 +48,6 @@ export class TopLevelScrollTrack extends
   }
 
   async initSqlTable(tableName: string) {
-    if (this.createdModels) {
-      return;
-    }
     const sql =
         `CREATE VIEW ${tableName} AS ` + generateSqlWithInternalLayout({
           columns: [`printf("Scroll %s", CAST(id AS STRING)) AS name`, '*'],
@@ -73,23 +56,38 @@ export class TopLevelScrollTrack extends
           orderByClause: 'ts',
         });
     await this.engine.query(sql);
-    this.createdModels = true;
   }
 
   isSelectionHandled(selection: Selection) {
-    if (selection.kind !== 'TOP_LEVEL_SCROLL') {
+    if (selection.kind !== 'BASIC_SQL_OBJECT') {
       return false;
     }
     return selection.trackId === this.trackId;
   }
 
-  onSliceClick(args: OnSliceClickArgs<TopLevelScrollTrackTypes['slice']>) {
-    globals.dispatch(Actions.selectTopLevelScrollSlice({
+  onSliceClick(args: OnSliceClickArgs<NamedSliceTrackTypes['slice']>) {
+    const columns : Columns = {};
+    columns['id'] = {displayName: 'Scroll Id (gesture_scroll_id)'};
+    columns['ts'] = {displayName: 'Start Time'};
+    columns['dur'] = {displayName: 'Duration'};
+
+    const title = 'Current Chrome Scroll';
+
+    globals.dispatch(Actions.selectBasicSqlSlice({
       id: args.slice.id,
       sqlTableName: this.tableName,
       start: args.slice.start,
       duration: args.slice.duration,
       trackId: this.trackId,
+      detailsPanelConfig: {
+        kind: GenericSliceDetailsTab.kind,
+        config: {
+          id: args.slice.id,
+          sqlTableName: this.tableName,
+          title: title,
+          columns: columns,
+        },
+      },
     }));
   }
 }

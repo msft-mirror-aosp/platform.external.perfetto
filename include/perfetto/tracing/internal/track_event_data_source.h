@@ -143,6 +143,15 @@ inline void ValidateEventNameType() {
       "track-events#dynamic-event-names");
 }
 
+inline bool UnorderedEqual(std::vector<std::string> vec1,
+                           std::vector<std::string> vec2) {
+  std::sort(vec1.begin(), vec1.end());
+  vec1.erase(std::unique(vec1.begin(), vec1.end()), vec1.end());
+  std::sort(vec2.begin(), vec2.end());
+  vec2.erase(std::unique(vec2.begin(), vec2.end()), vec2.end());
+  return vec1 == vec2;
+}
+
 }  // namespace
 
 inline ::perfetto::DynamicString DecayEventNameType(
@@ -268,6 +277,56 @@ class TrackEventDataSource
     TrackEventInternal::WillClearIncrementalState(*Registry, args);
   }
 
+  // In Chrome, startup sessions are propagated from the browser process to
+  // child processes using command-line flags. Command-line flags can only
+  // convey the category filter and privacy settings, so we use only those
+  // to determine which startup sessions to adopt.
+  // TODO(khokhlov): After Chrome is able to propagate the entire config to the
+  // child process, we can make this comparison more strict by only clearing
+  // selected fields and comparing everything else. One specific thing to keep
+  // in mind is to clear the |convert_to_legacy_json| field, because Telemetry
+  // initiates tracing with proto format, but in some cases adopts the tracing
+  // session later via devtools which expect json format.
+  bool CanAdoptStartupSession(const DataSourceConfig& startup_config,
+                              const DataSourceConfig& service_config) override {
+    if (startup_config.track_event_config_raw().empty() ||
+        service_config.track_event_config_raw().empty()) {
+      return false;
+    }
+
+    protos::gen::TrackEventConfig startup_te_cfg;
+    startup_te_cfg.ParseFromString(startup_config.track_event_config_raw());
+    protos::gen::TrackEventConfig service_te_cfg;
+    service_te_cfg.ParseFromString(service_config.track_event_config_raw());
+
+    if (!UnorderedEqual(startup_te_cfg.enabled_categories(),
+                        service_te_cfg.enabled_categories())) {
+      return false;
+    }
+    if (!UnorderedEqual(startup_te_cfg.disabled_categories(),
+                        service_te_cfg.disabled_categories())) {
+      return false;
+    }
+    if (!UnorderedEqual(startup_te_cfg.enabled_tags(),
+                        service_te_cfg.enabled_tags())) {
+      return false;
+    }
+    if (!UnorderedEqual(startup_te_cfg.disabled_tags(),
+                        service_te_cfg.disabled_tags())) {
+      return false;
+    }
+    if (startup_te_cfg.filter_debug_annotations() !=
+        service_te_cfg.filter_debug_annotations()) {
+      return false;
+    }
+    if (startup_te_cfg.filter_dynamic_event_names() !=
+        service_te_cfg.filter_dynamic_event_names()) {
+      return false;
+    }
+
+    return true;
+  }
+
   static void Flush() {
     Base::template Trace([](typename Base::TraceContext ctx) { ctx.Flush(); });
   }
@@ -309,23 +368,118 @@ class TrackEventDataSource
   }
 
   // The following methods forward all arguments to TraceForCategoryBody
-  // while casting string constants to const char*.
-  template <typename... Arguments>
-  static void TraceForCategory(Arguments&&... args) PERFETTO_ALWAYS_INLINE {
-    TraceForCategoryBody(DecayStrType(args)...);
+  // while casting string constants to const char* and integer arguments to
+  // int64_t, uint64_t or bool.
+  template <typename CategoryType,
+            typename EventNameType,
+            typename... Arguments>
+  static void TraceForCategory(uint32_t instances,
+                               const CategoryType& category,
+                               const EventNameType& name,
+                               perfetto::protos::pbzero::TrackEvent::Type type,
+                               Arguments&&... args) PERFETTO_ALWAYS_INLINE {
+    TraceForCategoryBody(instances, DecayStrType(category), DecayStrType(name),
+                         type, DecayArgType(args)...);
   }
 
-  template <typename... Arguments>
-  static void TraceForCategoryLegacy(Arguments&&... args)
-      PERFETTO_ALWAYS_INLINE {
-    TraceForCategoryLegacyBody(DecayStrType(args)...);
+#if PERFETTO_ENABLE_LEGACY_TRACE_EVENTS
+  template <typename TrackType,
+            typename CategoryType,
+            typename EventNameType,
+            typename... Arguments,
+            typename TrackTypeCheck = typename std::enable_if<
+                std::is_convertible<TrackType, Track>::value>::type>
+  static void TraceForCategoryLegacy(
+      uint32_t instances,
+      const CategoryType& category,
+      const EventNameType& event_name,
+      perfetto::protos::pbzero::TrackEvent::Type type,
+      TrackType&& track,
+      char phase,
+      uint32_t flags,
+      Arguments&&... args) PERFETTO_ALWAYS_INLINE {
+    TraceForCategoryLegacyBody(instances, DecayStrType(category),
+                               DecayStrType(event_name), type, track, phase,
+                               flags, DecayArgType(args)...);
   }
 
-  template <typename... Arguments>
-  static void TraceForCategoryLegacyWithId(Arguments&&... args)
-      PERFETTO_ALWAYS_INLINE {
-    TraceForCategoryLegacyWithIdBody(DecayStrType(args)...);
+  template <typename TrackType,
+            typename CategoryType,
+            typename EventNameType,
+            typename TimestampType = uint64_t,
+            typename... Arguments,
+            typename TrackTypeCheck = typename std::enable_if<
+                std::is_convertible<TrackType, Track>::value>::type,
+            typename TimestampTypeCheck = typename std::enable_if<
+                IsValidTimestamp<TimestampType>()>::type>
+  static void TraceForCategoryLegacy(
+      uint32_t instances,
+      const CategoryType& category,
+      const EventNameType& event_name,
+      perfetto::protos::pbzero::TrackEvent::Type type,
+      TrackType&& track,
+      char phase,
+      uint32_t flags,
+      TimestampType&& timestamp,
+      Arguments&&... args) PERFETTO_ALWAYS_INLINE {
+    TraceForCategoryLegacyBody(instances, DecayStrType(category),
+                               DecayStrType(event_name), type, track, phase,
+                               flags, timestamp, DecayArgType(args)...);
   }
+
+  template <typename TrackType,
+            typename CategoryType,
+            typename EventNameType,
+            typename ThreadIdType,
+            typename LegacyIdType,
+            typename... Arguments,
+            typename TrackTypeCheck = typename std::enable_if<
+                std::is_convertible<TrackType, Track>::value>::type>
+  static void TraceForCategoryLegacyWithId(
+      uint32_t instances,
+      const CategoryType& category,
+      const EventNameType& event_name,
+      perfetto::protos::pbzero::TrackEvent::Type type,
+      TrackType&& track,
+      char phase,
+      uint32_t flags,
+      ThreadIdType thread_id,
+      LegacyIdType legacy_id,
+      Arguments&&... args) PERFETTO_ALWAYS_INLINE {
+    TraceForCategoryLegacyWithIdBody(
+        instances, DecayStrType(category), DecayStrType(event_name), type,
+        track, phase, flags, thread_id, legacy_id, DecayArgType(args)...);
+  }
+
+  template <typename TrackType,
+            typename CategoryType,
+            typename EventNameType,
+            typename ThreadIdType,
+            typename LegacyIdType,
+            typename TimestampType = uint64_t,
+            typename... Arguments,
+            typename TrackTypeCheck = typename std::enable_if<
+                std::is_convertible<TrackType, Track>::value>::type,
+            typename TimestampTypeCheck = typename std::enable_if<
+                IsValidTimestamp<TimestampType>()>::type>
+  static void TraceForCategoryLegacyWithId(
+      uint32_t instances,
+      const CategoryType& category,
+      const EventNameType& event_name,
+      perfetto::protos::pbzero::TrackEvent::Type type,
+      TrackType&& track,
+      char phase,
+      uint32_t flags,
+      ThreadIdType thread_id,
+      LegacyIdType legacy_id,
+      TimestampType&& timestamp,
+      Arguments&&... args) PERFETTO_ALWAYS_INLINE {
+    TraceForCategoryLegacyWithIdBody(instances, DecayStrType(category),
+                                     DecayStrType(event_name), type, track,
+                                     phase, flags, thread_id, legacy_id,
+                                     timestamp, DecayArgType(args)...);
+  }
+#endif
 
   // Initialize the track event library. Should be called before tracing is
   // enabled.
@@ -399,6 +553,30 @@ class TrackEventDataSource
   }
 
   static const char* DecayStrType(const char* t) { return t; }
+
+  // The DecayArgType method is used to avoid unnecessary instantiations of
+  // templates on:
+  // * string constants of different sizes.
+  // * integers of different sizes or constness.
+  // * floats of different sizes.
+  // This allows to avoid extra instantiations of TraceForCategory templates.
+  template <typename T>
+  static T&& DecayArgType(T&& t) {
+    return std::forward<T>(t);
+  }
+
+  static const char* DecayArgType(const char* s) { return s; }
+  static uint64_t DecayArgType(uint64_t u) { return u; }
+  static uint64_t DecayArgType(uint32_t u) { return u; }
+  static uint64_t DecayArgType(uint16_t u) { return u; }
+  static uint64_t DecayArgType(uint8_t u) { return u; }
+  static int64_t DecayArgType(int64_t i) { return i; }
+  static int64_t DecayArgType(int32_t i) { return i; }
+  static int64_t DecayArgType(int16_t i) { return i; }
+  static int64_t DecayArgType(int8_t i) { return i; }
+  static bool DecayArgType(bool b) { return b; }
+  static double DecayArgType(float f) { return static_cast<double>(f); }
+  static double DecayArgType(double f) { return f; }
 
   // Once we've determined tracing to be enabled for this category, actually
   // write a trace event onto this thread's default track. Outlined to avoid

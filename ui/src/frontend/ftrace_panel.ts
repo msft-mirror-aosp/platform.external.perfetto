@@ -18,16 +18,19 @@ import {StringListPatch} from 'src/common/state';
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {colorForString} from '../common/colorizer';
-import {formatTPTime, TPTime} from '../common/time';
+import {TPTime} from '../common/time';
 
 import {globals} from './globals';
 import {Panel} from './panel';
+import {asTPTimestamp} from './sql_types';
+import {DetailsShell} from './widgets/details_shell';
 import {
   MultiSelect,
   MultiSelectDiff,
   Option as MultiSelectOption,
 } from './widgets/multiselect';
 import {PopupPosition} from './widgets/popup';
+import {Timestamp} from './widgets/timestamp';
 
 const ROW_H = 20;
 const PAGE_SIZE = 250;
@@ -55,16 +58,12 @@ export class FtracePanel extends Panel<{}> {
 
   view(_: m.CVnode<{}>) {
     return m(
-        '.ftrace-panel',
-        m(
-            '.sticky',
-            [
-              this.renderRowsLabel(),
-              this.renderFilterPanel(),
-            ],
-            ),
-        this.renderRows(),
-    );
+        DetailsShell,
+        {
+          title: this.renderTitle(),
+          buttons: this.renderFilterPanel(),
+        },
+        m('.ftrace-panel', this.renderRows()));
   }
 
   private scrollContainer(dom: Element): HTMLElement {
@@ -125,12 +124,12 @@ export class FtracePanel extends Panel<{}> {
     globals.dispatch(Actions.setHoverCursorTimestamp({ts: -1n}));
   }
 
-  private renderRowsLabel() {
+  private renderTitle() {
     if (globals.ftracePanelData) {
       const {numEvents} = globals.ftracePanelData;
-      return m('.ftrace-rows-label', `Ftrace Events (${numEvents})`);
+      return `Ftrace Events (${numEvents})`;
     } else {
-      return m('.ftrace-rows-label', 'Ftrace Rows');
+      return 'Ftrace Rows';
     }
   }
 
@@ -152,7 +151,9 @@ export class FtracePanel extends Panel<{}> {
     return m(
         MultiSelect,
         {
-          label: 'Filter by name',
+          label: 'Filter',
+          minimal: true,
+          compact: true,
           icon: 'filter_list_alt',
           popupPosition: PopupPosition.Top,
           options,
@@ -188,7 +189,7 @@ export class FtracePanel extends Panel<{}> {
       for (let i = 0; i < events.length; i++) {
         const {ts, name, cpu, process, args} = events[i];
 
-        const timestamp = formatTPTime(ts - globals.state.traceTime.start);
+        const timestamp = m(Timestamp, {ts: asTPTimestamp(ts), minimal: true});
 
         const rank = i + offset;
 
