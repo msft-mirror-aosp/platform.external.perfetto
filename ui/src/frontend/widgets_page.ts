@@ -23,15 +23,21 @@ import {PopupMenuButton} from './popup_menu';
 import {Icons} from './semantic_icons';
 import {TableShowcase} from './tables/table_showcase';
 import {Button} from './widgets/button';
+import {Callout} from './widgets/callout';
 import {Checkbox} from './widgets/checkbox';
+import {Editor} from './widgets/editor';
 import {EmptyState} from './widgets/empty_state';
 import {Form, FormButtonBar, FormLabel} from './widgets/form';
 import {Icon} from './widgets/icon';
 import {Menu, MenuDivider, MenuItem, PopupMenu2} from './widgets/menu';
-import {MultiSelect, MultiSelectDiff} from './widgets/multiselect';
+import {
+  MultiSelect,
+  MultiSelectDiff,
+  PopupMultiSelect,
+} from './widgets/multiselect';
 import {Popup, PopupPosition} from './widgets/popup';
 import {Portal} from './widgets/portal';
-import {Select} from './widgets/select';
+import {FilterableSelect, Select} from './widgets/select';
 import {Spinner} from './widgets/spinner';
 import {Switch} from './widgets/switch';
 import {TextInput} from './widgets/text_input';
@@ -308,6 +314,14 @@ export const WidgetsPage = createPage({
             disabled: false,
           },
         }),
+        m('h2', 'Filterable Select'),
+        m(WidgetShowcase, {
+          renderWidget: () =>
+              m(FilterableSelect, {
+                values: ['foo', 'bar', 'baz'],
+                onSelected: () => {},
+              }),
+        }),
         m('h2', 'Empty State'),
         m(WidgetShowcase, {
           renderWidget: ({header, content}) =>
@@ -390,9 +404,32 @@ export const WidgetsPage = createPage({
           renderWidget: (opts) => m(Icon, {icon: 'star', ...opts}),
           initialOpts: {filled: false},
         }),
-        m('h2', 'MultiSelect'),
+        m('h2', 'MultiSelect panel'),
         m(WidgetShowcase, {
-          renderWidget: ({icon, ...rest}) => m(MultiSelect, {
+          renderWidget: ({...rest}) => m(MultiSelect, {
+            options: Object.entries(options).map(([key, value]) => {
+              return {
+                id: key,
+                name: key,
+                checked: value,
+              };
+            }),
+            onChange: (diffs: MultiSelectDiff[]) => {
+              diffs.forEach(({id, checked}) => {
+                options[id] = checked;
+              });
+              globals.rafScheduler.scheduleFullRedraw();
+            },
+            ...rest,
+          }),
+          initialOpts: {
+            repeatCheckedItemsAtTop: false,
+            fixedSize: false,
+          },
+        }),
+        m('h2', 'Popup with MultiSelect'),
+        m(WidgetShowcase, {
+          renderWidget: ({icon, ...rest}) => m(PopupMultiSelect, {
             options: Object.entries(options).map(([key, value]) => {
               return {
                 id: key,
@@ -648,6 +685,24 @@ export const WidgetsPage = createPage({
                 dismissPopup: true,
               }),
             ),
+          }),
+          m('h2', 'Callout'),
+          m(
+            WidgetShowcase, {
+              renderWidget: () => m(
+                Callout,
+                {
+                  icon: 'info',
+                },
+                'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ' +
+                'Nulla rhoncus tempor neque, sed malesuada eros dapibus vel. ' +
+                'Aliquam in ligula vitae tortor porttitor laoreet iaculis ' +
+                'finibus est.',
+              ),
+            }),
+          m('h2', 'Editor'),
+          m(WidgetShowcase, {
+            renderWidget: () => m(Editor),
           }),
     );
   },

@@ -16,6 +16,7 @@
 
 #include "src/trace_processor/db/overlays/null_overlay.h"
 #include "perfetto/ext/base/flat_hash_map.h"
+#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/overlays/types.h"
 
 namespace perfetto {
@@ -28,7 +29,19 @@ StorageRange NullOverlay::MapToStorageRange(TableRange t_range) const {
   uint32_t start = non_null_->CountSetBits(t_range.range.start);
   uint32_t end = non_null_->CountSetBits(t_range.range.end);
 
-  return StorageRange({Range(start, end)});
+  return StorageRange(start, end);
+}
+
+TableRangeOrBitVector NullOverlay::MapToTableRangeOrBitVector(
+    StorageRange s_range,
+    OverlayOp op) const {
+  PERFETTO_DCHECK(s_range.range.end <= non_null_->CountSetBits());
+
+  BitVector range_to_bv(s_range.range.start, false);
+  range_to_bv.Resize(s_range.range.end, true);
+
+  return TableRangeOrBitVector(
+      MapToTableBitVector(StorageBitVector{std::move(range_to_bv)}, op).bv);
 }
 
 TableBitVector NullOverlay::MapToTableBitVector(StorageBitVector s_bv,
@@ -39,10 +52,12 @@ TableBitVector NullOverlay::MapToTableBitVector(StorageBitVector s_bv,
   if (op != OverlayOp::kIsNull)
     return {std::move(res)};
 
-  if (res.CountSetBits() == 0)
-    return {non_null_->Not()};
+  BitVector not_non_null = non_null_->Copy();
+  not_non_null.Not();
 
-  BitVector not_non_null = non_null_->Not();
+  if (res.CountSetBits() == 0)
+    return {std::move(not_non_null)};
+
   res.Or(not_non_null);
   return {std::move(res)};
 }

@@ -14,83 +14,63 @@
 
 import {v4 as uuidv4} from 'uuid';
 
-import {Actions} from '../../common/actions';
 import {Engine} from '../../common/engine';
-import {
-  generateSqlWithInternalLayout,
-} from '../../common/internal_layout_utils';
 import {
   PrimaryTrackSortKey,
   SCROLLING_TRACK_GROUP,
-  Selection,
 } from '../../common/state';
-import {TPTime} from '../../common/time';
-import {OnSliceClickArgs} from '../../frontend/base_slice_track';
-import {globals} from '../../frontend/globals';
 import {
-  NamedSliceTrack,
-  NamedSliceTrackTypes,
-} from '../../frontend/named_slice_track';
+  Columns,
+  GenericSliceDetailsTab,
+} from '../../frontend/generic_slice_details_tab';
+import {NamedSliceTrackTypes} from '../../frontend/named_slice_track';
 import {NewTrackArgs, Track} from '../../frontend/track';
 import {DecideTracksResult} from '../chrome_scroll_jank';
-
-export const TOP_LEVEL_SCROLL_KIND = 'TOP_LEVEL_SCROLL';
-
-export interface TopLevelScrollSelection {
-  kind: 'TOP_LEVEL_SCROLL';
-  id: number;
-  sqlTableName: string;
-  start: TPTime;
-  duration: TPTime;
-}
+import {
+  CustomSqlDetailsPanelConfig,
+  CustomSqlTableDefConfig,
+  CustomSqlTableSliceTrack,
+} from '../custom_sql_table_slices';
 
 export {Data} from '../chrome_slices';
 
-interface TopLevelScrollTrackTypes extends NamedSliceTrackTypes {}
-
 export class TopLevelScrollTrack extends
-    NamedSliceTrack<TopLevelScrollTrackTypes> {
+    CustomSqlTableSliceTrack<NamedSliceTrackTypes> {
   static readonly kind = 'org.chromium.TopLevelScrolls.scrolls';
-  createdModels = false;
+  displayColumns: Columns = {};
 
   static create(args: NewTrackArgs): Track {
     return new TopLevelScrollTrack(args);
   }
 
+  getSqlDataSource(): CustomSqlTableDefConfig {
+    return {
+      columns: [`printf("Scroll %s", CAST(id AS STRING)) AS name`, '*'],
+      sqlTableName: 'chrome_scrolls',
+    };
+  }
+
+  getDetailsPanel(): CustomSqlDetailsPanelConfig {
+    return {
+      kind: GenericSliceDetailsTab.kind,
+      config: {
+        sqlTableName: this.tableName,
+        title: 'Chrome Top Level Scrolls',
+        columns: this.displayColumns,
+      },
+    };
+  }
+
   constructor(args: NewTrackArgs) {
     super(args);
+
+    this.displayColumns['id'] = {displayName: 'Scroll Id (gesture_scroll_id)'};
+    this.displayColumns['ts'] = {displayName: 'Start time'};
+    this.displayColumns['dur'] = {displayName: 'Duration'};
   }
 
   async initSqlTable(tableName: string) {
-    if (this.createdModels) {
-      return;
-    }
-    const sql =
-        `CREATE VIEW ${tableName} AS ` + generateSqlWithInternalLayout({
-          columns: [`printf("Scroll %s", CAST(id AS STRING)) AS name`, '*'],
-          layoutParams: {ts: 'ts', dur: 'dur'},
-          sourceTable: 'chrome_scrolls',
-          orderByClause: 'ts',
-        });
-    await this.engine.query(sql);
-    this.createdModels = true;
-  }
-
-  isSelectionHandled(selection: Selection) {
-    if (selection.kind !== 'TOP_LEVEL_SCROLL') {
-      return false;
-    }
-    return selection.trackId === this.trackId;
-  }
-
-  onSliceClick(args: OnSliceClickArgs<TopLevelScrollTrackTypes['slice']>) {
-    globals.dispatch(Actions.selectTopLevelScrollSlice({
-      id: args.slice.id,
-      sqlTableName: this.tableName,
-      start: args.slice.start,
-      duration: args.slice.duration,
-      trackId: this.trackId,
-    }));
+    await super.initSqlTable(tableName);
   }
 }
 
@@ -100,14 +80,14 @@ export async function addTopLevelScrollTrack(engine: Engine):
     tracksToAdd: [],
   };
 
-  await engine.query(`SELECT IMPORT('chrome.chrome_scrolls');`);
+  await engine.query(`SELECT IMPORT('chrome.chrome_scrolls')`);
 
   result.tracksToAdd.push({
     id: uuidv4(),
     engineId: engine.id,
     kind: TopLevelScrollTrack.kind,
     trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-    name: 'Top Level Scrolls',
+    name: 'Chrome Top Level Scrolls',
     config: {},
     trackGroup: SCROLLING_TRACK_GROUP,
   });

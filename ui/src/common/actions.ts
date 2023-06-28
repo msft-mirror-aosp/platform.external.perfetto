@@ -16,6 +16,10 @@ import {Draft} from 'immer';
 
 import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
 import {RecordConfig} from '../controller/record_config_types';
+import {
+  GenericSliceDetailsTabConfig,
+  GenericSliceDetailsTabConfigBase,
+} from '../frontend/generic_slice_details_tab';
 import {globals} from '../frontend/globals';
 import {
   Aggregation,
@@ -34,7 +38,13 @@ import {
 } from './dragndrop_logic';
 import {createEmptyState} from './empty_state';
 import {DEFAULT_VIEWING_OPTION, PERF_SAMPLES_KEY} from './flamegraph_util';
-import {traceEventBegin, traceEventEnd, TraceEventScope} from './metatracing';
+import {
+  MetatraceTrackId,
+  traceEvent,
+  traceEventBegin,
+  traceEventEnd,
+  TraceEventScope,
+} from './metatracing';
 import {
   AdbRecordingTarget,
   Area,
@@ -534,7 +544,8 @@ export const StateActions = {
     if (statusTraceEvent) {
       traceEventEnd(statusTraceEvent);
     }
-    statusTraceEvent = traceEventBegin(args.msg);
+    statusTraceEvent =
+        traceEventBegin(args.msg, {track: MetatraceTrackId.kOmniboxStatus});
     state.status = args;
   },
 
@@ -797,37 +808,29 @@ export const StateActions = {
         state.pendingScrollId = args.scroll ? args.id : undefined;
       },
 
-  selectDebugSlice(state: StateDraft, args: {
+  selectGenericSlice(state: StateDraft, args: {
     id: number,
     sqlTableName: string,
     start: TPTime,
     duration: TPDuration,
     trackId: string,
+    detailsPanelConfig:
+        {kind: string, config: GenericSliceDetailsTabConfigBase},
   }): void {
-    state.currentSelection = {
-      kind: 'DEBUG_SLICE',
+    const detailsPanelConfig: GenericSliceDetailsTabConfig = {
       id: args.id,
-      sqlTableName: args.sqlTableName,
-      start: args.start,
-      duration: args.duration,
-      trackId: args.trackId,
+      ...args.detailsPanelConfig.config,
     };
-  },
 
-  selectTopLevelScrollSlice(state: StateDraft, args: {
-    id: number,
-    sqlTableName: string,
-    start: TPTime,
-    duration: TPTime,
-    trackId: string,
-  }): void {
     state.currentSelection = {
-      kind: 'TOP_LEVEL_SCROLL',
+      kind: 'GENERIC_SLICE',
       id: args.id,
       sqlTableName: args.sqlTableName,
       start: args.start,
       duration: args.duration,
       trackId: args.trackId,
+      detailsPanelConfig:
+          {kind: args.detailsPanelConfig.kind, config: detailsPanelConfig},
     };
   },
 
@@ -1065,7 +1068,13 @@ export const StateActions = {
   },
 
   setCurrentTab(state: StateDraft, args: {tab: string|undefined}) {
-    state.currentTab = args.tab;
+    traceEvent('setCurrentTab', () => {
+      state.currentTab = args.tab;
+    }, {
+      args: {
+        tab: args.tab ?? '<undefined>',
+      },
+    });
   },
 
   toggleAllTrackGroups(state: StateDraft, args: {collapsed: boolean}) {
