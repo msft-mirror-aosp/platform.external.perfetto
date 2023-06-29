@@ -23,6 +23,7 @@ import {
 import {LONG, NUM} from '../common/query_result';
 import {Selection, SelectionKind} from '../common/state';
 import {
+  Span,
   TPDuration,
   tpDurationFromNanos,
   TPTime,
@@ -34,6 +35,7 @@ import {globals} from './globals';
 import {Slice} from './slice';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
 import {constraintsToQuerySuffix} from './sql_utils';
+import {PxSpan, TimeScale} from './time_scale';
 import {NewTrackArgs, SliceRect, Track} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey, TrackCache} from './track_cache';
 
@@ -875,8 +877,10 @@ export abstract class BaseSliceTrack<T extends BaseSliceTrackTypes =
     return this.computedTrackHeight;
   }
 
-  getSliceRect(_tStart: TPTime, _tEnd: TPTime, _depth: number): SliceRect
-      |undefined {
+  getSliceRect(
+      _visibleTimeScale: TimeScale, _visibleWindow: Span<TPTime, TPDuration>,
+      _windowSpan: PxSpan, _tStart: TPTime, _tEnd: TPTime,
+      _depth: number): SliceRect|undefined {
     // TODO(hjd): Implement this as part of updating flow events.
     return undefined;
   }

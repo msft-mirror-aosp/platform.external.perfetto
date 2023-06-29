@@ -17,7 +17,7 @@ import m from 'mithril';
 
 import {Actions} from '../common/actions';
 import {TrackState} from '../common/state';
-import {TPTime} from '../common/time';
+import {Span, TPDuration, TPTime} from '../common/time';
 
 import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
 import {PerfettoMouseEvent} from './events';
@@ -26,6 +26,7 @@ import {drawGridLines} from './gridline_helper';
 import {BLANK_CHECKBOX, CHECKBOX, PIN} from './icons';
 import {Panel, PanelSize} from './panel';
 import {verticalScrollToTrack} from './scroll_helper';
+import {PxSpan, TimeScale} from './time_scale';
 import {SliceRect, Track} from './track';
 import {trackRegistry} from './track_registry';
 import {
@@ -458,11 +459,14 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
     }
   }
 
-  getSliceRect(tStart: TPTime, tDur: TPTime, depth: number): SliceRect
-      |undefined {
+  getSliceRect(
+      visibleTimeScale: TimeScale, visibleWindow: Span<TPTime, TPDuration>,
+      windowSpan: PxSpan, tStart: TPTime, tDur: TPTime,
+      depth: number): SliceRect|undefined {
     if (this.track === undefined) {
       return undefined;
     }
-    return this.track.getSliceRect(tStart, tDur, depth);
+    return this.track.getSliceRect(
+        visibleTimeScale, visibleWindow, windowSpan, tStart, tDur, depth);
   }
 }

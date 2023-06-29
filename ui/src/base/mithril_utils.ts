@@ -1,4 +1,4 @@
-// Copyright (C) 2020 The Android Open Source Project
+// Copyright (C) 2023 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-.query-page {
-  overflow-y: auto;
-  overflow-x: hidden;
-  .pf-editor {
-    width: 100%;
-    height: 0;
-    min-height: 3rem;
-    overflow-y: auto;
-    resize: vertical;
-  }
+import m from 'mithril';
+
+import {exists} from './utils';
+
+// Check if a mithril component vnode has children
+export function hasChildren({children}: m.Vnode<any>): boolean {
+  return Array.isArray(children) && children.length > 0 &&
+      children.some(exists);
 }
