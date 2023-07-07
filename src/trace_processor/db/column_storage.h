@@ -53,6 +53,7 @@ class ColumnStorage : public ColumnStorageBase {
   void Set(uint32_t idx, T val) { vector_[idx] = val; }
   uint32_t size() const { return static_cast<uint32_t>(vector_.size()); }
   void ShrinkToFit() { vector_.shrink_to_fit(); }
+  const std::vector<T>& vector() const { return vector_; }
 
   template <bool IsDense>
   static ColumnStorage<T> Create() {
@@ -66,7 +67,7 @@ class ColumnStorage : public ColumnStorageBase {
 
 // Class used for implementing storage for nullable columns.
 template <typename T>
-class ColumnStorage<base::Optional<T>> : public ColumnStorageBase {
+class ColumnStorage<std::optional<T>> : public ColumnStorageBase {
  public:
   ColumnStorage() = default;
 
@@ -76,19 +77,27 @@ class ColumnStorage<base::Optional<T>> : public ColumnStorageBase {
   ColumnStorage(ColumnStorage&&) = default;
   ColumnStorage& operator=(ColumnStorage&&) noexcept = default;
 
-  base::Optional<T> Get(uint32_t idx) const { return nv_.Get(idx); }
+  std::optional<T> Get(uint32_t idx) const { return nv_.Get(idx); }
   void Append(T val) { nv_.Append(val); }
-  void Append(base::Optional<T> val) { nv_.Append(std::move(val)); }
+  void Append(std::optional<T> val) { nv_.Append(std::move(val)); }
   void Set(uint32_t idx, T val) { nv_.Set(idx, val); }
   uint32_t size() const { return nv_.size(); }
   bool IsDense() const { return nv_.IsDense(); }
   void ShrinkToFit() { nv_.ShrinkToFit(); }
+  // For dense columns the size of the vector is equal to size of the bit
+  // vector. For sparse it's equal to count set bits of the bit vector.
+  const std::vector<T>& non_null_vector() const {
+    return nv_.non_null_vector();
+  }
+  const BitVector& non_null_bit_vector() const {
+    return nv_.non_null_bit_vector();
+  }
 
   template <bool IsDense>
-  static ColumnStorage<base::Optional<T>> Create() {
+  static ColumnStorage<std::optional<T>> Create() {
     return IsDense
-               ? ColumnStorage<base::Optional<T>>(NullableVector<T>::Dense())
-               : ColumnStorage<base::Optional<T>>(NullableVector<T>::Sparse());
+               ? ColumnStorage<std::optional<T>>(NullableVector<T>::Dense())
+               : ColumnStorage<std::optional<T>>(NullableVector<T>::Sparse());
   }
 
  private:

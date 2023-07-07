@@ -267,7 +267,7 @@ def perfetto_cc_proto_descriptor(name, deps, outs, **kwargs):
     perfetto_genrule(
         name = name + "_gen",
         cmd = " ".join(cmd),
-        exec_tools = [
+        tools = [
             ":gen_cc_proto_descriptor_py",
         ],
         srcs = deps,
@@ -295,7 +295,7 @@ def perfetto_cc_amalgamated_sql(name, deps, outs, namespace, **kwargs):
     perfetto_genrule(
         name = name + "_gen",
         cmd = " ".join(cmd),
-        exec_tools = [
+        tools = [
             ":gen_amalgamated_sql_py",
         ],
         srcs = deps,
@@ -308,18 +308,30 @@ def perfetto_cc_amalgamated_sql(name, deps, outs, namespace, **kwargs):
         **kwargs,
     )
 
-def perfetto_cc_tp_tables(name, srcs, outs, **kwargs):
+def perfetto_cc_tp_tables(name, srcs, outs, deps = [], **kwargs):
+    if PERFETTO_CONFIG.root[:2] != "//":
+        fail("Expected PERFETTO_CONFIG.root to start with //")
+
     if PERFETTO_CONFIG.root == "//":
-      python_path = PERFETTO_CONFIG.root + "python"
+        python_path = PERFETTO_CONFIG.root + "python"
     else:
-      python_path = PERFETTO_CONFIG.root + "/python"
+        python_path = PERFETTO_CONFIG.root + "/python"
+
+    perfetto_py_library(
+        name = name + "_lib",
+        deps = [
+            python_path + ":trace_processor_table_generator",
+        ],
+        srcs = srcs,
+    )
 
     perfetto_py_binary(
         name = name + "_tool",
         deps = [
+            ":" + name + "_lib",
             python_path + ":trace_processor_table_generator",
-        ],
-        srcs = srcs + [
+        ] + [d + "_lib" for d in deps],
+        srcs = [
             "tools/gen_tp_table_headers.py",
         ],
         main = "tools/gen_tp_table_headers.py",
@@ -329,12 +341,14 @@ def perfetto_cc_tp_tables(name, srcs, outs, **kwargs):
     cmd = ["$(location " + name + "_tool)"]
     cmd += ["--gen-dir", "$(RULEDIR)"]
     cmd += ["--inputs", "$(SRCS)"]
-    cmd += ["--outputs", "$(OUTS)"]
+    if PERFETTO_CONFIG.root != "//":
+        cmd += ["--import-prefix", PERFETTO_CONFIG.root[2:]]
+        cmd += ["--relative-input-dir", PERFETTO_CONFIG.root[2:]]
 
     perfetto_genrule(
         name = name + "_gen",
         cmd = " ".join(cmd),
-        exec_tools = [
+        tools = [
             ":" + name + "_tool",
         ],
         srcs = srcs,

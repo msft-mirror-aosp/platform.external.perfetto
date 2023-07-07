@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {hex} from 'color-convert';
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
@@ -187,18 +187,17 @@ export class TrackGroupPanel extends Panel<Attrs> {
   }
 
   highlightIfTrackSelected(ctx: CanvasRenderingContext2D, size: PanelSize) {
-    const localState = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.frontendLocalState;
     const selection = globals.state.currentSelection;
     if (!selection || selection.kind !== 'AREA') return;
     const selectedArea = globals.state.areas[selection.areaId];
+    const selectedAreaDuration = selectedArea.end - selectedArea.start;
     if (selectedArea.tracks.includes(this.trackGroupId)) {
       ctx.fillStyle = 'rgba(131, 152, 230, 0.3)';
       ctx.fillRect(
-          localState.timeScale.timeToPx(selectedArea.startSec) +
-              this.shellWidth,
+          visibleTimeScale.tpTimeToPx(selectedArea.start) + this.shellWidth,
           0,
-          localState.timeScale.deltaTimeToPx(
-              selectedArea.endSec - selectedArea.startSec),
+          visibleTimeScale.durationToPx(selectedAreaDuration),
           size.height);
     }
   }
@@ -227,41 +226,31 @@ export class TrackGroupPanel extends Panel<Attrs> {
 
     this.highlightIfTrackSelected(ctx, size);
 
-    const localState = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.frontendLocalState;
     // Draw vertical line when hovering on the notes panel.
-    if (globals.state.hoveredNoteTimestamp !== -1) {
+    if (globals.state.hoveredNoteTimestamp !== -1n) {
       drawVerticalLineAtTime(
           ctx,
-          localState.timeScale,
+          visibleTimeScale,
           globals.state.hoveredNoteTimestamp,
           size.height,
           `#aaa`);
     }
-    if (globals.state.hoveredLogsTimestamp !== -1) {
+    if (globals.state.hoverCursorTimestamp !== -1n) {
       drawVerticalLineAtTime(
           ctx,
-          localState.timeScale,
-          globals.state.hoveredLogsTimestamp,
+          visibleTimeScale,
+          globals.state.hoverCursorTimestamp,
           size.height,
           `#344596`);
     }
+
     if (globals.state.currentSelection !== null) {
-      if (globals.state.currentSelection.kind === 'NOTE') {
-        const note = globals.state.notes[globals.state.currentSelection.id];
-        if (note.noteType === 'DEFAULT') {
-          drawVerticalLineAtTime(
-              ctx,
-              localState.timeScale,
-              note.timestamp,
-              size.height,
-              note.color);
-        }
-      }
       if (globals.state.currentSelection.kind === 'SLICE' &&
           globals.sliceDetails.wakeupTs !== undefined) {
         drawVerticalLineAtTime(
             ctx,
-            localState.timeScale,
+            visibleTimeScale,
             globals.sliceDetails.wakeupTs,
             size.height,
             `black`);
@@ -275,18 +264,21 @@ export class TrackGroupPanel extends Panel<Attrs> {
             'rgba(' + hex.rgb(note.color.substr(1)).toString() + ', 0.65)';
         drawVerticalLineAtTime(
             ctx,
-            localState.timeScale,
-            globals.state.areas[note.areaId].startSec,
+            visibleTimeScale,
+            globals.state.areas[note.areaId].start,
             size.height,
             transparentNoteColor,
             1);
         drawVerticalLineAtTime(
             ctx,
-            localState.timeScale,
-            globals.state.areas[note.areaId].endSec,
+            visibleTimeScale,
+            globals.state.areas[note.areaId].end,
             size.height,
             transparentNoteColor,
             1);
+      } else if (note.noteType === 'DEFAULT') {
+        drawVerticalLineAtTime(
+            ctx, visibleTimeScale, note.timestamp, size.height, note.color);
       }
     }
   }

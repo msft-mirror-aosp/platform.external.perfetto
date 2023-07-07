@@ -19,6 +19,7 @@
 
 #include <sqlite3.h>
 #include <unordered_map>
+
 #include "perfetto/ext/base/base64.h"
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/trace_processor/demangle.h"
@@ -26,9 +27,9 @@
 #include "src/trace_processor/export_json.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/prelude/functions/create_function_internal.h"
+#include "src/trace_processor/prelude/functions/sql_function.h"
+#include "src/trace_processor/sqlite/sqlite_utils.h"
 #include "src/trace_processor/util/status_macros.h"
-
-#include "src/trace_processor/prelude/functions/register_function.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -255,7 +256,7 @@ base::Status ExtractArg::Run(TraceStorage* storage,
   uint32_t arg_set_id = static_cast<uint32_t>(sqlite3_value_int(argv[0]));
   const char* key = reinterpret_cast<const char*>(sqlite3_value_text(argv[1]));
 
-  base::Optional<Variadic> opt_value;
+  std::optional<Variadic> opt_value;
   RETURN_IF_ERROR(storage->ExtractArg(arg_set_id, key, &opt_value));
 
   if (!opt_value)
@@ -292,86 +293,6 @@ base::Status ExtractArg::Run(TraceStorage* storage,
       return base::OkStatus();
   }
   PERFETTO_FATAL("For GCC");
-}
-
-struct AbsTimeStr : public SqlFunction {
-  using Context = ClockTracker;
-  static base::Status Run(ClockTracker* tracker,
-                          size_t argc,
-                          sqlite3_value** argv,
-                          SqlValue& out,
-                          Destructors& destructors);
-};
-
-base::Status AbsTimeStr::Run(ClockTracker* tracker,
-                             size_t argc,
-                             sqlite3_value** argv,
-                             SqlValue& out,
-                             Destructors& destructors) {
-  if (argc != 1) {
-    return base::ErrStatus("ABS_TIME_STR: 1 arg required");
-  }
-
-  // If the timestamp is null, just return null as the result.
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    return base::OkStatus();
-  }
-  if (sqlite3_value_type(argv[0]) != SQLITE_INTEGER) {
-    return base::ErrStatus("ABS_TIME_STR: first argument should be timestamp");
-  }
-
-  int64_t ts = sqlite3_value_int64(argv[0]);
-  base::Optional<std::string> iso8601 = tracker->FromTraceTimeAsISO8601(ts);
-  if (!iso8601.has_value()) {
-    return base::OkStatus();
-  }
-
-  std::unique_ptr<char, base::FreeDeleter> s(
-      static_cast<char*>(malloc(iso8601->size() + 1)));
-  memcpy(s.get(), iso8601->c_str(), iso8601->size() + 1);
-
-  destructors.string_destructor = free;
-  out = SqlValue::String(s.release());
-  return base::OkStatus();
-}
-
-struct ToMonotonic : public SqlFunction {
-  using Context = ClockTracker;
-  static base::Status Run(ClockTracker* tracker,
-                          size_t argc,
-                          sqlite3_value** argv,
-                          SqlValue& out,
-                          Destructors& destructors);
-};
-
-base::Status ToMonotonic::Run(ClockTracker* tracker,
-                              size_t argc,
-                              sqlite3_value** argv,
-                              SqlValue& out,
-                              Destructors&) {
-  if (argc != 1) {
-    return base::ErrStatus("TO_MONOTONIC: 1 arg required");
-  }
-
-  // If the timestamp is null, just return null as the result.
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    return base::OkStatus();
-  }
-  if (sqlite3_value_type(argv[0]) != SQLITE_INTEGER) {
-    return base::ErrStatus("TO_MONOTONIC: first argument should be timestamp");
-  }
-
-  int64_t ts = sqlite3_value_int64(argv[0]);
-  base::Optional<int64_t> monotonic =
-      tracker->FromTraceTime(protos::pbzero::BUILTIN_CLOCK_MONOTONIC, ts);
-
-  if (!monotonic.has_value()) {
-    // This means we'll return NULL
-    return base::OkStatus();
-  }
-
-  out = SqlValue::Long(*monotonic);
-  return base::OkStatus();
 }
 
 struct SourceGeq : public SqlFunction {

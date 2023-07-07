@@ -16,8 +16,8 @@ import {Engine} from '../common/engine';
 import {featureFlags} from '../common/feature_flags';
 import {NUM, STR_NULL} from '../common/query_result';
 import {Area} from '../common/state';
-import {fromNs, toNs} from '../common/time';
-import {Flow} from '../frontend/globals';
+import {fromNs} from '../common/time';
+import {Flow, globals} from '../frontend/globals';
 import {publishConnectedFlows, publishSelectedFlows} from '../frontend/publish';
 import {
   ACTUAL_FRAMES_SLICE_TRACK_KIND,
@@ -29,7 +29,6 @@ import {
 } from '../tracks/chrome_slices';
 
 import {Controller} from './controller';
-import {globals} from './globals';
 
 export interface FlowEventsControllerArgs {
   engine: Engine;
@@ -242,8 +241,8 @@ export class FlowEventsController extends Controller<'main'> {
     const area = globals.state.areas[areaId];
     if (this.lastSelectedKind === 'AREA' && this.lastSelectedArea &&
         this.lastSelectedArea.tracks.join(',') === area.tracks.join(',') &&
-        this.lastSelectedArea.endSec === area.endSec &&
-        this.lastSelectedArea.startSec === area.startSec) {
+        this.lastSelectedArea.end === area.end &&
+        this.lastSelectedArea.start === area.start) {
       return;
     }
 
@@ -269,8 +268,8 @@ export class FlowEventsController extends Controller<'main'> {
 
     const tracks = `(${trackIds.join(',')})`;
 
-    const startNs = toNs(area.startSec);
-    const endNs = toNs(area.endSec);
+    const startNs = area.start;
+    const endNs = area.end;
 
     const query = `
     select

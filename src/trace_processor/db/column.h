@@ -18,9 +18,9 @@
 #define SRC_TRACE_PROCESSOR_DB_COLUMN_H_
 
 #include <stdint.h>
+#include <optional>
 
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
@@ -100,7 +100,7 @@ struct ColumnTypeHelper<StringPool::Id> {
   static constexpr ColumnType ToColumnType() { return ColumnType::kString; }
 };
 template <typename T>
-struct ColumnTypeHelper<base::Optional<T>> : public ColumnTypeHelper<T> {};
+struct ColumnTypeHelper<std::optional<T>> : public ColumnTypeHelper<T> {};
 
 class Table;
 
@@ -262,7 +262,7 @@ class Column {
   SqlValue Get(uint32_t row) const { return GetAtIdx(overlay().Get(row)); }
 
   // Returns the row containing the given value in the Column.
-  base::Optional<uint32_t> IndexOf(SqlValue value) const {
+  std::optional<uint32_t> IndexOf(SqlValue value) const {
     switch (type_) {
       // TODO(lalitm): investigate whether we could make this more efficient
       // by first checking the type of the column and comparing explicitly
@@ -276,11 +276,11 @@ class Column {
           if (compare::SqlValue(Get(i), value) == 0)
             return i;
         }
-        return base::nullopt;
+        return std::nullopt;
       }
       case ColumnType::kId: {
         if (value.type != SqlValue::Type::kLong)
-          return base::nullopt;
+          return std::nullopt;
         return overlay().RowOf(static_cast<uint32_t>(value.long_value));
       }
       case ColumnType::kDummy:
@@ -328,11 +328,11 @@ class Column {
     FilterIntoSlow(op, value, rm);
   }
 
-  // Returns the minimum value in this column. Returns nullopt if this column
-  // is empty.
-  base::Optional<SqlValue> Min() const {
+  // Returns the minimum value in this column. Returns std::nullopt if this
+  // column is empty.
+  std::optional<SqlValue> Min() const {
     if (overlay().empty())
-      return base::nullopt;
+      return std::nullopt;
 
     if (IsSorted())
       return Get(0);
@@ -342,11 +342,11 @@ class Column {
     return *std::min_element(b, e, &compare::SqlValueComparator);
   }
 
-  // Returns the minimum value in this column. Returns nullopt if this column
-  // is empty.
-  base::Optional<SqlValue> Max() const {
+  // Returns the minimum value in this column. Returns std::nullopt if this
+  // column is empty.
+  std::optional<SqlValue> Max() const {
     if (overlay().empty())
-      return base::nullopt;
+      return std::nullopt;
 
     if (IsSorted())
       return Get(overlay().size() - 1);
@@ -367,6 +367,9 @@ class Column {
   // Returns the type of this Column in terms of SqlValue::Type.
   SqlValue::Type type() const { return ToSqlValueType(type_); }
 
+  // Returns the type of this Column in terms of ColumnType.
+  ColumnType col_type() const { return type_; }
+
   // Test the type of this Column.
   template <typename T>
   bool IsColumnType() const {
@@ -381,6 +384,9 @@ class Column {
 
   // Returns true if this column is a sorted column.
   bool IsSorted() const { return IsSorted(flags_); }
+
+  // Returns true if this column is a dense column.
+  bool IsDense() const { return IsDense(flags_); }
 
   // Returns true if this column is a set id column.
   // Public for testing.
@@ -439,18 +445,8 @@ class Column {
     return IsFlagsAndTypeValid(flags, ColumnTypeHelper<T>::ToColumnType());
   }
 
- protected:
   template <typename T>
   using stored_type = typename tc_internal::TypeHandler<T>::stored_type;
-
-  // Returns the backing sparse vector cast to contain data of type T.
-  // Should only be called when |type_| == ToColumnType<T>().
-  template <typename T>
-  ColumnStorage<stored_type<T>>* mutable_storage() {
-    PERFETTO_DCHECK(ColumnTypeHelper<T>::ToColumnType() == type_);
-    PERFETTO_DCHECK(tc_internal::TypeHandler<T>::is_optional == IsNullable());
-    return static_cast<ColumnStorage<stored_type<T>>*>(storage_);
-  }
 
   // Returns the backing sparse vector cast to contain data of type T.
   // Should only be called when |type_| == ToColumnType<T>().
@@ -461,8 +457,15 @@ class Column {
     return *static_cast<ColumnStorage<stored_type<T>>*>(storage_);
   }
 
-  // Returns true if this column is a dense column.
-  bool IsDense() const { return IsDense(flags_); }
+ protected:
+  // Returns the backing sparse vector cast to contain data of type T.
+  // Should only be called when |type_| == ToColumnType<T>().
+  template <typename T>
+  ColumnStorage<stored_type<T>>* mutable_storage() {
+    PERFETTO_DCHECK(ColumnTypeHelper<T>::ToColumnType() == type_);
+    PERFETTO_DCHECK(tc_internal::TypeHandler<T>::is_optional == IsNullable());
+    return static_cast<ColumnStorage<stored_type<T>>*>(storage_);
+  }
 
   // Returns true if this column is a hidden column.
   bool IsHidden() const { return (flags_ & Flag::kHidden) != 0; }
@@ -525,7 +528,7 @@ class Column {
   template <typename T>
   SqlValue GetAtIdxTyped(uint32_t idx) const {
     if (IsNullable()) {
-      auto opt_value = storage<base::Optional<T>>().Get(idx);
+      auto opt_value = storage<std::optional<T>>().Get(idx);
       return opt_value ? ToSqlValue(*opt_value) : SqlValue();
     }
     return ToSqlValue(storage<T>().Get(idx));
@@ -545,31 +548,31 @@ class Column {
             b, std::lower_bound(b, e, value, &compare::SqlValueComparator));
         uint32_t end = std::distance(
             b, std::upper_bound(b, e, value, &compare::SqlValueComparator));
-        rm->Intersect(beg, end);
+        rm->Intersect({beg, end});
         return true;
       }
       case FilterOp::kLe: {
         uint32_t end = std::distance(
             b, std::upper_bound(b, e, value, &compare::SqlValueComparator));
-        rm->Intersect(0, end);
+        rm->Intersect({0, end});
         return true;
       }
       case FilterOp::kLt: {
         uint32_t end = std::distance(
             b, std::lower_bound(b, e, value, &compare::SqlValueComparator));
-        rm->Intersect(0, end);
+        rm->Intersect({0, end});
         return true;
       }
       case FilterOp::kGe: {
         uint32_t beg = std::distance(
             b, std::lower_bound(b, e, value, &compare::SqlValueComparator));
-        rm->Intersect(beg, overlay().size());
+        rm->Intersect({beg, overlay().size()});
         return true;
       }
       case FilterOp::kGt: {
         uint32_t beg = std::distance(
             b, std::upper_bound(b, e, value, &compare::SqlValueComparator));
-        rm->Intersect(beg, overlay().size());
+        rm->Intersect({beg, overlay().size()});
         return true;
       }
       case FilterOp::kNe:
@@ -608,11 +611,13 @@ class Column {
     // Otherwise, find the end of the set and return the intersection for this.
     for (uint32_t i = set_id + 1; i < ov.size(); ++i) {
       if (st.Get(ov.Get(i)) != filter_set_id) {
-        rm->Intersect(set_id, i);
+        RowMap r(set_id, i);
+        rm->Intersect(r);
         return;
       }
     }
-    rm->Intersect(set_id, ov.size());
+    RowMap r(set_id, ov.size());
+    rm->Intersect(r);
   }
 
   // Slow path filter method which will perform a full table scan.

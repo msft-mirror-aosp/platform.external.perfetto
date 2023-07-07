@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "perfetto/base/build_config.h"
@@ -125,6 +126,17 @@ class StopArgsImpl : public DataSourceBase::StopArgs {
   mutable std::function<void()> async_stop_closure;
 };
 
+class FlushArgsImpl : public DataSourceBase::FlushArgs {
+ public:
+  std::function<void()> HandleFlushAsynchronously() const override {
+    auto closure = std::move(async_flush_closure);
+    async_flush_closure = std::function<void()>();
+    return closure;
+  }
+
+  mutable std::function<void()> async_flush_closure;
+};
+
 uint64_t ComputeConfigHash(const DataSourceConfig& config) {
   base::Hasher hasher;
   std::string config_bytes = config.SerializeAsString();
@@ -163,6 +175,28 @@ uint64_t ComputeStartupConfigHash(DataSourceConfig config) {
   hasher.Update(config_bytes.data(), config_bytes.size());
   return hasher.digest();
 }
+
+template <typename RegisteredBackend>
+struct CompareBackendByType {
+  static int BackendTypePriority(BackendType type) {
+    switch (type) {
+      case kSystemBackend:
+        return 0;
+      case kInProcessBackend:
+        return 1;
+      case kCustomBackend:
+        return 2;
+      // The UnspecifiedBackend has the highest priority so that
+      // TracingBackendFake is the last one on the backend lists.
+      case kUnspecifiedBackend:
+        break;
+    }
+    return 3;
+  }
+  bool operator()(BackendType type, const RegisteredBackend& b) {
+    return BackendTypePriority(type) < BackendTypePriority(b.type);
+  }
+};
 
 }  // namespace
 
@@ -296,12 +330,27 @@ void TracingMuxerImpl::ProducerImpl::StopDataSource(DataSourceInstanceID id) {
   muxer_->StopDataSource_AsyncBegin(backend_id_, id);
 }
 
-void TracingMuxerImpl::ProducerImpl::Flush(FlushRequestID flush_id,
-                                           const DataSourceInstanceID*,
-                                           size_t) {
-  // Flush is not plumbed for now, we just ack straight away.
+void TracingMuxerImpl::ProducerImpl::Flush(
+    FlushRequestID flush_id,
+    const DataSourceInstanceID* instances,
+    size_t instance_count) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  service_->NotifyFlushComplete(flush_id);
+  bool all_handled = true;
+  if (muxer_) {
+    for (size_t i = 0; i < instance_count; i++) {
+      DataSourceInstanceID ds_id = instances[i];
+      bool handled =
+          muxer_->FlushDataSource_AsyncBegin(backend_id_, ds_id, flush_id);
+      if (!handled) {
+        pending_flushes_[flush_id].insert(ds_id);
+        all_handled = false;
+      }
+    }
+  }
+
+  if (all_handled) {
+    service_->NotifyFlushComplete(flush_id);
+  }
 }
 
 void TracingMuxerImpl::ProducerImpl::ClearIncrementalState(
@@ -348,17 +397,44 @@ void TracingMuxerImpl::ProducerImpl::SendOnConnectTriggers() {
   }
 }
 
+void TracingMuxerImpl::ProducerImpl::NotifyFlushForDataSourceDone(
+    DataSourceInstanceID ds_id,
+    FlushRequestID flush_id) {
+  if (!connected_) {
+    return;
+  }
+
+  {
+    auto it = pending_flushes_.find(flush_id);
+    if (it == pending_flushes_.end()) {
+      return;
+    }
+    std::set<DataSourceInstanceID>& ds_ids = it->second;
+    ds_ids.erase(ds_id);
+  }
+
+  std::optional<DataSourceInstanceID> biggest_flush_id;
+  for (auto it = pending_flushes_.begin(); it != pending_flushes_.end();) {
+    if (it->second.empty()) {
+      biggest_flush_id = it->first;
+      it = pending_flushes_.erase(it);
+    } else {
+      break;
+    }
+  }
+
+  if (biggest_flush_id) {
+    service_->NotifyFlushComplete(*biggest_flush_id);
+  }
+}
+
 // ----- End of TracingMuxerImpl::ProducerImpl methods.
 
 // ----- Begin of TracingMuxerImpl::ConsumerImpl
 TracingMuxerImpl::ConsumerImpl::ConsumerImpl(TracingMuxerImpl* muxer,
                                              BackendType backend_type,
-                                             TracingBackendId backend_id,
                                              TracingSessionGlobalID session_id)
-    : muxer_(muxer),
-      backend_type_(backend_type),
-      backend_id_(backend_id),
-      session_id_(session_id) {}
+    : muxer_(muxer), backend_type_(backend_type), session_id_(session_id) {}
 
 TracingMuxerImpl::ConsumerImpl::~ConsumerImpl() {
   muxer_ = nullptr;
@@ -568,8 +644,7 @@ void TracingMuxerImpl::ConsumerImpl::OnObservableEvents(
 }
 
 void TracingMuxerImpl::ConsumerImpl::OnSessionCloned(
-    bool /*success*/,
-    const std::string& /*error*/) {
+    const OnSessionClonedArgs&) {
   // CloneSession is not exposed in the SDK. This should never happen.
   PERFETTO_DCHECK(false);
 }
@@ -852,7 +927,10 @@ TracingMuxerImpl::TracingMuxerImpl(const TracingInitArgs& args)
       this, platform_->CreateTaskRunner(std::move(tr_args))));
 
   // Run the initializer on that thread.
-  task_runner_->PostTask([this, args] { Initialize(args); });
+  task_runner_->PostTask([this, args] {
+    Initialize(args);
+    AddBackends(args);
+  });
 }
 
 void TracingMuxerImpl::Initialize(const TracingInitArgs& args) {
@@ -862,56 +940,146 @@ void TracingMuxerImpl::Initialize(const TracingInitArgs& args) {
   supports_multiple_data_source_instances_ =
       args.supports_multiple_data_source_instances;
 
-  auto add_backend = [this, &args](TracingBackend* backend, BackendType type) {
-    if (!backend) {
-      // We skip the log in release builds because the *_backend_fake.cc code
-      // has already an ELOG before returning a nullptr.
-      PERFETTO_DLOG("Backend creation failed, type %d", static_cast<int>(type));
-      return;
-    }
-    TracingBackendId backend_id = backends_.size();
-    backends_.emplace_back();
-    RegisteredBackend& rb = backends_.back();
-    rb.backend = backend;
-    rb.id = backend_id;
-    rb.type = type;
-    rb.consumer_enabled = type != kSystemBackend || args.enable_system_consumer;
-    rb.producer.reset(new ProducerImpl(this, backend_id,
-                                       args.shmem_batch_commits_duration_ms));
-    rb.producer_conn_args.producer = rb.producer.get();
-    rb.producer_conn_args.producer_name = platform_->GetCurrentProcessName();
-    rb.producer_conn_args.task_runner = task_runner_.get();
-    rb.producer_conn_args.shmem_size_hint_bytes =
-        args.shmem_size_hint_kb * 1024;
-    rb.producer_conn_args.shmem_page_size_hint_bytes =
-        args.shmem_page_size_hint_kb * 1024;
-    rb.producer->Initialize(rb.backend->ConnectProducer(rb.producer_conn_args));
-  };
+  // Fallback backend for producer creation for an unsupported backend type.
+  PERFETTO_CHECK(producer_backends_.empty());
+  AddProducerBackend(internal::TracingBackendFake::GetInstance(),
+                     BackendType::kUnspecifiedBackend, args);
+  // Fallback backend for consumer creation for an unsupported backend type.
+  // This backend simply fails any attempt to start a tracing session.
+  PERFETTO_CHECK(consumer_backends_.empty());
+  AddConsumerBackend(internal::TracingBackendFake::GetInstance(),
+                     BackendType::kUnspecifiedBackend);
+}
 
+void TracingMuxerImpl::AddConsumerBackend(TracingConsumerBackend* backend,
+                                          BackendType type) {
+  if (!backend) {
+    // We skip the log in release builds because the *_backend_fake.cc code
+    // has already an ELOG before returning a nullptr.
+    PERFETTO_DLOG("Consumer backend creation failed, type %d",
+                  static_cast<int>(type));
+    return;
+  }
+  // Keep the backends sorted by type.
+  auto it =
+      std::upper_bound(consumer_backends_.begin(), consumer_backends_.end(),
+                       type, CompareBackendByType<RegisteredConsumerBackend>());
+  it = consumer_backends_.emplace(it);
+
+  RegisteredConsumerBackend& rb = *it;
+  rb.backend = backend;
+  rb.type = type;
+}
+
+void TracingMuxerImpl::AddProducerBackend(TracingProducerBackend* backend,
+                                          BackendType type,
+                                          const TracingInitArgs& args) {
+  if (!backend) {
+    // We skip the log in release builds because the *_backend_fake.cc code
+    // has already an ELOG before returning a nullptr.
+    PERFETTO_DLOG("Producer backend creation failed, type %d",
+                  static_cast<int>(type));
+    return;
+  }
+  TracingBackendId backend_id = producer_backends_.size();
+  // Keep the backends sorted by type.
+  auto it =
+      std::upper_bound(producer_backends_.begin(), producer_backends_.end(),
+                       type, CompareBackendByType<RegisteredProducerBackend>());
+  it = producer_backends_.emplace(it);
+
+  RegisteredProducerBackend& rb = *it;
+  rb.backend = backend;
+  rb.id = backend_id;
+  rb.type = type;
+  rb.producer.reset(
+      new ProducerImpl(this, backend_id, args.shmem_batch_commits_duration_ms));
+  rb.producer_conn_args.producer = rb.producer.get();
+  rb.producer_conn_args.producer_name = platform_->GetCurrentProcessName();
+  rb.producer_conn_args.task_runner = task_runner_.get();
+  rb.producer_conn_args.shmem_size_hint_bytes = args.shmem_size_hint_kb * 1024;
+  rb.producer_conn_args.shmem_page_size_hint_bytes =
+      args.shmem_page_size_hint_kb * 1024;
+  rb.producer->Initialize(rb.backend->ConnectProducer(rb.producer_conn_args));
+}
+
+TracingMuxerImpl::RegisteredProducerBackend*
+TracingMuxerImpl::FindProducerBackendById(TracingBackendId id) {
+  for (RegisteredProducerBackend& b : producer_backends_) {
+    if (b.id == id) {
+      return &b;
+    }
+  }
+  return nullptr;
+}
+
+TracingMuxerImpl::RegisteredProducerBackend*
+TracingMuxerImpl::FindProducerBackendByType(BackendType type) {
+  for (RegisteredProducerBackend& b : producer_backends_) {
+    if (b.type == type) {
+      return &b;
+    }
+  }
+  return nullptr;
+}
+
+TracingMuxerImpl::RegisteredConsumerBackend*
+TracingMuxerImpl::FindConsumerBackendByType(BackendType type) {
+  for (RegisteredConsumerBackend& b : consumer_backends_) {
+    if (b.type == type) {
+      return &b;
+    }
+  }
+  return nullptr;
+}
+
+void TracingMuxerImpl::AddBackends(const TracingInitArgs& args) {
   if (args.backends & kSystemBackend) {
-    PERFETTO_CHECK(args.system_backend_factory_);
-    add_backend(args.system_backend_factory_(), kSystemBackend);
+    PERFETTO_CHECK(args.system_producer_backend_factory_);
+    if (FindProducerBackendByType(kSystemBackend) == nullptr) {
+      AddProducerBackend(args.system_producer_backend_factory_(),
+                         kSystemBackend, args);
+    }
+    if (args.enable_system_consumer) {
+      PERFETTO_CHECK(args.system_consumer_backend_factory_);
+      if (FindConsumerBackendByType(kSystemBackend) == nullptr) {
+        AddConsumerBackend(args.system_consumer_backend_factory_(),
+                           kSystemBackend);
+      }
+    }
   }
 
   if (args.backends & kInProcessBackend) {
-    PERFETTO_CHECK(args.in_process_backend_factory_);
-    add_backend(args.in_process_backend_factory_(), kInProcessBackend);
+    TracingBackend* b = nullptr;
+    if (FindProducerBackendByType(kInProcessBackend) == nullptr) {
+      if (!b) {
+        PERFETTO_CHECK(args.in_process_backend_factory_);
+        b = args.in_process_backend_factory_();
+      }
+      AddProducerBackend(b, kInProcessBackend, args);
+    }
+    if (FindConsumerBackendByType(kInProcessBackend) == nullptr) {
+      if (!b) {
+        PERFETTO_CHECK(args.in_process_backend_factory_);
+        b = args.in_process_backend_factory_();
+      }
+      AddConsumerBackend(b, kInProcessBackend);
+    }
   }
 
   if (args.backends & kCustomBackend) {
     PERFETTO_CHECK(args.custom_backend);
-    add_backend(args.custom_backend, kCustomBackend);
+    if (FindProducerBackendByType(kCustomBackend) == nullptr) {
+      AddProducerBackend(args.custom_backend, kCustomBackend, args);
+    }
+    if (FindConsumerBackendByType(kCustomBackend) == nullptr) {
+      AddConsumerBackend(args.custom_backend, kCustomBackend);
+    }
   }
 
   if (args.backends & ~(kSystemBackend | kInProcessBackend | kCustomBackend)) {
     PERFETTO_FATAL("Unsupported tracing backend type");
   }
-
-  // Fallback backend for consumer creation for an unsupported backend type.
-  // This backend simply fails any attempt to start a tracing session.
-  // NOTE: This backend instance has to be added last.
-  add_backend(internal::TracingBackendFake::GetInstance(),
-              BackendType::kUnspecifiedBackend);
 }
 
 // Can be called from any thread (but not concurrently).
@@ -996,7 +1164,8 @@ void TracingMuxerImpl::RegisterInterceptor(
         }
         // Only allow certain interceptors for now.
         if (descriptor.name() != "test_interceptor" &&
-            descriptor.name() != "console") {
+            descriptor.name() != "console" &&
+            descriptor.name() != "etwexport") {
           PERFETTO_ELOG(
               "Interceptors are experimental. If you want to use them, please "
               "get in touch with the project maintainers "
@@ -1019,7 +1188,7 @@ void TracingMuxerImpl::ActivateTriggers(
   base::TimeMillis expire_time =
       base::GetWallTimeMs() + base::TimeMillis(ttl_ms);
   task_runner_->PostTask([this, triggers, expire_time] {
-    for (RegisteredBackend& backend : backends_) {
+    for (RegisteredProducerBackend& backend : producer_backends_) {
       if (backend.producer->connected_) {
         backend.producer->service_->ActivateTriggers(triggers);
       } else {
@@ -1171,7 +1340,7 @@ TracingMuxerImpl::FindDataSourceRes TracingMuxerImpl::SetupDataSourceImpl(
     internal_state->muxer_id_for_testing = muxer_id_for_testing_;
 
     if (startup_session_id) {
-      RegisteredBackend& backend = backends_[backend_id];
+      RegisteredProducerBackend& backend = *FindProducerBackendById(backend_id);
       uint16_t& last_reservation =
           backend.producer->last_startup_target_buffer_reservation_;
       if (last_reservation == std::numeric_limits<uint16_t>::max()) {
@@ -1257,7 +1426,7 @@ void TracingMuxerImpl::StartDataSource(TracingBackendId backend_id,
       ds.internal_state->startup_target_buffer_reservation.load(
           std::memory_order_relaxed);
   if (startup_reservation) {
-    RegisteredBackend& backend = backends_[backend_id];
+    RegisteredProducerBackend& backend = *FindProducerBackendById(backend_id);
     TracingSessionGlobalID session_id = ds.internal_state->startup_session_id;
     auto session_it = std::find_if(
         backend.startup_sessions.begin(), backend.startup_sessions.end(),
@@ -1424,10 +1593,10 @@ void TracingMuxerImpl::StopDataSource_AsyncEnd(TracingBackendId backend_id,
 
   TracingMuxer::generation_++;
 
-  // |backends_| is append-only, Backend instances are always valid.
-  PERFETTO_CHECK(backend_id < backends_.size());
-  RegisteredBackend& backend = backends_[backend_id];
-  ProducerImpl* producer = backends_[backend_id].producer.get();
+  // |producer_backends_| is append-only, Backend instances are always valid.
+  PERFETTO_CHECK(backend_id < producer_backends_.size());
+  RegisteredProducerBackend& backend = *FindProducerBackendById(backend_id);
+  ProducerImpl* producer = backend.producer.get();
   if (!producer)
     return;
 
@@ -1499,6 +1668,82 @@ void TracingMuxerImpl::ClearDataSourceIncrementalState(
       1, std::memory_order_relaxed);
 }
 
+bool TracingMuxerImpl::FlushDataSource_AsyncBegin(
+    TracingBackendId backend_id,
+    DataSourceInstanceID instance_id,
+    FlushRequestID flush_id) {
+  PERFETTO_DLOG("Flushing data source %" PRIu64, instance_id);
+  auto ds = FindDataSource(backend_id, instance_id);
+  if (!ds) {
+    PERFETTO_ELOG("Could not find data source to flush");
+    return true;
+  }
+
+  uint32_t backend_connection_id = ds.internal_state->backend_connection_id;
+
+  FlushArgsImpl flush_args;
+  flush_args.internal_instance_index = ds.instance_idx;
+  flush_args.async_flush_closure = [this, backend_id, backend_connection_id,
+                                    instance_id, ds, flush_id] {
+    // TracingMuxerImpl is long lived, capturing |this| is okay.
+    // The notification closure can be moved out of the StopArgs by the
+    // embedder to handle stop asynchronously. The embedder might then
+    // call the closure on a different thread than the current one, hence
+    // this nested PostTask().
+    task_runner_->PostTask(
+        [this, backend_id, backend_connection_id, instance_id, ds, flush_id] {
+          FlushDataSource_AsyncEnd(backend_id, backend_connection_id,
+                                   instance_id, ds, flush_id);
+        });
+  };
+  {
+    std::unique_lock<std::recursive_mutex> lock;
+    if (ds.requires_callbacks_under_lock)
+      lock = std::unique_lock<std::recursive_mutex>(ds.internal_state->lock);
+    ds.internal_state->data_source->OnFlush(flush_args);
+  }
+
+  // |async_flush_closure| is moved out of |flush_args| if the producer
+  // requested to handle the flush asynchronously.
+  bool handled = static_cast<bool>(flush_args.async_flush_closure);
+  return handled;
+}
+
+void TracingMuxerImpl::FlushDataSource_AsyncEnd(
+    TracingBackendId backend_id,
+    uint32_t backend_connection_id,
+    DataSourceInstanceID instance_id,
+    const FindDataSourceRes& ds,
+    FlushRequestID flush_id) {
+  PERFETTO_DLOG("Ending async flush of data source %" PRIu64, instance_id);
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+
+  // Check that the data source instance is still active and was not modified
+  // while it was being flushed.
+  if (!ds.static_state->TryGet(ds.instance_idx) ||
+      ds.internal_state->backend_id != backend_id ||
+      ds.internal_state->backend_connection_id != backend_connection_id ||
+      ds.internal_state->data_source_instance_id != instance_id) {
+    PERFETTO_ELOG("Async flush of data source %" PRIu64
+                  " failed. This might be due to the data source being stopped "
+                  "in the meantime",
+                  instance_id);
+    return;
+  }
+
+  // |producer_backends_| is append-only, Backend instances are always valid.
+  PERFETTO_CHECK(backend_id < producer_backends_.size());
+  RegisteredProducerBackend& backend = *FindProducerBackendById(backend_id);
+
+  ProducerImpl* producer = backend.producer.get();
+  if (!producer)
+    return;
+
+  if (producer->connected_) {
+    producer->NotifyFlushForDataSourceDone(instance_id, flush_id);
+  }
+}
+
 void TracingMuxerImpl::SyncProducersForTesting() {
   std::mutex mutex;
   std::condition_variable cv;
@@ -1517,9 +1762,9 @@ void TracingMuxerImpl::SyncProducersForTesting() {
     task_runner_->PostTask([this, &mutex, &cv, &countdown] {
       {
         std::unique_lock<std::mutex> countdown_lock(mutex);
-        countdown = backends_.size();
+        countdown = producer_backends_.size();
       }
-      for (auto& backend : backends_) {
+      for (auto& backend : producer_backends_) {
         auto* producer = backend.producer.get();
         producer->service_->Sync([&mutex, &cv, &countdown] {
           std::unique_lock<std::mutex> countdown_lock(mutex);
@@ -1539,7 +1784,7 @@ void TracingMuxerImpl::SyncProducersForTesting() {
   bool done = false;
   bool all_producers_connected = true;
   task_runner_->PostTask([this, &mutex, &cv, &done, &all_producers_connected] {
-    for (auto& backend : backends_)
+    for (auto& backend : producer_backends_)
       all_producers_connected &= backend.producer->connected_;
     std::unique_lock<std::mutex> lock(mutex);
     done = true;
@@ -1610,7 +1855,7 @@ void TracingMuxerImpl::UpdateDataSourcesOnAllBackends() {
 void TracingMuxerImpl::UpdateDataSourceOnAllBackends(RegisteredDataSource& rds,
                                                      bool is_changed) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredProducerBackend& backend : producer_backends_) {
     // We cannot call RegisterDataSource on the backend before it connects.
     if (!backend.producer->connected_)
       continue;
@@ -1754,7 +1999,7 @@ void TracingMuxerImpl::StopTracingSession(TracingSessionGlobalID session_id) {
 void TracingMuxerImpl::DestroyTracingSession(
     TracingSessionGlobalID session_id) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredConsumerBackend& backend : consumer_backends_) {
     // We need to find the consumer (if any) and call Disconnect as we destroy
     // the tracing session. We can't call Disconnect() inside this for loop
     // because in the in-process case this will end up to a synchronous call to
@@ -1847,7 +2092,7 @@ void TracingMuxerImpl::QueryServiceState(
 void TracingMuxerImpl::SetBatchCommitsDurationForTesting(
     uint32_t batch_commits_duration_ms,
     BackendType backend_type) {
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredProducerBackend& backend : producer_backends_) {
     if (backend.producer && backend.producer->connected_ &&
         backend.type == backend_type) {
       backend.producer->service_->MaybeSharedMemoryArbiter()
@@ -1858,7 +2103,7 @@ void TracingMuxerImpl::SetBatchCommitsDurationForTesting(
 
 bool TracingMuxerImpl::EnableDirectSMBPatchingForTesting(
     BackendType backend_type) {
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredProducerBackend& backend : producer_backends_) {
     if (backend.producer && backend.producer->connected_ &&
         backend.type == backend_type &&
         !backend.producer->service_->MaybeSharedMemoryArbiter()
@@ -1872,27 +2117,31 @@ bool TracingMuxerImpl::EnableDirectSMBPatchingForTesting(
 TracingMuxerImpl::ConsumerImpl* TracingMuxerImpl::FindConsumer(
     TracingSessionGlobalID session_id) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  for (RegisteredBackend& backend : backends_) {
+  return FindConsumerAndBackend(session_id).first;
+}
+
+std::pair<TracingMuxerImpl::ConsumerImpl*,
+          TracingMuxerImpl::RegisteredConsumerBackend*>
+TracingMuxerImpl::FindConsumerAndBackend(TracingSessionGlobalID session_id) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  for (RegisteredConsumerBackend& backend : consumer_backends_) {
     for (auto& consumer : backend.consumers) {
       if (consumer->session_id_ == session_id) {
-        return consumer.get();
+        return {consumer.get(), &backend};
       }
     }
   }
-  return nullptr;
+  return {nullptr, nullptr};
 }
 
 void TracingMuxerImpl::InitializeConsumer(TracingSessionGlobalID session_id) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
 
-  auto* consumer = FindConsumer(session_id);
-  if (!consumer)
+  auto res = FindConsumerAndBackend(session_id);
+  if (!res.first || !res.second)
     return;
-
-  TracingBackendId backend_id = consumer->backend_id_;
-  // |backends_| is append-only, Backend instances are always valid.
-  PERFETTO_CHECK(backend_id < backends_.size());
-  RegisteredBackend& backend = backends_[backend_id];
+  TracingMuxerImpl::ConsumerImpl* consumer = res.first;
+  RegisteredConsumerBackend& backend = *res.second;
 
   TracingBackend::ConnectConsumerArgs conn_args;
   conn_args.consumer = consumer;
@@ -1902,7 +2151,7 @@ void TracingMuxerImpl::InitializeConsumer(TracingSessionGlobalID session_id) {
 
 void TracingMuxerImpl::OnConsumerDisconnected(ConsumerImpl* consumer) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredConsumerBackend& backend : consumer_backends_) {
     auto pred = [consumer](const std::unique_ptr<ConsumerImpl>& con) {
       return con.get() == consumer;
     };
@@ -1918,9 +2167,28 @@ void TracingMuxerImpl::SetMaxProducerReconnectionsForTesting(uint32_t count) {
 
 void TracingMuxerImpl::OnProducerDisconnected(ProducerImpl* producer) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredProducerBackend& backend : producer_backends_) {
     if (backend.producer.get() != producer)
       continue;
+
+    // The tracing service is disconnected. It does not make sense to keep
+    // tracing (we wouldn't be able to commit). On reconnection, the tracing
+    // service will restart the data sources.
+    for (const auto& rds : data_sources_) {
+      DataSourceStaticState* static_state = rds.static_state;
+      for (uint32_t i = 0; i < kMaxDataSourceInstances; i++) {
+        auto* internal_state = static_state->TryGet(i);
+        if (internal_state && internal_state->backend_id == backend.id &&
+            internal_state->backend_connection_id ==
+                backend.producer->connection_id_.load(
+                    std::memory_order_relaxed)) {
+          StopDataSource_AsyncBeginImpl(
+              FindDataSourceRes(static_state, internal_state, i,
+                                rds.requires_callbacks_under_lock));
+        }
+      }
+    }
+
     // Try reconnecting the disconnected producer. If the connection succeeds,
     // all the data sources will be automatically re-registered.
     if (producer->connection_id_.load(std::memory_order_relaxed) >
@@ -1931,19 +2199,13 @@ void TracingMuxerImpl::OnProducerDisconnected(ProducerImpl* producer) {
       PERFETTO_ELOG("Producer disconnected too many times; not reconnecting");
       continue;
     }
+
     backend.producer->Initialize(
         backend.backend->ConnectProducer(backend.producer_conn_args));
     // Don't use producer-provided SMBs for the next connection unless startup
     // tracing requires it again.
     backend.producer_conn_args.use_producer_provided_smb = false;
   }
-
-  // Increment the generation counter to atomically ensure that:
-  // 1. Old trace writers from the severed connection eventually get cleaned up
-  //    by DestroyStoppedTraceWritersForCurrentThread().
-  // 2. No new trace writers can be created for the SharedMemoryArbiter from the
-  //    old connection.
-  TracingMuxer::generation_++;
 }
 
 void TracingMuxerImpl::SweepDeadBackends() {
@@ -1961,7 +2223,7 @@ TracingMuxerImpl::FindDataSourceRes TracingMuxerImpl::FindDataSource(
     TracingBackendId backend_id,
     DataSourceInstanceID instance_id) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  auto& backend = backends_[backend_id];
+  RegisteredProducerBackend& backend = *FindProducerBackendById(backend_id);
   for (const auto& rds : data_sources_) {
     DataSourceStaticState* static_state = rds.static_state;
     for (uint32_t i = 0; i < kMaxDataSourceInstances; i++) {
@@ -1997,7 +2259,8 @@ std::unique_ptr<TraceWriterBase> TracingMuxerImpl::CreateTraceWriter(
         interceptor.tls_factory(static_state, data_source_instance_index),
         interceptor.packet_callback, static_state, data_source_instance_index));
   }
-  ProducerImpl* producer = backends_[data_source->backend_id].producer.get();
+  ProducerImpl* producer =
+      FindProducerBackendById(data_source->backend_id)->producer.get();
   // Atomically load the current service endpoint. We keep the pointer as a
   // shared pointer on the stack to guard against it from being concurrently
   // modified on the thread by ProducerImpl::Initialize() swapping in a
@@ -2040,34 +2303,34 @@ std::unique_ptr<TraceWriterBase> TracingMuxerImpl::CreateTraceWriter(
 // This is called via the public API Tracing::NewTrace().
 // Can be called from any thread.
 std::unique_ptr<TracingSession> TracingMuxerImpl::CreateTracingSession(
-    BackendType requested_backend_type) {
+    BackendType requested_backend_type,
+    TracingConsumerBackend* (*system_backend_factory)()) {
   TracingSessionGlobalID session_id = ++next_tracing_session_id_;
 
   // |backend_type| can only specify one backend, not an OR-ed mask.
   PERFETTO_CHECK((requested_backend_type & (requested_backend_type - 1)) == 0);
 
   // Capturing |this| is fine because the TracingMuxer is a leaky singleton.
-  task_runner_->PostTask([this, requested_backend_type, session_id] {
-    for (RegisteredBackend& backend : backends_) {
+  task_runner_->PostTask([this, requested_backend_type, session_id,
+                          system_backend_factory] {
+    if (requested_backend_type == kSystemBackend && system_backend_factory &&
+        !FindConsumerBackendByType(kSystemBackend)) {
+      AddConsumerBackend(system_backend_factory(), kSystemBackend);
+    }
+    for (RegisteredConsumerBackend& backend : consumer_backends_) {
       if (requested_backend_type && backend.type &&
           backend.type != requested_backend_type) {
         continue;
       }
 
-      if (!backend.consumer_enabled) {
-        continue;
-      }
-
-      TracingBackendId backend_id = backend.id;
-
       // Create the consumer now, even if we have to ask the embedder below, so
       // that any other tasks executing after this one can find the consumer and
       // change its pending attributes.
       backend.consumers.emplace_back(
-          new ConsumerImpl(this, backend.type, backend.id, session_id));
+          new ConsumerImpl(this, backend.type, session_id));
 
-      // The last registered backend in |backends_| is the unsupported backend
-      // without a valid type.
+      // The last registered backend in |consumer_backends_| is the unsupported
+      // backend without a valid type.
       if (!backend.type) {
         PERFETTO_ELOG(
             "No tracing backend ready for type=%d, consumer will disconnect",
@@ -2083,10 +2346,11 @@ std::unique_ptr<TracingSession> TracingMuxerImpl::CreateTracingSession(
         return;
       }
 
+      BackendType type = backend.type;
       TracingPolicy::ShouldAllowConsumerSessionArgs args;
       args.backend_type = backend.type;
-      args.result_callback = [this, backend_id, session_id](bool allow) {
-        task_runner_->PostTask([this, backend_id, session_id, allow] {
+      args.result_callback = [this, type, session_id](bool allow) {
+        task_runner_->PostTask([this, type, session_id, allow] {
           if (allow) {
             InitializeConsumer(session_id);
             return;
@@ -2095,7 +2359,7 @@ std::unique_ptr<TracingSession> TracingMuxerImpl::CreateTracingSession(
           PERFETTO_ELOG(
               "Consumer session for backend type type=%d forbidden, "
               "consumer will disconnect",
-              backends_[backend_id].type);
+              type);
 
           auto* consumer = FindConsumer(session_id);
           if (!consumer)
@@ -2131,15 +2395,15 @@ TracingMuxerImpl::CreateStartupTracingSession(
 
   // Capturing |this| is fine because the TracingMuxer is a leaky singleton.
   task_runner_->PostTask([this, config, opts, backend_type, session_id] {
-    for (RegisteredBackend& backend : backends_) {
+    for (RegisteredProducerBackend& backend : producer_backends_) {
       if (backend_type && backend.type && backend.type != backend_type) {
         continue;
       }
 
       TracingBackendId backend_id = backend.id;
 
-      // The last registered backend in |backends_| is the unsupported backend
-      // without a valid type.
+      // The last registered backend in |producer_backends_| is the unsupported
+      // backend without a valid type.
       if (!backend.type) {
         PERFETTO_ELOG(
             "No tracing backend initialized for type=%d, startup tracing "
@@ -2259,7 +2523,7 @@ void TracingMuxerImpl::AbortStartupTracingSession(
     BackendType backend_type) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
 
-  for (RegisteredBackend& backend : backends_) {
+  for (RegisteredProducerBackend& backend : producer_backends_) {
     if (backend_type != backend.type)
       continue;
 
@@ -2330,8 +2594,13 @@ void TracingMuxerImpl::AbortStartupTracingSession(
 }
 
 void TracingMuxerImpl::InitializeInstance(const TracingInitArgs& args) {
-  if (instance_ != TracingMuxerFake::Get())
-    PERFETTO_FATAL("Tracing already initialized");
+  if (instance_ != TracingMuxerFake::Get()) {
+    // The tracing muxer was already initialized. We might need to initialize
+    // additional backends that were not configured earlier.
+    auto* muxer = static_cast<TracingMuxerImpl*>(instance_);
+    muxer->task_runner_->PostTask([muxer, args] { muxer->AddBackends(args); });
+    return;
+  }
   // If we previously had a TracingMuxerImpl instance which was reset,
   // reinitialize and reuse it instead of trying to create a new one. See
   // ResetForTesting().
@@ -2339,7 +2608,10 @@ void TracingMuxerImpl::InitializeInstance(const TracingInitArgs& args) {
     auto* muxer = g_prev_instance;
     g_prev_instance = nullptr;
     instance_ = muxer;
-    muxer->task_runner_->PostTask([muxer, args] { muxer->Initialize(args); });
+    muxer->task_runner_->PostTask([muxer, args] {
+      muxer->Initialize(args);
+      muxer->AddBackends(args);
+    });
   } else {
     new TracingMuxerImpl(args);
   }
@@ -2367,24 +2639,28 @@ void TracingMuxerImpl::ResetForTesting() {
 
   base::WaitableEvent reset_done;
   auto do_reset = [muxer, &reset_done] {
+    muxer->DestroyStoppedTraceWritersForCurrentThread();
     // Unregister all data sources so they don't interfere with any future
     // tracing sessions.
     for (RegisteredDataSource& rds : muxer->data_sources_) {
-      for (RegisteredBackend& backend : muxer->backends_) {
-        if (!backend.producer->service_)
+      for (RegisteredProducerBackend& backend : muxer->producer_backends_) {
+        if (!backend.producer->service_ || !backend.producer->connected_)
           continue;
         backend.producer->service_->UnregisterDataSource(rds.descriptor.name());
       }
     }
-    for (auto& backend : muxer->backends_) {
+    for (auto& backend : muxer->consumer_backends_) {
       // Check that no consumer session is currently active on any backend.
       for (auto& consumer : backend.consumers)
         PERFETTO_CHECK(!consumer->service_);
+    }
+    for (auto& backend : muxer->producer_backends_) {
       backend.producer->muxer_ = nullptr;
       backend.producer->DisposeConnection();
       muxer->dead_backends_.push_back(std::move(backend));
     }
-    muxer->backends_.clear();
+    muxer->consumer_backends_.clear();
+    muxer->producer_backends_.clear();
     muxer->interceptors_.clear();
 
     for (auto& ds : muxer->data_sources_) {
@@ -2405,6 +2681,12 @@ void TracingMuxerImpl::ResetForTesting() {
 
     g_prev_instance = muxer;
     instance_ = TracingMuxerFake::Get();
+
+    // Call the user provided cleanups on the muxer thread.
+    for (auto& cb : muxer->reset_callbacks_) {
+      cb();
+    }
+
     reset_done.Notify();
   };
 
@@ -2413,9 +2695,15 @@ void TracingMuxerImpl::ResetForTesting() {
   if (muxer->task_runner_->RunsTasksOnCurrentThread()) {
     do_reset();
   } else {
+    muxer->DestroyStoppedTraceWritersForCurrentThread();
     muxer->task_runner_->PostTask(std::move(do_reset));
     reset_done.Wait();
+    // Call the user provided cleanups also on this thread.
+    for (auto& cb : muxer->reset_callbacks_) {
+      cb();
+    }
   }
+  muxer->reset_callbacks_.clear();
 }
 
 // static
@@ -2433,7 +2721,7 @@ void TracingMuxerImpl::Shutdown() {
     // Check that no consumer session is currently active on any backend.
     // Producers will be automatically disconnected as a part of deleting the
     // muxer below.
-    for (auto& backend : muxer->backends_) {
+    for (auto& backend : muxer->consumer_backends_) {
       for (auto& consumer : backend.consumers) {
         PERFETTO_CHECK(!consumer->service_);
       }
@@ -2452,6 +2740,10 @@ void TracingMuxerImpl::Shutdown() {
     shutdown_done.Notify();
   });
   shutdown_done.Wait();
+}
+
+void TracingMuxerImpl::AppendResetForTestingCallback(std::function<void()> cb) {
+  reset_callbacks_.push_back(std::move(cb));
 }
 
 TracingMuxer::~TracingMuxer() = default;

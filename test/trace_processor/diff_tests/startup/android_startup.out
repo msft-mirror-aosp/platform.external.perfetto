@@ -42,7 +42,8 @@ android_startup {
         package_name: "com.google.android.calendar"
         apk_version_code: 123
         debuggable: false
-      }
+      },
+      pid: 3
     }
     report_fully_drawn {
       dur_ns: 198
@@ -62,6 +63,7 @@ android_startup {
       installd_dur_ns: 0
       dex2oat_dur_ns: 0
     }
+    slow_start_reason: "Main Thread - Time spent in Runnable state"
     startup_type: "warm"
   }
 }

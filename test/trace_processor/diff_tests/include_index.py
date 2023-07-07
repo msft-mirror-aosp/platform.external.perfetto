@@ -55,6 +55,7 @@ from diff_tests.parsing.tests_debug_annotation import ParsingDebugAnnotation
 from diff_tests.parsing.tests_memory_counters import ParsingMemoryCounters
 from diff_tests.parsing.tests_rss_stats import ParsingRssStats
 from diff_tests.performance.tests import Performance
+from diff_tests.pkvm.tests import Pkvm
 from diff_tests.power.tests import Power
 from diff_tests.power.tests_energy_breakdown import PowerEnergyBreakdown
 from diff_tests.power.tests_entity_state_residency import EntityStateResidency
@@ -86,6 +87,7 @@ from diff_tests.tables.tests_sched import TablesSched
 from diff_tests.track_event.tests import TrackEvent
 from diff_tests.translation.tests import Translation
 from diff_tests.ufs.tests import Ufs
+from diff_tests.webview.tests import WebView
 
 sys.path.pop()
 
@@ -129,6 +131,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ParsingMemoryCounters(index_path, 'parsing',
                              'ParsingMemoryCounters').fetch(),
       *Performance(index_path, 'performance', 'Performance').fetch(),
+      *Pkvm(index_path, 'pkvm', 'Pkvm').fetch(),
       *Power(index_path, 'power', 'Power').fetch(),
       *PowerPowerRails(index_path, 'power', 'PowerPowerRails').fetch(),
       *PowerVoltageAndScaling(index_path, 'power',
@@ -165,4 +168,5 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *TablesSched(index_path, 'tables', 'TablesSched').fetch(),
       *TrackEvent(index_path, 'track_event', 'TrackEvent').fetch(),
       *Translation(index_path, 'translation', 'Translation').fetch(),
+      *WebView(index_path, 'webview', 'WebView').fetch(),
   ]
