@@ -19,6 +19,7 @@
 #include "perfetto/base/compiler.h"
 #include "perfetto/base/proc_utils.h"
 #include "perfetto/base/time.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "src/tracing/internal/tracing_muxer_impl.h"
 
@@ -35,6 +36,8 @@
 namespace perfetto {
 namespace test {
 
+using internal::TracingMuxerImpl;
+
 #if PERFETTO_BUILDFLAG(PERFETTO_IPC)
 namespace {
 
@@ -47,6 +50,8 @@ class InProcessSystemService {
   }
 
   void CleanEnv() { test_helper_.CleanEnv(); }
+
+  void Restart() { test_helper_.RestartService(); }
 
  private:
   perfetto::base::TestTaskRunner task_runner_;
@@ -91,12 +96,20 @@ void SystemService::Clean() {
   }
   valid_ = false;
 }
+
+void SystemService::Restart() {
+  PERFETTO_CHECK(valid_);
+  g_system_service->Restart();
+}
 #else   // !PERFETTO_BUILDFLAG(PERFETTO_IPC)
 // static
 SystemService SystemService::Start() {
   return SystemService();
 }
 void SystemService::Clean() {
+  valid_ = false;
+}
+void SystemService::Restart() {
   valid_ = false;
 }
 #endif  // !PERFETTO_BUILDFLAG(PERFETTO_IPC)
@@ -143,25 +156,62 @@ bool EnableDirectSMBPatching(BackendType backend_type) {
 TestTempFile CreateTempFile() {
   TestTempFile res{};
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-  char temp_file[255]{};
-  sprintf(temp_file, "%s\\perfetto-XXXXXX", getenv("TMP"));
-  PERFETTO_CHECK(_mktemp_s(temp_file, strlen(temp_file) + 1) == 0);
+  base::StackString<255> temp_file("%s\\perfetto-XXXXXX", getenv("TMP"));
+  PERFETTO_CHECK(_mktemp_s(temp_file.mutable_data(), temp_file.len() + 1) == 0);
   HANDLE handle =
-      ::CreateFileA(temp_file, GENERIC_READ | GENERIC_WRITE,
+      ::CreateFileA(temp_file.c_str(), GENERIC_READ | GENERIC_WRITE,
                     FILE_SHARE_DELETE | FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
                     FILE_ATTRIBUTE_TEMPORARY, nullptr);
   PERFETTO_CHECK(handle && handle != INVALID_HANDLE_VALUE);
   res.fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), 0);
+  res.path = temp_file.ToStdString();
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   char temp_file[] = "/data/local/tmp/perfetto-XXXXXXXX";
   res.fd = mkstemp(temp_file);
+  res.path = temp_file;
 #else
   char temp_file[] = "/tmp/perfetto-XXXXXXXX";
   res.fd = mkstemp(temp_file);
-#endif
   res.path = temp_file;
+#endif
   PERFETTO_CHECK(res.fd > 0);
   return res;
+}
+
+// static
+bool TracingMuxerImplInternalsForTest::DoesSystemBackendHaveSMB() {
+  using RegisteredProducerBackend = TracingMuxerImpl::RegisteredProducerBackend;
+  // Ideally we should be doing dynamic_cast and a DCHECK(muxer != nullptr);
+  auto* muxer =
+      reinterpret_cast<TracingMuxerImpl*>(TracingMuxerImpl::instance_);
+  const auto& backends = muxer->producer_backends_;
+  const auto& backend =
+      std::find_if(backends.begin(), backends.end(),
+                   [](const RegisteredProducerBackend& r_backend) {
+                     return r_backend.type == kSystemBackend;
+                   });
+  if (backend == backends.end())
+    return false;
+  const auto& service = backend->producer->service_;
+  return service && service->shared_memory();
+}
+
+// static
+void TracingMuxerImplInternalsForTest::ClearIncrementalState() {
+  auto* muxer =
+      reinterpret_cast<TracingMuxerImpl*>(TracingMuxerImpl::instance_);
+  for (const auto& data_source : muxer->data_sources_) {
+    data_source.static_state->incremental_state_generation.fetch_add(
+        1, std::memory_order_relaxed);
+  }
+}
+
+// static
+void TracingMuxerImplInternalsForTest::AppendResetForTestingCallback(
+    std::function<void()> f) {
+  auto* muxer =
+      reinterpret_cast<TracingMuxerImpl*>(TracingMuxerImpl::instance_);
+  muxer->AppendResetForTestingCallback(f);
 }
 
 }  // namespace test
