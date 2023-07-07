@@ -19,7 +19,7 @@
       ]
     }
   ],
-  "hwasan-postsubmit": [
+  "hwasan-presubmit": [
     {
       "name": "CtsPerfettoTestCases"
     }
