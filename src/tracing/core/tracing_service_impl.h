@@ -87,8 +87,9 @@ class TracingServiceImpl : public TracingService {
                          // tracing_integration_test.cc and b/195065199
 
   // This is a rough threshold to determine how many bytes to read from the
-  // buffers on each iteration when writing into a file. Since filtering
-  // allocates memory, this limits the amount of memory allocated.
+  // buffers on each iteration when writing into a file. Since filtering and
+  // compression allocate memory, this effectively limits the amount of memory
+  // allocated.
   static constexpr size_t kWriteIntoFileChunkSize = 1024 * 1024ul;
 
   // The implementation behind the service endpoint exposed to each producer.
@@ -209,6 +210,7 @@ class TracingServiceImpl : public TracingService {
     ~ConsumerEndpointImpl() override;
 
     void NotifyOnTracingDisabled(const std::string& error);
+    void NotifyCloneSnapshotTrigger();
 
     // TracingService::ConsumerEndpoint implementation.
     void EnableTracing(const TraceConfig&, base::ScopedFile) override;
@@ -264,7 +266,8 @@ class TracingServiceImpl : public TracingService {
   };
 
   explicit TracingServiceImpl(std::unique_ptr<SharedMemory::Factory>,
-                              base::TaskRunner*);
+                              base::TaskRunner*,
+                              InitOpts = {});
   ~TracingServiceImpl() override;
 
   // Called by ProducerEndpointImpl.
@@ -565,6 +568,9 @@ class TracingServiceImpl : public TracingService {
     // Whether we put the system info into the trace output yet.
     bool did_emit_system_info = false;
 
+    // Whether we should compress TracePackets after reading them.
+    bool compress_deflate = false;
+
     // The number of received triggers we've emitted into the trace output.
     size_t num_triggers_emitted_into_trace = 0;
 
@@ -647,6 +653,7 @@ class TracingServiceImpl : public TracingService {
     uint64_t filter_input_bytes = 0;
     uint64_t filter_output_bytes = 0;
     uint64_t filter_errors = 0;
+    uint64_t filter_time_taken_ns = 0;
 
     // A randomly generated trace identifier. Note that this does NOT always
     // match the requested TraceConfig.trace_uuid_msb/lsb. Spcifically, it does
@@ -723,7 +730,8 @@ class TracingServiceImpl : public TracingService {
   TraceBuffer* GetBufferByID(BufferID);
   base::Status DoCloneSession(ConsumerEndpointImpl*,
                               TracingSessionID,
-                              bool final_flush_outcome);
+                              bool final_flush_outcome,
+                              base::Uuid*);
 
   // Returns true if `*tracing_session` is waiting for a trigger that hasn't
   // happened.
@@ -743,6 +751,10 @@ class TracingServiceImpl : public TracingService {
   // change the number of `*packets`, only their content.
   void MaybeFilterPackets(TracingSession* tracing_session,
                           std::vector<TracePacket>* packets);
+
+  // If `*tracing_session` has compression enabled, compress `*packets`.
+  void MaybeCompressPackets(TracingSession* tracing_session,
+                            std::vector<TracePacket>* packets);
 
   // If `*tracing_session` is configured to write into a file, writes `packets`
   // into the file.
@@ -765,6 +777,7 @@ class TracingServiceImpl : public TracingService {
                                      TracingSessionID);
 
   base::TaskRunner* const task_runner_;
+  const InitOpts init_opts_;
   std::unique_ptr<SharedMemory::Factory> shm_factory_;
   ProducerID last_producer_id_ = 0;
   DataSourceInstanceID last_data_source_instance_id_ = 0;
