@@ -71,6 +71,7 @@ message InternedData {
   repeated DebugAnnotationName debug_annotation_names = 3;
   repeated DebugAnnotationValueTypeName debug_annotation_value_type_names = 27;
   repeated SourceLocation source_locations = 4;
+  repeated UnsymbolizedSourceLocation unsymbolized_source_locations = 28;
   repeated LogMessageBody log_message_body = 20;
   repeated HistogramName histogram_names = 25;
 
@@ -111,6 +112,9 @@ message InternedData {
   // This is is NOT the real address. This is to avoid disclosing KASLR through
   // traces.
   repeated InternedString kernel_symbols = 26;
+
+  // Interned string values in the DebugAnnotation proto.
+  repeated InternedString debug_annotation_string_values = 29;
 
   // Interned packet context for android.network_packets.
   repeated NetworkPacketContext packet_context = 30;
