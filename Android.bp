@@ -567,6 +567,7 @@ cc_library_shared {
         ":perfetto_src_protozero_filtering_bytecode_common",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_proto_ring_buffer",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_traced_probes_android_game_intervention_list_android_game_intervention_list",
@@ -801,6 +802,7 @@ cc_library_static {
         ":perfetto_src_protozero_filtering_bytecode_common",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_tracing_client_api_without_backends",
         ":perfetto_src_tracing_common",
@@ -1204,11 +1206,11 @@ cc_library_static {
         ":perfetto_src_ipc_perfetto_ipc",
         ":perfetto_src_kallsyms_kallsyms",
         ":perfetto_src_kernel_utils_syscall_table",
-        ":perfetto_src_perfetto_cmd_bugreport_path",
         ":perfetto_src_protozero_filtering_bytecode_common",
         ":perfetto_src_protozero_filtering_bytecode_generator",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_proto_ring_buffer",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_traced_probes_android_game_intervention_list_android_game_intervention_list",
@@ -1238,12 +1240,11 @@ cc_library_static {
         ":perfetto_src_tracing_ipc_default_socket",
         ":perfetto_src_tracing_ipc_producer_producer",
         ":perfetto_src_tracing_ipc_service_service",
-        ":perfetto_test_integrationtests",
         ":perfetto_test_test_helper",
         "test/cts/device_feature_test_cts.cc",
-        "test/cts/end_to_end_integrationtest_cts.cc",
         "test/cts/heapprofd_java_test_cts.cc",
         "test/cts/heapprofd_test_cts.cc",
+        "test/cts/producer_to_consumer_integrationtest_cts.cc",
         "test/cts/traced_perf_test_cts.cc",
     ],
     static_libs: [
@@ -1500,6 +1501,7 @@ cc_library_static {
         ":perfetto_src_protozero_filtering_bytecode_common",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_proto_ring_buffer",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_traced_probes_android_game_intervention_list_android_game_intervention_list",
@@ -1705,6 +1707,17 @@ cc_defaults {
     },
 }
 
+// GN: //test:perfetto_end_to_end_integrationtests
+filegroup {
+    name: "perfetto_end_to_end_integrationtests",
+    srcs: [
+        "test/android_integrationtest.cc",
+        "test/cmdline_integrationtest.cc",
+        "test/ftrace_integrationtest.cc",
+        "test/traced_integrationtest.cc",
+    ],
+}
+
 // GN: //test:perfetto_gtest_logcat_printer
 cc_library_static {
     name: "perfetto_gtest_logcat_printer",
@@ -1870,6 +1883,7 @@ cc_test {
     name: "perfetto_integrationtests",
     srcs: [
         ":perfetto_base_default_platform",
+        ":perfetto_end_to_end_integrationtests",
         ":perfetto_include_perfetto_base_base",
         ":perfetto_include_perfetto_ext_base_base",
         ":perfetto_include_perfetto_ext_base_version",
@@ -2028,6 +2042,7 @@ cc_test {
         ":perfetto_src_protozero_filtering_bytecode_generator",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_proto_ring_buffer",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_shared_lib_shared_lib",
@@ -2129,7 +2144,6 @@ cc_test {
         ":perfetto_src_tracing_test_client_api_integrationtests",
         ":perfetto_src_tracing_test_test_support",
         ":perfetto_src_tracing_test_tracing_integration_test",
-        ":perfetto_test_integrationtests",
         ":perfetto_test_test_helper",
     ],
     shared_libs: [
@@ -9087,6 +9101,14 @@ filegroup {
     ],
 }
 
+// GN: //src/protozero/filtering:string_filter
+filegroup {
+    name: "perfetto_src_protozero_filtering_string_filter",
+    srcs: [
+        "src/protozero/filtering/string_filter.cc",
+    ],
+}
+
 // GN: //src/protozero/filtering:unittests
 filegroup {
     name: "perfetto_src_protozero_filtering_unittests",
@@ -9096,6 +9118,7 @@ filegroup {
         "src/protozero/filtering/filter_util_unittest.cc",
         "src/protozero/filtering/message_filter_unittest.cc",
         "src/protozero/filtering/message_tokenizer_unittest.cc",
+        "src/protozero/filtering/string_filter_unittest.cc",
     ],
 }
 
@@ -11484,17 +11507,6 @@ filegroup {
     ],
 }
 
-// GN: //test:integrationtests
-filegroup {
-    name: "perfetto_test_integrationtests",
-    srcs: [
-        "test/android_integrationtest.cc",
-        "test/cmdline_integrationtest.cc",
-        "test/ftrace_integrationtest.cc",
-        "test/traced_integrationtest.cc",
-    ],
-}
-
 // GN: //test/sanitizers:unittests
 filegroup {
     name: "perfetto_test_sanitizers_unittests",
@@ -12023,6 +12035,7 @@ cc_test {
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_filter_util",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_filtering_unittests",
         ":perfetto_src_protozero_proto_ring_buffer",
         ":perfetto_src_protozero_protozero",
@@ -12459,6 +12472,7 @@ cc_library_static {
         ":perfetto_src_protozero_filtering_bytecode_common",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_proto_ring_buffer",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_traced_probes_android_game_intervention_list_android_game_intervention_list",
@@ -13200,6 +13214,7 @@ cc_binary {
         ":perfetto_src_protozero_filtering_bytecode_common",
         ":perfetto_src_protozero_filtering_bytecode_parser",
         ":perfetto_src_protozero_filtering_message_filter",
+        ":perfetto_src_protozero_filtering_string_filter",
         ":perfetto_src_protozero_protozero",
         ":perfetto_src_traced_probes_ftrace_ftrace_procfs",
         ":perfetto_src_traced_probes_packages_list_packages_list_parser",
