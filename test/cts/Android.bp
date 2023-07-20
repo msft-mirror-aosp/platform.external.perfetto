@@ -56,7 +56,8 @@ cc_test {
         ":CtsPerfettoProducerApp",
         ":CtsPerfettoReleaseApp",
         ":CtsPerfettoDebuggableApp",
-        ":CtsPerfettoReporterApp"
+        ":CtsPerfettoReporterApp",
+        "perfetto_device_preparer.sh",
   ],
   stl: "libc++_static",
   defaults: [
