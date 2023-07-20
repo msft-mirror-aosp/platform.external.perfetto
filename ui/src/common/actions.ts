@@ -16,6 +16,10 @@ import {Draft} from 'immer';
 
 import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
 import {RecordConfig} from '../controller/record_config_types';
+import {
+  GenericSliceDetailsTabConfig,
+  GenericSliceDetailsTabConfigBase,
+} from '../frontend/generic_slice_details_tab';
 import {globals} from '../frontend/globals';
 import {
   Aggregation,
@@ -34,7 +38,13 @@ import {
 } from './dragndrop_logic';
 import {createEmptyState} from './empty_state';
 import {DEFAULT_VIEWING_OPTION, PERF_SAMPLES_KEY} from './flamegraph_util';
-import {traceEventBegin, traceEventEnd, TraceEventScope} from './metatracing';
+import {
+  MetatraceTrackId,
+  traceEvent,
+  traceEventBegin,
+  traceEventEnd,
+  TraceEventScope,
+} from './metatracing';
 import {
   AdbRecordingTarget,
   Area,
@@ -46,6 +56,7 @@ import {
   NewEngineMode,
   OmniboxState,
   Pagination,
+  PendingDeeplinkState,
   PivotTableResult,
   PrimaryTrackSortKey,
   ProfileType,
@@ -62,7 +73,6 @@ import {
   VisibleState,
 } from './state';
 import {TPDuration, TPTime} from './time';
-import {SqlObjectDetailsTabConfig} from '../frontend/details_panel';
 
 export const DEBUG_SLICE_TRACK_KIND = 'DebugSliceTrack';
 
@@ -470,8 +480,7 @@ export const StateActions = {
     }
   },
 
-  maybeSetPendingDeeplink(
-      state: StateDraft, args: {ts?: string, dur?: string, tid?: string}) {
+  maybeSetPendingDeeplink(state: StateDraft, args: PendingDeeplinkState) {
     state.pendingDeeplink = args;
   },
 
@@ -535,7 +544,8 @@ export const StateActions = {
     if (statusTraceEvent) {
       traceEventEnd(statusTraceEvent);
     }
-    statusTraceEvent = traceEventBegin(args.msg);
+    statusTraceEvent =
+        traceEventBegin(args.msg, {track: MetatraceTrackId.kOmniboxStatus});
     state.status = args;
   },
 
@@ -798,42 +808,29 @@ export const StateActions = {
         state.pendingScrollId = args.scroll ? args.id : undefined;
       },
 
-  selectDebugSlice(state: StateDraft, args: {
+  selectGenericSlice(state: StateDraft, args: {
     id: number,
     sqlTableName: string,
     start: TPTime,
     duration: TPDuration,
     trackId: string,
+    detailsPanelConfig:
+        {kind: string, config: GenericSliceDetailsTabConfigBase},
   }): void {
-    state.currentSelection = {
-      kind: 'DEBUG_SLICE',
+    const detailsPanelConfig: GenericSliceDetailsTabConfig = {
       id: args.id,
-      sqlTableName: args.sqlTableName,
-      start: args.start,
-      duration: args.duration,
-      trackId: args.trackId,
+      ...args.detailsPanelConfig.config,
     };
-  },
 
-  selectBasicSqlSlice(state: StateDraft, args: {
-    id: number,
-    sqlTableName: string,
-    start: TPTime,
-    duration: TPDuration,
-    trackId: string,
-    detailsPanelConfig: {
-      kind: string,
-      config: SqlObjectDetailsTabConfig
-    },
-  }): void {
     state.currentSelection = {
-      kind: 'BASIC_SQL_OBJECT',
+      kind: 'GENERIC_SLICE',
       id: args.id,
       sqlTableName: args.sqlTableName,
       start: args.start,
       duration: args.duration,
       trackId: args.trackId,
-      detailsPanelConfig: args.detailsPanelConfig,
+      detailsPanelConfig:
+          {kind: args.detailsPanelConfig.kind, config: detailsPanelConfig},
     };
   },
 
@@ -1071,7 +1068,13 @@ export const StateActions = {
   },
 
   setCurrentTab(state: StateDraft, args: {tab: string|undefined}) {
-    state.currentTab = args.tab;
+    traceEvent('setCurrentTab', () => {
+      state.currentTab = args.tab;
+    }, {
+      args: {
+        tab: args.tab ?? '<undefined>',
+      },
+    });
   },
 
   toggleAllTrackGroups(state: StateDraft, args: {collapsed: boolean}) {

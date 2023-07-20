@@ -18,12 +18,15 @@ import {GridLayout} from '../..//frontend/widgets/grid_layout';
 import {Section} from '../..//frontend/widgets/section';
 import {ColumnType, LONG, STR} from '../../common/query_result';
 import {TPDuration, tpDurationFromSql, tpTimeFromSql} from '../../common/time';
+import {raf} from '../../core/raf_scheduler';
 import {
   BottomTab,
   bottomTabRegistry,
   NewBottomTabArgs,
 } from '../../frontend/bottom_tab';
-import {globals} from '../../frontend/globals';
+import {
+  GenericSliceDetailsTabConfig,
+} from '../../frontend/generic_slice_details_tab';
 import {
   getSlice,
   SliceDetails,
@@ -35,6 +38,7 @@ import {
   TPTimestamp,
   Utid,
 } from '../../frontend/sql_types';
+import {sqlValueToString} from '../../frontend/sql_utils';
 import {
   getProcessName,
   getThreadName,
@@ -53,13 +57,8 @@ import {
   Tree,
   TreeNode,
 } from '../../frontend/widgets/tree';
-import {ARG_PREFIX} from './add_debug_track_menu';
-import {sqlValueToString} from '../../frontend/sql_utils';
 
-interface DebugSliceDetailsTabConfig {
-  sqlTableName: string;
-  id: number;
-}
+import {ARG_PREFIX} from './add_debug_track_menu';
 
 function sqlValueToNumber(value?: ColumnType): number|undefined {
   if (typeof value === 'bigint') return Number(value);
@@ -86,8 +85,8 @@ function renderTreeContents(dict: {[key: string]: m.Child}): m.Child[] {
 }
 
 export class DebugSliceDetailsTab extends
-    BottomTab<DebugSliceDetailsTabConfig> {
-  static readonly kind = 'org.perfetto.DebugSliceDetailsTab';
+    BottomTab<GenericSliceDetailsTabConfig> {
+  static readonly kind = 'dev.perfetto.DebugSliceDetailsTab';
 
   data?: {
     name: string,
@@ -204,7 +203,7 @@ export class DebugSliceDetailsTab extends
         this.data.dur,
         sqlValueToNumber(this.data.args['track_id']));
 
-    globals.rafScheduler.scheduleRedraw();
+    raf.scheduleRedraw();
   }
 
   constructor(args: NewBottomTabArgs) {

@@ -13,41 +13,36 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-SELECT CREATE_FUNCTION(
-  'VSYNC_FROM_NAME(slice_name STRING)',
-  'STRING',
-  'SELECT CAST(STR_SPLIT($slice_name, " ", 1) AS INTEGER)'
-);
+CREATE PERFETTO FUNCTION VSYNC_FROM_NAME(slice_name STRING)
+RETURNS STRING AS
+SELECT CAST(STR_SPLIT($slice_name, " ", 1) AS INTEGER);
 
-SELECT CREATE_FUNCTION(
-  'GPU_COMPLETION_FENCE_ID_FROM_NAME(slice_name STRING)',
-  'STRING',
-  'SELECT
-    CASE
-      WHEN
-        $slice_name GLOB "GPU completion fence *"
-      THEN
-        CAST(STR_SPLIT($slice_name, " ", 3) AS INTEGER)
-      WHEN
-        $slice_name GLOB "Trace GPU completion fence *"
-      THEN
-        CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
-      WHEN
-        $slice_name GLOB "waiting for GPU completion *"
-      THEN
-        CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
-      WHEN
-        $slice_name GLOB "Trace HWC release fence *"
-      THEN
-        CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
-      WHEN
-        $slice_name GLOB "waiting for HWC release *"
-      THEN
-        CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
-      ELSE NULL
-    END
-  '
-);
+CREATE PERFETTO FUNCTION GPU_COMPLETION_FENCE_ID_FROM_NAME(slice_name STRING)
+RETURNS STRING AS
+SELECT
+  CASE
+    WHEN
+      $slice_name GLOB "GPU completion fence *"
+    THEN
+      CAST(STR_SPLIT($slice_name, " ", 3) AS INTEGER)
+    WHEN
+      $slice_name GLOB "Trace GPU completion fence *"
+    THEN
+      CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
+    WHEN
+      $slice_name GLOB "waiting for GPU completion *"
+    THEN
+      CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
+    WHEN
+      $slice_name GLOB "Trace HWC release fence *"
+    THEN
+      CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
+    WHEN
+      $slice_name GLOB "waiting for HWC release *"
+    THEN
+      CAST(STR_SPLIT($slice_name, " ", 4) AS INTEGER)
+    ELSE NULL
+  END;
 
 -- Find Choreographer#doFrame slices that are between the CUJ markers.
 -- We extract vsync IDs from doFrame slice names and use these as the source
@@ -176,9 +171,9 @@ JOIN actual_frame_timeline_slice app_timeline
   ON do_frame.upid = app_timeline.upid
     AND do_frame.vsync = CAST(app_timeline.name AS INTEGER)
 JOIN directly_connected_flow(app_timeline.id) flow
-  ON flow.slice_in = app_timeline.id
+  ON flow.slice_out = app_timeline.id
 JOIN actual_frame_timeline_slice sf_timeline
-  ON flow.slice_out = sf_timeline.id
+  ON flow.slice_in = sf_timeline.id
 JOIN android_jank_cuj_sf_process sf_process
   ON sf_timeline.upid = sf_process.upid
 -- In cases where there are multiple layers drawn we would have separate frame timeline
@@ -186,7 +181,7 @@ JOIN android_jank_cuj_sf_process sf_process
 GROUP BY cuj_id, app_upid, app_vsync, sf_upid, sf_vsync;
 
 SELECT CREATE_VIEW_FUNCTION(
-  'ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE(slice_name_glob STRING)',
+  'FIND_ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE(slice_name_glob STRING)',
   'cuj_id INT, utid INT, vsync INT, id INT, name STRING, ts LONG, dur LONG, ts_end LONG',
   '
   WITH sf_vsync AS (
@@ -212,16 +207,16 @@ SELECT CREATE_VIEW_FUNCTION(
 
 DROP TABLE IF EXISTS android_jank_cuj_sf_commit_slice;
 CREATE TABLE android_jank_cuj_sf_commit_slice AS
-SELECT * FROM ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE('commit *');
+SELECT * FROM FIND_ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE('commit *');
 
 DROP TABLE IF EXISTS android_jank_cuj_sf_composite_slice;
 CREATE TABLE android_jank_cuj_sf_composite_slice AS
-SELECT * FROM ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE('composite *');
+SELECT * FROM FIND_ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE('composite *');
 
 -- Older builds do not have the commit/composite but onMessageInvalidate instead
 DROP TABLE IF EXISTS android_jank_cuj_sf_on_message_invalidate_slice;
 CREATE TABLE android_jank_cuj_sf_on_message_invalidate_slice AS
-SELECT * FROM ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE('onMessageInvalidate *');
+SELECT * FROM FIND_ANDROID_JANK_CUJ_SF_MAIN_THREAD_SLICE('onMessageInvalidate *');
 
 DROP VIEW IF EXISTS android_jank_cuj_sf_root_slice;
 CREATE VIEW android_jank_cuj_sf_root_slice AS

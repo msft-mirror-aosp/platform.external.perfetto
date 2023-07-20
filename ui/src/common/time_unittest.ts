@@ -12,71 +12,77 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {globals} from '../frontend/globals';
+import {createEmptyState} from './empty_state';
 import {
-  formatTPTime,
+  formatDuration,
+  formatDurationShort,
+  Timecode,
   TPTime,
   TPTimeSpan,
-  tpTimeToCode,
-  tpTimeToString,
 } from './time';
 
-test('tpTimeToCode', () => {
-  expect(tpTimeToCode(0n)).toEqual('0s');
-  expect(tpTimeToCode(3_000_000_000n)).toEqual('3s');
-  expect(tpTimeToCode(60_000_000_000n)).toEqual('1m');
-  expect(tpTimeToCode(63_000_000_000n)).toEqual('1m 3s');
-  expect(tpTimeToCode(63_200_000_000n)).toEqual('1m 3s 200ms');
-  expect(tpTimeToCode(63_222_100_000n)).toEqual('1m 3s 222ms 100us');
-  expect(tpTimeToCode(63_222_111_100n)).toEqual('1m 3s 222ms 111us 100ns');
-  expect(tpTimeToCode(222_111_100n)).toEqual('222ms 111us 100ns');
-  expect(tpTimeToCode(1_000n)).toEqual('1us');
-  expect(tpTimeToCode(3_000n)).toEqual('3us');
-  expect(tpTimeToCode(1_000_001_000n)).toEqual('1s 1us');
-  expect(tpTimeToCode(200_000_000_030n)).toEqual('3m 20s 30ns');
-  expect(tpTimeToCode(3_600_000_000_000n)).toEqual('60m');
-  expect(tpTimeToCode(3_600_000_000_001n)).toEqual('60m 1ns');
-  expect(tpTimeToCode(86_400_000_000_000n)).toEqual('1,440m');
-  expect(tpTimeToCode(86_400_000_000_001n)).toEqual('1,440m 1ns');
-  expect(tpTimeToCode(31_536_000_000_000_000n)).toEqual('525,600m');
-  expect(tpTimeToCode(31_536_000_000_000_001n)).toEqual('525,600m 1ns');
+beforeAll(() => {
+  globals.initStore(createEmptyState());
+  globals.store.edit((draft) => {
+    draft.traceTime.start = 0n;
+  });
 });
 
-test('formatTPTime', () => {
-  expect(formatTPTime(0n)).toEqual('0.000 000 000');
-  expect(formatTPTime(3_000_000_000n)).toEqual('3.000 000 000');
-  expect(formatTPTime(60_000_000_000n)).toEqual('60.000 000 000');
-  expect(formatTPTime(63_000_000_000n)).toEqual('63.000 000 000');
-  expect(formatTPTime(63_200_000_000n)).toEqual('63.200 000 000');
-  expect(formatTPTime(63_222_100_000n)).toEqual('63.222 100 000');
-  expect(formatTPTime(63_222_111_100n)).toEqual('63.222 111 100');
-  expect(formatTPTime(222_111_100n)).toEqual('0.222 111 100');
-  expect(formatTPTime(1_000n)).toEqual('0.000 001 000');
-  expect(formatTPTime(3_000n)).toEqual('0.000 003 000');
-  expect(formatTPTime(1_000_001_000n)).toEqual('1.000 001 000');
-  expect(formatTPTime(200_000_000_030n)).toEqual('200.000 000 030');
-  expect(formatTPTime(3_600_000_000_000n)).toEqual('3600.000 000 000');
-  expect(formatTPTime(86_400_000_000_000n)).toEqual('86400.000 000 000');
-  expect(formatTPTime(86_400_000_000_001n)).toEqual('86400.000 000 001');
-  expect(formatTPTime(31_536_000_000_000_000n)).toEqual('31536000.000 000 000');
-  expect(formatTPTime(31_536_000_000_000_001n)).toEqual('31536000.000 000 001');
+test('formatDuration', () => {
+  expect(formatDuration(0n)).toEqual('0s');
+  expect(formatDuration(3_000_000_000n)).toEqual('3s');
+  expect(formatDuration(60_000_000_000n)).toEqual('1m');
+  expect(formatDuration(63_000_000_000n)).toEqual('1m 3s');
+  expect(formatDuration(63_200_000_000n)).toEqual('1m 3s 200ms');
+  expect(formatDuration(63_222_100_000n)).toEqual('1m 3s 222ms 100us');
+  expect(formatDuration(63_222_111_100n)).toEqual('1m 3s 222ms 111us 100ns');
+  expect(formatDuration(222_111_100n)).toEqual('222ms 111us 100ns');
+  expect(formatDuration(1_000n)).toEqual('1us');
+  expect(formatDuration(3_000n)).toEqual('3us');
+  expect(formatDuration(1_000_001_000n)).toEqual('1s 1us');
+  expect(formatDuration(200_000_000_030n)).toEqual('3m 20s 30ns');
+  expect(formatDuration(3_600_000_000_000n)).toEqual('60m');
+  expect(formatDuration(3_600_000_000_001n)).toEqual('60m 1ns');
+  expect(formatDuration(86_400_000_000_000n)).toEqual('1,440m');
+  expect(formatDuration(86_400_000_000_001n)).toEqual('1,440m 1ns');
+  expect(formatDuration(31_536_000_000_000_000n)).toEqual('525,600m');
+  expect(formatDuration(31_536_000_000_000_001n)).toEqual('525,600m 1ns');
 });
 
-test('tpTimeToString', () => {
-  expect(tpTimeToString(0n)).toEqual('0 s');
-  expect(tpTimeToString(3_000_000_000n)).toEqual('3 s');
-  expect(tpTimeToString(60_000_000_000n)).toEqual('60 s');
-  expect(tpTimeToString(63_000_000_000n)).toEqual('63 s');
-  expect(tpTimeToString(63_200_000_000n)).toEqual('63.2 s');
-  expect(tpTimeToString(63_222_100_000n)).toEqual('63.2 s');
-  expect(tpTimeToString(63_222_111_100n)).toEqual('63.2 s');
-  expect(tpTimeToString(222_111_100n)).toEqual('222.1 ms');
-  expect(tpTimeToString(1_000n)).toEqual('1 us');
-  expect(tpTimeToString(3_000n)).toEqual('3 us');
-  expect(tpTimeToString(1_000_001_000n)).toEqual('1 s');
-  expect(tpTimeToString(200_000_000_030n)).toEqual('200 s');
-  expect(tpTimeToString(3_600_000_000_000n)).toEqual('3600 s');
-  expect(tpTimeToString(86_400_000_000_000n)).toEqual('86400 s');
-  expect(tpTimeToString(31_536_000_000_000_000n)).toEqual('31536000 s');
+test('formatDurationShort', () => {
+  expect(formatDurationShort(0n)).toEqual('0s');
+  expect(formatDurationShort(123n)).toEqual('123ns');
+  expect(formatDurationShort(1_234n)).toEqual('1.2us');
+  expect(formatDurationShort(12_345n)).toEqual('12.3us');
+  expect(formatDurationShort(3_000_000_000n)).toEqual('3s');
+  expect(formatDurationShort(60_000_000_000n)).toEqual('60s');
+  expect(formatDurationShort(63_000_000_000n)).toEqual('63s');
+  expect(formatDurationShort(63_200_000_000n)).toEqual('63.2s');
+  expect(formatDurationShort(63_222_100_000n)).toEqual('63.2s');
+  expect(formatDurationShort(63_222_111_100n)).toEqual('63.2s');
+  expect(formatDurationShort(222_111_100n)).toEqual('222.1ms');
+  expect(formatDurationShort(1_000n)).toEqual('1us');
+  expect(formatDurationShort(3_000n)).toEqual('3us');
+  expect(formatDurationShort(1_000_001_000n)).toEqual('1s');
+  expect(formatDurationShort(200_000_000_030n)).toEqual('200s');
+  expect(formatDurationShort(3_600_000_000_000n)).toEqual('3600s');
+  expect(formatDurationShort(86_400_000_000_000n)).toEqual('86400s');
+  expect(formatDurationShort(31_536_000_000_000_000n)).toEqual('31536000s');
+});
+
+test('timecode', () => {
+  expect(new Timecode(0n).toString(' ')).toEqual('00:00:00.000 000 000');
+  expect(new Timecode(123n).toString(' ')).toEqual('00:00:00.000 000 123');
+  expect(new Timecode(60_000_000_000n).toString(' '))
+      .toEqual('00:01:00.000 000 000');
+  expect(new Timecode(12_345_678_910n).toString(' '))
+      .toEqual('00:00:12.345 678 910');
+  expect(new Timecode(86_400_000_000_000n).toString(' '))
+      .toEqual('1d00:00:00.000 000 000');
+  expect(new Timecode(31_536_000_000_000_000n).toString(' '))
+      .toEqual('365d00:00:00.000 000 000');
+  expect(new Timecode(-123n).toString(' ')).toEqual('-00:00:00.000 000 123');
 });
 
 function mkSpan(start: TPTime, end: TPTime) {
@@ -122,15 +128,26 @@ describe('TPTimeSpan', () => {
     expect(x.contains(mkSpan(20n, 30n))).toBeFalsy();
   });
 
+  it('checks intersection with span', () => {
+    const x = mkSpan(10n, 20n);
+
+    expect(x.intersectsSpan(mkSpan(0n, 10n))).toBeFalsy();
+    expect(x.intersectsSpan(mkSpan(5n, 15n))).toBeTruthy();
+    expect(x.intersectsSpan(mkSpan(12n, 18n))).toBeTruthy();
+    expect(x.intersectsSpan(mkSpan(15n, 25n))).toBeTruthy();
+    expect(x.intersectsSpan(mkSpan(20n, 30n))).toBeFalsy();
+    expect(x.intersectsSpan(mkSpan(5n, 25n))).toBeTruthy();
+  });
+
   it('checks intersection', () => {
     const x = mkSpan(10n, 20n);
 
-    expect(x.intersects(mkSpan(0n, 10n))).toBeFalsy();
-    expect(x.intersects(mkSpan(5n, 15n))).toBeTruthy();
-    expect(x.intersects(mkSpan(12n, 18n))).toBeTruthy();
-    expect(x.intersects(mkSpan(15n, 25n))).toBeTruthy();
-    expect(x.intersects(mkSpan(20n, 30n))).toBeFalsy();
-    expect(x.intersects(mkSpan(5n, 25n))).toBeTruthy();
+    expect(x.intersects(0n, 10n)).toBeFalsy();
+    expect(x.intersects(5n, 15n)).toBeTruthy();
+    expect(x.intersects(12n, 18n)).toBeTruthy();
+    expect(x.intersects(15n, 25n)).toBeTruthy();
+    expect(x.intersects(20n, 30n)).toBeFalsy();
+    expect(x.intersects(5n, 25n)).toBeTruthy();
   });
 
   it('can add', () => {

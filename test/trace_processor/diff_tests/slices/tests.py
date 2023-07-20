@@ -138,3 +138,28 @@ class Slices(TestSuite):
         "end_ts"
         174797566610797
         """))
+
+  def test_slice_flattened(self):
+    return DiffTestBlueprint(
+        trace=DataPath('chrome_input_with_frame_view.pftrace'),
+        query="""
+        SELECT import('experimental.flat_slices');
+
+        SELECT e.name, e.ts, e.dur, e.depth
+        FROM experimental_slice_flattened e
+        JOIN thread_track ON e.track_id = thread_track.id
+        JOIN thread USING(utid)
+        WHERE thread.tid = 30944;
+      """,
+        out=Csv("""
+        "name","ts","dur","depth"
+        "ThreadControllerImpl::RunTask",174793737042797,3937000,0
+        "ThreadControllerImpl::RunTask",174793741016797,5930000,0
+        "ThreadControllerImpl::RunTask",174793747000797,47000,0
+        "Receive mojo message",174793747047797,136000,1
+        "ThreadControllerImpl::RunTask",174793747183797,17000,0
+        "Looper.dispatch: android.os.Handler(Kx3@57873a8)",174793747546797,119000,0
+        "ThreadControllerImpl::RunTask",174796099970797,186000,0
+        "Looper.dispatch: jy3(null)",174800056530797,1368000,0
+        "ThreadControllerImpl::RunTask",174800107962797,132000,0
+      """))

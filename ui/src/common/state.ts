@@ -14,13 +14,16 @@
 
 import {RecordConfig} from '../controller/record_config_types';
 import {
+  GenericSliceDetailsTabConfigBase,
+} from '../frontend/generic_slice_details_tab';
+import {
   Aggregation,
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
+
 import {Direction} from './event_set';
 import {TPDuration, TPTime} from './time';
-import {SqlObjectDetailsTabConfig} from '../frontend/details_panel';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -104,7 +107,9 @@ export const MAX_TIME = 180;
 // 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
 // 31. Convert all timestamps to bigints.
 // 32. Add pendingDeeplink.
-export const STATE_VERSION = 31;
+// 33. Add plugins state.
+// 34. Add additional pendingDeeplink fields (query, pid).
+export const STATE_VERSION = 34;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -311,14 +316,6 @@ export interface SliceSelection {
   id: number;
 }
 
-export interface DebugSliceSelection {
-  kind: 'DEBUG_SLICE';
-  id: number;
-  sqlTableName: string;
-  start: TPTime;
-  duration: TPDuration;
-}
-
 export interface CounterSelection {
   kind: 'COUNTER';
   leftTs: TPTime;
@@ -378,24 +375,21 @@ export interface LogSelection {
   trackId: string;
 }
 
-export interface BasicSqlObjectSelection {
-  kind: 'BASIC_SQL_OBJECT';
+export interface GenericSliceSelection {
+  kind: 'GENERIC_SLICE';
   id: number;
   sqlTableName: string;
   start: TPTime;
   duration: TPDuration;
   // NOTE: this config can be expanded for multiple details panel types.
-  detailsPanelConfig: {
-    kind: string;
-    config: SqlObjectDetailsTabConfig;
-  };
+  detailsPanelConfig: {kind: string; config: GenericSliceDetailsTabConfigBase;};
 }
 
 export type Selection =
     (NoteSelection|SliceSelection|CounterSelection|HeapProfileSelection|
      CpuProfileSampleSelection|ChromeSliceSelection|ThreadStateSelection|
-     AreaSelection|PerfSamplesSelection|LogSelection|DebugSliceSelection|
-     BasicSqlObjectSelection)&{trackId?: string};
+     AreaSelection|PerfSamplesSelection|LogSelection|GenericSliceSelection)&
+    {trackId?: string};
 export type SelectionKind = Selection['kind'];  // 'THREAD_STATE' | 'SLICE' ...
 
 export interface Pagination {
@@ -532,6 +526,8 @@ export interface PendingDeeplinkState {
   ts?: string;
   dur?: string;
   tid?: string;
+  pid?: string;
+  query?: string;
 }
 
 export interface State {
@@ -632,6 +628,9 @@ export interface State {
   // Pending deeplink which will happen when we first finish opening a
   // trace.
   pendingDeeplink?: PendingDeeplinkState;
+
+  // Individual plugin states
+  plugins: {[key: string]: any};
 }
 
 export const defaultTraceTime = {
