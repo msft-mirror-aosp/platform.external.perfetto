@@ -21,11 +21,7 @@ import {Actions} from '../common/actions';
 import {EngineProxy} from '../common/engine';
 import {runQuery} from '../common/queries';
 import {LONG, LONG_NULL, NUM, STR_NULL} from '../common/query_result';
-import {
-  formatDuration,
-  TPDuration,
-  TPTime,
-} from '../common/time';
+import {Duration, duration, Time, time} from '../common/time';
 import {ArgNode, convertArgsToTree, Key} from '../controller/args_parser';
 
 import {Anchor} from './anchor';
@@ -43,11 +39,11 @@ import {Arg} from './sql/args';
 import {getSlice, SliceDetails, SliceRef} from './sql/slice';
 import {SqlTableTab} from './sql_table/tab';
 import {SqlTables} from './sql_table/well_known_tables';
-import {asSliceSqlId, asTPTimestamp} from './sql_types';
+import {asSliceSqlId} from './sql_types';
 import {getProcessName, getThreadName} from './thread_and_process_info';
 import {Button} from './widgets/button';
 import {DetailsShell} from './widgets/details_shell';
-import {Duration} from './widgets/duration';
+import {DurationWidget} from './widgets/duration';
 import {GridLayout, GridLayoutColumn} from './widgets/grid_layout';
 import {MenuItem, PopupMenu2} from './widgets/menu';
 import {Section} from './widgets/section';
@@ -58,34 +54,51 @@ import {Tree, TreeNode} from './widgets/tree';
 interface ContextMenuItem {
   name: string;
   shouldDisplay(slice: SliceDetails): boolean;
-  getAction(slice: SliceDetails): void;
+  run(slice: SliceDetails): void;
+}
+
+function getTidFromSlice(slice: SliceDetails): number|undefined {
+  return slice.thread?.tid;
+}
+
+function getPidFromSlice(slice: SliceDetails): number|undefined {
+  return slice.process?.pid;
+}
+
+function getProcessNameFromSlice(slice: SliceDetails): string|undefined {
+  return slice.process?.name;
+}
+
+function hasName(slice: SliceDetails): boolean {
+  return slice.name !== undefined;
+}
+
+function hasTid(slice: SliceDetails): boolean {
+  return getTidFromSlice(slice) !== undefined;
+}
+
+function hasPid(slice: SliceDetails): boolean {
+  return getPidFromSlice(slice) !== undefined;
+}
+
+function hasProcessName(slice: SliceDetails): boolean {
+  return getProcessNameFromSlice(slice) !== undefined;
 }
 
 const ITEMS: ContextMenuItem[] = [
   {
-    name: 'Average duration',
-    shouldDisplay: (slice: SliceDetails) => slice.name !== undefined,
-    getAction: (slice: SliceDetails) => runQueryInNewTab(
+    name: 'Average duration of slice name',
+    shouldDisplay: (slice: SliceDetails) => hasName(slice),
+    run: (slice: SliceDetails) => runQueryInNewTab(
         `SELECT AVG(dur) / 1e9 FROM slice WHERE name = '${slice.name!}'`,
         `${slice.name} average dur`,
         ),
   },
   {
-    name: 'Binder by TXN',
-    shouldDisplay: () => true,
-    getAction: () => runQueryInNewTab(
-        `SELECT IMPORT('android.binder');
-
-         SELECT *
-         FROM android_sync_binder_metrics_by_txn
-         ORDER BY client_dur DESC`,
-        'Binder by TXN',
-        ),
-  },
-  {
-    name: 'Binder call names',
-    shouldDisplay: () => true,
-    getAction: (slice: SliceDetails) => {
+    name: 'Binder call names on thread',
+    shouldDisplay: (slice) =>
+        hasProcessName(slice) && hasTid(slice) && hasPid(slice),
+    run: (slice: SliceDetails) => {
       const engine = getEngine();
       if (engine === undefined) return;
       runQuery(`SELECT IMPORT('android.binder');`, engine)
@@ -99,56 +112,12 @@ const ITEMS: ContextMenuItem[] = [
                   JOIN thread USING (utid)
                   JOIN process USING (upid)
                 WHERE aidl_name IS NOT NULL
-                  AND pid = ${slice.process?.pid}
-                  AND tid = ${slice.thread?.tid}`,
-                  `Binder names (${slice.process?.name}:${slice.thread?.tid})`,
+                  AND pid = ${getPidFromSlice(slice)}
+                  AND tid = ${getTidFromSlice(slice)}`,
+                  `Binder names (${getProcessNameFromSlice(slice)}:${
+                      getTidFromSlice(slice)})`,
                   ));
     },
-  },
-  {
-    name: 'Lock graph',
-    shouldDisplay: (slice: SliceDetails) => slice.id !== undefined,
-    getAction: (slice: SliceDetails) => runQueryInNewTab(
-        `SELECT IMPORT('android.monitor_contention');
-         DROP TABLE IF EXISTS FAST;
-         CREATE TABLE FAST
-         AS
-         WITH slice_process AS (
-         SELECT process.name, process.upid FROM slice
-         JOIN thread_track ON thread_track.id = slice.track_id
-         JOIN thread USING(utid)
-         JOIN process USING(upid)
-         WHERE slice.id = ${slice.id}
-         )
-         SELECT *,
-         IIF(blocked_thread_name LIKE 'binder:%', 'binder', blocked_thread_name)
-          AS blocked_thread_name_norm,
-         IIF(blocking_thread_name LIKE 'binder:%', 'binder', blocking_thread_name)
-          AS blocking_thread_name_norm
-         FROM android_monitor_contention_chain, slice_process
-         WHERE android_monitor_contention_chain.upid = slice_process.upid;
-
-         WITH
-         R AS (
-         SELECT
-           id,
-           dur,
-           CAT_STACKS(blocked_thread_name_norm || ':' || short_blocked_method,
-             blocking_thread_name_norm || ':' || short_blocking_method) AS stack
-         FROM FAST
-         WHERE parent_id IS NULL
-         UNION ALL
-         SELECT
-         c.id,
-         c.dur AS dur,
-         CAT_STACKS(stack, blocking_thread_name_norm || ':' || short_blocking_method) AS stack
-         FROM FAST c, R AS p
-         WHERE p.id = c.parent_id
-         )
-         SELECT TITLE.process_name, EXPERIMENTAL_PROFILE(stack, 'duration', 'ns', dur) AS pprof
-         FROM R, (SELECT process_name FROM FAST LIMIT 1) TITLE;`,
-        'Lock graph',
-        ),
   },
 ];
 
@@ -274,12 +243,12 @@ function renderArgTreeNodes(
   });
 }
 
-function computeDuration(ts: TPTime, dur: TPDuration): m.Children {
+function computeDuration(ts: time, dur: duration): m.Children {
   if (dur === -1n) {
     const minDuration = globals.state.traceTime.end - ts;
-    return `${formatDuration(minDuration)} (Did not end)`;
+    return `${Duration.format(minDuration)} (Did not end)`;
   } else {
-    return m(Duration, {dur});
+    return m(DurationWidget, {dur});
   }
 }
 
@@ -312,7 +281,7 @@ async function getAnnotationSlice(
   return {
     id: asSliceSqlId(it.id),
     name: it.name ?? 'null',
-    ts: asTPTimestamp(it.ts),
+    ts: Time.fromRaw(it.ts),
     dur: it.dur,
     sqlTrackId: it.trackId,
     threadDur: it.threadDur ?? undefined,
@@ -439,7 +408,7 @@ export class ChromeSliceDetailsTab extends
             }),
             m(TreeNode, {
               left: 'Start time',
-              right: m(Timestamp, {ts: asTPTimestamp(slice.ts)}),
+              right: m(Timestamp, {ts: slice.ts}),
             }),
             exists(slice.absTime) &&
                 m(TreeNode, {left: 'Absolute Time', right: slice.absTime}),
@@ -537,8 +506,7 @@ export class ChromeSliceDetailsTab extends
   }
 
   private renderFlow(
-      flow: FlowPoint, dur: TPDuration,
-      includeProcessName: boolean): m.Children {
+      flow: FlowPoint, dur: duration, includeProcessName: boolean): m.Children {
     const description = flow.sliceChromeCustomName === undefined ?
         flow.sliceName :
         flow.sliceChromeCustomName;
@@ -559,7 +527,7 @@ export class ChromeSliceDetailsTab extends
             sqlTrackId: flow.trackId,
           }),
         }),
-        m(TreeNode, {left: 'Delay', right: m(Duration, {dur})}),
+        m(TreeNode, {left: 'Delay', right: m(DurationWidget, {dur})}),
         m(TreeNode, {left: 'Thread', right: threadName}),
     );
   }
@@ -590,8 +558,8 @@ export class ChromeSliceDetailsTab extends
           PopupMenu2,
           {trigger},
           contextMenuItems.map(
-              ({name, getAction}) =>
-                  m(MenuItem, {label: name, onclick: getAction})),
+              ({name, run}) =>
+                  m(MenuItem, {label: name, onclick: () => run(sliceInfo)})),
       );
     } else {
       return undefined;

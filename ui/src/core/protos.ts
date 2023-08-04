@@ -36,6 +36,7 @@ import DataSourceDescriptor = protos.perfetto.protos.DataSourceDescriptor;
 import FtraceConfig = protos.perfetto.protos.FtraceConfig;
 import HeapprofdConfig = protos.perfetto.protos.HeapprofdConfig;
 import JavaHprofConfig = protos.perfetto.protos.JavaHprofConfig;
+import PerfEventConfig = protos.perfetto.protos.PerfEventConfig;
 import IAndroidPowerConfig = protos.perfetto.protos.IAndroidPowerConfig;
 import IBufferConfig = protos.perfetto.protos.TraceConfig.IBufferConfig;
 import IProcessStatsConfig = protos.perfetto.protos.IProcessStatsConfig;
@@ -85,12 +86,12 @@ export {
   BatteryCounters,
   BufferConfig,
   ChromeConfig,
-  ConsumerPort,
   ComputeMetricArgs,
   ComputeMetricResult,
+  ConsumerPort,
   DataSourceConfig,
-  DisableAndReadMetatraceResult,
   DataSourceDescriptor,
+  DisableAndReadMetatraceResult,
   DisableTracingRequest,
   DisableTracingResponse,
   EnableTracingRequest,
@@ -115,20 +116,21 @@ export {
   MeminfoCounters,
   NativeContinuousDumpConfig,
   NetworkPacketTraceConfig,
-  ProcessStatsConfig,
   PerfettoMetatrace,
-  ReadBuffersRequest,
-  ReadBuffersResponse,
+  PerfEventConfig,
+  ProcessStatsConfig,
+  QueryArgs,
   QueryServiceStateRequest,
   QueryServiceStateResponse,
-  QueryArgs,
+  ReadBuffersRequest,
+  ReadBuffersResponse,
   ResetTraceProcessorArgs,
   StatCounters,
   StatusResult,
   SysStatsConfig,
   Trace,
   TraceConfig,
-  TrackEventConfig,
   TracePacket,
+  TrackEventConfig,
   VmstatCounters,
 };

@@ -17,7 +17,7 @@ import m from 'mithril';
 
 import {Actions} from '../common/actions';
 import {TrackState} from '../common/state';
-import {Span, TPDuration, TPTime} from '../common/time';
+import {duration, Span, time} from '../common/time';
 import {raf} from '../core/raf_scheduler';
 
 import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
@@ -63,6 +63,24 @@ function isSelected(id: string) {
   if (selection === null || selection.kind !== 'AREA') return false;
   const selectedArea = globals.state.areas[selection.areaId];
   return selectedArea.tracks.includes(id);
+}
+
+interface TrackChipsAttrs {
+  config: {[k: string]: any};
+}
+
+export class TrackChips implements m.ClassComponent<TrackChipsAttrs> {
+  view({attrs}: m.CVnode<TrackChipsAttrs>) {
+    const {config} = attrs;
+
+    const isMetric = 'namespace' in config;
+    const isDebuggable = ('isDebuggable' in config) && config.isDebuggable;
+
+    return [
+      isMetric && m('span.chip', 'metric'),
+      isDebuggable && m('span.chip', 'debuggable'),
+    ];
+  }
 }
 
 interface TrackShellAttrs {
@@ -113,8 +131,7 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
               },
             },
             attrs.trackState.name,
-            ('namespace' in attrs.trackState.config) &&
-                m('span.chip', 'metric'),
+            m(TrackChips, {config: attrs.trackState.config}),
             ),
         m('.track-buttons',
           attrs.track.getTrackShellButtons(),
@@ -380,7 +397,7 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
     if (selectedArea.tracks.includes(trackState.id)) {
       ctx.fillStyle = SELECTION_FILL_COLOR;
       ctx.fillRect(
-          visibleTimeScale.tpTimeToPx(selectedArea.start) + TRACK_SHELL_WIDTH,
+          visibleTimeScale.timeToPx(selectedArea.start) + TRACK_SHELL_WIDTH,
           0,
           visibleTimeScale.durationToPx(selectedAreaDuration),
           size.height);
@@ -461,9 +478,9 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
   }
 
   getSliceRect(
-      visibleTimeScale: TimeScale, visibleWindow: Span<TPTime, TPDuration>,
-      windowSpan: PxSpan, tStart: TPTime, tDur: TPTime,
-      depth: number): SliceRect|undefined {
+      visibleTimeScale: TimeScale, visibleWindow: Span<time, duration>,
+      windowSpan: PxSpan, tStart: time, tDur: time, depth: number): SliceRect
+      |undefined {
     if (this.track === undefined) {
       return undefined;
     }

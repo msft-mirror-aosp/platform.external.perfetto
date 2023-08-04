@@ -843,8 +843,7 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
     // for pre-pending the packet preamble (See GetProtoPreamble() calls), but
     // the preamble is not there at ReadBuffer time. Hence we change the root of
     // the filtering to start at the Trace.packet level.
-    uint32_t packet_field_id = TracePacket::kPacketFieldNumber;
-    if (!trace_filter->SetFilterRoot(&packet_field_id, 1)) {
+    if (!trace_filter->SetFilterRoot({TracePacket::kPacketFieldNumber})) {
       MaybeLogUploadEvent(
           cfg, uuid, PerfettoStatsdAtom::kTracedEnableTracingInvalidFilter);
       return PERFETTO_SVC_ERR("Failed to set filter root.");
@@ -1121,6 +1120,14 @@ void TracingServiceImpl::ChangeTraceConfig(ConsumerEndpointImpl* consumer,
     *cfg_data_source.mutable_producer_name_regex_filter() =
         new_producer_name_regex_filter;
 
+    // Get the list of producers that are already set up.
+    std::unordered_set<uint16_t> set_up_producers;
+    auto& ds_instances = tracing_session->data_source_instances;
+    for (auto instance_it = ds_instances.begin();
+         instance_it != ds_instances.end(); ++instance_it) {
+      set_up_producers.insert(instance_it->first);
+    }
+
     // Scan all the registered data sources with a matching name.
     auto range = data_sources_.equal_range(cfg_data_source.config().name());
     for (auto it = range.first; it != range.second; it++) {
@@ -1135,19 +1142,9 @@ void TracingServiceImpl::ChangeTraceConfig(ConsumerEndpointImpl* consumer,
         continue;
       }
 
-      bool already_setup = false;
-      auto& ds_instances = tracing_session->data_source_instances;
-      for (auto instance_it = ds_instances.begin();
-           instance_it != ds_instances.end(); ++instance_it) {
-        if (instance_it->first == it->second.producer_id &&
-            instance_it->second.data_source_name ==
-                cfg_data_source.config().name()) {
-          already_setup = true;
-          break;
-        }
-      }
-
-      if (already_setup)
+      // If this producer is already set up, we assume that all datasources
+      // in it started already.
+      if (set_up_producers.count(it->second.producer_id))
         continue;
 
       // If it wasn't previously setup, set it up now.
@@ -2229,6 +2226,19 @@ bool TracingServiceImpl::IsWaitingForTrigger(TracingSession* tracing_session) {
         "ReadBuffers(): tracing session has not received a trigger yet.");
     return true;
   }
+
+  // Traces with CLONE_SNAPSHOT triggers are a special case of the above. They
+  // can be read only via a CloneSession() request. This is to keep the
+  // behavior consistent with the STOP_TRACING+triggers case and avoid periodic
+  // finalizations and uploads of the main CLONE_SNAPSHOT triggers.
+  if (GetTriggerMode(tracing_session->config) ==
+      TraceConfig::TriggerConfig::CLONE_SNAPSHOT) {
+    PERFETTO_DLOG(
+        "ReadBuffers(): skipping because the tracing session has "
+        "CLONE_SNAPSHOT triggers defined");
+    return true;
+  }
+
   return false;
 }
 
@@ -2401,9 +2411,9 @@ void TracingServiceImpl::MaybeFilterPackets(TracingSession* tracing_session,
     return;
   }
   protozero::MessageFilter& trace_filter = *tracing_session->trace_filter;
-  // The filter root shoud be reset from protos.Trace to protos.TracePacket
+  // The filter root should be reset from protos.Trace to protos.TracePacket
   // by the earlier call to SetFilterRoot() in EnableTracing().
-  PERFETTO_DCHECK(trace_filter.root_msg_index() != 0);
+  PERFETTO_DCHECK(trace_filter.config().root_msg_index() != 0);
   std::vector<protozero::MessageFilter::InputSlice> filter_input;
   auto start = base::GetWallTimeNs();
   for (TracePacket& packet : *packets) {
@@ -3683,7 +3693,15 @@ base::Status TracingServiceImpl::DoCloneSession(ConsumerEndpointImpl* consumer,
 
   // Copy over relevant state that we want to persist in the cloned session.
   // Mostly stats and metadata that is emitted in the trace file by the service.
-  cloned_session->received_triggers = src->received_triggers;
+  // Also clear the received trigger list in the main tracing session. A
+  // CLONE_SNAPSHOT session can go in ring buffer mode for several hours and get
+  // snapshotted several times. This causes two issues with `received_triggers`:
+  // 1. Adding noise in the cloned trace emitting triggers that happened too
+  //    far back (see b/290799105).
+  // 2. Bloating memory (see b/290798988).
+  cloned_session->received_triggers = std::move(src->received_triggers);
+  src->received_triggers.clear();
+  src->num_triggers_emitted_into_trace = 0;
   cloned_session->lifecycle_events =
       std::vector<TracingSession::LifecycleEvent>(src->lifecycle_events);
   cloned_session->initial_clock_snapshot = src->initial_clock_snapshot;
@@ -3696,7 +3714,7 @@ base::Status TracingServiceImpl::DoCloneSession(ConsumerEndpointImpl* consumer,
   if (src->trace_filter) {
     // Copy the trace filter.
     cloned_session->trace_filter.reset(
-        new protozero::MessageFilter(*src->trace_filter));
+        new protozero::MessageFilter(src->trace_filter->config()));
   }
 
   SnapshotLifecyleEvent(

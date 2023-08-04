@@ -130,23 +130,25 @@ SqliteEngine::~SqliteEngine() {
   PERFETTO_CHECK(sqlite_tables_.size() == 0);
 }
 
-base::StatusOr<SqliteEngine::PreparedStatement> SqliteEngine::PrepareStatement(
-    SqlSource sql) {
+SqliteEngine::PreparedStatement SqliteEngine::PrepareStatement(SqlSource sql) {
   PERFETTO_TP_TRACE(metatrace::Category::QUERY, "QUERY_PREPARE");
   sqlite3_stmt* raw_stmt = nullptr;
   int err =
       sqlite3_prepare_v2(db_.get(), sql.sql().c_str(), -1, &raw_stmt, nullptr);
+  PreparedStatement statement{ScopedStmt(raw_stmt), std::move(sql)};
   if (err != SQLITE_OK) {
     const char* errmsg = sqlite3_errmsg(db_.get());
-    std::string frame = sql.AsTracebackFrame(GetErrorOffset());
+    std::string frame = statement.sql_source_.AsTraceback(GetErrorOffset());
     base::Status status = base::ErrStatus("%s%s", frame.c_str(), errmsg);
     status.SetPayload("perfetto.dev/has_traceback", "true");
-    return status;
+
+    statement.status_ = std::move(status);
+    return statement;
   }
   if (!raw_stmt) {
-    return base::ErrStatus("No SQL to execute");
+    statement.status_ = base::ErrStatus("No SQL to execute");
   }
-  return PreparedStatement{ScopedStmt(raw_stmt), std::move(sql)};
+  return statement;
 }
 
 base::Status SqliteEngine::RegisterFunction(const char* name,
@@ -218,8 +220,8 @@ void SqliteEngine::OnSqliteTableDestroyed(const std::string& name) {
 }
 
 SqliteEngine::PreparedStatement::PreparedStatement(ScopedStmt stmt,
-                                                   SqlSource tagged)
-    : stmt_(std::move(stmt)), sql_source_(std::move(tagged)) {}
+                                                   SqlSource source)
+    : stmt_(std::move(stmt)), sql_source_(std::move(source)) {}
 
 bool SqliteEngine::PreparedStatement::Step() {
   PERFETTO_TP_TRACE(metatrace::Category::QUERY, "STMT_STEP",
@@ -237,7 +239,7 @@ bool SqliteEngine::PreparedStatement::Step() {
     return false;
   }
   sqlite3* db = sqlite3_db_handle(stmt_.get());
-  std::string frame = sql_source_.AsTracebackFrame(GetErrorOffsetDb(db));
+  std::string frame = sql_source_.AsTraceback(GetErrorOffsetDb(db));
   const char* errmsg = sqlite3_errmsg(db);
   status_ = base::ErrStatus("%s%s", frame.c_str(), errmsg);
   return false;
