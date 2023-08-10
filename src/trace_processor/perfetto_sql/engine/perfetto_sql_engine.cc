@@ -83,7 +83,9 @@ base::Status AddTracebackIfNeeded(base::Status status,
   if (status.GetPayload("perfetto.dev/has_traceback") == "true") {
     return status;
   }
-  std::string traceback = source.AsTraceback(std::nullopt);
+  // Since the error is with the statement as a whole, just pass zero so the
+  // traceback points to the start of the statement.
+  std::string traceback = source.AsTraceback(0);
   status = base::ErrStatus("%s%s", traceback.c_str(), status.c_message());
   status.SetPayload("perfetto.dev/has_traceback", "true");
   return status;
@@ -107,9 +109,8 @@ PerfettoSqlEngine::~PerfettoSqlEngine() {
 
 void PerfettoSqlEngine::RegisterStaticTable(const Table& table,
                                             const std::string& table_name) {
-  DbSqliteTable::Context context{
-      query_cache_.get(), DbSqliteTable::TableComputation::kStatic, &table,
-      /*sql_table=*/nullptr, /*generator=*/nullptr};
+  auto context =
+      std::make_unique<DbSqliteTable::Context>(query_cache_.get(), &table);
   engine_->RegisterVirtualTableModule<DbSqliteTable>(
       table_name, std::move(context), SqliteTable::kEponymousOnly, false);
 
@@ -130,9 +131,8 @@ void PerfettoSqlEngine::RegisterStaticTable(const Table& table,
 void PerfettoSqlEngine::RegisterStaticTableFunction(
     std::unique_ptr<StaticTableFunction> fn) {
   std::string table_name = fn->TableName();
-  DbSqliteTable::Context context{
-      query_cache_.get(), DbSqliteTable::TableComputation::kTableFunction,
-      /*static_table=*/nullptr, /*sql_table=*/nullptr, std::move(fn)};
+  auto context = std::make_unique<DbSqliteTable::Context>(query_cache_.get(),
+                                                          std::move(fn));
   engine_->RegisterVirtualTableModule<DbSqliteTable>(
       table_name, std::move(context), SqliteTable::kEponymousOnly, false);
 }
@@ -357,9 +357,8 @@ base::Status PerfettoSqlEngine::RegisterRuntimeTable(std::string name,
   }
   RETURN_IF_ERROR(table->AddColumnsAndOverlays(rows));
 
-  DbSqliteTable::Context context{
-      query_cache_.get(), DbSqliteTable::TableComputation::kRuntime,
-      /*static_table=*/nullptr, std::move(table), /*generator=*/nullptr};
+  auto context = std::make_unique<DbSqliteTable::Context>(query_cache_.get(),
+                                                          std::move(table));
   engine_->RegisterVirtualTableModule<DbSqliteTable>(
       name, std::move(context), SqliteTable::kEponymousOnly, false);
   return base::OkStatus();
