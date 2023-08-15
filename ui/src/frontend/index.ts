@@ -157,6 +157,7 @@ function setupContentSecurityPolicy() {
       'blob:',
       'https://www.google-analytics.com',
       'https://www.googletagmanager.com',
+      'https://*.googleapis.com',
     ],
     'style-src': [
       `'self'`,
@@ -332,6 +333,8 @@ function onCssLoaded() {
       dur: route.args.dur,
       pid: route.args.pid,
       query: route.args.query,
+      visStart: route.args.visStart,
+      visEnd: route.args.visEnd,
     }));
 
     if (!globals.embeddedMode) {
