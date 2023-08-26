@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Disposable} from '../base/disposable';
+import m from 'mithril';
+
 import {Hotkey} from '../base/hotkeys';
 import {EngineProxy} from '../common/engine';
+import {duration, Span, time} from '../common/time';
 import {TrackControllerFactory} from '../controller/track_controller';
 import {Store} from '../frontend/store';
-import {TrackCreator} from '../frontend/track';
+import {PxSpan, TimeScale} from '../frontend/time_scale';
+import {SliceRect, TrackCreator} from '../frontend/track';
+import {TrackButtonAttrs} from '../frontend/track_panel';
 
 export {EngineProxy} from '../common/engine';
 export {
@@ -139,36 +143,108 @@ export interface MetricVisualisation {
   path: string[];
 }
 
-// All trace plugins must implement this interface.
-export interface TracePlugin extends Disposable {
-  commands?: () => Command[];
+// This interface defines a context for a plugin, which is an object passed to
+// most hooks within the plugin. It should be used to interact with Perfetto.
+export interface PluginContext {
+  readonly viewer: Viewer;
 
-  // Called any time a trace is loaded. Plugins should return all
-  // potential tracks. Zero or more of the provided tracks may be
-  // instantiated depending on the users choices.
-  tracks?: () => Promise<TrackInfo[]>;
+  // DEPRECATED. In prior versions of the UI tracks were split into a
+  // 'TrackController' and a 'Track'. In more recent versions of the UI
+  // the functionality of |TrackController| has been merged into Track so
+  // |TrackController|s are not necessary in new code.
+  registerTrackController(track: TrackControllerFactory): void;
 
-  // Metric visualisations. These extend the metrics page with
-  // visualisations for specific metrics.
-  metricVisualisations?: () => MetricVisualisation[];
+  // Register a track factory. The core UI invokes |TrackCreator| to
+  // construct tracks discovered by invoking |TrackProvider|s.
+  // The split between 'construction' and 'discovery' allows
+  // plugins to reuse common tracks for new data. For example: the
+  // dev.perfetto.AndroidGpu plugin could register a TrackProvider
+  // which returns GPU counter tracks. The counter track factory itself
+  // could be registered in dev.perfetto.CounterTrack - a whole
+  // different plugin.
+  registerTrack(track: TrackCreator): void;
 }
+
+// TODO(stevegolton): Rename `Track` to `BaseTrack` (or similar) and rename this
+// interface to `Track`.
+export interface TrackLike {
+  render(ctx: CanvasRenderingContext2D): void;
+  onFullRedraw(): void;
+  getSliceRect(
+      visibleTimeScale: TimeScale, visibleWindow: Span<time, duration>,
+      windowSpan: PxSpan, tStart: time, tEnd: time, depth: number): SliceRect
+      |undefined;
+  getHeight(): number;
+  getTrackShellButtons(): Array<m.Vnode<TrackButtonAttrs>>;
+  getContextMenu(): m.Vnode<any>|null;
+  onMouseMove(_position: {x: number, y: number}): void;
+  onMouseClick(_position: {x: number, y: number}): boolean;
+  onMouseOut(): void;
+  onDestroy(): void;
+}
+
+export interface PluginTrackInfo {
+  // A unique identifier for the track. This must be unique within all tracks.
+  uri: string;
+
+  // A human friendly name for this track. Used when displaying the list of
+  // tracks to the user. E.g. when adding a new track to the workspace.
+  displayName: string;
+
+  // A factory function returning the track object.
+  trackFactory: () => TrackLike;
+}
+
+// Similar to PluginContext but with additional properties to operate on the
+// currently loaded trace. Passed to trace-relevant hooks instead of
+// PluginContext.
+export interface TracePluginContext<T = undefined> extends PluginContext {
+  readonly engine: EngineProxy;
+  readonly store: Store<T>;
+
+  // Add a new track from this plugin. The track is just made available here,
+  // it's not automatically shown until it's added to a workspace.
+  addTrack(trackDetails: PluginTrackInfo): void;
+}
+
+export interface BasePlugin<State> {
+  // Lifecycle methods.
+  onActivate(ctx: PluginContext): void;
+  onTraceLoad?(ctx: TracePluginContext<State>): Promise<void>;
+  onTraceUnload?(ctx: TracePluginContext<State>): Promise<void>;
+  onDeactivate?(ctx: PluginContext): void;
+
+  // Extension points.
+  commands?(ctx: PluginContext): Command[];
+  traceCommands?(ctx: TracePluginContext<State>): Command[];
+  metricVisualisations?(ctx: PluginContext): MetricVisualisation[];
+  findPotentialTracks?(ctx: TracePluginContext<State>): Promise<TrackInfo[]>;
+}
+
+export interface StatefulPlugin<State> extends BasePlugin<State> {
+  // Function to migrate the persistent state.
+  migrate(initialState: unknown): State;
+}
+
+// Generic interface all plugins must implement.
+// If a state type is passed, the plugin must implement migrate(). Otherwise if
+// the state type is omitted, migrate need not be defined.
+export type Plugin<State = undefined> =
+    State extends undefined ? BasePlugin<State>: StatefulPlugin<State>;
 
 // This interface defines what a plugin factory should look like.
 // This can be defined in the plugin class definition by defining a constructor
 // and the relevant static methods:
 // E.g.
 // class MyPlugin implements TracePlugin<MyState> {
-//   static migrate(initialState: unknown): MyState {...}
+//   migrate(initialState: unknown): MyState {...}
 //   constructor(store: Store<MyState>, engine: EngineProxy) {...}
 //   ... methods from the TracePlugin interface go here ...
 // }
 // ... which can then be passed around by class i.e. MyPlugin
-export interface TracePluginFactory<StateT> {
-  // Function to migrate the persistent state. Called before new().
-  migrate(initialState: unknown): StateT;
-
+export interface PluginClass<T> {
   // Instantiate the plugin.
-  new(store: Store<StateT>, engine: EngineProxy, viewer: Viewer): TracePlugin;
+  new(): Plugin<T>;
 }
 
 export interface TrackInfo {
@@ -198,39 +274,17 @@ export interface TrackTags {
   [key: string]: string|undefined;
 }
 
-// The public API plugins use to extend the UI. This is passed to each
-// plugin via the exposed 'activate' function.
-export interface PluginContext {
-  // DEPRECATED. In prior versions of the UI tracks were split into a
-  // 'TrackController' and a 'Track'. In more recent versions of the UI
-  // the functionality of |TrackController| has been merged into Track so
-  // |TrackController|s are not necessary in new code.
-  registerTrackController(track: TrackControllerFactory): void;
+// Plugins can be passed as class refs, factory functions, or concrete plugin
+// implementations.
+export type PluginFactory<T> = PluginClass<T>|Plugin<T>|(() => Plugin<T>);
 
-  // Register a track factory. The core UI invokes |TrackCreator| to
-  // construct tracks discovered by invoking |TrackProvider|s.
-  // The split between 'construction' and 'discovery' allows
-  // plugins to reuse common tracks for new data. For example: the
-  // dev.perfetto.AndroidGpu plugin could register a TrackProvider
-  // which returns GPU counter tracks. The counter track factory itself
-  // could be registered in dev.perfetto.CounterTrack - a whole
-  // different plugin.
-  registerTrack(track: TrackCreator): void;
-
-  // Register a new plugin factory for a plugin whose lifecycle in linked to
-  // that of the trace.
-  registerTracePluginFactory<T>(pluginFactory: TracePluginFactory<T>): void;
-}
-
-export interface PluginInfo {
+export interface PluginInfo<T = undefined> {
   // A unique string for your plugin. To ensure the name is unique you
   // may wish to use a URL with reversed components in the manner of
   // Java package names.
   pluginId: string;
 
-  // This function is called when the plugin is loaded. Generally this
-  // is called at most once shortly after the UI is loaded. However in
-  // some situations it can be called multiple times - for example
-  // when the user is toggling plugins on/off.
-  activate: (ctx: PluginContext) => void;
+  // The plugin factory used to instantiate the plugin object, or if this is
+  // an actual plugin implementation, it's just used as-is.
+  plugin: PluginFactory<T>;
 }
