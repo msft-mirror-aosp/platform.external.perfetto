@@ -14,6 +14,7 @@
 
 // Keep this import first.
 import '../core/static_initializers';
+import '../gen/all_plugins';
 
 import {Draft} from 'immer';
 import m from 'mithril';
@@ -21,16 +22,20 @@ import m from 'mithril';
 import {defer} from '../base/deferred';
 import {assertExists, reportError, setErrorHandler} from '../base/logging';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
+import {CommandManager} from '../common/commands';
 import {createEmptyState} from '../common/empty_state';
 import {RECORDING_V2_FLAG} from '../common/feature_flags';
 import {pluginManager, pluginRegistry} from '../common/plugins';
 import {State} from '../common/state';
+import {setTimestampFormat, TimestampFormat} from '../common/time';
 import {initWasm} from '../common/wasm_engine_proxy';
 import {initController, runControllers} from '../controller';
 import {
   isGetCategoriesResponse,
 } from '../controller/chrome_proxy_record_controller';
+import {raf} from '../core/raf_scheduler';
 
+import {addTab} from './bottom_tab';
 import {initCssConstants} from './css_constants';
 import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
@@ -47,6 +52,8 @@ import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
 import {Router} from './router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
+import {SqlTableTab} from './sql_table/tab';
+import {SqlTables} from './sql_table/well_known_tables';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
 import {ViewerPage} from './viewer_page';
@@ -71,7 +78,7 @@ class FrontendApi {
     for (key in state) {
       if (key !== 'frontendLocalState' && key !== 'visibleTracks' &&
           oldState[key] !== state[key]) {
-        globals.rafScheduler.scheduleFullRedraw();
+        raf.scheduleFullRedraw();
         break;
       }
     }
@@ -152,7 +159,7 @@ function main() {
   setupContentSecurityPolicy();
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
-  // appenChild returns.
+  // appendChild returns.
   const cssLoadPromise = defer<void>();
   const css = document.createElement('link');
   css.rel = 'stylesheet';
@@ -200,7 +207,7 @@ function main() {
     '/widgets': WidgetsPage,
   });
   router.onRouteChanged = (route) => {
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
     maybeOpenTraceFromRoute(route);
   };
 
@@ -209,11 +216,68 @@ function main() {
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  globals.initialize(dispatch, router, createEmptyState());
+  const cmdManager = new CommandManager();
+
+  // Register some "core" commands.
+  // TODO(stevegolton): Find a better place to put this.
+  cmdManager.registerCommandSource({
+    commands() {
+      return [
+        {
+          id: 'dev.perfetto.SetTimestampFormatTimecodes',
+          name: 'Set timestamp format: Timecode',
+          callback: () => {
+            setTimestampFormat(TimestampFormat.Timecode);
+            raf.scheduleFullRedraw();
+          },
+        },
+        {
+          id: 'dev.perfetto.SetTimestampFormatSeconds',
+          name: 'Set timestamp format: Seconds',
+          callback: () => {
+            setTimestampFormat(TimestampFormat.Seconds);
+            raf.scheduleFullRedraw();
+          },
+        },
+        {
+          id: 'dev.perfetto.SetTimestampFormatRaw',
+          name: 'Set timestamp format: Raw',
+          callback: () => {
+            setTimestampFormat(TimestampFormat.Raw);
+            raf.scheduleFullRedraw();
+          },
+        },
+        {
+          id: 'dev.perfetto.SetTimestampFormatLocaleRaw',
+          name: 'Set timestamp format: Raw (formatted)',
+          callback: () => {
+            setTimestampFormat(TimestampFormat.RawLocale);
+            raf.scheduleFullRedraw();
+          },
+        },
+        {
+          id: 'dev.perfetto.ShowSliceTabe',
+          name: 'Show slice table',
+          callback: () => {
+            addTab({
+              kind: SqlTableTab.kind,
+              config: {
+                table: SqlTables.slice,
+                displayName: 'slice',
+              },
+            });
+          },
+        },
+      ];
+    },
+  });
+
+  globals.initialize(dispatch, router, createEmptyState(), cmdManager);
+
   globals.serviceWorkerController.install();
 
   const frontendApi = new FrontendApi();
-  globals.publishRedraw = () => globals.rafScheduler.scheduleFullRedraw();
+  globals.publishRedraw = () => raf.scheduleFullRedraw();
 
   // We proxy messages between the extension and the controller because the
   // controller's worker can't access chrome.runtime.
@@ -262,6 +326,8 @@ function main() {
   for (const plugin of pluginRegistry.values()) {
     pluginManager.activatePlugin(plugin.pluginId);
   }
+
+  cmdManager.registerCommandSource(pluginManager);
 }
 
 function onCssLoaded() {
@@ -270,7 +336,7 @@ function onCssLoaded() {
   // And replace it with the root <main> element which will be used by mithril.
   document.body.innerHTML = '<main></main>';
   const main = assertExists(document.body.querySelector('main'));
-  globals.rafScheduler.domRedraw = () => {
+  raf.domRedraw = () => {
     m.render(main, globals.router.resolve());
   };
 
@@ -301,6 +367,8 @@ function onCssLoaded() {
       ts: route.args.ts,
       tid: route.args.tid,
       dur: route.args.dur,
+      pid: route.args.dur,
+      query: route.args.query,
     }));
 
     if (!globals.embeddedMode) {

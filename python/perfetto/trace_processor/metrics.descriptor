@@ -844,17 +844,22 @@ display_id (	R	displayId#
 missed_frame_rate (RmissedFrameRate1
 missed_hwc_frame_rate (RmissedHwcFrameRate1
 missed_gpu_frame_rate (RmissedGpuFrameRate
-»
-0protos/perfetto/metrics/android/task_names.protoperfetto.protos"õ
+ö
+0protos/perfetto/metrics/android/task_names.protoperfetto.protos"°
 AndroidTaskNamesC
-process (2).perfetto.protos.AndroidTaskNames.ProcessRprocess›
+process (2).perfetto.protos.AndroidTaskNames.ProcessRprocessÖ
 Process
 pid (Rpid!
 process_name (	RprocessName
 thread_name (	R
 threadName
 uid (Ruid(
-uid_package_name (	RuidPackageName
+uid_package_name (	RuidPackageNamef
+short_lived_tasks (2:.perfetto.protos.AndroidTaskNames.Process.TaskCreationSpamRshortLivedTasksd
+long_lived_tasks (2:.perfetto.protos.AndroidTaskNames.Process.TaskCreationSpamRlongLivedTasksk
+TaskCreationSpam,
+thread_name_prefix (	RthreadNamePrefix)
+max_count_per_sec (RmaxCountPerSec
 Ó
 3protos/perfetto/metrics/android/trace_quality.protoperfetto.protos"Š
 AndroidTraceQualityMetricN
@@ -873,8 +878,8 @@ m
 build_id (	RbuildId
 address (Raddress(
 google_lookup_id (	RgoogleLookupId
-£
-3protos/perfetto/metrics/android/binder_metric.protoperfetto.protos"Ú
+÷
+3protos/perfetto/metrics/android/binder_metric.protoperfetto.protos"®
 AndroidBinderMetrice
 process_breakdown (28.perfetto.protos.AndroidBinderMetric.PerProcessBreakdownRprocessBreakdown{
 unaggregated_txn_breakdown (2=.perfetto.protos.AndroidBinderMetric.UnaggregatedTxnBreakdownRunaggregatedTxnBreakdown
@@ -883,7 +888,7 @@ m
 pid (Rpid
 
 slice_name (	R	sliceName
-count (RcountÁ
+count (Rcount•
 UnaggregatedTxnBreakdown
 	aidl_name (	RaidlName%
 client_process (	RclientProcess#
@@ -891,13 +896,15 @@ slice_name (	R	sliceName
 is_main_thread (RisMainThread
 	client_ts (RclientTs
 
-client_dur (R	clientDur%
+client_dur (R	clientDur(
+client_oom_score (RclientOomScore%
 server_process	 (	RserverProcess#
 server_thread
  (	RserverThread
 	server_ts (RserverTs
 
-server_dur (R	serverDur^
+server_dur (R	serverDur(
+server_oom_score (RserverOomScore^
 thread_states (29.perfetto.protos.AndroidBinderMetric.ThreadStateBreakdownRthreadStatesj
 blocked_functions (2=.perfetto.protos.AndroidBinderMetric.BlockedFunctionBreakdownRblockedFunctions
 

@@ -30,8 +30,10 @@ import {
   getEnabledMetatracingCategories,
   isMetatracingEnabled,
 } from '../common/metatracing';
+import {pluginManager} from '../common/plugins';
 import {
   LONG,
+  LONG_NULL,
   NUM,
   NUM_NULL,
   QueryError,
@@ -45,11 +47,7 @@ import {
   PendingDeeplinkState,
   ProfileType,
 } from '../common/state';
-import {Span} from '../common/time';
-import {
-  TPTime,
-  TPTimeSpan,
-} from '../common/time';
+import {Span, TPTime, TPTimeSpan} from '../common/time';
 import {resetEngineWorker, WasmEngineProxy} from '../common/wasm_engine_proxy';
 import {BottomTabList} from '../frontend/bottom_tab';
 import {
@@ -66,6 +64,7 @@ import {
   publishOverviewData,
   publishThreads,
 } from '../frontend/publish';
+import {runQueryInNewTab} from '../frontend/query_result_tab';
 import {Router} from '../frontend/router';
 
 import {
@@ -137,7 +136,8 @@ const METRICS = [
   'android_batt',
   'android_other_traces',
   'chrome_dropped_frames',
-  'chrome_long_latency',
+  // TODO(289365196): Reenable:
+  // 'chrome_long_latency',
   'trace_metadata',
   'android_trusty_workqueues',
 ];
@@ -342,6 +342,7 @@ export class TraceController extends Controller<States> {
   }
 
   onDestroy() {
+    pluginManager.onTraceClose();
     globals.engines.delete(this.engineId);
   }
 
@@ -532,6 +533,9 @@ export class TraceController extends Controller<States> {
     if (pendingDeeplink !== undefined) {
       globals.dispatch(Actions.clearPendingDeeplink({}));
       await this.selectPendingDeeplink(pendingDeeplink);
+      if (pendingDeeplink.query !== undefined) {
+        runQueryInNewTab(pendingDeeplink.query, 'Deeplink Query');
+      }
     }
 
     // If the trace was shared via a permalink, it might already have a
@@ -555,6 +559,8 @@ export class TraceController extends Controller<States> {
         }));
       }
     }
+
+    pluginManager.onTraceLoad(globals.store, engine);
 
     return engineMode;
   }
@@ -965,6 +971,17 @@ export class TraceController extends Controller<States> {
   }
 }
 
+async function computeFtraceBounds(engine: Engine): Promise<TPTimeSpan|null> {
+  const result = await engine.query(`
+    SELECT min(ts) as start, max(ts) as end FROM ftrace_event;
+  `);
+  const {start, end} = result.firstRow({start: LONG_NULL, end: LONG_NULL});
+  if (start !== null && end !== null) {
+    return new TPTimeSpan(start, end);
+  }
+  return null;
+}
+
 async function computeTraceReliableRangeStart(engine: Engine): Promise<TPTime> {
   const result =
     await engine.query(`SELECT RUN_METRIC('chrome/chrome_reliable_range.sql');
@@ -1006,6 +1023,11 @@ async function computeVisibleTime(
   if (!isJsonTrace && ENABLE_CHROME_RELIABLE_RANGE_ZOOM_FLAG.get()) {
     const reliableRangeStart = await computeTraceReliableRangeStart(engine);
     visibleStartSec = BigintMath.max(visibleStartSec, reliableRangeStart);
+  }
+
+  const ftraceBounds = await computeFtraceBounds(engine);
+  if (ftraceBounds !== null) {
+    visibleStartSec = ftraceBounds.start;
   }
 
   return HighPrecisionTimeSpan.fromTpTime(visibleStartSec, visibleEndSec);

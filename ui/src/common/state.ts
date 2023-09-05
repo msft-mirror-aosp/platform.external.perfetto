@@ -107,7 +107,9 @@ export const MAX_TIME = 180;
 // 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
 // 31. Convert all timestamps to bigints.
 // 32. Add pendingDeeplink.
-export const STATE_VERSION = 31;
+// 33. Add plugins state.
+// 34. Add additional pendingDeeplink fields (query, pid).
+export const STATE_VERSION = 34;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -524,6 +526,8 @@ export interface PendingDeeplinkState {
   ts?: string;
   dur?: string;
   tid?: string;
+  pid?: string;
+  query?: string;
 }
 
 export interface State {
@@ -624,6 +628,9 @@ export interface State {
   // Pending deeplink which will happen when we first finish opening a
   // trace.
   pendingDeeplink?: PendingDeeplinkState;
+
+  // Individual plugin states
+  plugins: {[key: string]: any};
 }
 
 export const defaultTraceTime = {

@@ -29,17 +29,40 @@ SELECT RUN_METRIC('chrome/event_latency_scroll_jank_cause.sql');
 -- respective scroll ids and start/end timestamps.
 DROP VIEW IF EXISTS chrome_presented_gesture_scrolls;
 CREATE VIEW chrome_presented_gesture_scrolls AS
+WITH
+  chrome_gesture_scrolls AS (
+    SELECT
+      ts AS start_ts,
+      ts + dur AS end_ts,
+      id,
+      -- TODO(b/250089570) Add trace_id to EventLatency and update this script to use it.
+      EXTRACT_ARG(arg_set_id, 'chrome_latency_info.trace_id') AS scroll_update_id,
+      EXTRACT_ARG(arg_set_id, 'chrome_latency_info.gesture_scroll_id') AS scroll_id,
+      EXTRACT_ARG(arg_set_id, 'chrome_latency_info.is_coalesced') AS is_coalesced
+    FROM slice
+    WHERE name = "InputLatency::GestureScrollUpdate"
+          AND dur != -1),
+  updates_with_coalesce_info AS (
+    SELECT
+      chrome_updates.*,
+      (
+        SELECT
+          MAX(id)
+        FROM chrome_gesture_scrolls updates
+        WHERE updates.is_coalesced = false
+          AND updates.start_ts <= chrome_updates.start_ts) AS coalesced_inside_id
+        FROM
+          chrome_gesture_scrolls chrome_updates)
 SELECT
-  ts AS start_ts,
-  ts + dur AS end_ts,
-  id,
-  -- TODO(b/250089570) Add trace_id to EventLatency and update this script to use it.
-  EXTRACT_ARG(arg_set_id, 'chrome_latency_info.trace_id') AS scroll_update_id,
-  EXTRACT_ARG(arg_set_id, 'chrome_latency_info.gesture_scroll_id') AS scroll_id
-FROM slice
-WHERE name = "InputLatency::GestureScrollUpdate"
-      AND EXTRACT_ARG(arg_set_id, 'chrome_latency_info.is_coalesced') = FALSE
-      AND dur != -1;
+  MIN(id) AS id,
+  MIN(start_ts) AS start_ts,
+  MAX(end_ts) AS end_ts,
+  MAX(start_ts) AS last_coalesced_input_ts,
+  scroll_update_id,
+  MIN(scroll_id) AS scroll_id
+FROM updates_with_coalesce_info
+GROUP BY coalesced_inside_id;
+
 
 
 -- Associate every trace_id with it's perceived delta_y on the screen after
@@ -82,6 +105,7 @@ CREATE VIEW chrome_full_frame_view AS
 SELECT
   frames.id,
   frames.start_ts,
+  frames.last_coalesced_input_ts,
   frames.scroll_id,
   frames.scroll_update_id,
   events.event_latency_id,
@@ -99,6 +123,7 @@ SELECT
   frames.start_ts,
   frames.scroll_id,
   frames.scroll_update_id,
+  frames.last_coalesced_input_ts,
   deltas.delta_y,
   frames.event_latency_id,
   frames.dur,
@@ -125,7 +150,7 @@ DROP VIEW IF EXISTS chrome_merged_frame_view_with_jank;
 CREATE VIEW chrome_merged_frame_view_with_jank AS
 SELECT
   id,
-  MAX(start_ts) AS max_start_ts,
+  MAX(last_coalesced_input_ts) AS max_start_ts,
   MIN(start_ts) AS min_start_ts,
   scroll_id,
   scroll_update_id,
@@ -187,6 +212,7 @@ WHERE delay_since_last_frame > 0;
 -- @column event_latency_id       Event latency id of the presented frame.
 -- @column vsync_interval         Vsync interval at the time of recording the trace.
 -- @column hardware_class         Device brand and model.
+-- @column scroll_id              The scroll corresponding to this frame.
 DROP VIEW IF EXISTS chrome_janky_frames;
 CREATE VIEW chrome_janky_frames AS
 SELECT
@@ -195,7 +221,8 @@ SELECT
   delay_since_last_frame,
   event_latency_id,
   (SELECT vsync_interval FROM chrome_vsyncs) AS vsync_interval,
-  CHROME_HARDWARE_CLASS() AS hardware_class
+  CHROME_HARDWARE_CLASS() AS hardware_class,
+  scroll_id
 FROM chrome_janky_frame_info_with_delay
 WHERE delay_since_last_frame > (select vsync_interval + vsync_interval / 2 from chrome_vsyncs)
       AND delay_since_last_input < (select vsync_interval + vsync_interval / 2 from chrome_vsyncs);
@@ -219,3 +246,99 @@ SELECT
 / (SELECT
     COUNT()
   FROM chrome_unique_frame_presentation_ts) * 100 AS delayed_frame_percentage;
+
+-- Number of frames and janky frames per scroll.
+DROP VIEW IF EXISTS frames_per_scroll;
+CREATE VIEW frames_per_scroll AS
+WITH
+  frames AS (
+    SELECT scroll_id, COUNT(*) AS num_frames
+    FROM
+      chrome_janky_frame_info_with_delay
+    GROUP BY scroll_id
+  ),
+  janky_frames AS (
+    SELECT scroll_id, COUNT(*) AS num_janky_frames
+    FROM
+      chrome_janky_frames
+    GROUP BY scroll_id
+  )
+SELECT
+  frames.scroll_id AS scroll_id,
+  frames.num_frames AS num_frames,
+  janky_frames.num_janky_frames AS num_janky_frames,
+  100.0 * janky_frames.num_janky_frames / frames.num_frames
+    AS scroll_jank_percentage
+FROM frames
+INNER JOIN janky_frames
+  ON frames.scroll_id = janky_frames.scroll_id;
+
+-- Scroll jank causes per scroll.
+DROP VIEW IF EXISTS causes_per_scroll;
+CREATE VIEW causes_per_scroll AS
+SELECT
+  scroll_id,
+  MAX(1.0 * delay_since_last_frame / vsync_interval)
+    AS max_delay_since_last_frame,
+  -- MAX does not matter, since `vsync_interval` is the computed as the
+  -- same value for a single trace.
+  MAX(vsync_interval) AS vsync_interval,
+  RepeatedField(
+    ChromeScrollJankV3_Scroll_ScrollJankCause(
+      'cause',
+      cause_of_jank,
+      'sub_cause',
+      sub_cause_of_jank,
+      'delay_since_last_frame',
+      1.0 * delay_since_last_frame / vsync_interval))
+    AS scroll_jank_causes
+FROM
+  chrome_janky_frames
+GROUP BY scroll_id;
+
+-- An "intermediate" view for computing `chrome_scroll_jank_v3_output` below.
+DROP VIEW IF EXISTS chrome_scroll_jank_v3_intermediate;
+CREATE VIEW chrome_scroll_jank_v3_intermediate AS
+SELECT
+  -- MAX does not matter for these aggregations, since the values are the
+  -- same across rows.
+  (SELECT COUNT(*) FROM chrome_janky_frame_info_with_delay)
+    AS trace_num_frames,
+  (SELECT COUNT(*) FROM chrome_janky_frames)
+    AS trace_num_janky_frames,
+  causes.vsync_interval,
+  RepeatedField(
+    ChromeScrollJankV3_Scroll(
+      'num_frames',
+      frames.num_frames,
+      'num_janky_frames',
+      frames.num_janky_frames,
+      'scroll_jank_percentage',
+      frames.scroll_jank_percentage,
+      'max_delay_since_last_frame',
+      causes.max_delay_since_last_frame,
+      'scroll_jank_causes',
+      causes.scroll_jank_causes))
+    AS scrolls
+FROM
+  frames_per_scroll AS frames
+INNER JOIN causes_per_scroll AS causes
+  ON frames.scroll_id = causes.scroll_id;
+
+-- For producing a "native" Perfetto UI metric.
+DROP VIEW IF EXISTS chrome_scroll_jank_v3_output;
+CREATE VIEW chrome_scroll_jank_v3_output AS
+SELECT
+  ChromeScrollJankV3(
+    'trace_num_frames',
+    trace_num_frames,
+    'trace_num_janky_frames',
+    trace_num_janky_frames,
+    'trace_scroll_jank_percentage',
+    100.0 * trace_num_janky_frames / trace_num_frames,
+    'vsync_interval_ms',
+    vsync_interval,
+    'scrolls',
+    scrolls)
+FROM
+  chrome_scroll_jank_v3_intermediate;

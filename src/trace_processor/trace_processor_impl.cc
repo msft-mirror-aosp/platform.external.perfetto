@@ -87,6 +87,7 @@
 #include "src/trace_processor/tp_metatrace.h"
 #include "src/trace_processor/types/variadic.h"
 #include "src/trace_processor/util/protozero_to_text.h"
+#include "src/trace_processor/util/regex.h"
 #include "src/trace_processor/util/sql_modules.h"
 #include "src/trace_processor/util/status_macros.h"
 
@@ -432,6 +433,9 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
       std::unique_ptr<ToFtrace::Context>(new ToFtrace::Context{
           context_.storage.get(), SystraceSerializer(&context_)}));
 
+  if constexpr (regex::IsRegexSupported()) {
+    RegisterFunction<Regex>(&engine_, "regexp", 2);
+  }
   // Old style function registration.
   // TODO(lalitm): migrate this over to using RegisterFunction once aggregate
   // functions are supported.
@@ -473,7 +477,6 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
       false);
   engine_.sqlite_engine()->RegisterVirtualTableModule<WindowOperatorTable>(
       "window", storage, SqliteTable::TableType::kExplicitCreate, true);
-  RegisterCreateViewFunctionModule(&engine_);
 
   // Initalize the tables and views in the prelude.
   InitializePreludeTablesViews(engine_.sqlite_engine()->db());
@@ -593,6 +596,10 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
 
   RegisterDbTable(storage->expected_frame_timeline_slice_table());
   RegisterDbTable(storage->actual_frame_timeline_slice_table());
+
+  RegisterDbTable(storage->surfaceflinger_layers_snapshot_table());
+  RegisterDbTable(storage->surfaceflinger_layer_table());
+  RegisterDbTable(storage->surfaceflinger_transactions_table());
 
   RegisterDbTable(storage->metadata_table());
   RegisterDbTable(storage->cpu_table());

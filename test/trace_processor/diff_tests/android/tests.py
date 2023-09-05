@@ -293,6 +293,7 @@ class Android(TestSuite):
           is_main_thread,
           client_ts,
           client_dur,
+          client_oom_score,
           binder_reply_id,
           server_process,
           server_thread,
@@ -300,15 +301,16 @@ class Android(TestSuite):
           server_utid,
           server_tid,
           server_ts,
-          server_dur
+          server_dur,
+          server_oom_score
         FROM android_sync_binder_metrics_by_txn
         WHERE binder_txn_id = 34382
         ORDER BY client_ts
         LIMIT 1;
       """,
         out=Csv("""
-        "aidl_name","binder_txn_id","client_process","client_thread","client_upid","client_utid","client_tid","is_main_thread","client_ts","client_dur","binder_reply_id","server_process","server_thread","server_upid","server_utid","server_tid","server_ts","server_dur"
-        "AIDL::java::ISensorPrivacyManager::isSensorPrivacyEnabled::server",34382,"/system/bin/audioserver","audioserver",281,281,492,1,25505818197,3125407,34383,"system_server","binder:641_4",311,539,1596,25505891588,3000749
+        "aidl_name","binder_txn_id","client_process","client_thread","client_upid","client_utid","client_tid","is_main_thread","client_ts","client_dur","client_oom_score","binder_reply_id","server_process","server_thread","server_upid","server_utid","server_tid","server_ts","server_dur","server_oom_score"
+        "AIDL::java::ISensorPrivacyManager::isSensorPrivacyEnabled::server",34382,"/system/bin/audioserver","audioserver",281,281,492,1,25505818197,3125407,-1000,34383,"system_server","binder:641_4",311,539,1596,25505891588,3000749,-900
       """))
 
   def test_binder_sync_binder_thread_state(self):
@@ -477,3 +479,38 @@ class Android(TestSuite):
         trace=DataPath('android_monitor_contention_trace.atr'),
         query=Metric('android_monitor_contention'),
         out=Path('android_monitor_contention.out'))
+
+  def test_thread_creation_spam(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      SELECT IMPORT('android.thread');
+      SELECT * FROM ANDROID_THREAD_CREATION_SPAM(1e9, 1e9);
+      """,
+        out=Csv("""
+      "process_name","pid","thread_name_prefix","max_count_per_sec"
+      "com.android.providers.media.module",3487,"SharedPreferenc",3
+      "com.android.providers.media.module",3487,"MediaCodec_loop",2
+      "/apex/com.android.adbd/bin/adbd",527,"shell",1
+      "media.swcodec",563,"id.hevc.decoder",1
+      "system_server",642,"Thread",1
+      "sh",3474,"sh",1
+      "sh",3476,"sh",1
+      "sh",3478,"sh",1
+      "am",3480,"am",1
+      "cmd",3482,"binder",1
+      "cmd",3482,"cmd",1
+      "com.android.providers.media.module",3487,"CodecLooper",1
+      "sh",3517,"sh",1
+      "sgdisk",3521,"sgdisk",1
+      "blkid",3523,"blkid",1
+      "binder:243_4",3524,"binder",1
+      "fsck_msdos",3525,"fsck_msdos",1
+      "binder:243_4",3526,"binder",1
+      "sh",3532,"sh",1
+      "cut",3534,"cut",1
+      "sh",3536,"sh",1
+      "sh",3544,"sh",1
+      "sh",3546,"sh",1
+      "sh",3564,"sh",1
+      """))
