@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import m from 'mithril';
+let FULL_REDRAW_FUNCTION = () => {};
 
-import {Duration, duration} from '../../base/time';
-
-interface DurationWidgetAttrs {
-  dur: duration;
+export function setScheduleFullRedraw(func: () => void) {
+  FULL_REDRAW_FUNCTION = func;
 }
 
-export class DurationWidget implements m.ClassComponent<DurationWidgetAttrs> {
-  view(vnode: m.Vnode<DurationWidgetAttrs>) {
-    return Duration.format(vnode.attrs.dur);
-  }
+export function scheduleFullRedraw() {
+  FULL_REDRAW_FUNCTION();
 }
