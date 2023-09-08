@@ -14,13 +14,13 @@
 
 import m from 'mithril';
 
+import {Icons} from '../base/semantic_icons';
 import {Actions} from '../common/actions';
 import {raf} from '../core/raf_scheduler';
+import {DurationWidget} from '../widgets/duration';
 
 import {Flow, globals} from './globals';
-import {BLANK_CHECKBOX, CHECKBOX} from './icons';
 import {Panel, PanelSize} from './panel';
-import {DurationWidget} from './widgets/duration';
 
 export const ALL_CATEGORIES = '_all_';
 
@@ -173,7 +173,7 @@ export class FlowEventsAreaSelectedPanel extends Panel {
               raf.scheduleFullRedraw();
             },
           },
-          allWasChecked ? CHECKBOX : BLANK_CHECKBOX)),
+          allWasChecked ? Icons.Checkbox : Icons.BlankCheckbox)),
     ]));
 
     categoryToFlowsNum.forEach((num, cat) => {
@@ -193,7 +193,7 @@ export class FlowEventsAreaSelectedPanel extends Panel {
                 raf.scheduleFullRedraw();
               },
             },
-            wasChecked ? CHECKBOX : BLANK_CHECKBOX)),
+            wasChecked ? Icons.Checkbox : Icons.BlankCheckbox)),
       ];
       rows.push(m('tr', data));
     });

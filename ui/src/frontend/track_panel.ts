@@ -15,6 +15,7 @@
 import {hex} from 'color-convert';
 import m from 'mithril';
 
+import {Icons} from '../base/semantic_icons';
 import {duration, Span, time} from '../base/time';
 import {Actions} from '../common/actions';
 import {pluginManager} from '../common/plugins';
@@ -27,7 +28,6 @@ import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
 import {PerfettoMouseEvent} from './events';
 import {globals} from './globals';
 import {drawGridLines} from './gridline_helper';
-import {BLANK_CHECKBOX, CHECKBOX, PIN} from './icons';
 import {Panel, PanelSize} from './panel';
 import {verticalScrollToTrack} from './scroll_helper';
 import {PxSpan, TimeScale} from './time_scale';
@@ -144,7 +144,7 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
               globals.dispatch(
                   Actions.toggleTrackPinned({trackId: attrs.trackState.id}));
             },
-            i: PIN,
+            i: Icons.Pin,
             filledIcon: isPinned(attrs.trackState.id),
             tooltip: isPinned(attrs.trackState.id) ? 'Unpin' : 'Pin to top',
             showButton: isPinned(attrs.trackState.id),
@@ -158,7 +158,8 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
                       {id: attrs.trackState.id, isTrackGroup: false}));
                   e.stopPropagation();
                 },
-                i: isSelected(attrs.trackState.id) ? CHECKBOX : BLANK_CHECKBOX,
+                i: isSelected(attrs.trackState.id) ? Icons.Checkbox :
+                                                     Icons.BlankCheckbox,
                 tooltip: isSelected(attrs.trackState.id) ?
                     'Remove track' :
                     'Add track to selection',

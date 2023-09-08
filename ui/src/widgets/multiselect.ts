@@ -14,13 +14,13 @@
 
 import m from 'mithril';
 
-import {scheduleFullRedraw} from '../../widgets/raf';
-import {DESELECT, SELECT_ALL} from '../icons';
+import {Icons} from '../base/semantic_icons';
 
 import {Button} from './button';
 import {Checkbox} from './checkbox';
 import {EmptyState} from './empty_state';
 import {Popup, PopupPosition} from './popup';
+import {scheduleFullRedraw} from './raf';
 import {TextInput} from './text_input';
 
 export interface Option {
@@ -107,7 +107,7 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                       m(Button, {
                         label: this.searchText === '' ? 'Clear All' :
                                                         'Clear Filtered',
-                        icon: DESELECT,
+                        icon: Icons.Deselect,
                         minimal: true,
                         onclick: () => {
                           const diffs =
@@ -131,7 +131,7 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                   m(Button, {
                     label: this.searchText === '' ? 'Select All' :
                                                     'Select Filtered',
-                    icon: SELECT_ALL,
+                    icon: Icons.SelectAll,
                     minimal: true,
                     compact: true,
                     onclick: () => {
@@ -145,7 +145,7 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                   m(Button, {
                     label: this.searchText === '' ? 'Clear All' :
                                                     'Clear Filtered',
-                    icon: DESELECT,
+                    icon: Icons.Deselect,
                     minimal: true,
                     compact: true,
                     onclick: () => {
