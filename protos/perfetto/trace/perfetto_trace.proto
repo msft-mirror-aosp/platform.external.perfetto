@@ -436,8 +436,8 @@ message AndroidSdkSyspropGuardConfig {
   // restarted.
   //
   // Specifically this sets the following system properties:
-  //   - debug.renderengine.skia_tracing_enabled
-  //   - debug.renderengine.skia_use_perfetto_track_events
+  //   - debug.tracing.renderengine.skia_tracing_enabled
+  //   - debug.tracing.renderengine.skia_use_perfetto_track_events
   //
   // Does not affect actual track_event data *collection*, which must be
   // configured seperately.
@@ -453,12 +453,12 @@ message AndroidSdkSyspropGuardConfig {
   //
   // ATTENTION: affects ALL HWUI APPS if hwui_package_name_filter is not set!
   // If filtering is NOT set, this controls these GLOBAL system properties:
-  //   - debug.hwui.skia_tracing_enabled
-  //   - debug.hwui.skia_use_perfetto_track_events
+  //   - debug.tracing.hwui.skia_tracing_enabled
+  //   - debug.tracing.hwui.skia_use_perfetto_track_events
   // If filtering IS set, this controls these APP-SPECIFIC system properties,
   // for each package listed in the filter:
-  //   - debug.hwui.skia_tracing_enabled.<package.name>
-  //   - debug.hwui.skia_use_perfetto_track_events.<package.name>
+  //   - debug.tracing.hwui.skia_tracing_enabled.<package.name>
+  //   - debug.tracing.hwui.skia_use_perfetto_track_events.<package.name>
   //
   // Does not affect actual track_event data *collection*, which must be
   // configured seperately.
@@ -4192,6 +4192,12 @@ message NetworkPacketEvent {
 
   // The remote udp/tcp port of the packet.
   optional uint32 remote_port = 9;
+
+  // The 1-byte ICMP type identifier.
+  optional uint32 icmp_type = 10;
+
+  // The 1-byte ICMP code identifier.
+  optional uint32 icmp_code = 11;
 }
 
 // NetworkPacketBundle bundles one or more packets sharing the same attributes.
