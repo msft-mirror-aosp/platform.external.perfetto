@@ -13,14 +13,14 @@
 // limitations under the License.
 
 import {BigintMath as BIMath} from '../../base/bigint_math';
+import {duration, time} from '../../base/time';
 import {LONG, LONG_NULL, NUM, STR} from '../../common/query_result';
-import {duration, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {
   TrackController,
 } from '../../controller/track_controller';
 import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 import {ChromeSliceTrack} from '../chrome_slices';
 
 export const ASYNC_SLICE_TRACK_KIND = 'AsyncSliceTrack';
@@ -139,12 +139,14 @@ export class AsyncSliceTrack extends ChromeSliceTrack {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(AsyncSliceTrackController);
-  ctx.registerTrack(AsyncSliceTrack);
+class AsyncSlicePlugin implements Plugin {
+  onActivate(ctx: PluginContext) {
+    ctx.registerTrackController(AsyncSliceTrackController);
+    ctx.registerTrack(AsyncSliceTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.AsyncSlices',
-  activate,
+  plugin: AsyncSlicePlugin,
 };

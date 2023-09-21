@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {duration, Time, time} from '../../base/time';
 import {LONG, NUM} from '../../common/query_result';
-import {duration, Time, time} from '../../common/time';
 import {LIMIT, TrackData} from '../../common/track_data';
 import {
   TrackController,
@@ -21,7 +21,7 @@ import {
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
 import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 
 export const ANDROID_LOGS_TRACK_KIND = 'AndroidLogTrack';
 
@@ -142,12 +142,14 @@ class AndroidLogTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrack(AndroidLogTrack);
-  ctx.registerTrackController(AndroidLogTrackController);
+class AndroidLog implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.registerTrack(AndroidLogTrack);
+    ctx.registerTrackController(AndroidLogTrackController);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.AndroidLog',
-  activate,
+  plugin: AndroidLog,
 };

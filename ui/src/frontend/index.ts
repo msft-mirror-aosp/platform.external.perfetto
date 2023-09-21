@@ -28,12 +28,14 @@ import {RECORDING_V2_FLAG} from '../common/feature_flags';
 import {flattenArgs, traceEvent} from '../common/metatracing';
 import {pluginManager, pluginRegistry} from '../common/plugins';
 import {State} from '../common/state';
+import {ViewerImpl} from '../common/viewer';
 import {initWasm} from '../common/wasm_engine_proxy';
 import {initController, runControllers} from '../controller';
 import {
   isGetCategoriesResponse,
 } from '../controller/chrome_proxy_record_controller';
 import {raf} from '../core/raf_scheduler';
+import {setScheduleFullRedraw} from '../widgets/raf';
 
 import {App} from './app';
 import {initCssConstants} from './css_constants';
@@ -138,7 +140,7 @@ function setupContentSecurityPolicy() {
       'https://*.google.com',
       'https://*.googleusercontent.com',
       'https://www.googletagmanager.com',
-      'https://www.google-analytics.com',
+      'https://*.google-analytics.com',
     ],
     'object-src': ['none'],
     'connect-src': [
@@ -146,7 +148,7 @@ function setupContentSecurityPolicy() {
       'http://127.0.0.1:9001',  // For trace_processor_shell --httpd.
       'ws://127.0.0.1:9001',    // Ditto, for the websocket RPC.
       'ws://127.0.0.1:8037',    // For the adb websocket server.
-      'https://www.google-analytics.com',
+      'https://*.google-analytics.com',
       'https://*.googleapis.com',  // For Google Cloud Storage fetches.
       'blob:',
       'data:',
@@ -155,7 +157,7 @@ function setupContentSecurityPolicy() {
       `'self'`,
       'data:',
       'blob:',
-      'https://www.google-analytics.com',
+      'https://*.google-analytics.com',
       'https://www.googletagmanager.com',
       'https://*.googleapis.com',
     ],
@@ -176,6 +178,9 @@ function setupContentSecurityPolicy() {
 }
 
 function main() {
+  // Wire up raf for widgets.
+  setScheduleFullRedraw(() => raf.scheduleFullRedraw());
+
   setupContentSecurityPolicy();
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
@@ -287,8 +292,9 @@ function main() {
   }
 
   // Initialize all plugins:
+  const viewer = new ViewerImpl();
   for (const plugin of pluginRegistry.values()) {
-    pluginManager.activatePlugin(plugin.pluginId);
+    pluginManager.activatePlugin(plugin.pluginId, viewer);
   }
 
   cmdManager.registerCommandSource(pluginManager);

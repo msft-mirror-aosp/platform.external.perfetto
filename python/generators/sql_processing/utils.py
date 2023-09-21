@@ -25,12 +25,18 @@ WS = r'\s*'
 
 CREATE_TABLE_VIEW_PATTERN = (
     # Match create table/view and catch type
-    fr'^CREATE{WS}(?:VIRTUAL )?{WS}(TABLE|VIEW){WS}(?:IF NOT EXISTS)?{WS}'
+    fr'^CREATE{WS}(?:VIRTUAL|PERFETTO)?{WS}(TABLE|VIEW){WS}(?:IF NOT EXISTS)?'
     # Catch the name
     fr'{WS}({NAME}){WS}(?:AS|USING)?{WS}.*')
 
+CREATE_TABLE_AS_PATTERN = (fr'^CREATE{WS}TABLE{WS}({NAME}){WS}AS')
+
 DROP_TABLE_VIEW_PATTERN = (fr'^DROP{WS}(TABLE|VIEW){WS}IF{WS}EXISTS{WS}'
                            fr'({NAME});$')
+
+CREATE_PERFETTO_TABLE_PATTERN = (
+    # Match `CREATE PERFETTO TABLE {name} AS` string
+    fr'^CREATE{WS}PERFETTO{WS}TABLE{WS}({NAME}){WS}AS{WS}.*')
 
 CREATE_FUNCTION_PATTERN = (
     # Function name.
@@ -121,6 +127,31 @@ def check_banned_words(sql: str, path: str) -> List[str]:
 
     if 'create_function' in line.casefold():
       errors.append('CREATE_FUNCTION is deprecated in trace processor. '
-                    'Prefer CREATE PERFETTO FUNCTION instead.\n'
+                    'Use CREATE PERFETTO FUNCTION instead.\n'
                     f'Offending file: {path}')
+
+    if 'import(' in line.casefold():
+      errors.append('SELECT IMPORT is deprecated in trace processor. '
+                    'Use INCLUDE PERFETTO MODULE instead.\n'
+                    f'Offending file: {path}')
+  return errors
+
+
+# Given SQL string check whether there is (not allowlisted) usage of
+# CREATE TABLE {name} AS.
+def check_banned_create_table_as(sql: str, filename: str,
+                                 allowlist: Dict[str, List[str]]) -> List[str]:
+  errors = []
+  for _, matches in match_pattern(CREATE_TABLE_AS_PATTERN, sql).items():
+    name = matches[0]
+    if filename not in allowlist:
+      errors.append(f"CREATE TABLE '{name}' is deprecated."
+                    "Use CREATE PERFETTO TABLE instead.\n"
+                    f"Offending file: {filename}\n")
+      continue
+    if name not in allowlist[filename]:
+      errors.append(
+          f"Table '{name}' uses CREATE TABLE which is deprecated "
+          "and this table is not allowlisted. Use CREATE PERFETTO TABLE.\n"
+          f"Offending file: {filename}\n")
   return errors

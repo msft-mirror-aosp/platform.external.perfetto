@@ -13,8 +13,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-SELECT IMPORT('common.slices');
-SELECT IMPORT('android.process_metadata');
+INCLUDE PERFETTO MODULE common.slices;
+INCLUDE PERFETTO MODULE android.process_metadata;
 
 -- All activity startup events.
 CREATE PERFETTO TABLE internal_startup_events AS
@@ -41,9 +41,9 @@ CREATE TABLE internal_all_startups(
   startup_type STRING
 );
 
-SELECT IMPORT('android.startup.internal_startups_maxsdk28');
-SELECT IMPORT('android.startup.internal_startups_minsdk29');
-SELECT IMPORT('android.startup.internal_startups_minsdk33');
+INCLUDE PERFETTO MODULE android.startup.internal_startups_maxsdk28;
+INCLUDE PERFETTO MODULE android.startup.internal_startups_minsdk29;
+INCLUDE PERFETTO MODULE android.startup.internal_startups_minsdk33;
 
 -- All activity startups in the trace by startup id.
 -- Populated by different scripts depending on the platform version/contents.
@@ -132,6 +132,8 @@ WITH startup_with_type AS MATERIALIZED (
       )
       )
     JOIN thread t ON (p.upid = t.upid AND t.is_main_thread)
+    -- Filter out the non-startup processes with the same package name as that of a startup.
+    WHERE a_resume > 0
   )
 )
 SELECT *

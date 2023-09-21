@@ -15,20 +15,23 @@
 import {hex} from 'color-convert';
 import m from 'mithril';
 
+import {Icons} from '../base/semantic_icons';
+import {duration, Span, time} from '../base/time';
 import {Actions} from '../common/actions';
+import {pluginManager} from '../common/plugins';
+import {RegistryError} from '../common/registry';
 import {TrackState} from '../common/state';
-import {duration, Span, time} from '../common/time';
 import {raf} from '../core/raf_scheduler';
+import {TrackLike} from '../public';
 
 import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
 import {PerfettoMouseEvent} from './events';
 import {globals} from './globals';
 import {drawGridLines} from './gridline_helper';
-import {BLANK_CHECKBOX, CHECKBOX, PIN} from './icons';
 import {Panel, PanelSize} from './panel';
 import {verticalScrollToTrack} from './scroll_helper';
 import {PxSpan, TimeScale} from './time_scale';
-import {SliceRect, Track} from './track';
+import {SliceRect} from './track';
 import {trackRegistry} from './track_registry';
 import {
   drawVerticalLineAtTime,
@@ -84,7 +87,7 @@ export class TrackChips implements m.ClassComponent<TrackChipsAttrs> {
 }
 
 interface TrackShellAttrs {
-  track: Track;
+  track: TrackLike;
   trackState: TrackState;
 }
 
@@ -141,7 +144,7 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
               globals.dispatch(
                   Actions.toggleTrackPinned({trackId: attrs.trackState.id}));
             },
-            i: PIN,
+            i: Icons.Pin,
             filledIcon: isPinned(attrs.trackState.id),
             tooltip: isPinned(attrs.trackState.id) ? 'Unpin' : 'Pin to top',
             showButton: isPinned(attrs.trackState.id),
@@ -155,7 +158,8 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
                       {id: attrs.trackState.id, isTrackGroup: false}));
                   e.stopPropagation();
                 },
-                i: isSelected(attrs.trackState.id) ? CHECKBOX : BLANK_CHECKBOX,
+                i: isSelected(attrs.trackState.id) ? Icons.Checkbox :
+                                                     Icons.BlankCheckbox,
                 tooltip: isSelected(attrs.trackState.id) ?
                     'Remove track' :
                     'Add track to selection',
@@ -214,7 +218,9 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
   }
 }
 
-export interface TrackContentAttrs { track: Track; }
+export interface TrackContentAttrs {
+  track: TrackLike;
+}
 export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
   private mouseDownX?: number;
   private mouseDownY?: number;
@@ -272,7 +278,7 @@ export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
 
 interface TrackComponentAttrs {
   trackState: TrackState;
-  track: Track;
+  track: TrackLike;
 }
 class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
   view({attrs}: m.CVnode<TrackComponentAttrs>) {
@@ -336,26 +342,18 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
   // TODO(hjd): It would be nicer if these could not be undefined here.
   // We should implement a NullTrack which can be used if the trackState
   // has disappeared.
-  private track: Track|undefined;
+  private track: TrackLike|undefined;
   private trackState: TrackState|undefined;
 
   constructor(vnode: m.CVnode<TrackPanelAttrs>) {
     super();
     const trackId = vnode.attrs.id;
     const trackState = globals.state.tracks[trackId];
-    if (trackState === undefined) {
-      return;
-    }
-    const engine = globals.engines.get(trackState.engineId);
-    if (engine === undefined) {
-      return;
-    }
-    const trackCreator = trackRegistry.get(trackState.kind);
-    this.track = trackCreator.create({
-      trackId,
-      engine:
-          engine.getProxy(`Track; kind: ${trackState.kind}; id: ${trackId}`),
-    });
+
+    if (!trackState) return;
+
+    const {id} = trackState;
+    this.track = loadTrack(trackState, id) || pluginManager.createTrack(id);
     this.trackState = trackState;
   }
 
@@ -486,5 +484,28 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
     }
     return this.track.getSliceRect(
         visibleTimeScale, visibleWindow, windowSpan, tStart, tDur, depth);
+  }
+}
+
+function loadTrack(trackState: TrackState, trackId: string): TrackLike|
+    undefined {
+  const engine = globals.engines.get(trackState.engineId);
+  if (engine === undefined) {
+    return undefined;
+  }
+
+  try {
+    const trackCreator = trackRegistry.get(trackState.kind);
+    return trackCreator.create({
+      trackId,
+      engine:
+          engine.getProxy(`Track; kind: ${trackState.kind}; id: ${trackId}`),
+    });
+  } catch (e) {
+    if (e instanceof RegistryError) {
+      return undefined;
+    } else {
+      throw e;
+    }
   }
 }

@@ -57,7 +57,6 @@ import {CPU_SLICE_TRACK_KIND} from '../tracks/cpu_slices';
 import {
   EXPECTED_FRAMES_SLICE_TRACK_KIND,
 } from '../tracks/expected_frames';
-import {FTRACE_RAW_TRACK_KIND} from '../tracks/ftrace';
 import {HEAP_PROFILE_TRACK_KIND} from '../tracks/heap_profile';
 import {NULL_TRACK_KIND} from '../tracks/null_track';
 import {
@@ -84,6 +83,11 @@ const TRACKS_V2_COMPARE_FLAG = featureFlags.register({
       'Show V1 tracks side by side with V2 tracks. Does nothing if TracksV2 is not enabled.',
   defaultValue: false,
 });
+
+// Special kind reserved for plugin tracks.
+// There is no significance to this value, it simply something that's unlikely
+// to be used as a key in the trackRegistry.
+const PLUGIN_TRACK_KIND = 'PLUGIN_TRACK';
 
 function showV2(): boolean {
   return TRACKS_V2_FLAG.get();
@@ -494,6 +498,17 @@ class TrackDecider {
     }
   }
 
+  async addCpuFreqLimitCounterTracks(engine: EngineProxy): Promise<void> {
+    const cpuFreqLimitCounterTracksSql = `
+      select name, id
+      from cpu_counter_track
+      where name glob "Cpu * Freq Limit"
+      order by name asc
+    `;
+
+    this.addCpuCounterTracks(engine, cpuFreqLimitCounterTracksSql);
+  }
+
   async addCpuPerfCounterTracks(engine: EngineProxy): Promise<void> {
     // Perf counter tracks are bound to CPUs, follow the scheduling and
     // frequency track naming convention ("Cpu N ...").
@@ -501,11 +516,16 @@ class TrackDecider {
     // it. This might look surprising in the UI, but placeholder tracks are
     // wasteful as there's no way of collapsing global counter tracks at the
     // moment.
-    const result = await engine.query(`
+    const addCpuPerfCounterTracksSql = `
       select printf("Cpu %u %s", cpu, name) as name, id
       from perf_counter_track as pct
       order by perf_session_id asc, pct.name asc, cpu asc
-  `);
+    `;
+    this.addCpuCounterTracks(engine, addCpuPerfCounterTracksSql);
+  }
+
+  async addCpuCounterTracks(engine: EngineProxy, sql: string): Promise<void> {
+    const result = await engine.query(sql);
 
     const it = result.iter({
       name: STR,
@@ -900,11 +920,12 @@ class TrackDecider {
       }
       this.tracksToAdd.push({
         engineId: this.engineId,
-        kind: FTRACE_RAW_TRACK_KIND,
+        kind: PLUGIN_TRACK_KIND,
         trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
         name: `Ftrace Events Cpu ${it.cpu}`,
         trackGroup: groupUuid,
-        config: {cpu: it.cpu},
+        config: {},
+        id: `perfetto.FtraceRaw#cpu${it.cpu}`,
       });
     }
 
@@ -1944,6 +1965,8 @@ class TrackDecider {
         this.engine.getProxy('TrackDecider::addGlobalAsyncTracks'));
     await this.addGpuFreqTracks(
         this.engine.getProxy('TrackDecider::addGpuFreqTracks'));
+    await this.addCpuFreqLimitCounterTracks(
+          this.engine.getProxy('TrackDecider::addCpuFreqLimitCounterTracks'));
     await this.addCpuPerfCounterTracks(
         this.engine.getProxy('TrackDecider::addCpuPerfCounterTracks'));
     await this.addPluginTracks();

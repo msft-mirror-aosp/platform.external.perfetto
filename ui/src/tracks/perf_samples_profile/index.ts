@@ -13,17 +13,17 @@
 // limitations under the License.
 
 import {searchSegment} from '../../base/binary_search';
+import {duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {LONG} from '../../common/query_result';
 import {ProfileType} from '../../common/state';
-import {duration, Time, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {TrackController} from '../../controller/track_controller';
 import {FLAMEGRAPH_HOVERED_COLOR} from '../../frontend/flamegraph';
 import {globals} from '../../frontend/globals';
 import {TimeScale} from '../../frontend/time_scale';
 import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 
 export const PERF_SAMPLES_PROFILE_TRACK_KIND = 'PerfSamplesProfileTrack';
 
@@ -208,12 +208,14 @@ class PerfSamplesProfileTrack extends Track<Config, Data> {
   }
 }
 
-export function activate(ctx: PluginContext) {
-  ctx.registerTrackController(PerfSamplesProfileTrackController);
-  ctx.registerTrack(PerfSamplesProfileTrack);
+class PerfSamplesProfilePlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.registerTrackController(PerfSamplesProfileTrackController);
+    ctx.registerTrack(PerfSamplesProfileTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.PerfSamplesProfile',
-  activate,
+  plugin: PerfSamplesProfilePlugin,
 };

@@ -13,10 +13,10 @@
 // limitations under the License.
 
 import {searchSegment} from '../../base/binary_search';
+import {duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {LONG, STR} from '../../common/query_result';
 import {ProfileType} from '../../common/state';
-import {duration, Time, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {profileType} from '../../controller/flamegraph_controller';
 import {TrackController} from '../../controller/track_controller';
@@ -24,7 +24,7 @@ import {FLAMEGRAPH_HOVERED_COLOR} from '../../frontend/flamegraph';
 import {globals} from '../../frontend/globals';
 import {TimeScale} from '../../frontend/time_scale';
 import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 
 export const HEAP_PROFILE_TRACK_KIND = 'HeapProfileTrack';
 
@@ -215,12 +215,14 @@ class HeapProfileTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(HeapProfileTrackController);
-  ctx.registerTrack(HeapProfileTrack);
+class HeapProfilePlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.registerTrackController(HeapProfileTrackController);
+    ctx.registerTrack(HeapProfileTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.HeapProfile',
-  activate,
+  plugin: HeapProfilePlugin,
 };

@@ -20,11 +20,11 @@ import {NewTrackArgs, Track} from '../../frontend/track';
 import {ChromeSliceTrack} from '../chrome_slices';
 
 import {LONG, LONG_NULL, NUM, STR} from '../../common/query_result';
-import {duration, time} from '../../common/time';
+import {duration, time} from '../../base/time';
 import {
   TrackController,
 } from '../../controller/track_controller';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 import {BigintMath as BIMath} from '../../base/bigint_math';
 
 export interface Config {
@@ -147,12 +147,14 @@ export class ExpectedFramesSliceTrack extends ChromeSliceTrack {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(ExpectedFramesSliceTrackController);
-  ctx.registerTrack(ExpectedFramesSliceTrack);
+class ExpectedFramesPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.registerTrackController(ExpectedFramesSliceTrackController);
+    ctx.registerTrack(ExpectedFramesSliceTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.ExpectedFrames',
-  activate,
+  plugin: ExpectedFramesPlugin,
 };

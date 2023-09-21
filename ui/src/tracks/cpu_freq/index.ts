@@ -15,6 +15,7 @@
 import {BigintMath as BIMath} from '../../base/bigint_math';
 import {searchSegment} from '../../base/binary_search';
 import {assertTrue} from '../../base/logging';
+import {duration, time, Time} from '../../base/time';
 import {hueForCpu} from '../../common/colorizer';
 import {
   LONG,
@@ -23,13 +24,12 @@ import {
   NUM_NULL,
   QueryResult,
 } from '../../common/query_result';
-import {duration, time, Time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {TrackController} from '../../controller/track_controller';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
 import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 
 
 export const CPU_FREQ_TRACK_KIND = 'CpuFreqTrack';
@@ -481,12 +481,14 @@ class CpuFreqTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(CpuFreqTrackController);
-  ctx.registerTrack(CpuFreqTrack);
+class CpuFreq implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.registerTrackController(CpuFreqTrackController);
+    ctx.registerTrack(CpuFreqTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.CpuFreq',
-  activate,
+  plugin: CpuFreq,
 };

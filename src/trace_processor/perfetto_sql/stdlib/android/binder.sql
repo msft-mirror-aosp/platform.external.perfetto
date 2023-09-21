@@ -14,7 +14,7 @@
 -- limitations under the License.
 --
 
-SELECT IMPORT('common.timestamps');
+INCLUDE PERFETTO MODULE common.timestamps;
 
 -- Count Binder transactions per process.
 --
@@ -326,8 +326,7 @@ JOIN process
   USING (upid)
 WHERE slice.name = 'binder transaction async';
 
-CREATE TABLE internal_binder_async_txn
-AS
+CREATE PERFETTO TABLE internal_binder_async_txn AS
 SELECT
   IIF(binder_reply.next_name = 'binder async rcv', NULL, binder_reply.next_name) AS aidl_name,
   binder_txn.*,

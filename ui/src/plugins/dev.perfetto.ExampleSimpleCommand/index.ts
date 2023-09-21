@@ -13,44 +13,23 @@
 // limitations under the License.
 
 import {
-  Command,
-  EngineProxy,
+  Plugin,
   PluginContext,
-  Store,
-  TracePlugin,
-  Viewer,
+  PluginInfo,
 } from '../../public';
 
-interface State {}
-
 // This is just an example plugin, used to prove that the plugin system works.
-class ExampleSimpleCommand implements TracePlugin {
-  static migrate(_initialState: unknown): State {
-    return {};
-  }
-
-  constructor(_store: Store<State>, _engine: EngineProxy, _viewer: Viewer) {
-    // No-op
-  }
-
-  dispose(): void {
-    // No-op
-  }
-
-  commands(): Command[] {
-    return [
-      {
-        id: 'dev.perfetto.ExampleSimpleCommand#LogHelloWorld',
-        name: 'Log "Hello, world!"',
-        callback: () => console.log('Hello, world!'),
-      },
-    ];
+class ExampleSimpleCommand implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.addCommand({
+      id: 'dev.perfetto.ExampleSimpleCommand#LogHelloWorld',
+      name: 'Log "Hello, world!"',
+      callback: () => console.log('Hello, world!'),
+    });
   }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'dev.perfetto.ExampleSimpleCommand',
-  activate(ctx: PluginContext) {
-    ctx.registerTracePluginFactory(ExampleSimpleCommand);
-  },
+  plugin: ExampleSimpleCommand,
 };
