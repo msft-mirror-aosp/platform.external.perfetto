@@ -39,7 +39,6 @@ import {
   UtidToTrackSortKey,
 } from '../common/state';
 import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../tracks/actual_frames';
-import {ANDROID_LOGS_TRACK_KIND} from '../tracks/android_log';
 import {ASYNC_SLICE_TRACK_KIND} from '../tracks/async_slices';
 import {
   ENABLE_SCROLL_JANK_PLUGIN_V2,
@@ -53,7 +52,6 @@ import {SLICE_TRACK_KIND} from '../tracks/chrome_slices';
 import {COUNTER_TRACK_KIND, CounterScaleOptions} from '../tracks/counter';
 import {CPU_FREQ_TRACK_KIND} from '../tracks/cpu_freq';
 import {CPU_PROFILE_TRACK_KIND} from '../tracks/cpu_profile';
-import {CPU_SLICE_TRACK_KIND} from '../tracks/cpu_slices';
 import {
   EXPECTED_FRAMES_SLICE_TRACK_KIND,
 } from '../tracks/expected_frames';
@@ -263,13 +261,12 @@ class TrackDecider {
       const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
       this.tracksToAdd.push({
         engineId: this.engineId,
-        kind: CPU_SLICE_TRACK_KIND,
+        kind: PLUGIN_TRACK_KIND,
         trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
         name,
         trackGroup: SCROLLING_TRACK_GROUP,
-        config: {
-          cpu,
-        },
+        config: {},
+        uri: `perfetto.CpuSlices#cpu${cpu}`,
       });
     }
   }
@@ -885,11 +882,12 @@ class TrackDecider {
     if (count > 0) {
       this.tracksToAdd.push({
         engineId: this.engineId,
-        kind: ANDROID_LOGS_TRACK_KIND,
+        kind: PLUGIN_TRACK_KIND,
         name: 'Android logs',
         trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
         trackGroup: SCROLLING_TRACK_GROUP,
         config: {},
+        uri: 'perfetto.AndroidLog',
       });
     }
   }
@@ -925,7 +923,7 @@ class TrackDecider {
         name: `Ftrace Events Cpu ${it.cpu}`,
         trackGroup: groupUuid,
         config: {},
-        id: `perfetto.FtraceRaw#cpu${it.cpu}`,
+        uri: `perfetto.FtraceRaw#cpu${it.cpu}`,
       });
     }
 
