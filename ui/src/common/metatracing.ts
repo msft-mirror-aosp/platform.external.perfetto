@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {PerfettoMetatrace, Trace, TracePacket} from '../common/protos';
-import {perfetto} from '../gen/protos';
+import {
+  MetatraceCategories,
+  PerfettoMetatrace,
+  Trace,
+  TracePacket,
+} from '../core/protos';
 
 import {featureFlags} from './feature_flags';
-import {toNs} from './time';
 
 const METATRACING_BUFFER_SIZE = 100000;
 
@@ -28,8 +31,6 @@ export enum MetatraceTrackId {
   // in the omnibox.
   kOmniboxStatus = 3,
 }
-
-import MetatraceCategories = perfetto.protos.MetatraceCategories;
 
 const AOMT_FLAG = featureFlags.register({
   id: 'alwaysOnMetatracing',
@@ -122,8 +123,12 @@ export type TraceEventScope = {
 
 const correctedTimeOrigin = new Date().getTime() - performance.now();
 
+function msToNs(ms: number) {
+  return Math.round(ms * 1e6);
+}
+
 function now(): number {
-  return toNs((correctedTimeOrigin + performance.now()) / 1000);
+  return msToNs((correctedTimeOrigin + performance.now()));
 }
 
 export function traceEvent<T>(
@@ -159,4 +164,32 @@ export function traceEventEnd(traceEvent: TraceEventScope) {
   while (traceEvents.length > METATRACING_BUFFER_SIZE) {
     traceEvents.shift();
   }
+}
+
+// Flatten arbitrary values so they can be used as args in traceEvent() et al.
+export function flattenArgs(
+    input: unknown, parentKey = ''): {[key: string]: string} {
+  if (typeof input !== 'object' || input === null) {
+    return {[parentKey]: String(input)};
+  }
+
+  if (Array.isArray(input)) {
+    const result: Record<string, string> = {};
+
+    (input as Array<unknown>).forEach((item, index) => {
+      const arrayKey = `${parentKey}[${index}]`;
+      Object.assign(result, flattenArgs(item, arrayKey));
+    });
+
+    return result;
+  }
+
+  const result: Record<string, string> = {};
+
+  Object.entries(input as Record<string, unknown>).forEach(([key, value]) => {
+    const newKey = parentKey ? `${parentKey}.${key}` : key;
+    Object.assign(result, flattenArgs(value, newKey));
+  });
+
+  return result;
 }

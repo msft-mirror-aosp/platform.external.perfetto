@@ -14,7 +14,7 @@
 -- limitations under the License.
 --
 
-SELECT IMPORT('android.process_metadata');
+INCLUDE PERFETTO MODULE android.process_metadata;
 
 DROP VIEW IF EXISTS process_metadata_table;
 CREATE VIEW process_metadata_table AS
@@ -56,7 +56,7 @@ FROM process_metadata_table
 LEFT JOIN upid_packages USING (upid);
 
 -- Given a process name, return if it is debuggable.
-CREATE PERFETTO FUNCTION IS_PROCESS_DEBUGGABLE(process_name STRING)
+CREATE PERFETTO FUNCTION is_process_debuggable(process_name STRING)
 RETURNS BOOL AS
 SELECT p.debuggable
 FROM process_metadata_table p

@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Vnode} from 'mithril';
-
+import {duration, Time, time} from '../../base/time';
+import {BasicAsyncTrack} from '../../common/basic_async_track';
 import {colorForString} from '../../common/colorizer';
-import {LONG, STR} from '../../common/query_result';
-import {TPDuration, TPTime} from '../../common/time';
+import {LONG, NUM, STR} from '../../common/query_result';
 import {LIMIT, TrackData} from '../../common/track_data';
-import {
-  TrackController,
-} from '../../controller/track_controller';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {
+  EngineProxy,
+  Plugin,
+  PluginContext,
+  PluginInfo,
+  TracePluginContext,
+} from '../../public';
 
 
 export interface Data extends TrackData {
@@ -36,23 +37,26 @@ export interface Config {
   cpu?: number;
 }
 
-export const FTRACE_RAW_TRACK_KIND = 'FtraceRawTrack';
-
 const MARGIN = 2;
 const RECT_HEIGHT = 18;
 const TRACK_HEIGHT = (RECT_HEIGHT) + (2 * MARGIN);
 
-class FtraceRawTrackController extends TrackController<Config, Data> {
-  static readonly kind = FTRACE_RAW_TRACK_KIND;
+class FtraceRawTrack extends BasicAsyncTrack<Data> {
+  constructor(private engine: EngineProxy, private cpu: number) {
+    super();
+  }
 
-  async onBoundsChange(start: TPTime, end: TPTime, resolution: TPDuration):
+  getHeight(): number {
+    return TRACK_HEIGHT;
+  }
+
+  async onBoundsChange(start: time, end: time, resolution: duration):
       Promise<Data> {
     const excludeList = Array.from(globals.state.ftraceFilter.excludedNames);
     const excludeListSql = excludeList.map((s) => `'${s}'`).join(',');
-    const cpuFilter =
-        this.config.cpu === undefined ? '' : `and cpu = ${this.config.cpu}`;
+    const cpuFilter = this.cpu === undefined ? '' : `and cpu = ${this.cpu}`;
 
-    const queryRes = await this.query(`
+    const queryRes = await this.engine.query(`
       select
         cast(ts / ${resolution} as integer) * ${resolution} as tsQuant,
         type,
@@ -83,21 +87,6 @@ class FtraceRawTrackController extends TrackController<Config, Data> {
     }
     return result;
   }
-}
-
-export class FtraceRawTrack extends Track<Config, Data> {
-  static readonly kind = FTRACE_RAW_TRACK_KIND;
-  constructor(args: NewTrackArgs) {
-    super(args);
-  }
-
-  static create(args: NewTrackArgs): FtraceRawTrack {
-    return new FtraceRawTrack(args);
-  }
-
-  getHeight(): number {
-    return TRACK_HEIGHT;
-  }
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const {
@@ -105,12 +94,12 @@ export class FtraceRawTrack extends Track<Config, Data> {
       windowSpan,
     } = globals.frontendLocalState;
 
-    const data = this.data();
+    const data = this.data;
 
     if (data === undefined) return;  // Can't possibly draw anything.
 
-    const dataStartPx = visibleTimeScale.tpTimeToPx(data.start);
-    const dataEndPx = visibleTimeScale.tpTimeToPx(data.end);
+    const dataStartPx = visibleTimeScale.timeToPx(data.start);
+    const dataEndPx = visibleTimeScale.timeToPx(data.end);
     const visibleStartPx = windowSpan.start;
     const visibleEndPx = windowSpan.end;
 
@@ -133,7 +122,8 @@ export class FtraceRawTrack extends Track<Config, Data> {
         ${Math.min(color.l + 10, 60)}%
       )`;
       ctx.fillStyle = hsl;
-      const xPos = Math.floor(visibleTimeScale.tpTimeToPx(data.timestamps[i]));
+      const timestamp = Time.fromRaw(data.timestamps[i]);
+      const xPos = Math.floor(visibleTimeScale.timeToPx(timestamp));
 
       // Draw a diamond over the event
       ctx.save();
@@ -143,18 +133,43 @@ export class FtraceRawTrack extends Track<Config, Data> {
       ctx.restore();
     }
   }
+}
 
-  getContextMenu(): Vnode<any, {}>|null {
-    return null;
+class FtraceRawPlugin implements Plugin {
+  onActivate(_: PluginContext) {}
+
+  async onTraceLoad(ctx: TracePluginContext): Promise<void> {
+    const cpus = await this.lookupCpuCores(ctx.engine);
+    for (const cpuNum of cpus) {
+      const uri = `perfetto.FtraceRaw#cpu${cpuNum}`;
+
+      ctx.addTrack({
+        uri,
+        displayName: `Ftrace Track for CPU ${cpuNum}`,
+        trackFactory: () => {
+          return new FtraceRawTrack(ctx.engine, cpuNum);
+        },
+      });
+    }
+  }
+
+  private async lookupCpuCores(engine: EngineProxy): Promise<number[]> {
+    const query = 'select distinct cpu from ftrace_event';
+
+    const result = await engine.query(query);
+    const it = result.iter({cpu: NUM});
+
+    const cpuCores: number[] = [];
+
+    for (; it.valid(); it.next()) {
+      cpuCores.push(it.cpu);
+    }
+
+    return cpuCores;
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrack(FtraceRawTrack);
-  ctx.registerTrackController(FtraceRawTrackController);
-}
-
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.FtraceRaw',
-  activate,
+  plugin: FtraceRawPlugin,
 };

@@ -14,6 +14,13 @@
 
 import {BigintMath} from '../base/bigint_math';
 import {assertExists} from '../base/logging';
+import {
+  duration,
+  Span,
+  Time,
+  time,
+  TimeSpan,
+} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
 import {Args} from '../common/arg_types';
@@ -30,14 +37,14 @@ import {
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
 import {onSelectionChanged} from '../common/selection_observer';
-import {CallsiteInfo, EngineConfig, ProfileType, State} from '../common/state';
 import {
-  Span,
-  TPDuration,
-  TPTime,
-  tpTimeFromSeconds,
-  TPTimeSpan,
-} from '../common/time';
+  CallsiteInfo,
+  EngineConfig,
+  ProfileType,
+  RESOLUTION_DEFAULT,
+  State,
+} from '../common/state';
+import {TimestampFormat, timestampFormat} from '../common/timestamp_format';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 
@@ -46,9 +53,12 @@ import {BottomTabList} from './bottom_tab';
 import {FrontendLocalState} from './frontend_local_state';
 import {Router} from './router';
 import {ServiceWorkerController} from './service_worker_controller';
-import {SliceSqlId, TPTimestamp} from './sql_types';
+import {SliceSqlId} from './sql_types';
 import {createStore, Store} from './store';
 import {PxSpan, TimeScale} from './time_scale';
+
+const INSTANT_FOCUS_DURATION = 1n;
+const INCOMPLETE_SLICE_DURATION = 30_000n;
 
 type Dispatch = (action: DeferredAction) => void;
 type TrackDataStore = Map<string, {}>;
@@ -57,18 +67,18 @@ type AggregateDataStore = Map<string, AggregateData>;
 type Description = Map<string, string>;
 
 export interface SliceDetails {
-  ts?: TPTime;
+  ts?: time;
   absTime?: string;
-  dur?: TPDuration;
-  threadTs?: TPTime;
-  threadDur?: TPDuration;
+  dur?: duration;
+  threadTs?: time;
+  threadDur?: duration;
   priority?: number;
   endState?: string|null;
   cpu?: number;
   id?: number;
   threadStateId?: number;
   utid?: number;
-  wakeupTs?: TPTime;
+  wakeupTs?: time;
   wakerUtid?: number;
   wakerCpu?: number;
   category?: string;
@@ -90,8 +100,8 @@ export interface FlowPoint {
   sliceName: string;
   sliceCategory: string;
   sliceId: SliceSqlId;
-  sliceStartTs: TPTimestamp;
-  sliceEndTs: TPTimestamp;
+  sliceStartTs: time;
+  sliceEndTs: time;
   // Thread and process info. Only set in sliceSelected not in areaSelected as
   // the latter doesn't display per-flow info and it'd be a waste to join
   // additional tables for undisplayed info in that case. Nothing precludes
@@ -112,30 +122,30 @@ export interface Flow {
 
   begin: FlowPoint;
   end: FlowPoint;
-  dur: TPDuration;
+  dur: duration;
 
   category?: string;
   name?: string;
 }
 
 export interface CounterDetails {
-  startTime?: TPTime;
+  startTime?: time;
   value?: number;
   delta?: number;
-  duration?: TPDuration;
+  duration?: duration;
   name?: string;
 }
 
 export interface ThreadStateDetails {
-  ts?: TPTime;
-  dur?: TPDuration;
+  ts?: time;
+  dur?: duration;
 }
 
 export interface FlamegraphDetails {
   type?: ProfileType;
   id?: number;
-  start?: TPTime;
-  dur?: TPDuration;
+  start?: time;
+  dur?: duration;
   pids?: number[];
   upids?: number[];
   flamegraph?: CallsiteInfo[];
@@ -152,14 +162,14 @@ export interface FlamegraphDetails {
 
 export interface CpuProfileDetails {
   id?: number;
-  ts?: TPTime;
+  ts?: time;
   utid?: number;
   stack?: CallsiteInfo[];
 }
 
 export interface QuantizedLoad {
-  start: TPTime;
-  end: TPTime;
+  start: time;
+  end: time;
   load: number;
 }
 type OverviewStore = Map<string, QuantizedLoad[]>;
@@ -176,7 +186,7 @@ type ThreadMap = Map<number, ThreadDesc>;
 
 export interface FtraceEvent {
   id: number;
-  ts: TPTime;
+  ts: time;
   name: string;
   cpu: number;
   thread: string|null;
@@ -208,6 +218,16 @@ function getRoot() {
   let root = script.src;
   root = root.substr(0, root.lastIndexOf('/') + 1);
   return root;
+}
+
+// Options for globals.makeSelection().
+export interface MakeSelectionOpts {
+  // The ID of the next tab to reveal, or null to keep the current tab.
+  // If undefined, the 'current_selection' tab will be revealed.
+  tab?: string|null;
+
+  // Whether to cancel the current search selection. Default = true.
+  clearSearch?: boolean;
 }
 
 /**
@@ -253,6 +273,8 @@ class Globals {
   private _ftraceCounters?: FtraceStat[] = undefined;
   private _ftracePanelData?: FtracePanelData = undefined;
   private _cmdManager?: CommandManager = undefined;
+  private _realtimeOffset = Time.ZERO;
+  private _utcOffset = Time.ZERO;
 
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
@@ -556,7 +578,7 @@ class Globals {
     this.aggregateDataStore.set(kind, data);
   }
 
-  getCurResolution(): TPDuration {
+  getCurResolution(): duration {
     // Truncate the resolution to the closest power of 2 (in nanosecond space).
     // We choose to work in ns space because resolution is consumed be track
     // controllers for quantization and they rely on resolution to be a power
@@ -571,12 +593,12 @@ class Globals {
     // TODO(b/186265930): Remove once fixed:
     if (timeScale.pxSpan.delta === 0) {
       console.error(`b/186265930: Bad pxToSec suppressed`);
-      return BigintMath.bitFloor(tpTimeFromSeconds(1000));
+      return RESOLUTION_DEFAULT;
     }
 
     const timePerPx = timeScale.pxDeltaToDuration(this.quantPx);
 
-    return BigintMath.bitFloor(timePerPx.toTPTime('floor'));
+    return BigintMath.bitFloor(timePerPx.toTime('floor'));
   }
 
   getCurrentEngine(): EngineConfig|undefined {
@@ -591,15 +613,21 @@ class Globals {
     this._ftracePanelData = data;
   }
 
-  makeSelection(
-      action: DeferredAction<{}>, tab: string|null = 'current_selection') {
+  makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
+    const {
+      tab = 'current_selection',
+      clearSearch = true,
+    } = opts;
+
     const previousState = this.state;
+
     // A new selection should cancel the current search selection.
-    globals.dispatch(Actions.setSearchIndex({index: -1}));
+    clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
+
     if (action.type === 'deselect') {
       globals.dispatch(Actions.setCurrentTab({tab: undefined}));
     } else if (tab !== null) {
-      globals.dispatch(Actions.setCurrentTab({tab: tab}));
+      globals.dispatch(Actions.setCurrentTab({tab}));
     }
     globals.dispatch(action);
 
@@ -674,25 +702,25 @@ class Globals {
   // Get a timescale that covers the entire trace
   getTraceTimeScale(pxSpan: PxSpan): TimeScale {
     const {start, end} = this.state.traceTime;
-    const traceTime = HighPrecisionTimeSpan.fromTpTime(start, end);
+    const traceTime = HighPrecisionTimeSpan.fromTime(start, end);
     return TimeScale.fromHPTimeSpan(traceTime, pxSpan);
   }
 
   // Get the trace time bounds
   stateTraceTime(): Span<HighPrecisionTime> {
     const {start, end} = this.state.traceTime;
-    return HighPrecisionTimeSpan.fromTpTime(start, end);
+    return HighPrecisionTimeSpan.fromTime(start, end);
   }
 
-  stateTraceTimeTP(): Span<TPTime> {
+  stateTraceTimeTP(): Span<time, duration> {
     const {start, end} = this.state.traceTime;
-    return new TPTimeSpan(start, end);
+    return new TimeSpan(start, end);
   }
 
   // Get the state version of the visible time bounds
-  stateVisibleTime(): Span<TPTime> {
+  stateVisibleTime(): Span<time, duration> {
     const {start, end} = this.state.frontendLocalState.visibleState;
-    return new TPTimeSpan(start, end);
+    return new TimeSpan(start, end);
   }
 
   // How many pixels to use for one quanta of horizontal resolution
@@ -708,6 +736,108 @@ class Globals {
 
   get commandManager(): CommandManager {
     return assertExists(this._cmdManager);
+  }
+
+
+  // This is the ts value at the time of the Unix epoch.
+  // Normally some large negative value, because the unix epoch is normally in
+  // the past compared to ts=0.
+  get realtimeOffset(): time {
+    return this._realtimeOffset;
+  }
+
+  set realtimeOffset(time: time) {
+    this._realtimeOffset = time;
+  }
+
+  // This is the timestamp that we should use for our offset when in UTC mode.
+  // Usually the most recent UTC midnight compared to the trace start time.
+  get utcOffset(): time {
+    return this._utcOffset;
+  }
+
+  set utcOffset(offset: time) {
+    this._utcOffset = offset;
+  }
+
+  // Offset between t=0 and the configured time domain.
+  timestampOffset(): time {
+    const fmt = timestampFormat();
+    switch (fmt) {
+      case TimestampFormat.Timecode:
+      case TimestampFormat.Seconds:
+        return this.state.traceTime.start;
+      case TimestampFormat.Raw:
+      case TimestampFormat.RawLocale:
+        return Time.ZERO;
+      case TimestampFormat.UTC:
+        return this.utcOffset;
+      default:
+        const x: never = fmt;
+        throw new Error(`Unsupported format ${x}`);
+    }
+  }
+
+  // Convert absolute time to domain time.
+  toDomainTime(ts: time): time {
+    return Time.sub(ts, this.timestampOffset());
+  }
+
+  findTimeRangeOfSelection(): {start: time, end: time} {
+    const selection = this.state.currentSelection;
+    let start = Time.INVALID;
+    let end = Time.INVALID;
+    if (selection === null) {
+      return {start, end};
+    } else if (
+        selection.kind === 'SLICE' || selection.kind === 'CHROME_SLICE') {
+      const slice = this.sliceDetails;
+      if (slice.ts && slice.dur !== undefined && slice.dur > 0) {
+        start = slice.ts;
+        end = Time.add(start, slice.dur);
+      } else if (slice.ts) {
+        start = slice.ts;
+        // This will handle either:
+        // a)slice.dur === -1 -> unfinished slice
+        // b)slice.dur === 0  -> instant event
+        end = slice.dur === -1n ? Time.add(start, INCOMPLETE_SLICE_DURATION) :
+                                  Time.add(start, INSTANT_FOCUS_DURATION);
+      }
+    } else if (selection.kind === 'THREAD_STATE') {
+      const threadState = this.threadStateDetails;
+      if (threadState.ts && threadState.dur) {
+        start = threadState.ts;
+        end = Time.add(start, threadState.dur);
+      }
+    } else if (selection.kind === 'COUNTER') {
+      start = selection.leftTs;
+      end = selection.rightTs;
+    } else if (selection.kind === 'AREA') {
+      const selectedArea = this.state.areas[selection.areaId];
+      if (selectedArea) {
+        start = selectedArea.start;
+        end = selectedArea.end;
+      }
+    } else if (selection.kind === 'NOTE') {
+      const selectedNote = this.state.notes[selection.id];
+      // Notes can either be default or area notes. Area notes are handled
+      // above in the AREA case.
+      if (selectedNote && selectedNote.noteType === 'DEFAULT') {
+        start = selectedNote.timestamp;
+        end = Time.add(selectedNote.timestamp, INSTANT_FOCUS_DURATION);
+      }
+    } else if (selection.kind === 'LOG') {
+      // TODO(hjd): Make focus selection work for logs.
+    } else if (selection.kind === 'GENERIC_SLICE') {
+      start = selection.start;
+      if (selection.duration > 0) {
+        end = Time.add(start, selection.duration);
+      } else {
+        end = Time.add(start, INSTANT_FOCUS_DURATION);
+      }
+    }
+
+    return {start, end};
   }
 }
 

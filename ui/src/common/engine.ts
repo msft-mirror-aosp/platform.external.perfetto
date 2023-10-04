@@ -13,31 +13,35 @@
 // limitations under the License.
 
 import {defer, Deferred} from '../base/deferred';
+import {Disposable} from '../base/disposable';
 import {assertExists, assertTrue} from '../base/logging';
-import {perfetto} from '../gen/protos';
-
-import {ProtoRingBuffer} from './proto_ring_buffer';
+import {duration, Span, Time, time, TimeSpan} from '../base/time';
 import {
   ComputeMetricArgs,
   ComputeMetricResult,
   DisableAndReadMetatraceResult,
+  EnableMetatraceArgs,
+  MetatraceCategories,
   QueryArgs,
+  QueryResult as ProtoQueryResult,
   ResetTraceProcessorArgs,
-} from './protos';
-import {LONG, LONG_NULL, NUM, STR} from './query_result';
+  TraceProcessorRpc,
+  TraceProcessorRpcStream,
+} from '../core/protos';
+
+import {ProtoRingBuffer} from './proto_ring_buffer';
 import {
   createQueryResult,
+  LONG,
+  LONG_NULL,
+  NUM,
   QueryError,
   QueryResult,
+  STR,
   WritableQueryResult,
 } from './query_result';
-import {TPTime, TPTimeSpan} from './time';
 
-import TraceProcessorRpc = perfetto.protos.TraceProcessorRpc;
-import TraceProcessorRpcStream = perfetto.protos.TraceProcessorRpcStream;
-import TPM = perfetto.protos.TraceProcessorRpc.TraceProcessorMethod;
-import {Span} from '../common/time';
-import {BigintMath} from '../base/bigint_math';
+import TPM = TraceProcessorRpc.TraceProcessorMethod;
 
 export interface LoadingTracker {
   beginLoading(): void;
@@ -86,7 +90,7 @@ export abstract class Engine {
   private pendingResetTraceProcessors = new Array<Deferred<void>>();
   private pendingQueries = new Array<WritableQueryResult>();
   private pendingRestoreTables = new Array<Deferred<void>>();
-  private pendingComputeMetrics = new Array<Deferred<ComputeMetricResult>>();
+  private pendingComputeMetrics = new Array<Deferred<string|Uint8Array>>();
   private pendingReadMetatrace?: Deferred<DisableAndReadMetatraceResult>;
   private _isMetatracingEnabled = false;
 
@@ -131,23 +135,20 @@ export abstract class Engine {
     // 1. We avoid protobufjs decoding the TraceProcessorRpc.query_result field.
     // 2. We stash (a view of) the original buffer into the |rawQueryResult| so
     //    the `case TPM_QUERY_STREAMING` below can take it.
-    perfetto.protos.QueryResult.decode =
-        (reader: protobuf.Reader, length: number) => {
-          const res =
-              perfetto.protos.QueryResult.create() as {} as QueryResultBypass;
-          res.rawQueryResult =
-              reader.buf.subarray(reader.pos, reader.pos + length);
-          // All this works only if protobufjs returns the original ArrayBuffer
-          // from |rpcMsgEncoded|. It should be always the case given the
-          // current implementation. This check mainly guards against future
-          // behavioral changes of protobufjs. We don't want to accidentally
-          // hold onto some internal protobufjs buffer. We are fine holding
-          // onto |rpcMsgEncoded| because those come from ProtoRingBuffer which
-          // is buffer-retention-friendly.
-          assertTrue(res.rawQueryResult.buffer === rpcMsgEncoded.buffer);
-          reader.pos += length;
-          return res as {} as perfetto.protos.QueryResult;
-        };
+    ProtoQueryResult.decode = (reader: protobuf.Reader, length: number) => {
+      const res = ProtoQueryResult.create() as {} as QueryResultBypass;
+      res.rawQueryResult = reader.buf.subarray(reader.pos, reader.pos + length);
+      // All this works only if protobufjs returns the original ArrayBuffer
+      // from |rpcMsgEncoded|. It should be always the case given the
+      // current implementation. This check mainly guards against future
+      // behavioral changes of protobufjs. We don't want to accidentally
+      // hold onto some internal protobufjs buffer. We are fine holding
+      // onto |rpcMsgEncoded| because those come from ProtoRingBuffer which
+      // is buffer-retention-friendly.
+      assertTrue(res.rawQueryResult.buffer === rpcMsgEncoded.buffer);
+      reader.pos += length;
+      return res as {} as ProtoQueryResult;
+    };
 
     const rpc = TraceProcessorRpc.decode(rpcMsgEncoded);
 
@@ -207,7 +208,9 @@ export abstract class Engine {
               });
           pendingComputeMetric.reject(error);
         } else {
-          pendingComputeMetric.resolve(metricRes);
+          const result = metricRes.metricsAsPrototext ||
+              metricRes.metricsAsJson || metricRes.metrics || '';
+          pendingComputeMetric.resolve(result);
         }
         break;
       case TPM.TPM_DISABLE_AND_READ_METATRACE:
@@ -288,14 +291,23 @@ export abstract class Engine {
   }
 
   // Shorthand for sending a compute metrics request to the engine.
-  async computeMetric(metrics: string[]): Promise<ComputeMetricResult> {
-    const asyncRes = defer<ComputeMetricResult>();
+  async computeMetric(metrics: string[], format: 'json'|'prototext'|'proto'):
+      Promise<string|Uint8Array> {
+    const asyncRes = defer<string|Uint8Array>();
     this.pendingComputeMetrics.push(asyncRes);
     const rpc = TraceProcessorRpc.create();
     rpc.request = TPM.TPM_COMPUTE_METRIC;
     const args = rpc.computeMetricArgs = new ComputeMetricArgs();
     args.metricNames = metrics;
-    args.format = ComputeMetricArgs.ResultFormat.TEXTPROTO;
+    if (format === 'json') {
+      args.format = ComputeMetricArgs.ResultFormat.JSON;
+    } else if (format === 'prototext') {
+      args.format = ComputeMetricArgs.ResultFormat.TEXTPROTO;
+    } else if (format === 'proto') {
+      args.format = ComputeMetricArgs.ResultFormat.BINARY_PROTOBUF;
+    } else {
+      throw new Error(`Unknown compute metric format ${format}`);
+    }
     this.rpcSendRequest(rpc);
     return asyncRes;
   }
@@ -339,11 +351,11 @@ export abstract class Engine {
     return this._isMetatracingEnabled;
   }
 
-  enableMetatrace(categories?: perfetto.protos.MetatraceCategories) {
+  enableMetatrace(categories?: MetatraceCategories) {
     const rpc = TraceProcessorRpc.create();
     rpc.request = TPM.TPM_ENABLE_METATRACE;
     if (categories) {
-      rpc.enableMetatraceArgs = new perfetto.protos.EnableMetatraceArgs();
+      rpc.enableMetatraceArgs = new EnableMetatraceArgs();
       rpc.enableMetatraceArgs.categories = categories;
     }
     this._isMetatracingEnabled = true;
@@ -412,38 +424,39 @@ export abstract class Engine {
     return result.firstRow({cnt: NUM}).cnt;
   }
 
-  async getTraceTimeBounds(): Promise<Span<TPTime>> {
+  async getTraceTimeBounds(): Promise<Span<time, duration>> {
     const result = await this.query(
         `select start_ts as startTs, end_ts as endTs from trace_bounds`);
     const bounds = result.firstRow({
       startTs: LONG,
       endTs: LONG,
     });
-    return new TPTimeSpan(bounds.startTs, bounds.endTs);
+    return new TimeSpan(
+        Time.fromRaw(bounds.startTs), Time.fromRaw(bounds.endTs));
   }
 
-  async getTracingMetadataTimeBounds(): Promise<Span<TPTime>> {
+  async getTracingMetadataTimeBounds(): Promise<Span<time, duration>> {
     const queryRes = await this.query(`select
          name,
          int_value as intValue
          from metadata
          where name = 'tracing_started_ns' or name = 'tracing_disabled_ns'
          or name = 'all_data_source_started_ns'`);
-    let startBound = 0n;
-    let endBound = BigintMath.INT64_MAX;
+    let startBound = Time.MIN;
+    let endBound = Time.MAX;
     const it = queryRes.iter({'name': STR, 'intValue': LONG_NULL});
     for (; it.valid(); it.next()) {
       const columnName = it.name;
       const timestamp = it.intValue;
       if (timestamp === null) continue;
       if (columnName === 'tracing_disabled_ns') {
-        endBound = BigintMath.min(endBound, timestamp);
+        endBound = Time.min(endBound, Time.fromRaw(timestamp));
       } else {
-        startBound = BigintMath.max(startBound, timestamp);
+        startBound = Time.max(startBound, Time.fromRaw(timestamp));
       }
     }
 
-    return new TPTimeSpan(startBound, endBound);
+    return new TimeSpan(startBound, endBound);
   }
 
   getProxy(tag: string): EngineProxy {
@@ -453,20 +466,44 @@ export abstract class Engine {
 
 // Lightweight wrapper over Engine exposing only `query` method and annotating
 // all queries going through it with a tag.
-export class EngineProxy {
+export class EngineProxy implements Disposable {
   private engine: Engine;
   private tag: string;
+  private isAlive: boolean;
 
   constructor(engine: Engine, tag: string) {
     this.engine = engine;
     this.tag = tag;
+    this.isAlive = true;
   }
 
-  query(sqlQuery: string, tag?: string): Promise<QueryResult>&QueryResult {
-    return this.engine.query(sqlQuery, tag || this.tag);
+  query(query: string, tag?: string): Promise<QueryResult>&QueryResult {
+    if (!this.isAlive) {
+      throw new Error(`EngineProxy ${this.tag} was disposed.`);
+    }
+    return this.engine.query(query, tag || this.tag);
+  }
+
+  async computeMetric(metrics: string[], format: 'json'|'prototext'|'proto'):
+      Promise<string|Uint8Array> {
+    if (!this.isAlive) {
+      return Promise.reject(new Error(`EngineProxy ${this.tag} was disposed.`));
+    }
+    return this.engine.computeMetric(metrics, format);
+  }
+
+  async getCpus(): Promise<number[]> {
+    if (!this.isAlive) {
+      return Promise.reject(new Error(`EngineProxy ${this.tag} was disposed.`));
+    }
+    return this.engine.getCpus();
   }
 
   get engineId(): string {
     return this.engine.id;
+  }
+
+  dispose() {
+    this.isAlive = false;
   }
 }

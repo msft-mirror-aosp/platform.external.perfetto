@@ -512,7 +512,7 @@ TEST_F(TraceProcessorIntegrationTest, ErrorMessageMetricFile) {
   ASSERT_EQ(it.Status().message(),
             R"(Traceback (most recent call last):
   File "stdin" line 1 col 1
-    select RUN_METRIC('foo/bar.sql');
+    select RUN_METRIC('foo/bar.sql')
     ^
   Metric file "foo/bar.sql" line 1 col 8
     select t from slice
@@ -527,16 +527,16 @@ TEST_F(TraceProcessorIntegrationTest, ErrorMessageModule) {
 
   ASSERT_TRUE(Processor()->RegisterSqlModule(module).ok());
 
-  auto it = Query("select IMPORT('foo.bar');");
+  auto it = Query("include perfetto module foo.bar;");
   ASSERT_FALSE(it.Next());
   ASSERT_FALSE(it.Status().ok());
 
   ASSERT_EQ(it.Status().message(),
             R"(Traceback (most recent call last):
   File "stdin" line 1 col 1
-    select IMPORT('foo.bar');
+    include perfetto module foo.bar
     ^
-  Module import "foo.bar" line 1 col 8
+  Module include "foo.bar" line 1 col 8
     select t from slice
            ^
 no such column: t)");

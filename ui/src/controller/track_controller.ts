@@ -14,21 +14,15 @@
 
 import {BigintMath} from '../base/bigint_math';
 import {assertExists} from '../base/logging';
+import {duration, time, Time, TimeSpan} from '../base/time';
 import {Engine} from '../common/engine';
 import {Registry} from '../common/registry';
-import {TraceTime, TrackState} from '../common/state';
-import {
-  TPDuration,
-  TPTime,
-  tpTimeFromSeconds,
-  TPTimeSpan,
-} from '../common/time';
+import {RESOLUTION_DEFAULT, TraceTime, TrackState} from '../common/state';
 import {LIMIT, TrackData} from '../common/track_data';
 import {globals} from '../frontend/globals';
 import {publishTrackData} from '../frontend/publish';
 
-import {Controller} from './controller';
-import {ControllerFactory} from './controller';
+import {Controller, ControllerFactory} from './controller';
 
 interface TrackConfig {}
 
@@ -47,10 +41,6 @@ export abstract class TrackController<
   private isSetup = false;
   private lastReloadHandled = 0;
 
-  // We choose 100000 as the table size to cache as this is roughly the point
-  // where SQLite sorts start to become expensive.
-  private static readonly MIN_TABLE_SIZE_TO_CACHE = 100000;
-
   constructor(args: TrackControllerArgs) {
     super('main');
     this.trackId = args.trackId;
@@ -68,7 +58,7 @@ export abstract class TrackController<
   // Must be overridden by the track implementation. Is invoked when the track
   // frontend runs out of cached data. The derived track controller is expected
   // to publish new track data in response to this call.
-  abstract onBoundsChange(start: TPTime, end: TPTime, resolution: TPDuration):
+  abstract onBoundsChange(start: time, end: time, resolution: duration):
       Promise<Data>;
 
   get trackState(): TrackState {
@@ -127,7 +117,7 @@ export abstract class TrackController<
   }
 
   shouldRequestData(traceTime: TraceTime): boolean {
-    const tspan = new TPTimeSpan(traceTime.start, traceTime.end);
+    const tspan = new TimeSpan(traceTime.start, traceTime.end);
     if (this.data === undefined) return true;
     if (this.shouldReload()) return true;
 
@@ -147,80 +137,6 @@ export abstract class TrackController<
     return !inRange ||
         this.data.resolution !==
         globals.state.frontendLocalState.visibleState.resolution;
-  }
-
-  // Decides, based on the length of the trace and the number of rows
-  // provided whether a TrackController subclass should cache its quantized
-  // data. Returns the bucket size (in ns) if caching should happen and
-  // undefined otherwise.
-  // Subclasses should call this in their setup function
-  calcCachedBucketSize(numRows: number): TPDuration|undefined {
-    // Ensure that we're not caching when the table size isn't even that big.
-    if (numRows < TrackController.MIN_TABLE_SIZE_TO_CACHE) {
-      return undefined;
-    }
-
-    const traceDuration = globals.stateTraceTimeTP().duration;
-
-    // For large traces, going through the raw table in the most zoomed-out
-    // states can be very expensive as this can involve going through O(millions
-    // of rows). The cost of this becomes high even for just iteration but is
-    // especially slow as quantization involves a SQLite sort on the quantized
-    // timestamp (for the group by).
-    //
-    // To get around this, we can cache a pre-quantized table which we can then
-    // in zoomed-out situations and fall back to the real table when zoomed in
-    // (which naturally constrains the amount of data by virtue of the window
-    // covering a smaller timespan)
-    //
-    // This method computes that cached table by computing an approximation for
-    // the bucket size we would use when totally zoomed out and then going a few
-    // resolution levels down which ensures that our cached table works for more
-    // than the literally most zoomed out state. Moving down a resolution level
-    // is defined as moving down a power of 2; this matches the logic in
-    // |globals.getCurResolution|.
-    //
-    // TODO(lalitm): in the future, we should consider having a whole set of
-    // quantized tables each of which cover some portion of resolution lvel
-    // range. As each table covers a large number of resolution levels, even 3-4
-    // tables should really cover the all concievable trace sizes. This set
-    // could be computed by looking at the number of events being processed one
-    // level below the cached table and computing another layer of caching if
-    // that count is too high (with respect to MIN_TABLE_SIZE_TO_CACHE).
-
-    // 4k monitors have 3840 horizontal pixels so use that for a worst case
-    // approximation of the window width.
-    const approxWidthPx = 3840n;
-
-    // Compute the outermost bucket size. This acts as a starting point for
-    // computing the cached size.
-    const outermostBucketSize =
-        BigintMath.bitCeil(traceDuration / approxWidthPx);
-    const outermostResolutionLevel = BigintMath.log2(outermostBucketSize);
-
-    // This constant decides how many resolution levels down from our outermost
-    // bucket computation we want to be able to use the cached table.
-    // We've chosen 7 as it seems to be empircally seems to be a good fit for
-    // trace data.
-    const resolutionLevelsCovered = 7n;
-
-    // If we've got less resolution levels in the trace than the number of
-    // resolution levels we want to go down, bail out because this cached
-    // table is really not going to be used enough.
-    if (outermostResolutionLevel < resolutionLevelsCovered) {
-      return BigintMath.INT64_MAX;
-    }
-
-    // Another way to look at moving down resolution levels is to consider how
-    // many sub-intervals we are splitting the bucket into.
-    const bucketSubIntervals = 1n << resolutionLevelsCovered;
-
-    // Calculate the smallest bucket we want our table to be able to handle by
-    // dividing the outermsot bucket by the number of subintervals we should
-    // divide by.
-    const cachedBucketSize = outermostBucketSize / bucketSubIntervals;
-
-    return cachedBucketSize;
   }
 
   run() {
@@ -247,13 +163,14 @@ export abstract class TrackController<
               this.isSetup = true;
               let resolution = visibleState.resolution;
 
+              // If resolution is not a power of 2, reset to the default value
               if (BigintMath.popcount(resolution) !== 1) {
-                resolution = BigintMath.bitFloor(tpTimeFromSeconds(1000));
+                resolution = RESOLUTION_DEFAULT;
               }
 
               return this.onBoundsChange(
-                  visibleTimeSpan.start - dur,
-                  visibleTimeSpan.end + dur,
+                  Time.sub(visibleTimeSpan.start, dur),
+                  Time.add(visibleTimeSpan.end, dur),
                   resolution);
             })
             .then((data) => {

@@ -17,17 +17,22 @@
 #ifndef SRC_TRACE_PROCESSOR_PERFETTO_SQL_ENGINE_PERFETTO_SQL_ENGINE_H_
 #define SRC_TRACE_PROCESSOR_PERFETTO_SQL_ENGINE_PERFETTO_SQL_ENGINE_H_
 
+#include <memory>
 #include <optional>
+
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/status_or.h"
+#include "src/trace_processor/db/runtime_table.h"
 #include "src/trace_processor/perfetto_sql/engine/perfetto_sql_parser.h"
+#include "src/trace_processor/perfetto_sql/engine/runtime_table_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/sql_function.h"
-#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_function.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/static_table_function.h"
 #include "src/trace_processor/sqlite/scoped_db.h"
 #include "src/trace_processor/sqlite/sql_source.h"
 #include "src/trace_processor/sqlite/sqlite_engine.h"
 #include "src/trace_processor/sqlite/sqlite_utils.h"
+#include "src/trace_processor/util/sql_modules.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -47,7 +52,8 @@ class PerfettoSqlEngine {
     ExecutionStats stats;
   };
 
-  PerfettoSqlEngine();
+  explicit PerfettoSqlEngine(StringPool* pool);
+  ~PerfettoSqlEngine();
 
   // Executes all the statements in |sql| and returns a |ExecutionResult|
   // object. The metadata will reference all the statements executed and the
@@ -107,32 +113,51 @@ class PerfettoSqlEngine {
   // Enables memoization for the given SQL function.
   base::Status EnableSqlFunctionMemoization(const std::string& name);
 
-  // Takes the prepared statement for the given SQL table function.
-  std::optional<SqliteEngine::PreparedStatement> TakeSqlTableFunctionStatement(
-      const std::string&);
-
-  // Returns the prepared statement for the given SQL table function for future
-  // use.
-  void ReturnSqlTableFunctionStatementForReuse(const std::string&,
-                                               SqliteEngine::PreparedStatement);
-
   // Registers a trace processor C++ table with SQLite with an SQL name of
   // |name|.
-  void RegisterTable(const Table& table, const std::string& name);
+  void RegisterStaticTable(const Table& table, const std::string& name);
 
   // Registers a trace processor C++ table function with SQLite.
-  void RegisterTableFunction(std::unique_ptr<TableFunction> fn);
+  void RegisterStaticTableFunction(std::unique_ptr<StaticTableFunction> fn);
 
-  SqliteEngine* sqlite_engine() { return &engine_; }
+  // Returns the state for the given table function.
+  RuntimeTableFunction::State* GetRuntimeTableFunctionState(
+      const std::string&) const;
+
+  // Should be called when a table function is destroyed.
+  void OnRuntimeTableFunctionDestroyed(const std::string&);
+
+  SqliteEngine* sqlite_engine() { return engine_.get(); }
+
+  // Makes new SQL module available to import.
+  void RegisterModule(const std::string& name,
+                      sql_modules::RegisteredModule module) {
+    modules_.Insert(name, std::move(module));
+  }
+
+  // Fetches registered SQL module.
+  sql_modules::RegisteredModule* FindModule(const std::string& name) {
+    return modules_.Find(name);
+  }
 
  private:
   base::StatusOr<SqlSource> ExecuteCreateFunction(
-      const PerfettoSqlParser::CreateFunction&);
+      const PerfettoSqlParser::CreateFunction&,
+      const PerfettoSqlParser& parser);
+
+  base::Status ExecuteInclude(const PerfettoSqlParser::Include&,
+                              const PerfettoSqlParser& parser);
+
+  // Registers a SQL-defined trace processor C++ table with SQLite.
+  base::Status RegisterRuntimeTable(std::string name, SqlSource sql);
 
   std::unique_ptr<QueryCache> query_cache_;
-  SqliteEngine engine_;
-  base::FlatHashMap<std::string, std::optional<SqliteEngine::PreparedStatement>>
-      sql_table_function_statements_;
+  StringPool* pool_ = nullptr;
+  base::FlatHashMap<std::string, std::unique_ptr<RuntimeTableFunction::State>>
+      runtime_table_fn_states_;
+  base::FlatHashMap<std::string, std::unique_ptr<RuntimeTable>> runtime_tables_;
+  base::FlatHashMap<std::string, sql_modules::RegisteredModule> modules_;
+  std::unique_ptr<SqliteEngine> engine_;
 };
 
 }  // namespace trace_processor
@@ -201,7 +226,7 @@ base::Status PerfettoSqlEngine::RegisterCppFunction(
     int argc,
     typename Function::Context* ctx,
     bool deterministic) {
-  return engine_.RegisterFunction(
+  return engine_->RegisterFunction(
       name, argc, perfetto_sql_internal::WrapSqlFunction<Function>, ctx,
       nullptr, deterministic);
 }
@@ -215,7 +240,7 @@ base::Status PerfettoSqlEngine::RegisterCppFunction(
   auto ctx_destructor = [](void* ptr) {
     delete static_cast<typename Function::Context*>(ptr);
   };
-  return engine_.RegisterFunction(
+  return engine_->RegisterFunction(
       name, argc, perfetto_sql_internal::WrapSqlFunction<Function>,
       user_data.release(), ctx_destructor, deterministic);
 }

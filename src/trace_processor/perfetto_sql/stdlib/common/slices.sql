@@ -106,7 +106,7 @@ JOIN process USING (upid);
 -- @arg id INT              Id of the slice to check parents of.
 -- @arg parent_name STRING  Name of potential ancestor slice.
 -- @ret BOOL                Whether `parent_name` is a name of an ancestor slice.
-CREATE PERFETTO FUNCTION HAS_PARENT_SLICE_WITH_NAME(id INT, parent_name STRING)
+CREATE PERFETTO FUNCTION has_parent_slice_with_name(id INT, parent_name STRING)
 RETURNS BOOL AS
 SELECT EXISTS(
   SELECT 1
@@ -121,7 +121,7 @@ SELECT EXISTS(
 -- @arg descendant_name STRING  Name of potential descendant slice.
 -- @ret BOOL                    Whether `descendant_name` is a name of an
 --                              descendant slice.
-CREATE PERFETTO FUNCTION HAS_DESCENDANT_SLICE_WITH_NAME(
+CREATE PERFETTO FUNCTION has_descendant_slice_with_name(
   id INT,
   descendant_name STRING
 )
@@ -137,7 +137,7 @@ SELECT EXISTS(
 --
 -- @arg slice_glob STRING Name of the slices to counted.
 -- @ret INT               Number of slices with the name.
-CREATE PERFETTO FUNCTION SLICE_COUNT(slice_glob STRING)
+CREATE PERFETTO FUNCTION slice_count(slice_glob STRING)
 RETURNS INT AS
 SELECT COUNT(1) FROM slice WHERE name GLOB $slice_glob;;
 
@@ -148,7 +148,7 @@ SELECT COUNT(1) FROM slice WHERE name GLOB $slice_glob;;
 -- @arg parent_id INT Id of the parent slice.
 -- @arg child_name STRING name of the child with the desired end TS.
 -- @ret INT end timestamp of the child or NULL if it doesn't exist.
-CREATE PERFETTO FUNCTION DESCENDANT_SLICE_END(
+CREATE PERFETTO FUNCTION descendant_slice_end(
   parent_id INT,
   child_name STRING
 )
@@ -161,3 +161,59 @@ SELECT
 FROM descendant_slice($parent_id) s
 WHERE s.name = $child_name
 LIMIT 1;
+
+-- Finds all slices with a direct parent with the given parent_id.
+-- @arg parent_id INT Id of the parent slice.
+-- @column id                 Alias for `slice.id`.
+-- @column type               Alias for `slice.type`.
+-- @column ts                 Alias for `slice.ts`.
+-- @column dur                Alias for `slice.dur`.
+-- @column category           Alias for `slice.category`.
+-- @column name               Alias for `slice.name`.
+-- @column track_id           Alias for `slice.track_id`.
+-- @column depth              Alias for `slice.depth`.
+-- @column parent_id          Alias for `slice.parent_id`.
+-- @column arg_set_id         Alias for `slice.arg_set_id`.
+-- @column thread_ts          Alias for `slice.thread_ts`.
+-- @column thread_dur         Alias for `slice.thread_dur`.
+CREATE PERFETTO FUNCTION direct_children_slice(parent_id LONG)
+RETURNS TABLE(
+  id LONG,
+  type STRING,
+  ts LONG,
+  dur LONG,
+  category LONG,
+  name STRING,
+  track_id LONG,
+  depth LONG,
+  parent_id LONG,
+  arg_set_id LONG,
+  thread_ts LONG,
+  thread_dur LONG) AS
+SELECT
+  slice.id,
+  slice.type,
+  slice.ts,
+  slice.dur,
+  slice.category,
+  slice.name,
+  slice.track_id,
+  slice.depth,
+  slice.parent_id,
+  slice.arg_set_id,
+  slice.thread_ts,
+  slice.thread_dur
+FROM slice
+WHERE parent_id = $parent_id;
+
+-- Given a slice id, returns the name of the slice.
+-- @arg id LONG the slice id which we need the name for.
+-- @ret STRING the name of slice with the given id.
+CREATE PERFETTO FUNCTION slice_name_from_id(
+  id LONG
+)
+RETURNS STRING AS
+SELECT
+  name
+FROM slice
+WHERE $id = id;

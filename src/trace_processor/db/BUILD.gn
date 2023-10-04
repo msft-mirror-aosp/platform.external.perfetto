@@ -26,6 +26,8 @@ source_set("db") {
     "compare.h",
     "query_executor.cc",
     "query_executor.h",
+    "runtime_table.cc",
+    "runtime_table.h",
     "table.cc",
     "table.h",
     "typed_column.h",
@@ -41,6 +43,7 @@ source_set("db") {
     "../containers",
     "../util:glob",
     "../util:regex",
+    "../util:util",
     "overlays",
     "storage",
   ]
@@ -56,6 +59,7 @@ perfetto_unittest_source_set("unittests") {
     "column_storage_overlay_unittest.cc",
     "compare_unittest.cc",
     "query_executor_unittest.cc",
+    "runtime_table_unittest.cc",
     "view_unittest.cc",
   ]
   deps = [

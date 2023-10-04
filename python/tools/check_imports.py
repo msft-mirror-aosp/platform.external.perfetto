@@ -56,6 +56,24 @@ class Failure(object):
     ])
 
 
+class AllowList(object):
+
+  def __init__(self, allowed, dst, reasoning):
+    self.allowed = allowed
+    self.dst = dst
+    self.reasoning = reasoning
+
+  def check(self, graph):
+    for node, edges in graph.items():
+      for edge in edges:
+        if re.match(self.dst, edge):
+          if not any(re.match(a, node) for a in self.allowed):
+            yield Failure([node, edge], self)
+
+  def __str__(self):
+    return f'Only items in the allowlist ({self.allowed}) may directly depend on "{self.dst}" ' + self.reasoning
+
+
 class NoDirectDep(object):
 
   def __init__(self, src, dst, reasoning):
@@ -114,6 +132,11 @@ class NoCircularDeps(object):
 # NoDep(a, b) = as above but 'a' may not even transitively import 'b'.
 # NoCircularDeps = forbid introduction of circular dependencies
 RULES = [
+    AllowList(
+        ['/core/protos'],
+        r'/gen/protos',
+        'protos should be re-exported from /core/protos without the nesting.',
+    ),
     NoDirectDep(
         r'/plugins/.*',
         r'/core/.*',
@@ -144,16 +167,21 @@ RULES = [
         r'/controller/.*',
         'trying to reduce the dependency mess as we refactor into core',
     ),
-
-    # Fails at the moment due to:
-    # ui/src/base/comparison_utils.ts
-    #    -> ui/src/common/query_result.ts
-    #    -> ui/src/core/static_initializers.ts
-    #NoDep(
-    #  r'/base/.*',
-    #  r'/core/.*',
-    #  'core should depend on base not the other way round',
-    #),
+    NoDep(
+        r'/base/.*',
+        r'/core/.*',
+        'core should depend on base not the other way round',
+    ),
+    NoDep(
+        r'/base/.*',
+        r'/common/.*',
+        'common should depend on base not the other way round',
+    ),
+    NoDep(
+        r'/common/.*',
+        r'/chrome_extension/.*',
+        'chrome_extension must be a leaf',
+    ),
 
     # Fails at the moment as we have several circular dependencies. One
     # example:
@@ -200,7 +228,11 @@ def find_imports(path):
 
 
 def path_to_id(path):
-  return path.replace('/', '_').replace('-', '_').replace('@', '_at_')
+  path = path.replace('/', '_')
+  path = path.replace('-', '_')
+  path = path.replace('@', '_at_')
+  path = path.replace('.', '_')
+  return path
 
 
 def is_external_dep(path):
@@ -271,6 +303,12 @@ def do_desc(options, graph):
     print(rule)
 
 
+def do_print(options, graph):
+  for node, edges in graph.items():
+    for edge in edges:
+      print("{}\t{}".format(node, edge))
+
+
 def do_dot(options, graph):
 
   def simplify(path):
@@ -313,6 +351,9 @@ def main():
 
   desc_command = subparsers.add_parser('desc', help='Print the rules')
   desc_command.set_defaults(func=do_desc)
+
+  print_command = subparsers.add_parser('print', help='Print all imports')
+  print_command.set_defaults(func=do_print)
 
   dot_command = subparsers.add_parser(
       'dot',

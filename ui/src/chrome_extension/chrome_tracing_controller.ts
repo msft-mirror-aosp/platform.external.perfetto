@@ -18,18 +18,17 @@ import {Client} from 'noice-json-rpc';
 
 import {base64Encode} from '../base/string_utils';
 import {
-  browserSupportsPerfettoConfig,
-  extractTraceConfig,
-  hasSystemDataSourceConfig,
-} from '../base/trace_config_utils';
-import {TraceConfig} from '../common/protos';
-import {
   ConsumerPortResponse,
   GetTraceStatsResponse,
   ReadBuffersResponse,
 } from '../controller/consumer_port_types';
 import {RpcConsumerPort} from '../controller/record_controller_interfaces';
-import {perfetto} from '../gen/protos';
+import {ITraceStats, TraceConfig} from '../core/protos';
+import {
+  browserSupportsPerfettoConfig,
+  extractTraceConfig,
+  hasSystemDataSourceConfig,
+} from '../core/trace_config_utils';
 
 import {DevToolsSocket} from './devtools_socket';
 
@@ -201,7 +200,7 @@ export class ChromeTracingController extends RpcConsumerPort {
     if (this.lastBufferUsageEvent && this.lastBufferUsageEvent.percentFull) {
       percentFull = this.lastBufferUsageEvent.percentFull;
     }
-    const stats: perfetto.protos.ITraceStats = {
+    const stats: ITraceStats = {
       bufferStats:
           [{bufferSize: 1000, bytesWritten: Math.round(percentFull * 1000)}],
     };

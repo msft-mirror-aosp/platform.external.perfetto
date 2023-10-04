@@ -15,6 +15,7 @@
 import {Draft} from 'immer';
 
 import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
+import {duration, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {
   GenericSliceDetailsTabConfig,
@@ -28,6 +29,7 @@ import {
   tableColumnEquals,
   toggleEnabled,
 } from '../frontend/pivot_table_types';
+import {TrackTags} from '../public/index';
 import {DebugTrackV2Config} from '../tracks/debug/slice_track';
 
 import {randomColor} from './colorizer';
@@ -54,6 +56,7 @@ import {
   FtraceFilterPatch,
   LoadedConfig,
   NewEngineMode,
+  OmniboxMode,
   OmniboxState,
   Pagination,
   PendingDeeplinkState,
@@ -72,7 +75,6 @@ import {
   UtidToTrackSortKey,
   VisibleState,
 } from './state';
-import {TPDuration, TPTime} from './time';
 
 export const DEBUG_SLICE_TRACK_KIND = 'DebugSliceTrack';
 
@@ -87,6 +89,8 @@ export interface AddTrackArgs {
   trackSortKey: TrackSortKey;
   trackGroup?: string;
   config: {};
+  tags?: TrackTags;
+  uri?: string;  // Only used for new PLUGIN_TRACK tracks
 }
 
 export interface PostedTrace {
@@ -100,8 +104,8 @@ export interface PostedTrace {
 }
 
 export interface PostedScrollToRange {
-  timeStart: TPTime;
-  timeEnd: TPTime;
+  timeStart: time;
+  timeEnd: time;
   viewPercentage?: number;
 }
 
@@ -238,8 +242,20 @@ export const StateActions = {
   addTracks(state: StateDraft, args: {tracks: AddTrackArgs[]}) {
     args.tracks.forEach((track) => {
       const id = track.id === undefined ? generateNextId(state) : track.id;
-      track.id = id;
-      state.tracks[id] = track as TrackState;
+      const name = track.name;
+      const tags = track.tags ?? {name};
+      state.tracks[id] = {
+        id,
+        engineId: track.engineId,
+        kind: track.kind,
+        name,
+        trackSortKey: track.trackSortKey,
+        trackGroup: track.trackGroup,
+        tags,
+        config: track.config,
+        labels: track.labels,
+        uri: track.uri,
+      };
       this.fillUiTrackIdByTraceTrackId(state, track as TrackState, id);
       if (track.trackGroup === SCROLLING_TRACK_GROUP) {
         state.scrollingTracks.push(id);
@@ -257,26 +273,8 @@ export const StateActions = {
     state.utidToThreadSortKey = args.threadOrderingMetadata;
   },
 
-  addTrack(state: StateDraft, args: {
-    id?: string; engineId: string; kind: string; name: string;
-    trackGroup?: string; config: {}; trackSortKey: TrackSortKey;
-  }): void {
-    const id = args.id !== undefined ? args.id : generateNextId(state);
-    state.tracks[id] = {
-      id,
-      engineId: args.engineId,
-      kind: args.kind,
-      name: args.name,
-      trackSortKey: args.trackSortKey,
-      trackGroup: args.trackGroup,
-      config: args.config,
-    };
-    this.fillUiTrackIdByTraceTrackId(state, state.tracks[id], id);
-    if (args.trackGroup === SCROLLING_TRACK_GROUP) {
-      state.scrollingTracks.push(id);
-    } else if (args.trackGroup !== undefined) {
-      assertExists(state.trackGroups[args.trackGroup]).tracks.push(id);
-    }
+  addTrack(state: StateDraft, args: AddTrackArgs): void {
+    this.addTracks(state, {tracks: [args]});
   },
 
   addTrackGroup(
@@ -583,7 +581,7 @@ export const StateActions = {
 
   addAutomaticNote(
       state: StateDraft,
-      args: {timestamp: TPTime, color: string, text: string}): void {
+      args: {timestamp: time, color: string, text: string}): void {
     const id = generateNextId(state);
     state.notes[id] = {
       noteType: 'DEFAULT',
@@ -594,7 +592,7 @@ export const StateActions = {
     };
   },
 
-  addNote(state: StateDraft, args: {timestamp: TPTime, color: string}): void {
+  addNote(state: StateDraft, args: {timestamp: time, color: string}): void {
     const id = generateNextId(state);
     state.notes[id] = {
       noteType: 'DEFAULT',
@@ -694,7 +692,7 @@ export const StateActions = {
 
   selectCounter(
       state: StateDraft,
-      args: {leftTs: TPTime, rightTs: TPTime, id: number, trackId: string}):
+      args: {leftTs: time, rightTs: time, id: number, trackId: string}):
       void {
         state.currentSelection = {
           kind: 'COUNTER',
@@ -707,7 +705,7 @@ export const StateActions = {
 
   selectHeapProfile(
       state: StateDraft,
-      args: {id: number, upid: number, ts: TPTime, type: ProfileType}): void {
+      args: {id: number, upid: number, ts: time, type: ProfileType}): void {
     state.currentSelection = {
       kind: 'HEAP_PROFILE',
       id: args.id,
@@ -717,7 +715,8 @@ export const StateActions = {
     };
     this.openFlamegraph(state, {
       type: args.type,
-      start: state.traceTime.start,
+      start: state.traceTime.start as
+          time,  // TODO(stevegolton): Avoid type assertion here.
       end: args.ts,
       upids: [args.upid],
       viewingOption: DEFAULT_VIEWING_OPTION,
@@ -727,8 +726,8 @@ export const StateActions = {
   selectPerfSamples(state: StateDraft, args: {
     id: number,
     upid: number,
-    leftTs: TPTime,
-    rightTs: TPTime,
+    leftTs: time,
+    rightTs: time,
     type: ProfileType
   }): void {
     state.currentSelection = {
@@ -750,8 +749,8 @@ export const StateActions = {
 
   openFlamegraph(state: StateDraft, args: {
     upids: number[],
-    start: TPTime,
-    end: TPTime,
+    start: time,
+    end: time,
     type: ProfileType,
     viewingOption: FlamegraphStateViewingOption
   }): void {
@@ -767,7 +766,7 @@ export const StateActions = {
   },
 
   selectCpuProfileSample(
-      state: StateDraft, args: {id: number, utid: number, ts: TPTime}): void {
+      state: StateDraft, args: {id: number, utid: number, ts: time}): void {
     state.currentSelection = {
       kind: 'CPU_PROFILE_SAMPLE',
       id: args.id,
@@ -811,8 +810,8 @@ export const StateActions = {
   selectGenericSlice(state: StateDraft, args: {
     id: number,
     sqlTableName: string,
-    start: TPTime,
-    duration: TPDuration,
+    start: time,
+    duration: duration,
     trackId: string,
     detailsPanelConfig:
         {kind: string, config: GenericSliceDetailsTabConfigBase},
@@ -928,6 +927,10 @@ export const StateActions = {
     state.omniboxState = args;
   },
 
+  setOmniboxMode(state: StateDraft, args: {mode: OmniboxMode}): void {
+    state.omniboxState.mode = args.mode;
+  },
+
   selectArea(state: StateDraft, args: {area: Area}): void {
     const {start, end, tracks} = args.area;
     assertTrue(start <= end);
@@ -1002,40 +1005,12 @@ export const StateActions = {
     state.lastRecordingError = undefined;
   },
 
-  requestSelectedMetric(state: StateDraft, _: {}): void {
-    if (!state.metrics.availableMetrics) throw Error('No metrics available');
-    if (state.metrics.selectedIndex === undefined) {
-      throw Error('No metric selected');
-    }
-    state.metrics.requestedMetric =
-        state.metrics.availableMetrics[state.metrics.selectedIndex];
-  },
-
-  resetMetricRequest(state: StateDraft, args: {name: string}): void {
-    if (state.metrics.requestedMetric !== args.name) return;
-    state.metrics.requestedMetric = undefined;
-  },
-
-  setAvailableMetrics(state: StateDraft, args: {availableMetrics: string[]}):
-      void {
-        state.metrics.availableMetrics = args.availableMetrics;
-        if (args.availableMetrics.length > 0) state.metrics.selectedIndex = 0;
-      },
-
-  setMetricSelectedIndex(state: StateDraft, args: {index: number}): void {
-    if (!state.metrics.availableMetrics ||
-        args.index >= state.metrics.availableMetrics.length) {
-      throw Error('metric selection out of bounds');
-    }
-    state.metrics.selectedIndex = args.index;
-  },
-
   togglePerfDebug(state: StateDraft, _: {}): void {
     state.perfDebug = !state.perfDebug;
   },
 
-  toggleSidebar(state: StateDraft, _: {}): void {
-    state.sidebarVisible = !state.sidebarVisible;
+  setSidebar(state: StateDraft, args: {visible: boolean}): void {
+    state.sidebarVisible = args.visible;
   },
 
   setHoveredUtidAndPid(state: StateDraft, args: {utid: number, pid: number}) {
@@ -1059,11 +1034,11 @@ export const StateActions = {
     state.searchIndex = args.index;
   },
 
-  setHoverCursorTimestamp(state: StateDraft, args: {ts: TPTime}) {
+  setHoverCursorTimestamp(state: StateDraft, args: {ts: time}) {
     state.hoverCursorTimestamp = args.ts;
   },
 
-  setHoveredNoteTimestamp(state: StateDraft, args: {ts: TPTime}) {
+  setHoveredNoteTimestamp(state: StateDraft, args: {ts: time}) {
     state.hoveredNoteTimestamp = args.ts;
   },
 
@@ -1084,9 +1059,10 @@ export const StateActions = {
   },
 
   clearAllPinnedTracks(state: StateDraft, _: {}) {
-    if (state.pinnedTracks.length > 0) {
-      // Clear pinnedTracks array
-      state.pinnedTracks.length = 0;
+    const pinnedTracks = state.pinnedTracks.slice();
+    for (let index = pinnedTracks.length-1; index >= 0; index--) {
+      const trackId = pinnedTracks[index];
+      this.toggleTrackPinned(state, {trackId});
     }
   },
 

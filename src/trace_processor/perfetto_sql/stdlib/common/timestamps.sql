@@ -19,21 +19,21 @@
 
 -- Fetch start of the trace.
 -- @ret LONG  Start of the trace in nanoseconds.
-CREATE PERFETTO FUNCTION TRACE_START()
+CREATE PERFETTO FUNCTION trace_start()
 RETURNS LONG AS
 SELECT start_ts FROM trace_bounds;
 
 -- Fetch end of the trace.
 -- @ret LONG  End of the trace in nanoseconds.
-CREATE PERFETTO FUNCTION TRACE_END()
+CREATE PERFETTO FUNCTION trace_end()
 RETURNS LONG AS
 SELECT end_ts FROM trace_bounds;
 
 -- Fetch duration of the trace.
 -- @ret LONG  Duration of the trace in nanoseconds.
-CREATE PERFETTO FUNCTION TRACE_DUR()
+CREATE PERFETTO FUNCTION trace_dur()
 RETURNS LONG AS
-SELECT TRACE_END() - TRACE_START();
+SELECT trace_end() - trace_start();
 
 -- Checks whether two spans are overlapping.
 --
@@ -42,7 +42,7 @@ SELECT TRACE_END() - TRACE_START();
 -- @arg ts2 LONG      Start of second span.
 -- @arg ts_end2 LONG  End of second span.
 -- @ret BOOL          Whether two spans are overlapping.
-CREATE PERFETTO FUNCTION IS_SPANS_OVERLAPPING(ts1 LONG, ts_end1 LONG, ts2 LONG, ts_end2 LONG)
+CREATE PERFETTO FUNCTION is_spans_overlapping(ts1 LONG, ts_end1 LONG, ts2 LONG, ts_end2 LONG)
 RETURNS BOOL AS
 SELECT (IIF($ts1 < $ts2, $ts2, $ts1)
       < IIF($ts_end1 < $ts_end2, $ts_end1, $ts_end2));
@@ -55,7 +55,7 @@ SELECT (IIF($ts1 < $ts2, $ts2, $ts1)
 -- @arg ts2 LONG Timestamp of second slice start.
 -- @arg dur2 LONG Duration of second slice.
 -- @ret INT               Overlapping duration
-CREATE PERFETTO FUNCTION SPANS_OVERLAPPING_DUR(ts1 LONG, dur1 LONG, ts2 LONG, dur2 LONG)
+CREATE PERFETTO FUNCTION spans_overlapping_dur(ts1 LONG, dur1 LONG, ts2 LONG, dur2 LONG)
 RETURNS INT AS
 SELECT
   CASE
@@ -66,3 +66,56 @@ SELECT
     WHEN ($ts1 > $ts2) AND ($ts1 + $dur1 > $ts2 + $dur2) THEN $ts2 + $dur2 - $ts1
     ELSE $dur2
   END;
+
+--
+-- Helpers for defining time durations.
+--
+
+-- Converts a duration in seconds to nanoseconds, which is the default representation
+-- of time durations in trace processor. Provided for consisensy with other functions.
+-- @arg nanos INT  Time duration in seconds.
+-- @ret INT        Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION ns(nanos INT) RETURNS INT AS
+SELECT $nanos;
+
+-- Converts a duration in microseconds to nanoseconds, which is the default
+-- representation of time durations in trace processor.
+-- @arg micros INT  Time duration in microseconds.
+-- @ret INT         Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION us(micros INT) RETURNS INT AS
+SELECT $micros * 1000;
+
+-- Converts a duration in millseconds to nanoseconds, which is the default
+-- representation of time durations in trace processor.
+-- @arg millis INT  Time duration in milliseconds.
+-- @ret INT         Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION ms(millis INT) RETURNS INT AS
+SELECT $millis * 1000 * 1000;
+
+-- Converts a duration in seconds to nanoseconds, which is the default
+-- representation of time durations in trace processor.
+-- @arg seconds INT  Time duration in seconds.
+-- @ret INT          Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION seconds(seconds INT) RETURNS INT AS
+SELECT $seconds * 1000 * 1000 * 1000;
+
+-- Converts a duration in minutes to nanoseconds, which is the default
+-- representation of time durations in trace processor.
+-- @arg minutes INT  Time duration in minutes.
+-- @ret INT          Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION minutes(minutes INT) RETURNS INT AS
+SELECT $minutes * 60 * 1000 * 1000 * 1000;
+
+-- Converts a duration in hours to nanoseconds, which is the default
+-- representation of time durations in trace processor.
+-- @arg hours INT  Time duration in hours.
+-- @ret INT        Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION hours(hours INT) RETURNS INT AS
+SELECT $hours * 60 * 60 * 1000 * 1000 * 1000;
+
+-- Converts a duration in days to nanoseconds, which is the default
+-- representation of time durations in trace processor.
+-- @arg days INT  Time duration in days.
+-- @ret INT       Time duration in nanoseconds.
+CREATE PERFETTO FUNCTION days(days INT) RETURNS INT AS
+SELECT $days * 24 * 60 * 60 * 1000 * 1000 * 1000;

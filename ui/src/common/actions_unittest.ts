@@ -15,6 +15,7 @@
 import {produce} from 'immer';
 
 import {assertExists} from '../base/logging';
+import {Time} from '../base/time';
 import {SLICE_TRACK_KIND} from '../tracks/chrome_slices';
 import {HEAP_PROFILE_TRACK_KIND} from '../tracks/heap_profile';
 import {
@@ -449,8 +450,8 @@ test('perf samples open flamegraph', () => {
     StateActions.selectPerfSamples(draft, {
       id: 0,
       upid: 0,
-      leftTs: 0n,
-      rightTs: 0n,
+      leftTs: Time.fromRaw(0n),
+      rightTs: Time.fromRaw(0n),
       type: ProfileType.PERF_SAMPLE,
     });
   });
@@ -463,8 +464,12 @@ test('heap profile opens flamegraph', () => {
   const state = createEmptyState();
 
   const afterSelectingPerf = produce(state, (draft) => {
-    StateActions.selectHeapProfile(
-        draft, {id: 0, upid: 0, ts: 0n, type: ProfileType.JAVA_HEAP_GRAPH});
+    StateActions.selectHeapProfile(draft, {
+      id: 0,
+      upid: 0,
+      ts: Time.fromRaw(0n),
+      type: ProfileType.JAVA_HEAP_GRAPH,
+    });
   });
 
   expect(assertExists(afterSelectingPerf.currentFlamegraphState).type)

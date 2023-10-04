@@ -25,7 +25,8 @@ namespace {
 
 class PerfettoSqlEngineTest : public ::testing::Test {
  protected:
-  PerfettoSqlEngine engine_;
+  StringPool pool_;
+  PerfettoSqlEngine engine_{&pool_};
 };
 
 TEST_F(PerfettoSqlEngineTest, CreatePerfettoFunctionSmoke) {
@@ -56,6 +57,56 @@ TEST_F(PerfettoSqlEngineTest, CreatePerfettoFunctionError) {
                                   "AS select $x + $y;"
                                   "SELECT foo(1, 2)"));
   ASSERT_FALSE(res.ok());
+}
+
+TEST_F(PerfettoSqlEngineTest, CreatePerfettoTableSmoke) {
+  auto res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO TABLE foo AS SELECT 42 AS bar"));
+  ASSERT_TRUE(res.ok());
+}
+
+TEST_F(PerfettoSqlEngineTest, CreatePerfettoTableStringSmoke) {
+  auto res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO TABLE foo AS SELECT 'foo' AS bar"));
+  ASSERT_TRUE(res.ok());
+}
+
+TEST_F(PerfettoSqlEngineTest, CreatePerfettoTableDrop) {
+  auto res_create = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO TABLE foo AS SELECT 'foo' AS bar"));
+  ASSERT_TRUE(res_create.ok());
+
+  auto res_drop =
+      engine_.Execute(SqlSource::FromExecuteQuery("DROP TABLE foo"));
+  ASSERT_TRUE(res_drop.ok());
+}
+
+TEST_F(PerfettoSqlEngineTest, CreatePerfettoTableValues) {
+  auto res = engine_.ExecuteUntilLastStatement(
+      SqlSource::FromExecuteQuery("creatE PeRfEttO TABLE foo AS "
+                                  "SELECT 42 as bar;"
+                                  "SELECT * from foo"));
+  ASSERT_TRUE(res.ok());
+  ASSERT_FALSE(res->stmt.IsDone());
+  ASSERT_EQ(sqlite3_column_int64(res->stmt.sqlite_stmt(), 0), 42);
+  ASSERT_FALSE(res->stmt.Step());
+}
+
+TEST_F(PerfettoSqlEngineTest, CreateTableFunctionDupe) {
+  auto res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO FUNCTION foo() RETURNS TABLE(x INT) AS "
+      "select 1 AS x"));
+  ASSERT_TRUE(res.ok());
+
+  res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO FUNCTION foo() RETURNS TABLE(x INT) AS "
+      "select 1 AS x"));
+  ASSERT_FALSE(res.ok());
+
+  res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE OR REPLACE PERFETTO FUNCTION foo() RETURNS TABLE(x INT) AS "
+      "select 2 AS x"));
+  ASSERT_TRUE(res.ok());
 }
 
 }  // namespace

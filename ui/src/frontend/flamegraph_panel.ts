@@ -16,6 +16,7 @@ import m from 'mithril';
 
 import {findRef} from '../base/dom_utils';
 import {assertExists, assertTrue} from '../base/logging';
+import {Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {
   ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
@@ -31,19 +32,16 @@ import {
 } from '../common/state';
 import {profileType} from '../controller/flamegraph_controller';
 import {raf} from '../core/raf_scheduler';
+import {Button} from '../widgets/button';
+import {DurationWidget} from '../widgets/duration';
 
 import {Flamegraph, NodeRendering} from './flamegraph';
 import {globals} from './globals';
 import {Modal, ModalDefinition} from './modal';
-import {Panel, PanelSize} from './panel';
 import {debounce} from './rate_limiters';
 import {Router} from './router';
 import {getCurrentTrace} from './sidebar';
 import {convertTraceToPprofAndDownload} from './trace_converter';
-import {Button} from './widgets/button';
-import {Duration} from './widgets/duration';
-
-interface FlamegraphDetailsPanelAttrs {}
 
 const HEADER_HEIGHT = 30;
 
@@ -63,9 +61,9 @@ const RENDER_OBJ_COUNT: NodeRendering = {
   totalSize: 'Subtree objects',
 };
 
-export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
+export class FlamegraphDetailsPanel implements m.ClassComponent {
   private profileType?: ProfileType = undefined;
-  private ts = 0n;
+  private ts = Time.ZERO;
   private pids: number[] = [];
   private flamegraph: Flamegraph = new Flamegraph([]);
   private focusRegex = '';
@@ -82,7 +80,7 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
         flamegraphDetails.pids !== undefined &&
         flamegraphDetails.upids !== undefined) {
       this.profileType = profileType(flamegraphDetails.type);
-      this.ts = flamegraphDetails.start + flamegraphDetails.dur;
+      this.ts = Time.add(flamegraphDetails.start, flamegraphDetails.dur);
       this.pids = flamegraphDetails.pids;
       if (flamegraphDetails.flamegraph) {
         this.flamegraph.updateDataIfChanged(
@@ -110,7 +108,7 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
                             flamegraphDetails.expandedCallsite)}`),
                   m('div.time',
                     `Snapshot time: `,
-                    m(Duration, {dur: flamegraphDetails.dur})),
+                    m(DurationWidget, {dur: flamegraphDetails.dur})),
                   m('input[type=text][placeholder=Focus]', {
                     oninput: (e: Event) => {
                       const target = (e.target as HTMLInputElement);
@@ -253,7 +251,7 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
         this.nodeRendering(), flamegraphData, data.expandedCallsite);
   }
 
-  oncreate({dom}: m.CVnodeDOM<FlamegraphDetailsPanelAttrs>) {
+  oncreate({dom}: m.CVnodeDOM) {
     this.canvas = FlamegraphDetailsPanel.findCanvasElement(dom);
     // TODO(stevegolton): If we truely want to be standalone, then we shouldn't
     // rely on someone else calling the rafScheduler when the window is resized,
@@ -261,11 +259,11 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
     raf.addRedrawCallback(this.rafRedrawCallback);
   }
 
-  onupdate({dom}: m.CVnodeDOM<FlamegraphDetailsPanelAttrs>) {
+  onupdate({dom}: m.CVnodeDOM) {
     this.canvas = FlamegraphDetailsPanel.findCanvasElement(dom);
   }
 
-  onremove(_vnode: m.CVnodeDOM<FlamegraphDetailsPanelAttrs>) {
+  onremove(_vnode: m.CVnodeDOM) {
     raf.removeRedrawCallback(this.rafRedrawCallback);
   }
 
@@ -289,17 +287,14 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
         ctx.save();
         ctx.scale(devicePixelRatio, devicePixelRatio);
         const {offsetWidth: width, offsetHeight: height} = canvas;
-        this.renderLocalCanvas(ctx, {width, height});
+        this.renderLocalCanvas(ctx, width, height);
         ctx.restore();
       }
     }
   };
 
-  renderCanvas() {
-    // No-op
-  }
-
-  private renderLocalCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
+  private renderLocalCanvas(
+      ctx: CanvasRenderingContext2D, width: number, height: number) {
     this.changeFlamegraphData();
     const current = globals.state.currentFlamegraphState;
     if (current === null) return;
@@ -308,7 +303,7 @@ export class FlamegraphDetailsPanel extends Panel<FlamegraphDetailsPanelAttrs> {
             current.viewingOption === ALLOC_SPACE_MEMORY_ALLOCATED_KEY ?
         'B' :
         '';
-    this.flamegraph.draw(ctx, size.width, size.height, 0, 0, unit);
+    this.flamegraph.draw(ctx, width, height, 0, 0, unit);
   }
 
   private onMouseClick({x, y}: {x: number, y: number}): boolean {

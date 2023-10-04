@@ -16,6 +16,7 @@ import {hex} from 'color-convert';
 import m from 'mithril';
 
 import {assertExists} from '../base/logging';
+import {Icons} from '../base/semantic_icons';
 import {Actions} from '../common/actions';
 import {
   getContainingTrackId,
@@ -25,16 +26,9 @@ import {
 
 import {globals} from './globals';
 import {drawGridLines} from './gridline_helper';
-import {
-  BLANK_CHECKBOX,
-  CHECKBOX,
-  EXPAND_DOWN,
-  EXPAND_UP,
-  INDETERMINATE_CHECKBOX,
-} from './icons';
 import {Panel, PanelSize} from './panel';
 import {Track} from './track';
-import {TrackContent} from './track_panel';
+import {TrackChips, TrackContent} from './track_panel';
 import {trackRegistry} from './track_registry';
 import {
   drawVerticalLineAtTime,
@@ -96,16 +90,16 @@ export class TrackGroupPanel extends Panel<Attrs> {
     const selection = globals.state.currentSelection;
 
     const trackGroup = globals.state.trackGroups[attrs.trackGroupId];
-    let checkBox = BLANK_CHECKBOX;
+    let checkBox = Icons.BlankCheckbox;
     if (selection !== null && selection.kind === 'AREA') {
       const selectedArea = globals.state.areas[selection.areaId];
       if (selectedArea.tracks.includes(attrs.trackGroupId) &&
           trackGroup.tracks.every((id) => selectedArea.tracks.includes(id))) {
-        checkBox = CHECKBOX;
+        checkBox = Icons.Checkbox;
       } else if (
           selectedArea.tracks.includes(attrs.trackGroupId) ||
           trackGroup.tracks.some((id) => selectedArea.tracks.includes(id))) {
-        checkBox = INDETERMINATE_CHECKBOX;
+        checkBox = Icons.IndeterminateCheckbox;
       }
     }
 
@@ -131,13 +125,15 @@ export class TrackGroupPanel extends Panel<Attrs> {
 
           m('.fold-button',
             m('i.material-icons',
-              this.trackGroupState.collapsed ? EXPAND_DOWN : EXPAND_UP)),
+              this.trackGroupState.collapsed ? Icons.ExpandDown :
+                                               Icons.ExpandUp)),
           m('.title-wrapper',
-            m('h1.track-title',
-              {title: name},
-              name,
-              ('namespace' in this.summaryTrackState.config) &&
-                  m('span.chip', 'metric')),
+            m(
+                'h1.track-title',
+                {title: name},
+                name,
+                m(TrackChips, {config: this.summaryTrackState.config}),
+                ),
             (this.trackGroupState.collapsed && child !== null) ?
                 m('h2.track-subtitle', child) :
                 null),
@@ -198,7 +194,7 @@ export class TrackGroupPanel extends Panel<Attrs> {
     if (selectedArea.tracks.includes(this.trackGroupId)) {
       ctx.fillStyle = 'rgba(131, 152, 230, 0.3)';
       ctx.fillRect(
-          visibleTimeScale.tpTimeToPx(selectedArea.start) + this.shellWidth,
+          visibleTimeScale.timeToPx(selectedArea.start) + this.shellWidth,
           0,
           visibleTimeScale.durationToPx(selectedAreaDuration),
           size.height);

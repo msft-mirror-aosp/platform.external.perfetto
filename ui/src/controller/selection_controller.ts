@@ -13,27 +13,25 @@
 // limitations under the License.
 
 import {assertTrue} from '../base/logging';
+import {Time, time} from '../base/time';
 import {Args, ArgValue} from '../common/arg_types';
 import {Engine} from '../common/engine';
 import {
+  durationFromSql,
   LONG,
   NUM,
   NUM_NULL,
   STR,
   STR_NULL,
+  timeFromSql,
 } from '../common/query_result';
 import {ChromeSliceSelection} from '../common/state';
 import {
-  tpDurationFromSql,
-  TPTime,
-  tpTimeFromSql,
-} from '../common/time';
-import {
   CounterDetails,
+  globals,
   SliceDetails,
   ThreadStateDetails,
 } from '../frontend/globals';
-import {globals} from '../frontend/globals';
 import {
   publishCounterDetails,
   publishSliceDetails,
@@ -184,10 +182,10 @@ export class SelectionController extends Controller<'main'> {
         case 'id':
           break;
         case 'ts':
-          ts = tpTimeFromSql(v);
+          ts = timeFromSql(v);
           break;
         case 'thread_ts':
-          threadTs = tpTimeFromSql(v);
+          threadTs = timeFromSql(v);
           break;
         case 'absTime':
           if (v) absTime = `${v}`;
@@ -196,10 +194,10 @@ export class SelectionController extends Controller<'main'> {
           name = `${v}`;
           break;
         case 'dur':
-          dur = tpDurationFromSql(v);
+          dur = durationFromSql(v);
           break;
         case 'thread_dur':
-          threadDur = tpDurationFromSql(v);
+          threadDur = durationFromSql(v);
           break;
         case 'category':
         case 'cat':
@@ -339,7 +337,7 @@ export class SelectionController extends Controller<'main'> {
         dur: LONG,
       });
       const selected: ThreadStateDetails = {
-        ts: row.ts,
+        ts: Time.fromRaw(row.ts),
         dur: row.dur,
       };
       publishThreadStateDetails(selected);
@@ -370,7 +368,7 @@ export class SelectionController extends Controller<'main'> {
         cpu: NUM,
         threadStateId: NUM_NULL,
       });
-      const ts = row.ts;
+      const ts = Time.fromRaw(row.ts);
       const dur = row.dur;
       const priority = row.priority;
       const endState = row.endState;
@@ -399,7 +397,7 @@ export class SelectionController extends Controller<'main'> {
     }
   }
 
-  async counterDetails(ts: TPTime, rightTs: TPTime, id: number):
+  async counterDetails(ts: time, rightTs: time, id: number):
       Promise<CounterDetails> {
     const counter = await this.args.engine.query(
         `SELECT value, track_id as trackId FROM counter WHERE id = ${id}`);
@@ -424,7 +422,7 @@ export class SelectionController extends Controller<'main'> {
     return {startTime: ts, value, delta, duration, name};
   }
 
-  async schedulingDetails(ts: TPTime, utid: number) {
+  async schedulingDetails(ts: time, utid: number) {
     // Find the ts of the first wakeup before the current slice.
     const wakeResult = await this.args.engine.query(`
       select ts, waker_utid as wakerUtid

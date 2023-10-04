@@ -16,9 +16,7 @@ import {AddTrackArgs} from '../../common/actions';
 import {Engine} from '../../common/engine';
 import {featureFlags} from '../../common/feature_flags';
 import {ObjectById} from '../../common/state';
-import {
-  PluginContext,
-} from '../../public';
+import {Plugin, PluginContext, PluginInfo} from '../../public';
 import {CustomSqlDetailsPanelConfig} from '../custom_sql_table_slices';
 
 import {ChromeTasksScrollJankTrack} from './chrome_tasks_scroll_jank_track';
@@ -28,10 +26,6 @@ import {
   ScrollJankV3Track,
 } from './scroll_jank_v3_track';
 import {addTopLevelScrollTrack, TopLevelScrollTrack} from './scroll_track';
-import {
-  addJankyLatenciesTrack,
-  TopLevelEventLatencyTrack,
-} from './top_level_janky_event_latencies_track';
 
 export {Data} from '../chrome_slices';
 
@@ -122,18 +116,6 @@ export async function getScrollJankTracks(engine: Engine):
     result.tracksToAdd[i + originalLength] = janksResult.tracksToAdd[i];
   }
 
-  // TODO(b/278844325): Top Level event latency summary is already rendered in
-  // the TopLevelJankTrack; this track should be rendered at a more
-  // intuitive location when the descendant slices are rendered.
-  originalLength = result.tracksToAdd.length;
-  const jankyEventLatencies = addJankyLatenciesTrack(engine);
-  const jankyEventLatencyResult = await jankyEventLatencies;
-  result.tracksToAdd.length += jankyEventLatencyResult.tracksToAdd.length;
-  for (let i = 0; i < jankyEventLatencyResult.tracksToAdd.length; ++i) {
-    result.tracksToAdd[i + originalLength] =
-        jankyEventLatencyResult.tracksToAdd[i];
-  }
-
   originalLength = result.tracksToAdd.length;
   const eventLatencies = addLatencyTracks(engine);
   const eventLatencyResult = await eventLatencies;
@@ -145,15 +127,16 @@ export async function getScrollJankTracks(engine: Engine):
   return result;
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrack(ChromeTasksScrollJankTrack);
-  ctx.registerTrack(EventLatencyTrack);
-  ctx.registerTrack(ScrollJankV3Track);
-  ctx.registerTrack(TopLevelScrollTrack);
-  ctx.registerTrack(TopLevelEventLatencyTrack);
+class ChromeScrollJankPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.registerTrack(ChromeTasksScrollJankTrack);
+    ctx.registerTrack(EventLatencyTrack);
+    ctx.registerTrack(ScrollJankV3Track);
+    ctx.registerTrack(TopLevelScrollTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginInfo = {
   pluginId: 'perfetto.ChromeScrollJank',
-  activate,
+  plugin: ChromeScrollJankPlugin,
 };

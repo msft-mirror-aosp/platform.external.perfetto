@@ -13,13 +13,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-SELECT CREATE_FUNCTION(
-    'INTERNAL_THREAD_PREFIX(thread_name STRING)',
-    'STRING',
-    '
-    SELECT STR_SPLIT(STR_SPLIT(STR_SPLIT(STR_SPLIT($thread_name, "-", 0), "[", 0), ":", 0), " ", 0);
-    '
-);
+CREATE PERFETTO FUNCTION internal_thread_prefix(thread_name STRING)
+RETURNS STRING AS
+SELECT STR_SPLIT(STR_SPLIT(STR_SPLIT(STR_SPLIT($thread_name, "-", 0), "[", 0), ":", 0), " ", 0);
 
 -- Per process stats of threads created in a process
 --
@@ -32,34 +28,36 @@ SELECT CREATE_FUNCTION(
 -- @column pid                     Process pid creating threads.
 -- @column thread_name_prefix      String prefix of thread names created.
 -- @column max_count_per_sec       Max number of threads created within a time window.
-SELECT CREATE_VIEW_FUNCTION(
-    'ANDROID_THREAD_CREATION_SPAM(min_thread_dur FLOAT, sliding_window_dur FLOAT)',
-    'process_name STRING, pid INT, thread_name_prefix STRING, max_count_per_sec INT',
-    '
-    WITH
-      x AS (
-        SELECT
-          pid,
-          upid,
-          INTERNAL_THREAD_PREFIX(thread.name) AS thread_name_prefix,
-          process.name AS process_name,
-          COUNT(thread.start_ts)
-            OVER (
-              PARTITION BY upid, thread.name
-              ORDER BY thread.start_ts
-              RANGE BETWEEN CURRENT ROW AND CAST($sliding_window_dur AS INT64) FOLLOWING
-            ) AS count
-        FROM thread
-        JOIN process
-          USING (upid)
-        WHERE
-          ($min_thread_dur AND (thread.end_ts - thread.start_ts) <= $min_thread_dur)
-          OR $min_thread_dur IS NULL
-      )
-    SELECT process_name, pid, thread_name_prefix, MAX(count) AS max_count_per_sec
-    FROM x
-    GROUP BY upid, thread_name_prefix
-    HAVING max_count_per_sec > 0
-    ORDER BY count DESC;
-    '
-);
+CREATE PERFETTO FUNCTION android_thread_creation_spam(
+  min_thread_dur FLOAT, sliding_window_dur FLOAT)
+RETURNS TABLE(
+  process_name STRING,
+  pid INT,
+  thread_name_prefix STRING,
+  max_count_per_sec INT
+) AS
+WITH
+x AS (
+  SELECT
+    pid,
+    upid,
+    INTERNAL_THREAD_PREFIX(thread.name) AS thread_name_prefix,
+    process.name AS process_name,
+    COUNT(thread.start_ts)
+      OVER (
+        PARTITION BY upid, thread.name
+        ORDER BY thread.start_ts
+        RANGE BETWEEN CURRENT ROW AND CAST($sliding_window_dur AS INT64) FOLLOWING
+      ) AS count
+  FROM thread
+  JOIN process
+    USING (upid)
+  WHERE
+    ($min_thread_dur AND (thread.end_ts - thread.start_ts) <= $min_thread_dur)
+    OR $min_thread_dur IS NULL
+)
+SELECT process_name, pid, thread_name_prefix, MAX(count) AS max_count_per_sec
+FROM x
+GROUP BY upid, thread_name_prefix
+HAVING max_count_per_sec > 0
+ORDER BY count DESC;

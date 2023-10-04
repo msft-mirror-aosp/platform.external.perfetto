@@ -768,10 +768,7 @@ class Parsing(TestSuite):
         }
         """),
         query="""
-        CREATE TABLE TEST_TMP AS
         SELECT RUN_METRIC('android/process_metadata.sql');
-
-        DROP TABLE TEST_TMP;
 
         SELECT upid, process_name, uid, shared_uid, package_name, version_code
         FROM process_metadata_table
@@ -836,14 +833,14 @@ class Parsing(TestSuite):
             "pid": 1,
             "tid": 1,
             "ph": "B",
-            "ts": 1597071955492308000
+            "ts": 1597071955492308
           },
           {
             "name": "add_graph",
             "pid": 1,
             "tid": 1,
             "ph": "E",
-            "ts": 1597071955703771000
+            "ts": 1597071955703771
           }
         ]
         }
@@ -853,7 +850,7 @@ class Parsing(TestSuite):
         """,
         out=Csv("""
         "ts","dur","name"
-        -7794778920422990592,211463000000,"add_graph"
+        1597071955492308000,211463000,"add_graph"
         """))
 
   # Parsing sched_blocked_reason
@@ -1170,6 +1167,7 @@ class Parsing(TestSuite):
         """,
         out=Csv("""
         "waker_utid"
+        1
         1
         """))
 

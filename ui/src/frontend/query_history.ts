@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 
-import {STAR} from './icons';
+import {Icons} from '../base/semantic_icons';
 
 import {
   arrayOf,
@@ -23,9 +23,9 @@ import {
   runValidator,
   str,
   ValidatedType,
-} from '../controller/validators';
+} from '../base/validators';
 import {assertTrue} from '../base/logging';
-import {Icon} from './widgets/icon';
+import {Icon} from '../widgets/icon';
 import {raf} from '../core/raf_scheduler';
 
 const QUERY_HISTORY_KEY = 'queryHistory';
@@ -76,7 +76,7 @@ export class HistoryItemComponent implements
                   raf.scheduleFullRedraw();
                 },
               },
-              m(Icon, {icon: STAR, filled: vnode.attrs.entry.starred}),
+              m(Icon, {icon: Icons.Star, filled: vnode.attrs.entry.starred}),
               ),
           m('button',
             {

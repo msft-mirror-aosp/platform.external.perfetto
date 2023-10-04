@@ -246,7 +246,8 @@ class FakeProducerThread {
     PosixSharedMemory::Factory factory;
 #endif
     shm_ = factory.CreateSharedMemory(1024 * 1024);
-    shm_arbiter_ = SharedMemoryArbiter::CreateUnboundInstance(shm_.get(), 4096);
+    shm_arbiter_ = SharedMemoryArbiter::CreateUnboundInstance(
+        shm_.get(), 4096, SharedMemoryABI::ShmemMode::kDefault);
   }
 
   void ProduceStartupEventBatch(const protos::gen::TestConfig& config,
@@ -313,7 +314,7 @@ class TestHelper : public Consumer {
   void StartTracing(const TraceConfig& config,
                     base::ScopedFile = base::ScopedFile());
   void DisableTracing();
-  void FlushAndWait(uint32_t timeout_ms);
+  void FlushAndWait(uint32_t timeout_ms, FlushFlags = FlushFlags());
   void ReadData(uint32_t read_count = 0);
   void FreeBuffers();
   void DetachConsumer(const std::string& key);

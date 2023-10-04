@@ -13,11 +13,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-SELECT IMPORT('common.slices');
-SELECT IMPORT('android.process_metadata');
+INCLUDE PERFETTO MODULE common.slices;
+INCLUDE PERFETTO MODULE android.process_metadata;
 
 -- All activity startup events.
-CREATE TABLE internal_startup_events AS
+CREATE PERFETTO TABLE internal_startup_events AS
 SELECT
   ts,
   dur,
@@ -41,9 +41,9 @@ CREATE TABLE internal_all_startups(
   startup_type STRING
 );
 
-SELECT IMPORT('android.startup.internal_startups_maxsdk28');
-SELECT IMPORT('android.startup.internal_startups_minsdk29');
-SELECT IMPORT('android.startup.internal_startups_minsdk33');
+INCLUDE PERFETTO MODULE android.startup.internal_startups_maxsdk28;
+INCLUDE PERFETTO MODULE android.startup.internal_startups_minsdk29;
+INCLUDE PERFETTO MODULE android.startup.internal_startups_minsdk33;
 
 -- All activity startups in the trace by startup id.
 -- Populated by different scripts depending on the platform version/contents.
@@ -54,12 +54,12 @@ SELECT IMPORT('android.startup.internal_startups_minsdk33');
 -- @column dur          Startup duration.
 -- @column package      Package name.
 -- @column startup_type Startup type.
-CREATE TABLE android_startups AS
+CREATE PERFETTO TABLE android_startups AS
 SELECT startup_id, ts, ts_end, dur, package, startup_type FROM
 internal_all_startups WHERE ( CASE
-  WHEN SLICE_COUNT('launchingActivity#*:*') > 0
+  WHEN slice_count('launchingActivity#*:*') > 0
     THEN sdk = "minsdk33"
-  WHEN SLICE_COUNT('MetricsLogger:*') > 0
+  WHEN slice_count('MetricsLogger:*') > 0
     THEN sdk = "minsdk29"
   ELSE sdk = "maxsdk28"
   END);
@@ -70,12 +70,12 @@ internal_all_startups WHERE ( CASE
 
 -- Create a table containing only the slices which are necessary for determining
 -- whether a startup happened.
-CREATE TABLE internal_startup_indicator_slices AS
+CREATE PERFETTO TABLE internal_startup_indicator_slices AS
 SELECT ts, name, track_id
 FROM slice
 WHERE name IN ('bindApplication', 'activityStart', 'activityResume');
 
-CREATE PERFETTO FUNCTION INTERNAL_STARTUP_INDICATOR_SLICE_COUNT(start_ts LONG,
+CREATE PERFETTO FUNCTION INTERNAL_STARTUP_INDICATOR_slice_count(start_ts LONG,
                                                                 end_ts LONG,
                                                                 utid INT,
                                                                 name STRING)
@@ -97,7 +97,7 @@ WHERE
 -- @column startup_id   Startup id.
 -- @column upid         Upid of process on which activity started.
 -- @column startup_type Type of the startup.
-CREATE TABLE android_startup_processes AS
+CREATE PERFETTO TABLE android_startup_processes AS
 -- This is intentionally a materialized query. For some reason, if we don't
 -- materialize, we end up with a query which is an order of magnitude slower :(
 WITH startup_with_type AS MATERIALIZED (
@@ -117,9 +117,9 @@ WITH startup_with_type AS MATERIALIZED (
       l.startup_id,
       l.startup_type,
       p.upid,
-      INTERNAL_STARTUP_INDICATOR_SLICE_COUNT(l.ts, l.ts_end, t.utid, 'bindApplication') AS bind_app,
-      INTERNAL_STARTUP_INDICATOR_SLICE_COUNT(l.ts, l.ts_end, t.utid, 'activityStart') AS a_start,
-      INTERNAL_STARTUP_INDICATOR_SLICE_COUNT(l.ts, l.ts_end, t.utid, 'activityResume') AS a_resume
+      INTERNAL_STARTUP_INDICATOR_slice_count(l.ts, l.ts_end, t.utid, 'bindApplication') AS bind_app,
+      INTERNAL_STARTUP_INDICATOR_slice_count(l.ts, l.ts_end, t.utid, 'activityStart') AS a_start,
+      INTERNAL_STARTUP_INDICATOR_slice_count(l.ts, l.ts_end, t.utid, 'activityResume') AS a_resume
     FROM android_startups l
     JOIN android_process_metadata p ON (
       l.package = p.package_name
@@ -132,6 +132,8 @@ WITH startup_with_type AS MATERIALIZED (
       )
       )
     JOIN thread t ON (p.upid = t.upid AND t.is_main_thread)
+    -- Filter out the non-startup processes with the same package name as that of a startup.
+    WHERE a_resume > 0
   )
 )
 SELECT *
@@ -209,15 +211,18 @@ WHERE slice.ts BETWEEN st.ts AND st.ts + st.dur;
 -- @column slice_dur      Duration of the slice.
 -- @column thread_name    Name of the thread with the slice.
 -- @column arg_set_id     Arg set id.
-SELECT CREATE_VIEW_FUNCTION(
-  'ANDROID_SLICES_FOR_STARTUP_AND_SLICE_NAME(startup_id INT, slice_name STRING)',
-  'slice_name STRING, slice_ts INT, slice_dur INT, thread_name STRING, arg_set_id INT',
-  '
-    SELECT slice_name, slice_ts, slice_dur, thread_name, arg_set_id
-    FROM android_thread_slices_for_all_startups
-    WHERE startup_id = $startup_id AND slice_name GLOB $slice_name
-  '
-);
+CREATE PERFETTO FUNCTION android_slices_for_startup_and_slice_name(
+  startup_id INT, slice_name STRING)
+RETURNS TABLE(
+  slice_name STRING,
+  slice_ts INT,
+  slice_dur INT,
+  thread_name STRING,
+  arg_set_id INT
+) AS
+SELECT slice_name, slice_ts, slice_dur, thread_name, arg_set_id
+FROM android_thread_slices_for_all_startups
+WHERE startup_id = $startup_id AND slice_name GLOB $slice_name;
 
 -- Returns binder transaction slices for a given startup id with duration over threshold.
 --
@@ -229,18 +234,30 @@ SELECT CREATE_VIEW_FUNCTION(
 -- @column process        Name of the process with slice.
 -- @column arg_set_id     Arg set id.
 -- @column is_main_thread Whether is main thread.
-SELECT CREATE_VIEW_FUNCTION(
-  'ANDROID_BINDER_TRANSACTION_SLICES_FOR_STARTUP(startup_id INT, threshold DOUBLE)',
-  'id INT, slice_dur INT, thread_name STRING, process STRING, arg_set_id INT, is_main_thread BOOL',
-  '
-    SELECT slice_id as id, slice_dur, thread_name, process.name as process, s.arg_set_id, is_main_thread
-    FROM android_thread_slices_for_all_startups s
-    JOIN process ON (
-      EXTRACT_ARG(s.arg_set_id, "destination process") = process.pid
-    )
-    WHERE startup_id = $startup_id AND slice_name GLOB "binder transaction" AND slice_dur > $threshold
-  '
-);
+CREATE PERFETTO FUNCTION android_binder_transaction_slices_for_startup(
+  startup_id INT, threshold DOUBLE)
+RETURNS TABLE(
+  id INT,
+  slice_dur INT,
+  thread_name STRING,
+  process STRING,
+  arg_set_id INT,
+  is_main_thread BOOL
+) AS
+SELECT
+  slice_id as id,
+  slice_dur,
+  thread_name,
+  process.name as process,
+  s.arg_set_id,
+  is_main_thread
+FROM android_thread_slices_for_all_startups s
+JOIN process ON (
+  EXTRACT_ARG(s.arg_set_id, "destination process") = process.pid
+)
+WHERE startup_id = $startup_id
+  AND slice_name GLOB "binder transaction"
+  AND slice_dur > $threshold;
 
 -- Returns duration of startup for slice name.
 --
@@ -249,11 +266,13 @@ SELECT CREATE_VIEW_FUNCTION(
 -- @arg startup_id LONG   Startup id.
 -- @arg slice_name STRING Slice name.
 -- @ret INT               Sum of duration.
-CREATE PERFETTO FUNCTION ANDROID_SUM_DUR_FOR_STARTUP_AND_SLICE(startup_id LONG, slice_name STRING)
+CREATE PERFETTO FUNCTION android_sum_dur_for_startup_and_slice(
+  startup_id LONG, slice_name STRING)
 RETURNS INT AS
 SELECT SUM(slice_dur)
 FROM android_thread_slices_for_all_startups
-WHERE startup_id = $startup_id AND slice_name GLOB $slice_name;
+WHERE startup_id = $startup_id
+  AND slice_name GLOB $slice_name;
 
 -- Returns duration of startup for slice name on main thread.
 --
@@ -262,8 +281,11 @@ WHERE startup_id = $startup_id AND slice_name GLOB $slice_name;
 -- @arg startup_id LONG   Startup id.
 -- @arg slice_name STRING Slice name.
 -- @ret INT               Sum of duration.
-CREATE PERFETTO FUNCTION ANDROID_SUM_DUR_ON_MAIN_THREAD_FOR_STARTUP_AND_SLICE(startup_id LONG, slice_name STRING)
+CREATE PERFETTO FUNCTION android_sum_dur_on_main_thread_for_startup_and_slice(
+  startup_id LONG, slice_name STRING)
 RETURNS INT AS
 SELECT SUM(slice_dur)
 FROM android_thread_slices_for_all_startups
-WHERE startup_id = $startup_id AND slice_name GLOB $slice_name AND is_main_thread;
+WHERE startup_id = $startup_id
+  AND slice_name GLOB $slice_name
+  AND is_main_thread;

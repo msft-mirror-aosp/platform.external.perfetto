@@ -40,6 +40,7 @@ from diff_tests.chrome.tests_processes import ChromeProcesses
 from diff_tests.chrome.tests_rail_modes import ChromeRailModes
 from diff_tests.chrome.tests_scroll_jank import ChromeScrollJank
 from diff_tests.chrome.tests_touch_gesture import ChromeTouchGesture
+from diff_tests.codecs.tests import Codecs
 from diff_tests.cros.tests import Cros
 from diff_tests.dynamic.tests import Dynamic
 from diff_tests.fs.tests import Fs
@@ -56,6 +57,7 @@ from diff_tests.parsing.tests import Parsing
 from diff_tests.parsing.tests_debug_annotation import ParsingDebugAnnotation
 from diff_tests.parsing.tests_memory_counters import ParsingMemoryCounters
 from diff_tests.parsing.tests_rss_stats import ParsingRssStats
+from diff_tests.perfetto_sql.tests import PerfettoSql
 from diff_tests.performance.tests import Performance
 from diff_tests.pkvm.tests import Pkvm
 from diff_tests.power.tests import Power
@@ -87,6 +89,7 @@ from diff_tests.startup.tests_metrics import StartupMetrics
 from diff_tests.tables.tests import Tables
 from diff_tests.tables.tests_counters import TablesCounters
 from diff_tests.tables.tests_sched import TablesSched
+from diff_tests.time.tests import Time
 from diff_tests.track_event.tests import TrackEvent
 from diff_tests.translation.tests import Translation
 from diff_tests.ufs.tests import Ufs
@@ -111,6 +114,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ChromeProcesses(index_path, 'chrome', 'ChromeProcesses').fetch(),
       *ChromeArgs(index_path, 'chrome', 'ChromeArgs').fetch(),
       *Chrome(index_path, 'chrome', 'Chrome').fetch(),
+      *Codecs(index_path, 'codecs', 'Codecs').fetch(),
       *Cros(index_path, 'cros', 'Cros').fetch(),
       *Dynamic(index_path, 'dynamic', 'Dynamic').fetch(),
       *EntityStateResidency(index_path, 'power',
@@ -133,6 +137,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ParsingRssStats(index_path, 'parsing', 'ParsingRssStats').fetch(),
       *ParsingMemoryCounters(index_path, 'parsing',
                              'ParsingMemoryCounters').fetch(),
+      *PerfettoSql(index_path, 'perfetto_sql', 'PerfettoSql').fetch(),
       *Performance(index_path, 'performance', 'Performance').fetch(),
       *Pkvm(index_path, 'pkvm', 'Pkvm').fetch(),
       *Power(index_path, 'power', 'Power').fetch(),
@@ -174,6 +179,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *Tables(index_path, 'tables', 'Tables').fetch(),
       *TablesCounters(index_path, 'tables', 'TablesCounters').fetch(),
       *TablesSched(index_path, 'tables', 'TablesSched').fetch(),
+      *Time(index_path, 'time', 'Time').fetch(),
       *TrackEvent(index_path, 'track_event', 'TrackEvent').fetch(),
       *Translation(index_path, 'translation', 'Translation').fetch(),
       *WebView(index_path, 'webview', 'WebView').fetch(),

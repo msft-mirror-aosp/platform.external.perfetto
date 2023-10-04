@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from python.generators.diff_tests.testing import Path, DataPath, Metric
-from python.generators.diff_tests.testing import Csv, Json, TextProto
+from python.generators.diff_tests.testing import Path, DataPath, Metric, Systrace
+from python.generators.diff_tests.testing import Csv, Json, TextProto, BinaryProto
 from python.generators.diff_tests.testing import DiffTestBlueprint
 from python.generators.diff_tests.testing import TestSuite
-
+from python.generators.diff_tests.testing import PrintProfileProto
 
 class Android(TestSuite):
 
@@ -153,7 +153,7 @@ class Android(TestSuite):
         }
         """),
         query="""
-        SELECT IMPORT('android.battery_stats');
+        INCLUDE PERFETTO MODULE android.battery_stats;
         SELECT * FROM android_battery_stats_event_slices
         ORDER BY str_value;
         """,
@@ -190,7 +190,7 @@ class Android(TestSuite):
         }
         """),
         query="""
-        SELECT IMPORT('android.battery_stats');
+        INCLUDE PERFETTO MODULE android.battery_stats;
         SELECT * FROM android_battery_stats_state
         ORDER BY ts, track_name;
         """,
@@ -277,11 +277,32 @@ class Android(TestSuite):
         """,
         out=Path('android_network_activity.out'))
 
+  def test_anrs(self):
+    return DiffTestBlueprint(
+        trace=Path('android_anr_metric.py'),
+        query="""
+        INCLUDE PERFETTO MODULE android.anrs;
+        SELECT *
+        FROM android_anrs;
+      """,
+        out=Csv("""
+        "process_name","pid","upid","error_id","ts","subject"
+        "com.google.android.app1",11167,"[NULL]","da24554c-452a-4ae1-b74a-fb898f6e0982",1000,"Test ANR subject 1"
+        "com.google.android.app2","[NULL]","[NULL]","8612fece-c2f1-4aeb-9d45-8e6d9d0201cf",2000,"Test ANR subject 2"
+        "com.google.android.app3","[NULL]","[NULL]","c25916a0-a8f0-41f3-87df-319e06471a0f",3000,"[NULL]"
+      """))
+
+  def test_anr_metric(self):
+    return DiffTestBlueprint(
+        trace=Path('android_anr_metric.py'),
+        query=Metric('android_anr'),
+        out=Path('android_anr_metric.out'))
+
   def test_binder_sync_binder_metrics(self):
     return DiffTestBlueprint(
         trace=DataPath('android_binder_metric_trace.atr'),
         query="""
-        SELECT IMPORT('android.binder');
+        INCLUDE PERFETTO MODULE android.binder;
         SELECT
           aidl_name,
           binder_txn_id,
@@ -317,7 +338,7 @@ class Android(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('android_binder_metric_trace.atr'),
         query="""
-      SELECT IMPORT('android.binder');
+      INCLUDE PERFETTO MODULE android.binder;
       SELECT
         binder_txn_id,
         client_ts,
@@ -348,7 +369,7 @@ class Android(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('android_binder_metric_trace.atr'),
         query="""
-      SELECT IMPORT('android.binder');
+      INCLUDE PERFETTO MODULE android.binder;
       SELECT
         binder_txn_id,
         client_ts,
@@ -367,6 +388,98 @@ class Android(TestSuite):
         out=Csv("""
       "binder_txn_id","client_ts","client_tid","binder_reply_id","server_ts","server_tid","thread_state_type","blocked_function","blocked_function_dur","blocked_function_count"
       34382,25505818197,492,34383,25505891588,1596,"binder_reply","filemap_fault",864664,1
+      """))
+
+  def test_binder_txn_sync_good(self):
+    return DiffTestBlueprint(
+        trace=Systrace(
+"""          client-521390  [005] ..... 137012.464739: binder_command: cmd=0x40406300 BC_TRANSACTION
+          client-521390  [005] ..... 137012.464741: binder_transaction: transaction=5149 dest_node=5143 dest_proc=521383 dest_thread=0 reply=0 flags=0x0 code=0x3
+          server-521383  [004] ..... 137012.464771: binder_transaction_received: transaction=5149
+          server-521383  [004] ..... 137012.464772: binder_return: cmd=0x80407202 BR_TRANSACTION
+          server-521383  [004] ..... 137012.464815: binder_command: cmd=0x40086303 BC_FREE_BUFFER
+          server-521383  [004] ..... 137012.464823: binder_command: cmd=0x40406301 BC_REPLY
+          server-521383  [004] ..... 137012.464826: binder_transaction: transaction=5150 dest_node=0 dest_proc=521390 dest_thread=521390 reply=1 flags=0x20 code=0x3
+          server-521383  [004] ..... 137012.464837: binder_return: cmd=0x7206 BR_TRANSACTION_COMPLETE
+          client-521390  [005] ..... 137012.464847: binder_return: cmd=0x7206 BR_TRANSACTION_COMPLETE
+          client-521390  [005] ..... 137012.464848: binder_transaction_received: transaction=5150
+          client-521390  [005] ..... 137012.464849: binder_return: cmd=0x80407203 BR_REPLY
+          """),
+        query="""
+      SELECT
+        dur
+      FROM slice
+      ORDER BY dur;
+      """,
+        out=Csv("""
+      "dur"
+      55000
+      107000
+      """))
+
+  def test_binder_txn_sync_bad_request(self):
+    return DiffTestBlueprint(
+        trace=Systrace(
+"""          client-521349  [005] ..... 137004.281009: binder_command: cmd=0x40406300 BC_TRANSACTION
+          client-521349  [005] ..... 137004.281010: binder_transaction: transaction=5135 dest_node=5129 dest_proc=521347 dest_thread=0 reply=0 flags=0x0 code=0x3
+          client-521349  [005] ..... 137004.281410: binder_return: cmd=0x7211 BR_FAILED_REPLY
+          """),
+        query="""
+      SELECT
+        dur
+      FROM slice
+      ORDER BY dur;
+      """,
+        out=Csv("""
+      "dur"
+      400000
+      """))
+
+  def test_binder_txn_sync_bad_reply(self):
+    return DiffTestBlueprint(
+        trace=Systrace(
+"""          client-521332  [007] ..... 136996.112660: binder_command: cmd=0x40406300 BC_TRANSACTION
+          client-521332  [007] ..... 136996.112662: binder_transaction: transaction=5120 dest_node=5114 dest_proc=521330 dest_thread=0 reply=0 flags=0x0 code=0x3
+          server-521330  [000] ..... 136996.112714: binder_transaction_received: transaction=5120
+          server-521330  [000] ..... 136996.112715: binder_return: cmd=0x80407202 BR_TRANSACTION
+          server-521330  [000] ..... 136996.112752: binder_command: cmd=0x40086303 BC_FREE_BUFFER
+          server-521330  [000] ..... 136996.112758: binder_command: cmd=0x40406301 BC_REPLY
+          server-521330  [000] ..... 136996.112760: binder_transaction: transaction=5121 dest_node=0 dest_proc=521332 dest_thread=521332 reply=1 flags=0x20 code=0x3
+          server-521330  [000] ..... 136996.113163: binder_return: cmd=0x7206 BR_TRANSACTION_COMPLETE
+          client-521332  [007] ..... 136996.113201: binder_return: cmd=0x7206 BR_TRANSACTION_COMPLETE
+          client-521332  [007] ..... 136996.113201: binder_return: cmd=0x7211 BR_FAILED_REPLY
+          """),
+        query="""
+      SELECT
+        dur
+      FROM slice
+      ORDER BY dur;
+      """,
+        out=Csv("""
+      "dur"
+      46000
+      539000
+      """))
+
+  def test_binder_txn_oneway_good(self):
+    return DiffTestBlueprint(
+        trace=Systrace(
+"""          client-521406  [003] ..... 137020.679833: binder_command: cmd=0x40406300 BC_TRANSACTION
+          client-521406  [003] ..... 137020.679834: binder_transaction: transaction=5161 dest_node=5155 dest_proc=521404 dest_thread=0 reply=0 flags=0x1 code=0x3
+          client-521406  [003] ..... 137020.679843: binder_return: cmd=0x7206 BR_TRANSACTION_COMPLETE
+          server-521404  [006] ..... 137020.679890: binder_transaction_received: transaction=5161
+          server-521404  [006] ..... 137020.679890: binder_return: cmd=0x80407202 BR_TRANSACTION
+          """),
+        query="""
+      SELECT
+        dur
+      FROM slice
+      ORDER BY dur;
+      """,
+        out=Csv("""
+      "dur"
+      0
+      0
       """))
 
   def test_binder_metric(self):
@@ -391,7 +504,7 @@ class Android(TestSuite):
     return DiffTestBlueprint(
         trace=Path('android_slice_standardization.py'),
         query="""
-        SELECT IMPORT('android.slices');
+        INCLUDE PERFETTO MODULE android.slices;
         SELECT ANDROID_STANDARDIZE_SLICE_NAME(slice.name) name
         FROM slice
         ORDER BY name;
@@ -408,7 +521,7 @@ class Android(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      SELECT IMPORT('android.monitor_contention');
+      INCLUDE PERFETTO MODULE android.monitor_contention;
       SELECT
         blocking_method,
         blocked_method,
@@ -428,7 +541,7 @@ class Android(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      SELECT IMPORT('android.monitor_contention');
+      INCLUDE PERFETTO MODULE android.monitor_contention;
       SELECT
         *
       FROM android_monitor_contention_chain_blocked_functions_by_txn
@@ -444,7 +557,7 @@ class Android(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      SELECT IMPORT('android.monitor_contention');
+      INCLUDE PERFETTO MODULE android.monitor_contention;
       SELECT
         *
       FROM android_monitor_contention_chain_thread_state_by_txn
@@ -459,19 +572,19 @@ class Android(TestSuite):
         13934,"D",11950576,1
       """))
 
-  def test_monitor_contention_chain_extraction_parent(self):
+  def test_monitor_contention_chain_extraction(self):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      SELECT IMPORT('android.monitor_contention');
+      INCLUDE PERFETTO MODULE android.monitor_contention;
       SELECT * FROM android_monitor_contention_chain
         WHERE parent_id IS NOT NULL
       ORDER BY dur DESC
       LIMIT 1;
       """,
         out=Csv("""
-        "parent_id","blocking_method","blocked_method","short_blocking_method","short_blocked_method","blocking_src","blocked_src","waiter_count","blocked_utid","blocked_thread_name","blocking_utid","blocking_thread_name","blocking_tid","upid","process_name","id","ts","dur","track_id","is_blocked_thread_main","blocked_thread_tid","is_blocking_thread_main","blocking_thread_tid","binder_reply_id","binder_reply_ts","binder_reply_tid","pid"
-        956,"void com.android.server.am.AppProfiler.collectPssInBackground()","void com.android.server.am.ProcessRecord.setPid(int)","com.android.server.am.AppProfiler.collectPssInBackground","com.android.server.am.ProcessRecord.setPid","AppProfiler.java:514","ProcessRecord.java:596",0,656,"binder:642_12",506,"android.bg",670,250,"system_server",949,1737122781871,7301144,1236,0,2720,0,670,"[NULL]","[NULL]","[NULL]",642
+        "parent_id","blocking_method","blocked_method","short_blocking_method","short_blocked_method","blocking_src","blocked_src","waiter_count","blocked_utid","blocked_thread_name","blocking_utid","blocking_thread_name","blocking_tid","upid","process_name","id","ts","dur","track_id","is_blocked_thread_main","blocked_thread_tid","is_blocking_thread_main","blocking_thread_tid","binder_reply_id","binder_reply_ts","binder_reply_tid","pid","child_id"
+        949,"void com.android.server.am.ActivityManagerService$AppDeathRecipient.binderDied()","int com.android.server.am.ActivityManagerService.getMemoryTrimLevel()","com.android.server.am.ActivityManagerService$AppDeathRecipient.binderDied","com.android.server.am.ActivityManagerService.getMemoryTrimLevel","ActivityManagerService.java:1478","ActivityManagerService.java:9183",1,250,"system_server",656,"binder:642_12",2720,250,"system_server",956,1737123891932,17577143,1215,1,642,0,2720,"[NULL]","[NULL]","[NULL]",642,"[NULL]"
       """))
 
   def test_monitor_contention_metric(self):
@@ -480,11 +593,77 @@ class Android(TestSuite):
         query=Metric('android_monitor_contention'),
         out=Path('android_monitor_contention.out'))
 
+  def test_monitor_contention_agg_metric(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query=Metric('android_monitor_contention_agg'),
+        out=TextProto(r"""
+        android_monitor_contention_agg {
+          process_aggregation {
+            name: "android.process.media"
+            total_contention_count: 12
+            total_contention_dur: 12893198
+            main_thread_contention_count: 12
+            main_thread_contention_dur: 12893198
+          }
+          process_aggregation {
+            name: "com.android.providers.media.module"
+            total_contention_count: 7
+            total_contention_dur: 169793
+          }
+          process_aggregation {
+            name: "com.android.systemui"
+            total_contention_count: 8
+            total_contention_dur: 9445959
+            main_thread_contention_count: 5
+            main_thread_contention_dur: 9228582
+          }
+          process_aggregation {
+            name: "system_server"
+            total_contention_count: 354
+            total_contention_dur: 358898613
+            main_thread_contention_count: 27
+            main_thread_contention_dur: 36904702
+          }
+        }
+        """))
+
+  def test_monitor_contention_graph(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.monitor_contention;
+
+        SELECT HEX(pprof) FROM android_monitor_contention_graph(303)
+      """,
+        out=BinaryProto(
+            message_type="perfetto.third_party.perftools.profiles.Profile",
+            post_processing=PrintProfileProto,
+            contents="""
+        Sample:
+        Values: 29604
+        Stack:
+        android.bg:android.os.MessageQueue.nativeWake (0x0)
+        fg:android.os.MessageQueue.next (0x0)
+
+        Sample:
+        Values: 66924
+        Stack:
+        android.bg:android.os.MessageQueue.enqueueMessage (0x0)
+        fg:android.os.MessageQueue.next (0x0)
+
+        Sample:
+        Values: 73265
+        Stack:
+        main:android.os.MessageQueue.enqueueMessage (0x0)
+        fg:android.os.MessageQueue.next (0x0)
+        """))
+
   def test_thread_creation_spam(self):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      SELECT IMPORT('android.thread');
+      INCLUDE PERFETTO MODULE android.thread;
       SELECT * FROM ANDROID_THREAD_CREATION_SPAM(1e9, 1e9);
       """,
         out=Csv("""
@@ -514,3 +693,483 @@ class Android(TestSuite):
       "sh",3546,"sh",1
       "sh",3564,"sh",1
       """))
+
+  def test_f2fs_counter_stats(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      INCLUDE PERFETTO MODULE android.io;
+      SELECT * FROM android_io_f2fs_counter_stats;
+      """,
+        out=Csv("""
+        "name","sum","max","min","dur","count","avg"
+        "read_app_total",580966.000000,567184.000000,13782.000000,2515275969,2,290483.000000
+        "read_app_buffered",580966.000000,567184.000000,13782.000000,2515275969,2,290483.000000
+        "write_cp_node",94208.000000,94208.000000,0.000000,2515275969,2,47104.000000
+        "write_app_mapped",65536.000000,65536.000000,0.000000,2515275969,2,32768.000000
+        "write_fs_data",28672.000000,28672.000000,0.000000,2515275969,2,14336.000000
+        "write_cp_meta",28672.000000,28672.000000,0.000000,2515275969,2,14336.000000
+        "write_app_total",20616.000000,20616.000000,0.000000,2515275969,2,10308.000000
+        "write_app_buffered",20616.000000,20616.000000,0.000000,2515275969,2,10308.000000
+        "write_fs_node",8192.000000,8192.000000,0.000000,2515275969,2,4096.000000
+        "write_sync_meta_peak",8.000000,8.000000,0.000000,2515276848,2,4.000000
+        "write_sync_meta_cnt",5.000000,5.000000,0.000000,2515276848,2,2.500000
+        "write_sync_node_peak",4.000000,4.000000,0.000000,2515276848,2,2.000000
+        "write_sync_node_cnt",3.000000,3.000000,0.000000,2515276848,2,1.500000
+        "write_sync_data_cnt",3.000000,3.000000,0.000000,2515276848,2,1.500000
+        "write_sync_node_avg",1.000000,1.000000,0.000000,2515276848,2,0.500000
+        "write_sync_meta_avg",1.000000,1.000000,0.000000,2515276848,2,0.500000
+        "write_sync_data_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_sync_data_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_node_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_node_cnt",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_node_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_meta_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_meta_cnt",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_meta_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_data_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_data_cnt",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_async_data_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_node_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_node_cnt",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_node_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_meta_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_meta_cnt",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_meta_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_data_peak",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_data_cnt",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "read_data_avg",0.000000,0.000000,0.000000,2515276848,2,0.000000
+        "write_gc_node",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "write_gc_data",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "write_fs_meta",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "write_cp_data",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "write_app_direct",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_fs_node",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_fs_meta",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_fs_gdata",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_fs_data",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_fs_cdata",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_app_mapped",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "read_app_direct",0.000000,0.000000,0.000000,2515275969,2,0.000000
+        "other_fs_discard",0.000000,0.000000,0.000000,2515275969,2,0.000000
+      """))
+
+  def test_f2fs_write_stats(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+      INCLUDE PERFETTO MODULE android.io;
+      SELECT tid, thread_name, pid, process_name, ino, dev, bytes, write_count FROM android_io_f2fs_write_stats;
+      """,
+        out=Csv("""
+        "tid","thread_name","pid","process_name","ino","dev","bytes","write_count"
+        3548,"AsyncTask #1",3487,"com.android.providers.media.module",2636,65077,135168,33
+        3516,"fg",3487,"com.android.providers.media.module",2409,65077,98304,24
+        3548,"AsyncTask #1",3487,"com.android.providers.media.module",2642,65077,78280,57
+        3516,"fg",3487,"com.android.providers.media.module",2424,65077,37112,28
+        3487,"rs.media.module",3487,"com.android.providers.media.module",2366,65077,16480,12
+        3515,"ackgroundThread",3487,"com.android.providers.media.module",2642,65077,8272,7
+        282,"f2fs_ckpt-254:5",282,"f2fs_ckpt-254:5",4,65077,432,6
+        282,"f2fs_ckpt-254:5",282,"f2fs_ckpt-254:5",5,65077,432,6
+        3548,"AsyncTask #1",3487,"com.android.providers.media.module",3145,65077,233,2
+        743,"StorageManagerS",642,"system_server",3144,65077,227,1
+        282,"f2fs_ckpt-254:5",282,"f2fs_ckpt-254:5",6,65077,216,3
+        3487,"rs.media.module",3487,"com.android.providers.media.module",2367,65077,8,8
+        3516,"fg",3487,"com.android.providers.media.module",2425,65077,8,8
+        3548,"AsyncTask #1",3487,"com.android.providers.media.module",2643,65077,8,8
+      """))
+
+  def test_f2fs_aggregate_write_stats(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.io;
+        SELECT total_write_count, distinct_processes, total_bytes_written,
+               distinct_device_count, distict_inode_count, distinct_thread_count
+        FROM android_io_f2fs_aggregate_write_stats
+        """,
+        out=Csv("""
+        "total_write_count","distinct_processes","total_bytes_written","distinct_device_count","distict_inode_count","distinct_thread_count"
+        203,3,375180,1,13,6
+        """))
+
+  def test_binder_async_txns(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.binder;
+        SELECT
+          aidl_name,
+          client_process,
+          server_process,
+          client_thread,
+          client_tid,
+          server_tid,
+          is_main_thread,
+          client_oom_score,
+          server_oom_score,
+          client_ts,
+          server_ts
+        FROM android_async_binder_metrics_by_txn
+        WHERE aidl_name IS NOT NULL
+        ORDER BY client_ts
+        LIMIT 10;
+      """,
+        out=Csv("""
+        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts"
+        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474
+        "AIDL::cpp::IMediaMetricsService::submitBuffer::cppServer","/system/bin/audioserver","media.metrics","audioserver",492,1262,1,-1000,-1000,25512325446,25512488255
+        "AIDL::cpp::IMediaMetricsService::submitBuffer::cppServer","/system/bin/audioserver","media.metrics","audioserver",492,1262,1,-1000,-1000,25512842465,25522410505
+        "AIDL::cpp::IDisplayEventConnection::stealReceiveChannel::cppServer","/vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu","/system/bin/surfaceflinger","binder:446_1",553,522,0,-1000,-1000,25847718645,25847734867
+        "AIDL::cpp::ITunnelModeEnabledListener::onTunnelModeEnabledChanged::cppServer","/system/bin/surfaceflinger","system_server","binder:496_2",522,1600,0,-1000,-900,25854181504,25854195485
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25855697394,25855710732
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25873210999,25873224961
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25951278287,25952242397
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,1575,0,-900,-1000,25965452828,25965590137
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,1575,0,-900,-1000,26046376252,26046544680
+      """))
+
+  def test_binder_txns(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.binder;
+        SELECT
+          aidl_name,
+          client_process,
+          server_process,
+          client_thread,
+          client_tid,
+          server_tid,
+          is_main_thread,
+          client_oom_score,
+          server_oom_score,
+          client_ts,
+          server_ts
+        FROM android_binder_txns
+        WHERE aidl_name IS NOT NULL
+        ORDER BY client_ts
+        LIMIT 10;
+      """,
+        out=Csv("""
+        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts"
+        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474
+        "AIDL::cpp::IInstalld::rmdex::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25230101202,25230125660
+        "AIDL::cpp::IInstalld::cleanupInvalidPackageDirs::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25243511980,25243544499
+        "AIDL::cpp::IInstalld::createAppDataBatched::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25244949065,25244971300
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25279371214,25279387389
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25279567724,25279592927
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280736368,25280756522
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280932813,25280946041
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281131360,25281145719
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281273755,25281315273
+      """))
+
+  def test_binder_outgoing_graph(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.binder;
+        SELECT HEX(pprof) FROM ANDROID_BINDER_OUTGOING_GRAPH(259)
+      """,
+        out=BinaryProto(
+            message_type="perfetto.third_party.perftools.profiles.Profile",
+            post_processing=PrintProfileProto,
+            contents="""
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/surfaceflinger (0x0)
+        binder:446_1 (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        stealReceiveChannel (0x0)
+        IDisplayEventConnection (0x0)
+        /system/bin/surfaceflinger (0x0)
+        binder:446_1 (0x0)
+        """))
+
+  def test_binder_incoming_graph(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.binder;
+        SELECT HEX(pprof) FROM ANDROID_BINDER_INCOMING_GRAPH(296)
+      """,
+        out=BinaryProto(
+            message_type="perfetto.third_party.perftools.profiles.Profile",
+            post_processing=PrintProfileProto,
+            contents="""
+        Sample:
+        Values: 1764197
+        Stack:
+        fixupAppData (0x0)
+        IInstalld (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 202423
+        Stack:
+        rmdex (0x0)
+        IInstalld (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 438512
+        Stack:
+        cleanupInvalidPackageDirs (0x0)
+        IInstalld (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 4734897
+        Stack:
+        invalidateMounts (0x0)
+        IInstalld (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 7448312
+        Stack:
+        prepareAppProfile (0x0)
+        IInstalld (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 91238713
+        Stack:
+        createAppDataBatched (0x0)
+        IInstalld (0x0)
+        system_server (0x0)
+        """))
+
+  def test_binder_graph_invalid_oom(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.binder;
+        SELECT HEX(pprof) FROM ANDROID_BINDER_GRAPH(2000, 2000, 2000, 2000)
+      """,
+        out=BinaryProto(
+            message_type="perfetto.third_party.perftools.profiles.Profile",
+            post_processing=PrintProfileProto,
+            contents="""
+        """))
+
+  def test_binder_graph_valid_oom(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.binder;
+        SELECT HEX(pprof) FROM ANDROID_BINDER_GRAPH(-1000, 1000, -1000, 1000)
+      """,
+        out=BinaryProto(
+            message_type="perfetto.third_party.perftools.profiles.Profile",
+            post_processing=PrintProfileProto,
+            contents="""
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/apexd (0x0)
+        /system/bin/servicemanager (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/bootanimation (0x0)
+        /system/bin/surfaceflinger (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/cameraserver (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/storaged (0x0)
+        /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/surfaceflinger (0x0)
+        /system/bin/bootanimation (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        /system/bin/surfaceflinger (0x0)
+        /vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        media.metrics (0x0)
+        /system/bin/audioserver (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        system_server (0x0)
+        /system/bin/servicemanager (0x0)
+
+        Sample:
+        Values: 0
+        Stack:
+        system_server (0x0)
+        /system/bin/surfaceflinger (0x0)
+
+        Sample:
+        Values: 105827054
+        Stack:
+        /system/bin/installd (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 11316
+        Stack:
+        system_server (0x0)
+        /apex/com.android.os.statsd/bin/statsd (0x0)
+
+        Sample:
+        Values: 12567639
+        Stack:
+        /system/bin/servicemanager (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 137623
+        Stack:
+        /vendor/bin/hw/android.hardware.lights-service.example (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 140719
+        Stack:
+        system_server (0x0)
+        /system/bin/storaged (0x0)
+
+        Sample:
+        Values: 150044
+        Stack:
+        /vendor/bin/hw/android.hardware.input.processor-service.example (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 1877718
+        Stack:
+        /system/bin/surfaceflinger (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 19303
+        Stack:
+        system_server (0x0)
+        /vendor/bin/hw/android.hardware.sensors-service.example (0x0)
+
+        Sample:
+        Values: 210889
+        Stack:
+        /system/bin/servicemanager (0x0)
+        /apex/com.android.os.statsd/bin/statsd (0x0)
+
+        Sample:
+        Values: 21505514
+        Stack:
+        /system/bin/idmap2d (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 25394
+        Stack:
+        /system/bin/servicemanager (0x0)
+        /system/bin/surfaceflinger (0x0)
+
+        Sample:
+        Values: 2552696
+        Stack:
+        /system/bin/hwservicemanager (0x0)
+        /system/bin/cameraserver (0x0)
+
+        Sample:
+        Values: 273686
+        Stack:
+        /vendor/bin/hw/android.hardware.sensors-service.example (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 28045
+        Stack:
+        /apex/com.android.os.statsd/bin/statsd (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 297647
+        Stack:
+        /system/bin/hwservicemanager (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 3483649
+        Stack:
+        system_server (0x0)
+        /system/bin/audioserver (0x0)
+
+        Sample:
+        Values: 3677545
+        Stack:
+        /system/bin/servicemanager (0x0)
+        /system/bin/audioserver (0x0)
+
+        Sample:
+        Values: 3991341
+        Stack:
+        /system/bin/servicemanager (0x0)
+        /system/bin/cameraserver (0x0)
+
+        Sample:
+        Values: 41164
+        Stack:
+        system_server (0x0)
+        /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
+
+        Sample:
+        Values: 4948091
+        Stack:
+        system_server (0x0)
+        /system/bin/cameraserver (0x0)
+
+        Sample:
+        Values: 502254
+        Stack:
+        /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 629626
+        Stack:
+        /apex/com.android.hardware.vibrator/bin/hw/android.hardware.vibrator-service.example (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 78428525
+        Stack:
+        /vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu (0x0)
+        /system/bin/surfaceflinger (0x0)
+
+        Sample:
+        Values: 81216
+        Stack:
+        /system/bin/vold (0x0)
+        system_server (0x0)
+
+        Sample:
+        Values: 837989
+        Stack:
+        /system/bin/servicemanager (0x0)
+        /system/bin/storaged (0x0)
+        """))

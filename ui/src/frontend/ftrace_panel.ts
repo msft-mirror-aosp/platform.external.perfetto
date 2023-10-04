@@ -14,23 +14,21 @@
 
 import m from 'mithril';
 
+import {time, Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {colorForString} from '../common/colorizer';
 import {StringListPatch} from '../common/state';
-import {TPTime} from '../common/time';
-
-import {globals} from './globals';
-import {Panel} from './panel';
-import {asTPTimestamp} from './sql_types';
-import {DetailsShell} from './widgets/details_shell';
+import {DetailsShell} from '../widgets/details_shell';
 import {
   MultiSelectDiff,
   Option as MultiSelectOption,
   PopupMultiSelect,
-} from './widgets/multiselect';
-import {PopupPosition} from './widgets/popup';
+} from '../widgets/multiselect';
+import {PopupPosition} from '../widgets/popup';
+import {VirtualScrollContainer} from '../widgets/virtual_scroll_container';
+
+import {globals} from './globals';
 import {Timestamp} from './widgets/timestamp';
-import {VirtualScrollContainer} from './widgets/virtual_scroll_container';
 
 const ROW_H = 20;
 const PAGE_SIZE = 250;
@@ -52,7 +50,7 @@ const PAGE_SIZE = 250;
 // Another call to view() can come at any time, as a reusult of the controller
 // giving us some data.
 //
-export class FtracePanel extends Panel<{}> {
+export class FtracePanel implements m.ClassComponent {
   private page: number = 0;
   private pageCount: number = 0;
 
@@ -103,12 +101,12 @@ export class FtracePanel extends Panel<{}> {
     this.recomputeVisibleRowsAndUpdate(container);
   };
 
-  onRowOver(ts: TPTime) {
+  onRowOver(ts: time) {
     globals.dispatch(Actions.setHoverCursorTimestamp({ts}));
   }
 
   onRowOut() {
-    globals.dispatch(Actions.setHoverCursorTimestamp({ts: -1n}));
+    globals.dispatch(Actions.setHoverCursorTimestamp({ts: Time.INVALID}));
   }
 
   private renderTitle() {
@@ -175,7 +173,7 @@ export class FtracePanel extends Panel<{}> {
       for (let i = 0; i < events.length; i++) {
         const {ts, name, cpu, process, args} = events[i];
 
-        const timestamp = m(Timestamp, {ts: asTPTimestamp(ts)});
+        const timestamp = m(Timestamp, {ts});
 
         const rank = i + offset;
 
@@ -205,6 +203,4 @@ export class FtracePanel extends Panel<{}> {
       return m('.rows', rows);
     }
   }
-
-  renderCanvas() {}
 }
