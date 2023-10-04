@@ -12,14 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../../gn/perfetto_sql.gni")
+import("../../../../../gn/perfetto.gni")
 
-perfetto_sql_source_set("scroll_jank") {
-  sources = [
-    "scroll_jank_intervals.sql",
-    "scroll_jank_v3.sql",
-    "scroll_jank_v3_cause.sql",
-    "scroll_offsets.sql",
-    "utils.sql",
-  ]
+source_set("query_result_serializer") {
+  sources = [ "query_result_serializer.h" ]
 }
