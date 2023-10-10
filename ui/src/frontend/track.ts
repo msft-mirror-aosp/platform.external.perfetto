@@ -19,7 +19,7 @@ import {duration, Span, time} from '../base/time';
 import {EngineProxy} from '../common/engine';
 import {TrackState} from '../common/state';
 import {TrackData} from '../common/track_data';
-import {TrackLike} from '../public';
+import {Track} from '../public';
 
 import {checkerboard} from './checkerboard';
 import {globals} from './globals';
@@ -42,7 +42,7 @@ export interface TrackCreator {
 
   // We need the |create| method because the stored value in the registry can be
   // an abstract class, and we cannot call 'new' on an abstract class.
-  create(args: NewTrackArgs): Track;
+  create(args: NewTrackArgs): TrackBase;
 }
 
 export interface SliceRect {
@@ -54,8 +54,8 @@ export interface SliceRect {
 }
 
 // The abstract class that needs to be implemented by all tracks.
-export abstract class Track<Config = {}, Data extends TrackData = TrackData>
-    implements TrackLike {
+export abstract class TrackBase<Config = {}, Data extends TrackData = TrackData>
+    implements Track {
   // The UI-generated track ID (not to be confused with the SQL track.id).
   protected readonly trackId: string;
   protected readonly engine: EngineProxy;
@@ -75,11 +75,11 @@ export abstract class Track<Config = {}, Data extends TrackData = TrackData>
     this.lastTrackState = assertExists(globals.state.tracks[this.trackId]);
   }
 
-  async onCreate(): Promise<void> {}
+  onCreate() {}
 
   // Last call the track will receive. Called just before the last reference to
   // this object is removed.
-  async onDestroy(): Promise<void> {}
+  onDestroy() {}
 
   protected abstract renderCanvas(ctx: CanvasRenderingContext2D): void;
 

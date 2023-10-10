@@ -15,7 +15,6 @@
 import {hex} from 'color-convert';
 import m from 'mithril';
 
-import {Disposable} from '../base/disposable';
 import {currentTargetOffset} from '../base/dom_utils';
 import {Icons} from '../base/semantic_icons';
 import {duration, Span, time} from '../base/time';
@@ -25,7 +24,7 @@ import {pluginManager} from '../common/plugins';
 import {RegistryError} from '../common/registry';
 import {TrackState} from '../common/state';
 import {raf} from '../core/raf_scheduler';
-import {Migrate, TrackContext, TrackLike} from '../public';
+import {Migrate, Track, TrackContext} from '../public';
 
 import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
@@ -102,7 +101,7 @@ export function renderChips({uri, config}: TrackState) {
 }
 
 interface TrackShellAttrs {
-  track: TrackLifecycleContainer;
+  track: Track;
   trackState: TrackState;
 }
 
@@ -234,7 +233,7 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
 }
 
 export interface TrackContentAttrs {
-  track: TrackLifecycleContainer;
+  track: Track;
 }
 export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
   private mouseDownX?: number;
@@ -293,7 +292,7 @@ export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
 
 interface TrackComponentAttrs {
   trackState: TrackState;
-  track: TrackLifecycleContainer;
+  track: Track;
 }
 class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
   view({attrs}: m.CVnode<TrackComponentAttrs>) {
@@ -353,121 +352,12 @@ interface TrackPanelAttrs {
   selectable: boolean;
 }
 
-enum TrackLifecycleState {
-  Initializing,
-  Initialized,
-  DestroyPending,
-  Destroying,
-  Destroyed,
-}
-
-export class TrackLifecycleContainer implements Disposable {
-  private state = TrackLifecycleState.Initializing;
-
-  constructor(private track: TrackLike) {
-    track.onCreate().then(() => {
-      if (this.state === TrackLifecycleState.DestroyPending) {
-        track.onDestroy();
-        this.state = TrackLifecycleState.Destroying;
-      } else {
-        this.state = TrackLifecycleState.Initialized;
-      }
-    });
-  }
-
-  onFullRedraw(): void {
-    if (this.state === TrackLifecycleState.Initialized) {
-      this.track.onFullRedraw();
-    }
-  }
-
-  getSliceRect(
-      visibleTimeScale: TimeScale, visibleWindow: Span<time, bigint>,
-      windowSpan: PxSpan, tStart: time, tEnd: time, depth: number): SliceRect
-      |undefined {
-    if (this.state === TrackLifecycleState.Initialized) {
-      return this.track.getSliceRect(
-          visibleTimeScale, visibleWindow, windowSpan, tStart, tEnd, depth);
-    } else {
-      return undefined;
-    }
-  }
-
-  getHeight(): number {
-    if (this.state === TrackLifecycleState.Initialized) {
-      return this.track.getHeight();
-    } else {
-      return 18;
-    }
-  }
-
-  getTrackShellButtons(): m.Vnode<TrackButtonAttrs, {}>[] {
-    if (this.state === TrackLifecycleState.Initialized) {
-      return this.track.getTrackShellButtons();
-    } else {
-      return [];
-    }
-  }
-
-  getContextMenu(): m.Vnode<any, {}>|null {
-    if (this.state === TrackLifecycleState.Initialized) {
-      return this.track.getContextMenu();
-    } else {
-      return null;
-    }
-  }
-
-  onMouseMove(position: {x: number; y: number;}): void {
-    if (this.state === TrackLifecycleState.Initialized) {
-      this.track.onMouseMove(position);
-    }
-  }
-
-  onMouseClick(position: {x: number; y: number;}): boolean {
-    if (this.state === TrackLifecycleState.Initialized) {
-      return this.track.onMouseClick(position);
-    } else {
-      return false;
-    }
-  }
-
-  onMouseOut(): void {
-    if (this.state === TrackLifecycleState.Initialized) {
-      this.track.onMouseOut();
-    }
-  }
-
-  render(ctx: CanvasRenderingContext2D) {
-    if (this.state === TrackLifecycleState.Initialized) {
-      this.track.render(ctx);
-    }
-  }
-
-  dispose() {
-    switch (this.state) {
-      case TrackLifecycleState.Initializing:
-        this.state = TrackLifecycleState.DestroyPending;
-        break;
-      case TrackLifecycleState.Initialized:
-        this.state = TrackLifecycleState.Destroying;
-        this.track.onDestroy().then(() => {
-          this.state = TrackLifecycleState.Destroyed;
-        });
-        break;
-      case TrackLifecycleState.DestroyPending:
-      case TrackLifecycleState.Destroying:
-      case TrackLifecycleState.Destroyed:
-        break;
-      default:
-        const x: never = this.state;
-        throw new Error(`Invalid state "${x}"`);
-    }
-  }
-}
-
 export class TrackPanel extends Panel<TrackPanelAttrs> {
-  private track?: TrackLifecycleContainer;
-  private trackState?: TrackState;
+  // TODO(hjd): It would be nicer if these could not be undefined here.
+  // We should implement a NullTrack which can be used if the trackState
+  // has disappeared.
+  private track: Track|undefined;
+  private trackState: TrackState|undefined;
 
   private tryLoadTrack(vnode: m.CVnode<TrackPanelAttrs>) {
     const trackId = vnode.attrs.id;
@@ -489,13 +379,11 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
       },
     };
 
-    const track = uri ? pluginManager.createTrack(uri, trackCtx) :
-                        loadTrack(trackState, id);
+    this.track = uri ? pluginManager.createTrack(uri, trackCtx) :
+                       loadTrack(trackState, id);
 
-    if (track) {
-      this.track = new TrackLifecycleContainer(track);
-      this.trackState = trackState;
-    }
+    this.track?.onCreate();
+    this.trackState = trackState;
   }
 
   view(vnode: m.CVnode<TrackPanelAttrs>) {
@@ -523,7 +411,7 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
 
   onremove() {
     if (this.track !== undefined) {
-      this.track.dispose();
+      this.track.onDestroy();
       this.track = undefined;
     }
   }
@@ -632,8 +520,7 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
   }
 }
 
-function loadTrack(trackState: TrackState, trackId: string): TrackLike|
-    undefined {
+function loadTrack(trackState: TrackState, trackId: string): Track|undefined {
   const engine = globals.engines.get(trackState.engineId);
   if (engine === undefined) {
     return undefined;

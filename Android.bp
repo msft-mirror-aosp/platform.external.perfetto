@@ -4589,6 +4589,7 @@ genrule {
     srcs: [
         "protos/perfetto/metrics/android/android_blocking_call.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto",
+        "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
@@ -4669,6 +4670,7 @@ genrule {
     srcs: [
         "protos/perfetto/metrics/android/android_blocking_call.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto",
+        "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
@@ -4732,6 +4734,7 @@ genrule {
     srcs: [
         "protos/perfetto/metrics/android/android_blocking_call.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto",
+        "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
@@ -10431,6 +10434,7 @@ genrule {
         "src/trace_processor/metrics/sql/android/android_batt.sql",
         "src/trace_processor/metrics/sql/android/android_binder.sql",
         "src/trace_processor/metrics/sql/android/android_blocking_calls_cuj_metric.sql",
+        "src/trace_processor/metrics/sql/android/android_boot.sql",
         "src/trace_processor/metrics/sql/android/android_camera.sql",
         "src/trace_processor/metrics/sql/android/android_camera_unagg.sql",
         "src/trace_processor/metrics/sql/android/android_cpu.sql",
@@ -10617,6 +10621,7 @@ filegroup {
         "src/trace_processor/perfetto_sql/engine/function_util.cc",
         "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.cc",
         "src/trace_processor/perfetto_sql/engine/perfetto_sql_parser.cc",
+        "src/trace_processor/perfetto_sql/engine/perfetto_sql_preprocessor.cc",
         "src/trace_processor/perfetto_sql/engine/runtime_table_function.cc",
     ],
 }
@@ -10627,6 +10632,7 @@ filegroup {
     srcs: [
         "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine_unittest.cc",
         "src/trace_processor/perfetto_sql/engine/perfetto_sql_parser_unittest.cc",
+        "src/trace_processor/perfetto_sql/engine/perfetto_sql_preprocessor_unittest.cc",
     ],
 }
 

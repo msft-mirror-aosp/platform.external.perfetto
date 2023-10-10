@@ -40,7 +40,7 @@ import {Slice} from './slice';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
 import {constraintsToQuerySuffix} from './sql_utils';
 import {PxSpan, TimeScale} from './time_scale';
-import {NewTrackArgs, SliceRect, Track} from './track';
+import {NewTrackArgs, SliceRect, TrackBase} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey, TrackCache} from './track_cache';
 
 // The common class that underpins all tracks drawing slices.
@@ -179,7 +179,7 @@ export interface BaseSliceTrackTypes {
 
 export abstract class BaseSliceTrack<T extends BaseSliceTrackTypes =
                                                    BaseSliceTrackTypes> extends
-    Track<T['config']> {
+    TrackBase<T['config']> {
   protected sliceLayout: SliceLayout = {...DEFAULT_SLICE_LAYOUT};
 
   // This is the over-skirted cached bounds:
@@ -505,10 +505,10 @@ export abstract class BaseSliceTrack<T extends BaseSliceTrackTypes =
     }  // if (hoveredSlice)
   }
 
-  async onDestroy() {
-    await super.onDestroy();
+  onDestroy() {
+    super.onDestroy();
     this.isDestroyed = true;
-    await this.engine.query(`DROP VIEW IF EXISTS ${this.tableName}`);
+    this.engine.query(`DROP VIEW IF EXISTS ${this.tableName}`);
   }
 
   // This method figures out if the visible window is outside the bounds of
