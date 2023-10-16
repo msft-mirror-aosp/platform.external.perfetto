@@ -46,6 +46,7 @@
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/version.h"
 
+#include "perfetto/trace_processor/metatrace_config.h"
 #include "perfetto/trace_processor/read_trace.h"
 #include "perfetto/trace_processor/trace_processor.h"
 #include "src/trace_processor/metrics/all_chrome_metrics.descriptor.h"
@@ -53,7 +54,6 @@
 #include "src/trace_processor/metrics/metrics.descriptor.h"
 #include "src/trace_processor/metrics/metrics.h"
 #include "src/trace_processor/read_trace_internal.h"
-#include "src/trace_processor/util/proto_to_json.h"
 #include "src/trace_processor/util/sql_modules.h"
 #include "src/trace_processor/util/status_macros.h"
 
@@ -646,14 +646,16 @@ metatrace::MetatraceCategories ParseMetatraceCategories(std::string s) {
     std::string cur = splitter.cur_token();
     if (cur == "all" || cur == "*") {
       result = Cat::ALL;
-    } else if (cur == "toplevel") {
-      result = static_cast<Cat>(result | Cat::TOPLEVEL);
-    } else if (cur == "function") {
-      result = static_cast<Cat>(result | Cat::FUNCTION);
-    } else if (cur == "query") {
-      result = static_cast<Cat>(result | Cat::QUERY);
+    } else if (cur == "query_toplevel") {
+      result = static_cast<Cat>(result | Cat::QUERY_TIMELINE);
+    } else if (cur == "query_detailed") {
+      result = static_cast<Cat>(result | Cat::QUERY_DETAILED);
+    } else if (cur == "function_call") {
+      result = static_cast<Cat>(result | Cat::FUNCTION_CALL);
     } else if (cur == "db") {
       result = static_cast<Cat>(result | Cat::DB);
+    } else if (cur == "api") {
+      result = static_cast<Cat>(result | Cat::API_TIMELINE);
     } else {
       PERFETTO_ELOG("Unknown metatrace category %s", cur.data());
       exit(1);
@@ -682,7 +684,9 @@ struct CommandLineOptions {
   std::string metatrace_path;
   size_t metatrace_buffer_capacity = 0;
   metatrace::MetatraceCategories metatrace_categories =
-      metatrace::MetatraceCategories::TOPLEVEL;
+      static_cast<metatrace::MetatraceCategories>(
+          metatrace::MetatraceCategories::QUERY_TIMELINE |
+          metatrace::MetatraceCategories::API_TIMELINE);
   bool dev = false;
   bool no_ftrace_raw = false;
   bool analyze_trace_proto_content = false;
@@ -1183,7 +1187,7 @@ base::Status IncludeSqlModule(std::string root, bool allow_override) {
       return base::ErrStatus("Cannot read file %s", filename.c_str());
 
     std::string import_key =
-        module_name + "." + sql_modules::GetImportKey(path);
+        module_name + "." + sql_modules::GetIncludeKey(path);
     modules.Insert(module_name, {})
         .first->push_back({import_key, file_contents});
   }
@@ -1219,7 +1223,7 @@ base::Status LoadOverridenStdlib(std::string root) {
     if (!base::ReadFile(filename, &file_contents)) {
       return base::ErrStatus("Cannot read file %s", filename.c_str());
     }
-    std::string import_key = sql_modules::GetImportKey(path);
+    std::string import_key = sql_modules::GetIncludeKey(path);
     std::string module = sql_modules::GetModuleName(import_key);
     modules.Insert(module, {}).first->push_back({import_key, file_contents});
   }

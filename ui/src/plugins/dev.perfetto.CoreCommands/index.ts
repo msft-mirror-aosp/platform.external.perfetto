@@ -13,12 +13,9 @@
 // limitations under the License.
 
 import {
-  Command,
-  EngineProxy,
+  Plugin,
   PluginContext,
-  Store,
-  TracePlugin,
-  Viewer,
+  PluginDescriptor,
 } from '../../public';
 
 const SQL_STATS = `
@@ -87,117 +84,97 @@ group by
 order by total_self_size desc
 limit 100;`;
 
-class CoreCommands implements TracePlugin {
-  static migrate(_initialState: unknown): {} {
-    return {};
-  }
+const coreCommands: Plugin = {
+  onActivate: function(ctx: PluginContext): void {
+    const {viewer} = ctx;
 
-  private viewer: Viewer;
-
-  constructor(_store: Store<{}>, _engine: EngineProxy, viewer: Viewer) {
-    this.viewer = viewer;
-  }
-
-  dispose(): void {
-    // No-op
-  }
-
-  commands(): Command[] {
-    return [
-      {
-        id: 'dev.perfetto.CoreCommands#ToggleLeftSidebar',
-        name: 'Toggle left sidebar',
-        callback: () => {
-          if (this.viewer.sidebar.isVisible()) {
-            this.viewer.sidebar.hide();
-          } else {
-            this.viewer.sidebar.show();
-          }
-        },
-        defaultHotkey: '!Mod+B',
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#ToggleLeftSidebar',
+      name: 'Toggle left sidebar',
+      callback: () => {
+        if (viewer.sidebar.isVisible()) {
+          viewer.sidebar.hide();
+        } else {
+          viewer.sidebar.show();
+        }
       },
+      defaultHotkey: '!Mod+B',
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#RunQueryAllProcesses',
-        name: 'Run query: all processes',
-        callback: () => {
-          this.viewer.tabs.openQuery(ALL_PROCESSES_QUERY, 'All Processes');
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#RunQueryAllProcesses',
+      name: 'Run query: all processes',
+      callback: () => {
+        viewer.tabs.openQuery(ALL_PROCESSES_QUERY, 'All Processes');
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#RunQueryCpuTimeByProcess',
-        name: 'Run query: CPU time by process',
-        callback: () => {
-          this.viewer.tabs.openQuery(
-              CPU_TIME_FOR_PROCESSES, 'CPU time by process');
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#RunQueryCpuTimeByProcess',
+      name: 'Run query: CPU time by process',
+      callback: () => {
+        viewer.tabs.openQuery(CPU_TIME_FOR_PROCESSES, 'CPU time by process');
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#RunQueryCyclesByStateByCpu',
-        name: 'Run query: cycles by p-state by CPU',
-        callback: () => {
-          this.viewer.tabs.openQuery(
-              CYCLES_PER_P_STATE_PER_CPU, 'Cycles by p-state by CPU');
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#RunQueryCyclesByStateByCpu',
+      name: 'Run query: cycles by p-state by CPU',
+      callback: () => {
+        viewer.tabs.openQuery(
+            CYCLES_PER_P_STATE_PER_CPU, 'Cycles by p-state by CPU');
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#RunQueryCyclesByCpuByProcess',
-        name: 'Run query: CPU Time by CPU by process',
-        callback: () => {
-          this.viewer.tabs.openQuery(
-              CPU_TIME_BY_CPU_BY_PROCESS, 'CPU Time by CPU by process');
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#RunQueryCyclesByCpuByProcess',
+      name: 'Run query: CPU Time by CPU by process',
+      callback: () => {
+        viewer.tabs.openQuery(
+            CPU_TIME_BY_CPU_BY_PROCESS, 'CPU Time by CPU by process');
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#RunQueryHeapGraphBytesPerType',
-        name: 'Run query: heap graph bytes per type',
-        callback: () => {
-          this.viewer.tabs.openQuery(
-              HEAP_GRAPH_BYTES_PER_TYPE, 'Heap graph bytes per type');
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#RunQueryHeapGraphBytesPerType',
+      name: 'Run query: heap graph bytes per type',
+      callback: () => {
+        viewer.tabs.openQuery(
+            HEAP_GRAPH_BYTES_PER_TYPE, 'Heap graph bytes per type');
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#DebugSqlPerformance',
-        name: 'Debug SQL performance',
-        callback: () => {
-          this.viewer.tabs.openQuery(SQL_STATS, 'Recent SQL queries');
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#DebugSqlPerformance',
+      name: 'Debug SQL performance',
+      callback: () => {
+        viewer.tabs.openQuery(SQL_STATS, 'Recent SQL queries');
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#PinFtraceTracks',
-        name: 'Pin ftrace tracks',
-        callback: () => {
-          this.viewer.tracks.pin((tags) => {
-            return !!tags.name?.startsWith('Ftrace Events Cpu ');
-          });
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#PinFtraceTracks',
+      name: 'Pin ftrace tracks',
+      callback: () => {
+        viewer.tracks.pin((tags) => {
+          return !!tags.name?.startsWith('Ftrace Events Cpu ');
+        });
       },
+    });
 
-      {
-        id: 'dev.perfetto.CoreCommands#UnpinAllTracks',
-        name: 'Unpin all tracks',
-        callback: () => {
-          this.viewer.tracks.unpin((_) => {
-            return true;
-          });
-        },
+    ctx.addCommand({
+      id: 'dev.perfetto.CoreCommands#UnpinAllTracks',
+      name: 'Unpin all tracks',
+      callback: () => {
+        viewer.tracks.unpin((_) => {
+          return true;
+        });
       },
+    });
+  },
+};
 
-    ];
-  }
-}
-
-function activate(ctx: PluginContext) {
-  ctx.registerTracePluginFactory(CoreCommands);
-}
-
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'dev.perfetto.CoreCommands',
-  activate,
+  plugin: coreCommands,
 };

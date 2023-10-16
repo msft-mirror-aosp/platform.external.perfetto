@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {PrimaryTrackSortKey} from '../public';
+
 import {createEmptyState} from './empty_state';
-import {getContainingTrackId, PrimaryTrackSortKey, State} from './state';
+import {getContainingTrackId, State} from './state';
 import {deserializeStateObject, serializeStateObject} from './upload_utils';
 
 test('createEmptyState', () => {
@@ -30,6 +32,7 @@ test('getContainingTrackId', () => {
     name: 'a track',
     trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
     config: {},
+    tags: {},
   };
 
   state.tracks['b'] = {
@@ -40,6 +43,7 @@ test('getContainingTrackId', () => {
     trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
     config: {},
     trackGroup: 'containsB',
+    tags: {},
   };
 
   expect(getContainingTrackId(state, 'z')).toEqual(null);

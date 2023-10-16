@@ -16,15 +16,15 @@ import {TrackData} from '../../common/track_data';
 
 export const EXPECTED_FRAMES_SLICE_TRACK_KIND = 'ExpectedFramesSliceTrack';
 
-import {NewTrackArgs, Track} from '../../frontend/track';
+import {NewTrackArgs, TrackBase} from '../../frontend/track';
 import {ChromeSliceTrack} from '../chrome_slices';
 
 import {LONG, LONG_NULL, NUM, STR} from '../../common/query_result';
-import {duration, time} from '../../common/time';
+import {duration, time} from '../../base/time';
 import {
   TrackController,
 } from '../../controller/track_controller';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 import {BigintMath as BIMath} from '../../base/bigint_math';
 
 export interface Config {
@@ -142,17 +142,19 @@ class ExpectedFramesSliceTrackController extends TrackController<Config, Data> {
 
 export class ExpectedFramesSliceTrack extends ChromeSliceTrack {
   static readonly kind = EXPECTED_FRAMES_SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): Track {
+  static create(args: NewTrackArgs): TrackBase {
     return new ExpectedFramesSliceTrack(args);
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(ExpectedFramesSliceTrackController);
-  ctx.registerTrack(ExpectedFramesSliceTrack);
+class ExpectedFramesPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.LEGACY_registerTrackController(ExpectedFramesSliceTrackController);
+    ctx.LEGACY_registerTrack(ExpectedFramesSliceTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.ExpectedFrames',
-  activate,
+  plugin: ExpectedFramesPlugin,
 };

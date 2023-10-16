@@ -19,9 +19,9 @@ cd perfetto
 
 ### Copy the plugin skeleton
 ```sh
-cp -r ui/plugins/com.example.Skeleton ui/plugins/<your-plugin-name>
+cp -r ui/src/plugins/com.example.Skeleton ui/src/plugins/<your-plugin-name>
 ```
-Now edit `ui/plugins/<your-plugin-name>/index.ts`.
+Now edit `ui/src/plugins/<your-plugin-name>/index.ts`.
 Search for all instances of `SKELETON: <instruction>` in the file and
 follow the instructions.
 
@@ -33,6 +33,12 @@ Notes on naming:
   plugin should be named `com.example.Foo`.
 - Core plugins maintained by the Perfetto team should use
   `dev.perfetto.Foo`.
+- Commands should have ids with the pattern `example.com#DoSomething`
+- Command's ids should be prefixed with the id of the plugin which
+  provides them.
+- Commands names should have the form "Verb something something".
+  Good: "Pin janky frame timeline tracks"
+  Bad: "Tracks are Displayed if Janky"
 
 ### Start the dev server
 ```sh
@@ -41,7 +47,7 @@ Notes on naming:
 Now navigate to [](http://localhost:10000/settings)
 
 ### Upload your plugin for review
-- Update `ui/plugins/<your-plugin-name>/OWNERS` to include your email.
+- Update `ui/src/plugins/<your-plugin-name>/OWNERS` to include your email.
 - Follow the [Contributing](./getting-started#contributing)
   instructions to upload your CL to the codereview tool.
 - Once uploaded add `hjd@google.com` as a reviewer for your CL.
@@ -52,19 +58,183 @@ below show these extension points and give examples of how they can be
 used.
 
 ### Commands
-TBD
+Commands are user issuable shortcuts for actions in the UI.
+They can be accessed via the omnibox.
+
+Follow the [create a plugin](#create-a-plugin) to get an initial
+skeleton for your plugin.
+
+To add your first command, add a call to `ctx.addCommand()` in either your
+`onActivate()` or `onTraceLoad()` hooks. The recommendation is to register
+commands in `onActivate()` by default unless they require something from
+`TracePluginContext` which is not available on `PluginContext`.
+
+The tradeoff is that commands registered in `onTraceLoad()` are only available
+while a trace is loaded, whereas commands registered in `onActivate()` are
+available all the time the plugin is active.
+
+```typescript
+class MyPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.addCommand(
+       {
+         id: 'dev.perfetto.ExampleSimpleCommand#LogHelloPlugin',
+         name: 'Log "Hello, plugin!"',
+         callback: () => console.log('Hello, plugin!'),
+       },
+    );
+  }
+
+  onTraceLoad(ctx: TracePluginContext): void {
+    ctx.addCommand(
+       {
+         id: 'dev.perfetto.ExampleSimpleTraceCommand#LogHelloTrace',
+         name: 'Log "Hello, trace!"',
+         callback: () => console.log('Hello, trace!'),
+       },
+    );
+  }
+}
+```
+
+Here `id` is a unique string which identifies this command.
+The `id` should be prefixed with the plugin id followed by a `#`. All command
+`id`s must be unique system-wide.
+`name` is a human readable name for the command, which is shown in the command
+palette.
+Finally `callback()` is the callback which actually performs the
+action.
+
+Commands are removed automatically when their context disappears. Commands
+registered with the `PluginContext` are removed when the plugin is deactivated,
+and commands registered with the `TracePluginContext` are removed when the trace
+is unloaded.
+
+Examples:
+- [dev.perfetto.ExampleSimpleCommand](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.ExampleSimpleCommand/index.ts).
+- [dev.perfetto.CoreCommands](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.CoreCommands/index.ts).
+- [dev.perfetto.ExampleState](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.ExampleState/index.ts).
 
 ### Tracks
 TBD
 
-### Detail tabs
+### Tabs
 TBD
 
 ### Metric Visualisations
 TBD
 
+Examples:
+- [dev.perfetto.AndroidBinderViz](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.AndroidBinderViz/index.ts).
+
+### State
+NOTE: It is important to consider version skew when using persistent state.
+
+Plugins can persist information into permalinks. This allows plugins
+to gracefully handle permalinking and is an opt-in - not automatic -
+mechanism.
+
+Persistent plugin state works using a `Store<T>` where `T` is some JSON
+serializable object.
+`Store` is implemented [here](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/frontend/store.ts).
+`Store` allows for reading and writing `T`.
+Reading:
+```typescript
+interface Foo {
+  bar: string;
+}
+
+const store: Store<Foo> = getFooStoreSomehow();
+
+// store.state is immutable and must not be edited.
+const foo = store.state.foo;
+const bar = foo.bar;
+
+console.log(bar);
+```
+
+Writing:
+```typescript
+interface Foo {
+  bar: string;
+}
+
+const store: Store<Foo> = getFooStoreSomehow();
+
+store.edit((draft) => {
+  draft.foo.bar = 'Hello, world!';
+});
+
+console.log(store.state.foo.bar);
+// > Hello, world!
+```
+
+First define an interface for your specific plugin state.
+```typescript
+interface MyState {
+  favouriteSlices: MySliceInfo[];
+}
+```
+
+This interface will be used as type parameter to the `Plugin` and
+`TracePluginContext` interfaces.
+```typescript
+class MyPlugin implements Plugin<MyState> {
+
+  migrate(initialState: unknown): MyState {
+    // ...
+  }
+
+  async onTraceLoad(ctx: TracePluginContext<MyState>): Promise<void> {
+    // You can access the store on ctx.store
+  }
+
+  async onTraceUnload(ctx: TracePluginContext<MyState>): Promise<void> {
+    // You can access the store on ctx.store
+  }
+
+  // ...
+}
+```
+
+`migrate()` is called after `onActivate()` just before `onTraceLoad()`. There
+are two cases to consider:
+- Loading a new trace
+- Loading from a permalink
+
+In case of a new trace `migrate()` is called with `undefined`. In this
+case you should return a default version of `MyState`:
+```typescript
+class MyPlugin implements Plugin<MyState> {
+
+  migrate(initialState: unknown): MyState {
+    if (initialState === undefined) {
+      return {
+        favouriteSlices: [];
+      };
+    }
+    // ...
+  }
+
+  // ...
+}
+```
+
+In the permalink case `migrate()` is called with the state of the plugin
+store at the time the permalink was generated. This may be from a
+older or newer version of the plugin.
+**Plugin's must not make assumptions about the contents of `initialState`**.
+
+In this case you need to carefully validate the state object.
+
+TODO: Add validation example.
+
+Examples:
+- [dev.perfetto.ExampleState](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.ExampleState/index.ts).
+
 ## Guide to the plugin API
-TBD
+The plugin interfaces are defined in [ui/src/public/index.ts](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/public/index.ts).
+
 
 ## Default plugins
 TBD

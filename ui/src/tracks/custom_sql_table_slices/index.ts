@@ -27,7 +27,7 @@ import {
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
 import {NewTrackArgs} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 
 export interface CustomSqlTableDefConfig {
   // Table name
@@ -89,8 +89,8 @@ export abstract class CustomSqlTableSliceTrack<
     globals.makeSelection(Actions.selectGenericSlice({
       id: args.slice.id,
       sqlTableName: this.tableName,
-      start: args.slice.start,
-      duration: args.slice.duration,
+      start: args.slice.ts,
+      duration: args.slice.dur,
       trackId: this.trackId,
       detailsPanelConfig: {
         kind: detailsPanelConfig.kind,
@@ -100,14 +100,16 @@ export abstract class CustomSqlTableSliceTrack<
   }
 }
 
-function activate(ctx: PluginContext) {
-  // noop to allow directory to compile.
-  if (ctx) {
-    return;
+class CustomSqlTrackPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    // noop to allow directory to compile.
+    if (ctx) {
+      return;
+    }
   }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.CustomSqlTrack',
-  activate,
+  plugin: CustomSqlTrackPlugin,
 };

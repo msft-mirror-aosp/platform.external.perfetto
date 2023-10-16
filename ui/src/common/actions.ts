@@ -15,6 +15,8 @@
 import {Draft} from 'immer';
 
 import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
+import {duration, time} from '../base/time';
+import {exists} from '../base/utils';
 import {RecordConfig} from '../controller/record_config_types';
 import {
   GenericSliceDetailsTabConfig,
@@ -28,6 +30,8 @@ import {
   tableColumnEquals,
   toggleEnabled,
 } from '../frontend/pivot_table_types';
+import {PrimaryTrackSortKey, TrackTags} from '../public/index';
+import {CounterDebugTrackConfig} from '../tracks/debug/counter_track';
 import {DebugTrackV2Config} from '../tracks/debug/slice_track';
 
 import {randomColor} from './colorizer';
@@ -45,6 +49,7 @@ import {
   traceEventEnd,
   TraceEventScope,
 } from './metatracing';
+import {pluginManager} from './plugins';
 import {
   AdbRecordingTarget,
   Area,
@@ -59,7 +64,6 @@ import {
   Pagination,
   PendingDeeplinkState,
   PivotTableResult,
-  PrimaryTrackSortKey,
   ProfileType,
   RecordingTarget,
   SCROLLING_TRACK_GROUP,
@@ -73,9 +77,9 @@ import {
   UtidToTrackSortKey,
   VisibleState,
 } from './state';
-import {duration, time} from './time';
 
-export const DEBUG_SLICE_TRACK_KIND = 'DebugSliceTrack';
+export const DEBUG_SLICE_TRACK_KIND = 'dev.perfetto.DebugSliceTrack';
+export const DEBUG_COUNTER_TRACK_KIND = 'dev.perfetto.DebugCounterTrack';
 
 type StateDraft = Draft<State>;
 
@@ -88,6 +92,8 @@ export interface AddTrackArgs {
   trackSortKey: TrackSortKey;
   trackGroup?: string;
   config: {};
+  tags?: TrackTags;
+  uri?: string;  // Only used for new PLUGIN_TRACK tracks
 }
 
 export interface PostedTrace {
@@ -222,16 +228,25 @@ export const StateActions = {
       state.uiTrackIdByTraceTrackId[trackId] = uiTrackId;
     };
 
-    const config = trackState.config as {trackId: number};
-    if (config.trackId !== undefined) {
-      setUiTrackId(config.trackId, uiTrackId);
-      return;
-    }
-
-    const multiple = trackState.config as {trackIds: number[]};
-    if (multiple.trackIds !== undefined) {
-      for (const trackId of multiple.trackIds) {
+    const {uri, config} = trackState;
+    if (exists(uri)) {
+      // If track is a new "plugin" type track (i.e. it has a uri), resolve the
+      // track ids from through the pluginManager.
+      const trackInfo = pluginManager.resolveTrackInfo(uri);
+      if (trackInfo?.trackIds) {
+        for (const trackId of trackInfo.trackIds) {
+          setUiTrackId(trackId, uiTrackId);
+        }
+      }
+    } else {
+      // Traditional track - resolve track ids through the config.
+      const {trackId, trackIds} = config;
+      if (exists(trackId)) {
         setUiTrackId(trackId, uiTrackId);
+      } else if (exists(trackIds)) {
+        for (const trackId of trackIds) {
+          setUiTrackId(trackId, uiTrackId);
+        }
       }
     }
   },
@@ -239,8 +254,20 @@ export const StateActions = {
   addTracks(state: StateDraft, args: {tracks: AddTrackArgs[]}) {
     args.tracks.forEach((track) => {
       const id = track.id === undefined ? generateNextId(state) : track.id;
-      track.id = id;
-      state.tracks[id] = track as TrackState;
+      const name = track.name;
+      const tags = track.tags ?? {name};
+      state.tracks[id] = {
+        id,
+        engineId: track.engineId,
+        kind: track.kind,
+        name,
+        trackSortKey: track.trackSortKey,
+        trackGroup: track.trackGroup,
+        tags,
+        config: track.config,
+        labels: track.labels,
+        uri: track.uri,
+      };
       this.fillUiTrackIdByTraceTrackId(state, track as TrackState, id);
       if (track.trackGroup === SCROLLING_TRACK_GROUP) {
         state.scrollingTracks.push(id);
@@ -258,26 +285,8 @@ export const StateActions = {
     state.utidToThreadSortKey = args.threadOrderingMetadata;
   },
 
-  addTrack(state: StateDraft, args: {
-    id?: string; engineId: string; kind: string; name: string;
-    trackGroup?: string; config: {}; trackSortKey: TrackSortKey;
-  }): void {
-    const id = args.id !== undefined ? args.id : generateNextId(state);
-    state.tracks[id] = {
-      id,
-      engineId: args.engineId,
-      kind: args.kind,
-      name: args.name,
-      trackSortKey: args.trackSortKey,
-      trackGroup: args.trackGroup,
-      config: args.config,
-    };
-    this.fillUiTrackIdByTraceTrackId(state, state.tracks[id], id);
-    if (args.trackGroup === SCROLLING_TRACK_GROUP) {
-      state.scrollingTracks.push(id);
-    } else if (args.trackGroup !== undefined) {
-      assertExists(state.trackGroups[args.trackGroup]).tracks.push(id);
-    }
+  addTrack(state: StateDraft, args: AddTrackArgs): void {
+    this.addTracks(state, {tracks: [args]});
   },
 
   addTrackGroup(
@@ -287,6 +296,7 @@ export const StateActions = {
       args: {
         engineId: string; name: string; id: string; summaryTrackId: string;
         collapsed: boolean;
+        fixedOrdering?: boolean;
       }): void {
     state.trackGroups[args.id] = {
       engineId: args.engineId,
@@ -294,31 +304,52 @@ export const StateActions = {
       id: args.id,
       collapsed: args.collapsed,
       tracks: [args.summaryTrackId],
+      fixedOrdering: args.fixedOrdering,
     };
   },
 
-  addDebugTrack(
+  addDebugSliceTrack(
       state: StateDraft,
       args: {engineId: string, name: string, config: DebugTrackV2Config}):
       void {
-        if (state.debugTrackId !== undefined) return;
         const trackId = generateNextId(state);
         this.addTrack(state, {
           id: trackId,
           engineId: args.engineId,
-          kind: DEBUG_SLICE_TRACK_KIND,
           name: args.name,
-          trackSortKey: PrimaryTrackSortKey.DEBUG_SLICE_TRACK,
+          trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
           trackGroup: SCROLLING_TRACK_GROUP,
+          kind: DEBUG_SLICE_TRACK_KIND,
           config: args.config,
         });
         this.toggleTrackPinned(state, {trackId});
       },
 
+  addDebugCounterTrack(state: StateDraft, args: {
+    engineId: string,
+    name: string,
+    config: CounterDebugTrackConfig,
+  }): void {
+    const trackId = generateNextId(state);
+    this.addTrack(state, {
+      id: trackId,
+      engineId: args.engineId,
+      name: args.name,
+      trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
+      trackGroup: SCROLLING_TRACK_GROUP,
+      kind: DEBUG_COUNTER_TRACK_KIND,
+      config: args.config,
+    });
+    this.toggleTrackPinned(state, {trackId});
+  },
+
+
   removeDebugTrack(state: StateDraft, args: {trackId: string}): void {
     const track = state.tracks[args.trackId];
     if (track !== undefined) {
-      assertTrue(track.kind === DEBUG_SLICE_TRACK_KIND);
+      assertTrue(
+          track.kind === DEBUG_SLICE_TRACK_KIND ||
+          track.kind === DEBUG_COUNTER_TRACK_KIND);
       removeTrack(state, args.trackId);
     }
   },
@@ -372,6 +403,8 @@ export const StateActions = {
     // rather than T1, T10, T11, ..., T2, T20, T21 .
     const coll = new Intl.Collator([], {sensitivity: 'base', numeric: true});
     for (const group of Object.values(state.trackGroups)) {
+      if (group.fixedOrdering) continue;
+
       group.tracks.sort((a: string, b: string) => {
         const aRank = getFullKey(a);
         const bRank = getFullKey(b);
@@ -414,11 +447,6 @@ export const StateActions = {
 
   setVisibleTracks(state: StateDraft, args: {tracks: string[]}) {
     state.visibleTracks = args.tracks;
-  },
-
-  updateTrackConfig(state: StateDraft, args: {id: string, config: {}}) {
-    if (state.tracks[args.id] === undefined) return;
-    state.tracks[args.id].config = args.config;
   },
 
   moveTrack(
@@ -1062,9 +1090,10 @@ export const StateActions = {
   },
 
   clearAllPinnedTracks(state: StateDraft, _: {}) {
-    if (state.pinnedTracks.length > 0) {
-      // Clear pinnedTracks array
-      state.pinnedTracks.length = 0;
+    const pinnedTracks = state.pinnedTracks.slice();
+    for (let index = pinnedTracks.length-1; index >= 0; index--) {
+      const trackId = pinnedTracks[index];
+      this.toggleTrackPinned(state, {trackId});
     }
   },
 

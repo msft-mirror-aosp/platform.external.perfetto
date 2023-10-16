@@ -21,7 +21,7 @@ import {
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
 import {NewTrackArgs} from '../../frontend/track';
-import {TrackButton, TrackButtonAttrs} from '../../frontend/track_panel';
+import {TrackButton} from '../../frontend/track_panel';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
@@ -78,15 +78,15 @@ export class DebugTrackV2 extends CustomSqlTableSliceTrack<DebugTrackV2Types> {
     super.initSqlTable(tableName);
   }
 
-  getTrackShellButtons(): Array<m.Vnode<TrackButtonAttrs>> {
-    return [m(TrackButton, {
+  getTrackShellButtons(): m.Children {
+    return m(TrackButton, {
       action: () => {
         globals.dispatch(Actions.removeDebugTrack({trackId: this.trackId}));
       },
       i: 'close',
       tooltip: 'Close',
       showButton: true,
-    })];
+    });
   }
 }
 
@@ -100,7 +100,7 @@ export interface SqlDataSource {
   columns: string[];
 }
 
-export async function addDebugTrack(
+export async function addDebugSliceTrack(
     engine: EngineProxy,
     data: SqlDataSource,
     trackName: string,
@@ -140,7 +140,7 @@ export async function addDebugTrack(
       from prepared_data
       order by ts;`);
 
-  globals.dispatch(Actions.addDebugTrack({
+  globals.dispatch(Actions.addDebugSliceTrack({
     engineId: engine.engineId,
     name: trackName.trim() || `Debug Track ${debugTrackId}`,
     config: {

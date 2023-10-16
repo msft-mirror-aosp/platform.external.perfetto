@@ -13,14 +13,14 @@
 // limitations under the License.
 
 import {BigintMath as BIMath} from '../../base/bigint_math';
+import {duration, time} from '../../base/time';
 import {LONG, LONG_NULL, NUM, STR} from '../../common/query_result';
-import {duration, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {
   TrackController,
 } from '../../controller/track_controller';
-import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {NewTrackArgs, TrackBase} from '../../frontend/track';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 import {ChromeSliceTrack} from '../chrome_slices';
 
 export const ASYNC_SLICE_TRACK_KIND = 'AsyncSliceTrack';
@@ -134,17 +134,19 @@ class AsyncSliceTrackController extends TrackController<Config, Data> {
 
 export class AsyncSliceTrack extends ChromeSliceTrack {
   static readonly kind = ASYNC_SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): Track {
+  static create(args: NewTrackArgs): TrackBase {
     return new AsyncSliceTrack(args);
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(AsyncSliceTrackController);
-  ctx.registerTrack(AsyncSliceTrack);
+class AsyncSlicePlugin implements Plugin {
+  onActivate(ctx: PluginContext) {
+    ctx.LEGACY_registerTrackController(AsyncSliceTrackController);
+    ctx.LEGACY_registerTrack(AsyncSliceTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.AsyncSlices',
-  activate,
+  plugin: AsyncSlicePlugin,
 };

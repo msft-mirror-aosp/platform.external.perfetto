@@ -36,3 +36,152 @@ class PerfettoSql(TestSuite):
         1,"big"
         2,"bigger"
         """))
+
+  def test_import(self):
+    return DiffTestBlueprint(
+        trace=TextProto(r"""
+        packet {
+          ftrace_events {
+            cpu: 1
+            event {
+              timestamp: 1000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.data_conn|13\n"
+              }
+            }
+            event {
+              timestamp: 4000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.data_conn|20\n"
+              }
+            }
+            event {
+              timestamp: 1000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.audio|1\n"
+              }
+            }
+          }
+        }
+        """),
+        query="""
+        SELECT IMPORT('common.timestamps');
+
+        SELECT TRACE_START();
+        """,
+        out=Csv("""
+        "TRACE_START()"
+        1000
+        """))
+
+  def test_include_perfetto_module(self):
+    return DiffTestBlueprint(
+        trace=TextProto(r"""
+        packet {
+          ftrace_events {
+            cpu: 1
+            event {
+              timestamp: 1000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.data_conn|13\n"
+              }
+            }
+            event {
+              timestamp: 4000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.data_conn|20\n"
+              }
+            }
+            event {
+              timestamp: 1000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.audio|1\n"
+              }
+            }
+          }
+        }
+        """),
+        query="""
+        INCLUDE PERFETTO MODULE common.timestamps;
+
+        SELECT TRACE_START();
+        """,
+        out=Csv("""
+        "TRACE_START()"
+        1000
+        """))
+
+  def test_include_and_import(self):
+    return DiffTestBlueprint(
+        trace=TextProto(r"""
+        packet {
+          ftrace_events {
+            cpu: 1
+            event {
+              timestamp: 1000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.data_conn|13\n"
+              }
+            }
+            event {
+              timestamp: 4000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.data_conn|20\n"
+              }
+            }
+            event {
+              timestamp: 1000
+              pid: 1
+              print {
+                buf: "C|1000|battery_stats.audio|1\n"
+              }
+            }
+          }
+        }
+        """),
+        query="""
+        SELECT IMPORT('common.timestamps');
+        INCLUDE PERFETTO MODULE common.timestamps;
+
+        SELECT TRACE_START();
+        """,
+        out=Csv("""
+        "TRACE_START()"
+        1000
+        """))
+
+  def test_macro(self):
+    return DiffTestBlueprint(
+        trace=TextProto(''),
+        query='''
+        CREATE PERFETTO MACRO foo(a Expr,b Expr) RETURNS TableOrSubquery AS
+        SELECT $a - $b;
+        SELECT (foo!(123, 100)) as res;
+        ''',
+        out=Csv("""
+        "res"
+        23
+        """))
+
+  def test_nested_macro(self):
+    return DiffTestBlueprint(
+        trace=TextProto(''),
+        query='''
+        CREATE PERFETTO MACRO foo(a Expr) returns Expr AS $a;
+        CREATE PERFETTO MACRO bar(a Expr) returns Expr AS (SELECT $a);
+        CREATE PERFETTO MACRO baz(a Expr,b Expr) returns TableOrSubquery AS
+        SELECT bar!(foo!(123)) - $b as res;
+        baz!(123, 100);
+        ''',
+        out=Csv("""
+        "res"
+        23
+        """))

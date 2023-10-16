@@ -53,7 +53,6 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/clock_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.h"
-#include "src/trace_processor/perfetto_sql/intrinsics/functions/import.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/math.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.h"
@@ -337,7 +336,7 @@ void RegisterDevFunctions(PerfettoSqlEngine* engine) {
 sql_modules::NameToModule GetStdlibModules() {
   sql_modules::NameToModule modules;
   for (const auto& file_to_sql : stdlib::kFileToSql) {
-    std::string import_key = sql_modules::GetImportKey(file_to_sql.path);
+    std::string import_key = sql_modules::GetIncludeKey(file_to_sql.path);
     std::string module = sql_modules::GetModuleName(import_key);
     modules.Insert(module, {}).first->push_back({import_key, file_to_sql.sql});
   }
@@ -421,15 +420,17 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   RegisterFunction<Reverse>(&engine_, "REVERSE", 1);
   RegisterFunction<ToMonotonic>(&engine_, "TO_MONOTONIC", 1,
                                 context_.clock_converter.get());
+  RegisterFunction<ToRealtime>(&engine_, "TO_REALTIME", 1,
+                               context_.clock_converter.get());
   RegisterFunction<ToTimecode>(&engine_, "TO_TIMECODE", 1);
   RegisterFunction<CreateFunction>(&engine_, "CREATE_FUNCTION", 3, &engine_);
   RegisterFunction<CreateViewFunction>(&engine_, "CREATE_VIEW_FUNCTION", 3,
                                        &engine_);
   RegisterFunction<ExperimentalMemoize>(&engine_, "EXPERIMENTAL_MEMOIZE", 1,
                                         &engine_);
-  RegisterFunction<Import>(&engine_, "IMPORT", 1,
-                           std::unique_ptr<Import::Context>(
-                               new Import::Context{&engine_, &sql_modules_}));
+  RegisterFunction<Import>(
+      &engine_, "IMPORT", 1,
+      std::unique_ptr<Import::Context>(new Import::Context{&engine_}));
   RegisterFunction<ToFtrace>(
       &engine_, "TO_FTRACE", 1,
       std::unique_ptr<ToFtrace::Context>(new ToFtrace::Context{
@@ -725,7 +726,7 @@ size_t TraceProcessorImpl::RestoreInitialTables() {
 }
 
 Iterator TraceProcessorImpl::ExecuteQuery(const std::string& sql) {
-  PERFETTO_TP_TRACE(metatrace::Category::TOPLEVEL, "QUERY_EXECUTE");
+  PERFETTO_TP_TRACE(metatrace::Category::API_TIMELINE, "EXECUTE_QUERY");
 
   uint32_t sql_stats_row =
       context_.storage->mutable_sql_stats()->RecordQueryBegin(
@@ -758,7 +759,7 @@ bool TraceProcessorImpl::IsRootMetricField(const std::string& metric_name) {
 base::Status TraceProcessorImpl::RegisterSqlModule(SqlModule sql_module) {
   sql_modules::RegisteredModule new_module;
   std::string name = sql_module.name;
-  if (sql_modules_.Find(name) && !sql_module.allow_module_override) {
+  if (engine_.FindModule(name) && !sql_module.allow_module_override) {
     return base::ErrStatus(
         "Module '%s' is already registered. Choose a different name.\n"
         "If you want to replace the existing module using trace processor "
@@ -773,10 +774,10 @@ base::Status TraceProcessorImpl::RegisterSqlModule(SqlModule sql_module) {
           "key should be module name. Import key: %s, module name: %s.",
           name_and_sql.first.c_str(), name.c_str());
     }
-    new_module.import_key_to_file.Insert(name_and_sql.first,
-                                         {name_and_sql.second, false});
+    new_module.include_key_to_file.Insert(name_and_sql.first,
+                                          {name_and_sql.second, false});
   }
-  sql_modules_.Insert(name, std::move(new_module));
+  engine_.RegisterModule(name, std::move(new_module));
   return base::OkStatus();
 }
 
@@ -893,7 +894,8 @@ base::Status TraceProcessorImpl::ComputeMetricText(
       *metrics_string = protozero_to_json::ProtozeroToJson(
           pool_, ".perfetto.protos.TraceMetrics",
           protozero::ConstBytes{metrics_proto.data(), metrics_proto.size()},
-          protozero_to_json::kPretty | protozero_to_json::kInlineErrors);
+          protozero_to_json::kPretty | protozero_to_json::kInlineErrors |
+              protozero_to_json::kInlineAnnotations);
       break;
   }
   return status;

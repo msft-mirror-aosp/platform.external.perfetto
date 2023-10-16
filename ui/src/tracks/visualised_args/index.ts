@@ -16,9 +16,9 @@ import m from 'mithril';
 
 import {Actions} from '../../common/actions';
 import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
-import {TrackButton, TrackButtonAttrs} from '../../frontend/track_panel';
-import {PluginContext} from '../../public';
+import {NewTrackArgs, TrackBase} from '../../frontend/track';
+import {TrackButton} from '../../frontend/track_panel';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 import {
   ChromeSliceTrack,
   ChromeSliceTrackController,
@@ -41,7 +41,7 @@ class VisualisedArgsTrackController extends ChromeSliceTrackController {
 
 export class VisualisedArgsTrack extends ChromeSliceTrack {
   static readonly kind = VISUALISED_ARGS_SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): Track {
+  static create(args: NewTrackArgs): TrackBase {
     return new VisualisedArgsTrack(args);
   }
 
@@ -49,10 +49,9 @@ export class VisualisedArgsTrack extends ChromeSliceTrack {
     return 'italic 11px Roboto';
   }
 
-  getTrackShellButtons(): Array<m.Vnode<TrackButtonAttrs>> {
+  getTrackShellButtons(): m.Children {
     const config = this.config as Config;
-    const buttons: Array<m.Vnode<TrackButtonAttrs>> = [];
-    buttons.push(m(TrackButton, {
+    return m(TrackButton, {
       action: () => {
         globals.dispatch(
             Actions.removeVisualisedArg({argName: config.argName}));
@@ -60,17 +59,18 @@ export class VisualisedArgsTrack extends ChromeSliceTrack {
       i: 'close',
       tooltip: 'Close',
       showButton: true,
-    }));
-    return buttons;
+    });
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(VisualisedArgsTrackController);
-  ctx.registerTrack(VisualisedArgsTrack);
+class VisualisedArgsPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.LEGACY_registerTrackController(VisualisedArgsTrackController);
+    ctx.LEGACY_registerTrack(VisualisedArgsTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.VisualisedArgs',
-  activate,
+  plugin: VisualisedArgsPlugin,
 };

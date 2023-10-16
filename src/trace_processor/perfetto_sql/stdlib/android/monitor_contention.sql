@@ -149,8 +149,7 @@ GROUP BY slice.id;
 -- @column binder_reply_id Slice id of binder reply slice if lock contention was part of a binder txn.
 -- @column binder_reply_ts Timestamp of binder reply slice if lock contention was part of a binder txn.
 -- @column binder_reply_tid Tid of binder reply slice if lock contention was part of a binder txn.
-CREATE TABLE android_monitor_contention
-AS
+CREATE TABLE android_monitor_contention AS
 SELECT
   android_extract_android_monitor_contention_blocking_method(slice.name) AS blocking_method,
   android_extract_android_monitor_contention_blocked_method(slice.name)  AS blocked_method,
@@ -215,17 +214,17 @@ AND child.ts BETWEEN parent.ts AND parent.ts + parent.dur;
 
 -- Monitor contention slices that are neither blocking nor blocked by another monitor contention
 -- slice. They neither have |parent_id| nor |child_id| fields.
-CREATE TABLE internal_isolated
-AS
-WITH
-  x AS (
+CREATE TABLE internal_isolated AS
+WITH parents_and_children AS (
+ SELECT id FROM internal_children
+ UNION ALL
+ SELECT id FROM internal_parents
+), isolated AS (
     SELECT id FROM android_monitor_contention
     EXCEPT
-    SELECT id FROM internal_children
-    UNION ALL
-    SELECT id FROM internal_parents
+    SELECT id FROM parents_and_children
   )
-SELECT * FROM android_monitor_contention JOIN x USING (id);
+SELECT * FROM android_monitor_contention JOIN isolated USING (id);
 
 -- Contains parsed monitor contention slices with the parent-child relationships.
 --
@@ -251,8 +250,7 @@ SELECT * FROM android_monitor_contention JOIN x USING (id);
 -- @column binder_reply_ts Timestamp of binder reply slice if lock contention was part of a binder txn.
 -- @column binder_reply_tid Tid of binder reply slice if lock contention was part of a binder txn.
 -- @column child_id Id of monitor contention slice blocked by this contention.
-CREATE TABLE android_monitor_contention_chain
-  AS
+CREATE TABLE android_monitor_contention_chain AS
 SELECT NULL AS parent_id, *, NULL AS child_id FROM internal_isolated
 UNION ALL
 SELECT c.*, p.child_id FROM internal_children c
@@ -377,15 +375,15 @@ GROUP BY id, blocked_function;
 -- The weights of each node represent the cumulative wall time the node blocked
 -- other nodes connected to it.
 --
--- @arg upid INT      Upid of process to generate a lock graph for.
--- @ret pprof BYTES   Pprof of lock graph.
+-- @arg upid INT         Upid of process to generate a lock graph for.
+-- @column pprof BYTES   Pprof of lock graph.
 CREATE PERFETTO FUNCTION android_monitor_contention_graph(upid INT)
 RETURNS TABLE(pprof BYTES) AS
 WITH contention_chain AS (
 SELECT *,
-       IIF(blocked_thread_name LIKE 'binder:%', 'binder', blocked_thread_name)
+       IIF(blocked_thread_name GLOB 'binder:*', 'binder', blocked_thread_name)
         AS blocked_thread_name_norm,
-       IIF(blocking_thread_name LIKE 'binder:%', 'binder', blocking_thread_name)
+       IIF(blocking_thread_name GLOB 'binder:*', 'binder', blocking_thread_name)
         AS blocking_thread_name_norm
 FROM android_monitor_contention_chain WHERE upid = $upid
 GROUP BY id, parent_id

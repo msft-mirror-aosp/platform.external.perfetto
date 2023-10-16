@@ -14,15 +14,26 @@
 
 import m from 'mithril';
 
+import {copyToClipboard} from '../base/clipboard';
 import {Trash} from '../base/disposable';
 import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
 import {assertExists} from '../base/logging';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
+import {
+  duration,
+  Span,
+  Time,
+  time,
+  TimeSpan,
+} from '../base/time';
 import {Actions} from '../common/actions';
-import {setTimestampFormat, TimestampFormat} from '../common/time';
+import {pluginManager} from '../common/plugins';
+import {setTimestampFormat, TimestampFormat} from '../common/timestamp_format';
 import {raf} from '../core/raf_scheduler';
 import {Command} from '../public';
+import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
+import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 
 import {addTab} from './bottom_tab';
 import {onClickCopy} from './clipboard';
@@ -32,14 +43,13 @@ import {toggleHelp} from './help_modal';
 import {fullscreenModalContainer} from './modal';
 import {Omnibox, OmniboxOption} from './omnibox';
 import {runQueryInNewTab} from './query_result_tab';
+import {verticalScrollToTrack} from './scroll_helper';
 import {executeSearch} from './search_handler';
 import {Sidebar} from './sidebar';
 import {SqlTableTab} from './sql_table/tab';
 import {SqlTables} from './sql_table/well_known_tables';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
-import {HotkeyConfig, HotkeyContext} from './widgets/hotkey_context';
-import {HotkeyGlyphs} from './widgets/hotkey_glyphs';
 
 function renderPermalink(): m.Children {
   const permalink = globals.state.permalink;
@@ -90,10 +100,16 @@ export class App implements m.ClassComponent {
   private queryText = '';
   private omniboxSelectionIndex = 0;
   private focusOmniboxNextRender = false;
+  private pendingCursorPlacement = -1;
   private pendingPrompt?: Prompt;
   static readonly OMNIBOX_INPUT_REF = 'omnibox';
   private omniboxInputEl?: HTMLInputElement;
   private recentCommands: string[] = [];
+
+  constructor() {
+    const unreg = globals.commandManager.registerCommandSource(this);
+    this.trash.add(unreg);
+  }
 
   private enterCommandMode(): void {
     this.omniboxMode = OmniboxMode.Command;
@@ -177,6 +193,7 @@ export class App implements m.ClassComponent {
           async () => {
             const options: PromptOption[] = [
               {key: TimestampFormat.Timecode, displayName: 'Timecode'},
+              {key: TimestampFormat.UTC, displayName: 'Realtime (UTC)'},
               {key: TimestampFormat.Seconds, displayName: 'Seconds'},
               {key: TimestampFormat.Raw, displayName: 'Raw'},
               {
@@ -263,6 +280,80 @@ export class App implements m.ClassComponent {
       name: 'Show help',
       callback: () => toggleHelp(),
       defaultHotkey: '?',
+    },
+    {
+      id: 'perfetto.RunQueryInSelectedTimeWindow',
+      name: `Run query in selected time window`,
+      callback:
+          () => {
+            const window = getTimeSpanOfSelectionOrVisibleWindow();
+            if (window) {
+              this.enterQueryMode();
+              this.queryText =
+                  `select  where ts >= ${window.start} and ts < ${window.end}`;
+              this.pendingCursorPlacement = 7;
+            }
+          },
+    },
+    {
+      id: 'perfetto.CopyTimeWindow',
+      name: `Copy selected time window to clipboard`,
+      callback:
+          () => {
+            const window = getTimeSpanOfSelectionOrVisibleWindow();
+            if (window) {
+              const query = `ts >= ${window.start} and ts < ${window.end}`;
+              copyToClipboard(query);
+            }
+          },
+    },
+    {
+      // Selects & reveals the first track on the timeline with a given URI.
+      id: 'perfetto.FindTrack',
+      name: 'Find track by URI',
+      callback:
+          async () => {
+            const tracks = Array.from(pluginManager.trackRegistry.values());
+            const options = tracks.map(({uri}): PromptOption => {
+              return {key: uri, displayName: uri};
+            });
+
+            // Sort tracks in a natural sort order
+            const collator = new Intl.Collator('en', {
+              numeric: true,
+              sensitivity: 'base',
+            });
+            const sortedOptions = options.sort((a, b) => {
+              return collator.compare(a.displayName, b.displayName);
+            });
+
+            try {
+              const selectedUri =
+                  await this.prompt('Choose a track...', sortedOptions);
+
+              // Find the first track with this URI
+              const firstTrack = Object.values(globals.state.tracks)
+                                     .find(({uri}) => uri === selectedUri);
+              if (firstTrack) {
+                console.log(firstTrack);
+                verticalScrollToTrack(firstTrack.id, true);
+                const traceTime = globals.stateTraceTimeTP();
+                globals.makeSelection(
+                    Actions.selectArea({
+                      area: {
+                        start: traceTime.start,
+                        end: traceTime.end,
+                        tracks: [firstTrack.id],
+                      },
+                    }),
+                );
+              } else {
+                alert(`No tracks with uri ${selectedUri} on the timeline`);
+              }
+            } catch {
+              // Prompt was probably cancelled - do nothing.
+            }
+          },
     },
   ];
 
@@ -553,9 +644,6 @@ export class App implements m.ClassComponent {
   }
 
   oncreate({dom}: m.VnodeDOM) {
-    const unreg = globals.commandManager.registerCommandSource(this);
-    this.trash.add(unreg);
-
     this.updateOmniboxInputRef(dom);
     this.maybeFocusOmnibar();
   }
@@ -579,11 +667,29 @@ export class App implements m.ClassComponent {
 
   private maybeFocusOmnibar() {
     if (this.focusOmniboxNextRender) {
-      if (this.omniboxInputEl) {
-        this.omniboxInputEl.focus();
-        this.omniboxInputEl.select();
+      const omniboxEl = this.omniboxInputEl;
+      if (omniboxEl) {
+        omniboxEl.focus();
+        if (this.pendingCursorPlacement === -1) {
+          omniboxEl.select();
+        } else {
+          omniboxEl.setSelectionRange(
+              this.pendingCursorPlacement, this.pendingCursorPlacement);
+          this.pendingCursorPlacement = -1;
+        }
       }
       this.focusOmniboxNextRender = false;
     }
+  }
+}
+
+// Returns the time span of the current selection, or the visible window if
+// there is no current selection.
+function getTimeSpanOfSelectionOrVisibleWindow(): Span<time, duration> {
+  const range = globals.findTimeRangeOfSelection();
+  if (range.end !== Time.INVALID && range.start !== Time.INVALID) {
+    return new TimeSpan(range.start, range.end);
+  } else {
+    return globals.stateVisibleTime();
   }
 }

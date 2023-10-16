@@ -13,29 +13,52 @@
 // limitations under the License.
 
 import {
-  EngineProxy,
+  MetricVisualisation,
+  Plugin,
   PluginContext,
-  Store,
-  TracePlugin,
+  PluginContextTrace,
+  PluginDescriptor,
+  TrackInstanceDescriptor,
 } from '../../public';
 
-interface State {}
-
-// SKELETON: Rename this class to match your plugin.
-class Skeleton implements TracePlugin {
-  static migrate(_initialState: unknown): State {
-    return {};
-  }
-
-  constructor(_store: Store<State>, _engine: EngineProxy) {}
-
-  dispose(): void {}
+interface State {
+  foo: string;
 }
 
-export const plugin = {
+// SKELETON: Rename this class to match your plugin.
+class Skeleton implements Plugin<State> {
+  onActivate(_: PluginContext): void {
+    //
+  }
+
+  migrate(_initialState: unknown): State {
+    return {foo: 'bar'};
+  }
+
+  async onTraceLoad(_: PluginContextTrace<State>): Promise<void> {
+    //
+  }
+
+  async onTraceUnload(_: PluginContextTrace<State>): Promise<void> {
+    //
+  }
+
+  onDeactivate(_: PluginContext): void {
+    //
+  }
+
+  async findPotentialTracks(_: PluginContextTrace<State>):
+      Promise<TrackInstanceDescriptor[]> {
+    return [];
+  }
+
+  metricVisualisations(_: PluginContextTrace<State>): MetricVisualisation[] {
+    return [];
+  }
+}
+
+export const plugin: PluginDescriptor<State> = {
   // SKELETON: Update pluginId to match the directory of the plugin.
   pluginId: 'com.example.Skeleton',
-  activate: (ctx: PluginContext) => {
-    ctx.registerTracePluginFactory(Skeleton);
-  },
+  plugin: Skeleton,
 };

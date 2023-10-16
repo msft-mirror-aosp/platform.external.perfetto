@@ -16,25 +16,21 @@ import {hex} from 'color-convert';
 import m from 'mithril';
 
 import {assertExists} from '../base/logging';
+import {Icons} from '../base/semantic_icons';
 import {Actions} from '../common/actions';
+import {pluginManager} from '../common/plugins';
+import {RegistryError} from '../common/registry';
 import {
   getContainingTrackId,
   TrackGroupState,
   TrackState,
 } from '../common/state';
+import {Migrate, Track, TrackContext} from '../public';
 
 import {globals} from './globals';
 import {drawGridLines} from './gridline_helper';
-import {
-  BLANK_CHECKBOX,
-  CHECKBOX,
-  EXPAND_DOWN,
-  EXPAND_UP,
-  INDETERMINATE_CHECKBOX,
-} from './icons';
 import {Panel, PanelSize} from './panel';
-import {Track} from './track';
-import {TrackChips, TrackContent} from './track_panel';
+import {renderChips, TrackContent} from './track_panel';
 import {trackRegistry} from './track_registry';
 import {
   drawVerticalLineAtTime,
@@ -49,21 +45,33 @@ export class TrackGroupPanel extends Panel<Attrs> {
   private readonly trackGroupId: string;
   private shellWidth = 0;
   private backgroundColor = '#ffffff';  // Updated from CSS later.
-  private summaryTrack: Track|undefined;
+  private summaryTrack?: Track;
 
   constructor({attrs}: m.CVnode<Attrs>) {
     super();
     this.trackGroupId = attrs.trackGroupId;
-    const trackCreator = trackRegistry.get(this.summaryTrackState.kind);
-    const engineId = this.summaryTrackState.engineId;
-    const engine = globals.engines.get(engineId);
-    if (engine !== undefined) {
-      this.summaryTrack = trackCreator.create({
-        trackId: this.summaryTrackState.id,
-        engine: engine.getProxy(`Track; kind: ${
-            this.summaryTrackState.kind}; id: ${this.summaryTrackState.id}`),
-      });
-    }
+  }
+
+  private tryLoadTrack() {
+    const trackId = this.trackGroupId;
+    const trackState = this.summaryTrackState;
+
+    const {id, uri} = trackState;
+
+    const ctx: TrackContext = {
+      trackInstanceId: id,
+      mountStore: <T>(migrate: Migrate<T>) => {
+        const {store, state} = globals;
+        const migratedState = migrate(state.trackGroups[trackId].state);
+        store.edit((draft) => {
+          draft.trackGroups[trackId].state = migratedState;
+        });
+        return store.createProxy<T>(['trackGroups', trackId, 'state']);
+      },
+    };
+
+    this.summaryTrack =
+        uri ? pluginManager.createTrack(uri, ctx) : loadTrack(trackState, id);
   }
 
   get trackGroupState(): TrackGroupState {
@@ -75,6 +83,10 @@ export class TrackGroupPanel extends Panel<Attrs> {
   }
 
   view({attrs}: m.CVnode<Attrs>) {
+    if (!this.summaryTrack) {
+      this.tryLoadTrack();
+    }
+
     const collapsed = this.trackGroupState.collapsed;
     let name = this.trackGroupState.name;
     if (name[0] === '/') {
@@ -96,16 +108,16 @@ export class TrackGroupPanel extends Panel<Attrs> {
     const selection = globals.state.currentSelection;
 
     const trackGroup = globals.state.trackGroups[attrs.trackGroupId];
-    let checkBox = BLANK_CHECKBOX;
+    let checkBox = Icons.BlankCheckbox;
     if (selection !== null && selection.kind === 'AREA') {
       const selectedArea = globals.state.areas[selection.areaId];
       if (selectedArea.tracks.includes(attrs.trackGroupId) &&
           trackGroup.tracks.every((id) => selectedArea.tracks.includes(id))) {
-        checkBox = CHECKBOX;
+        checkBox = Icons.Checkbox;
       } else if (
           selectedArea.tracks.includes(attrs.trackGroupId) ||
           trackGroup.tracks.some((id) => selectedArea.tracks.includes(id))) {
-        checkBox = INDETERMINATE_CHECKBOX;
+        checkBox = Icons.IndeterminateCheckbox;
       }
     }
 
@@ -131,13 +143,14 @@ export class TrackGroupPanel extends Panel<Attrs> {
 
           m('.fold-button',
             m('i.material-icons',
-              this.trackGroupState.collapsed ? EXPAND_DOWN : EXPAND_UP)),
+              this.trackGroupState.collapsed ? Icons.ExpandDown :
+                                               Icons.ExpandUp)),
           m('.title-wrapper',
             m(
                 'h1.track-title',
                 {title: name},
                 name,
-                m(TrackChips, {config: this.summaryTrackState.config}),
+                renderChips(this.summaryTrackState),
                 ),
             (this.trackGroupState.collapsed && child !== null) ?
                 m('h2.track-subtitle', child) :
@@ -290,4 +303,26 @@ export class TrackGroupPanel extends Panel<Attrs> {
 
 function StripPathFromExecutable(path: string) {
   return path.split('/').slice(-1)[0];
+}
+
+function loadTrack(trackState: TrackState, trackId: string): Track|undefined {
+  const engine = globals.engines.get(trackState.engineId);
+  if (engine === undefined) {
+    return undefined;
+  }
+
+  try {
+    const trackCreator = trackRegistry.get(trackState.kind);
+    return trackCreator.create({
+      trackId,
+      engine:
+          engine.getProxy(`Track; kind: ${trackState.kind}; id: ${trackId}`),
+    });
+  } catch (e) {
+    if (e instanceof RegistryError) {
+      return undefined;
+    } else {
+      throw e;
+    }
+  }
 }

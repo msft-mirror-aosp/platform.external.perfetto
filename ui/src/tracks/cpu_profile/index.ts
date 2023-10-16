@@ -14,10 +14,10 @@
 
 
 import {searchSegment} from '../../base/binary_search';
+import {duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {hslForSlice} from '../../common/colorizer';
 import {LONG, NUM} from '../../common/query_result';
-import {duration, Time, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {
   TrackController,
@@ -25,8 +25,8 @@ import {
 import {globals} from '../../frontend/globals';
 import {cachedHsluvToHex} from '../../frontend/hsluv_cache';
 import {TimeScale} from '../../frontend/time_scale';
-import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {NewTrackArgs, TrackBase} from '../../frontend/track';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 
 const BAR_HEIGHT = 3;
 const MARGIN_TOP = 4.5;
@@ -85,7 +85,7 @@ function colorForSample(callsiteId: number, isHovered: boolean): string {
   return cachedHsluvToHex(hue, saturation, lightness);
 }
 
-class CpuProfileTrack extends Track<Config, Data> {
+class CpuProfileTrack extends TrackBase<Config, Data> {
   static readonly kind = CPU_PROFILE_TRACK_KIND;
   static create(args: NewTrackArgs): CpuProfileTrack {
     return new CpuProfileTrack(args);
@@ -244,12 +244,14 @@ class CpuProfileTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(CpuProfileTrackController);
-  ctx.registerTrack(CpuProfileTrack);
+class CpuProfile implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.LEGACY_registerTrackController(CpuProfileTrackController);
+    ctx.LEGACY_registerTrack(CpuProfileTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.CpuProfile',
-  activate,
+  plugin: CpuProfile,
 };

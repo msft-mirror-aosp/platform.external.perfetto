@@ -14,15 +14,19 @@
 
 import {v4 as uuidv4} from 'uuid';
 
+import {
+  getColorForSlice,
+} from '../../common/colorizer';
 import {Engine} from '../../common/engine';
 import {
   generateSqlWithInternalLayout,
 } from '../../common/internal_layout_utils';
-import {PrimaryTrackSortKey, SCROLLING_TRACK_GROUP} from '../../common/state';
+import {globals} from '../../frontend/globals';
 import {
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
-import {NewTrackArgs, Track} from '../../frontend/track';
+import {NewTrackArgs, TrackBase} from '../../frontend/track';
+import {PrimaryTrackSortKey} from '../../public';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
@@ -30,8 +34,14 @@ import {
 } from '../custom_sql_table_slices';
 
 import {EventLatencySliceDetailsPanel} from './event_latency_details_panel';
-import {ScrollJankTracks as DecideTracksResult} from './index';
-import {ScrollJankPluginState} from './index';
+import {
+  SCROLL_JANK_GROUP_ID,
+  ScrollJankPluginState,
+  ScrollJankTracks as DecideTracksResult,
+} from './index';
+import {DEEP_RED_COLOR, RED_COLOR} from './jank_colors';
+
+const JANKY_LATENCY_NAME = 'Janky EventLatency';
 
 export interface EventLatencyTrackTypes extends NamedSliceTrackTypes {
   config: {baseTable: string;}
@@ -41,7 +51,7 @@ export class EventLatencyTrack extends
     CustomSqlTableSliceTrack<EventLatencyTrackTypes> {
   static readonly kind = 'org.chromium.ScrollJank.event_latencies';
 
-  static create(args: NewTrackArgs): Track {
+  static create(args: NewTrackArgs): TrackBase {
     return new EventLatencyTrack(args);
   }
 
@@ -78,6 +88,29 @@ export class EventLatencyTrack extends
     return {
       sqlTableName: this.config.baseTable,
     };
+  }
+
+  onUpdatedSlices(slices: EventLatencyTrackTypes['slice'][]) {
+    for (const slice of slices) {
+      const currentSelection = globals.state.currentSelection;
+      const isSelected = currentSelection &&
+          currentSelection.kind === 'GENERIC_SLICE' &&
+          currentSelection.id !== undefined && currentSelection.id === slice.id;
+
+      const highlighted = globals.state.highlightedSliceId === slice.id;
+      const hasFocus = highlighted || isSelected;
+
+      if (slice.title === JANKY_LATENCY_NAME) {
+        if (hasFocus) {
+          slice.baseColor = DEEP_RED_COLOR;
+        } else {
+          slice.baseColor = RED_COLOR;
+        }
+      } else {
+        slice.baseColor = getColorForSlice(slice.title, hasFocus);
+      }
+    }
+    super.onUpdatedSlices(slices);
   }
 
   // At the moment we will just display the slice details. However, on select,
@@ -133,7 +166,7 @@ export async function addLatencyTracks(engine: Engine):
       CASE
         WHEN id IN (
           SELECT id FROM chrome_janky_event_latencies_v3)
-        THEN 'Janky EventLatency'
+        THEN '${JANKY_LATENCY_NAME}'
         ELSE name
       END
       AS name,
@@ -150,7 +183,8 @@ export async function addLatencyTracks(engine: Engine):
         WHERE id = ls.parent_id LIMIT 1) * 3) AS depth
     FROM latency_stages ls;`;
 
-  await engine.query(`SELECT IMPORT('chrome.chrome_scroll_janks')`);
+  await engine.query(
+      `INCLUDE PERFETTO MODULE chrome.scroll_jank.scroll_jank_intervals`);
   await engine.query(tableDefSql);
 
   result.tracksToAdd.push({
@@ -160,7 +194,7 @@ export async function addLatencyTracks(engine: Engine):
     trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
     name: 'Chrome Scroll Input Latencies',
     config: {baseTable: baseTable},
-    trackGroup: SCROLLING_TRACK_GROUP,
+    trackGroup: SCROLL_JANK_GROUP_ID,
   });
 
   return result;

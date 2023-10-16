@@ -13,29 +13,29 @@
 // limitations under the License.
 
 import {BigintMath as BIMath} from '../../base/bigint_math';
+import {duration, Span, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {cropText, drawIncompleteSlice} from '../../common/canvas_utils';
-import {colorForThreadIdleSlice, hslForSlice} from '../../common/colorizer';
+import {
+  colorForThreadIdleSlice,
+  getColorForSlice,
+} from '../../common/colorizer';
 import {HighPrecisionTime} from '../../common/high_precision_time';
 import {LONG, LONG_NULL, NUM, STR} from '../../common/query_result';
-import {duration, Span, Time, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {TrackController} from '../../controller/track_controller';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
 import {cachedHsluvToHex} from '../../frontend/hsluv_cache';
 import {PxSpan, TimeScale} from '../../frontend/time_scale';
-import {NewTrackArgs, SliceRect, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {NewTrackArgs, SliceRect, TrackBase} from '../../frontend/track';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 
 export const SLICE_TRACK_KIND = 'ChromeSliceTrack';
 const SLICE_HEIGHT = 18;
 const TRACK_PADDING = 2;
 const CHEVRON_WIDTH_PX = 10;
 const HALF_CHEVRON_WIDTH_PX = CHEVRON_WIDTH_PX / 2;
-const INNER_CHEVRON_OFFSET = -3;
-const INNER_CHEVRON_SCALE =
-    (SLICE_HEIGHT - 2 * INNER_CHEVRON_OFFSET) / SLICE_HEIGHT;
 
 export interface Config {
   maxDepth: number;
@@ -159,9 +159,9 @@ export class ChromeSliceTrackController extends TrackController<Config, Data> {
   }
 }
 
-export class ChromeSliceTrack extends Track<Config, Data> {
+export class ChromeSliceTrack extends TrackBase<Config, Data> {
   static readonly kind: string = SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): Track {
+  static create(args: NewTrackArgs): TrackBase {
     return new ChromeSliceTrack(args);
   }
 
@@ -236,17 +236,15 @@ export class ChromeSliceTrack extends Track<Config, Data> {
           currentSelection.kind === 'CHROME_SLICE' &&
           currentSelection.id !== undefined && currentSelection.id === sliceId;
 
-      const name = title.replace(/( )?\d+/g, '');
       const highlighted = titleId === this.hoveredTitleId ||
           globals.state.highlightedSliceId === sliceId;
 
       const hasFocus = highlighted || isSelected;
-
-      const [hue, saturation, lightness] = hslForSlice(name, hasFocus);
+      const colorObj = getColorForSlice(title, hasFocus);
 
       let color: string;
       if (colorOverride === undefined) {
-        color = cachedHsluvToHex(hue, saturation, lightness);
+        color = colorObj.c;
       } else {
         color = colorOverride;
       }
@@ -265,14 +263,13 @@ export class ChromeSliceTrack extends Track<Config, Data> {
             ctx.save();
             ctx.translate(rect.left, rect.top);
 
-            // Draw outer chevron as dark border
-            ctx.save();
-            ctx.translate(0, INNER_CHEVRON_OFFSET);
-            ctx.scale(INNER_CHEVRON_SCALE, INNER_CHEVRON_SCALE);
-            ctx.fillStyle = cachedHsluvToHex(hue, 100, 10);
-
-            this.drawChevron(ctx);
-            ctx.restore();
+            // Draw a rectangle around the selected slice
+            ctx.strokeStyle = cachedHsluvToHex(colorObj.h, 100, 10);
+            ctx.beginPath();
+            ctx.lineWidth = 3;
+            ctx.strokeRect(
+                -HALF_CHEVRON_WIDTH_PX, 0, CHEVRON_WIDTH_PX, SLICE_HEIGHT);
+            ctx.closePath();
 
             // Draw inner chevron as interior
             ctx.fillStyle = color;
@@ -299,8 +296,8 @@ export class ChromeSliceTrack extends Track<Config, Data> {
         const firstPartWidth = rect.width * cpuTimeRatio;
         const secondPartWidth = rect.width * (1 - cpuTimeRatio);
         ctx.fillRect(rect.left, rect.top, firstPartWidth, SLICE_HEIGHT);
-        ctx.fillStyle =
-            colorForThreadIdleSlice(hue, saturation, lightness, hasFocus);
+        ctx.fillStyle = colorForThreadIdleSlice(
+            colorObj.h, colorObj.s, colorObj.l, hasFocus);
         ctx.fillRect(
             rect.left + firstPartWidth,
             rect.top,
@@ -313,7 +310,7 @@ export class ChromeSliceTrack extends Track<Config, Data> {
       // Selected case
       if (isSelected) {
         drawRectOnSelected = () => {
-          ctx.strokeStyle = cachedHsluvToHex(hue, 100, 10);
+          ctx.strokeStyle = cachedHsluvToHex(colorObj.h, 100, 10);
           ctx.beginPath();
           ctx.lineWidth = 3;
           ctx.strokeRect(
@@ -324,7 +321,7 @@ export class ChromeSliceTrack extends Track<Config, Data> {
 
       // Don't render text when we have less than 5px to play with.
       if (rect.width >= 5) {
-        ctx.fillStyle = lightness > 65 ? '#404040' : 'white';
+        ctx.fillStyle = colorObj.l > 65 ? '#404040' : 'white';
         const displayText = cropText(title, charWidth, rect.width);
         const rectXCenter = rect.left + rect.width / 2;
         ctx.textBaseline = 'middle';
@@ -440,12 +437,14 @@ export class ChromeSliceTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(ChromeSliceTrackController);
-  ctx.registerTrack(ChromeSliceTrack);
+class ChromeSlicesPlugin implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.LEGACY_registerTrackController(ChromeSliceTrackController);
+    ctx.LEGACY_registerTrack(ChromeSliceTrack);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.ChromeSlices',
-  activate,
+  plugin: ChromeSlicesPlugin,
 };

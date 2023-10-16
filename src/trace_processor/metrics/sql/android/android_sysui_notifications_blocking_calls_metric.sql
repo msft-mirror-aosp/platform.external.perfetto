@@ -13,7 +13,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-SELECT IMPORT('android.slices');
+INCLUDE PERFETTO MODULE android.slices;
 
 DROP TABLE IF EXISTS android_sysui_notifications_blocking_calls;
 CREATE PERFETTO TABLE android_sysui_notifications_blocking_calls AS
@@ -32,6 +32,8 @@ WHERE
        s.name GLOB 'NotificationStackScrollLayout#onMeasure'
     OR s.name GLOB 'NotificationToplineView#onMeasure'
     OR s.name GLOB 'ExpNotRow#*'
+    OR s.name GLOB 'NotificationShadeWindowView#onMeasure'
+    OR s.name GLOB 'ImageFloatingTextView#onMeasure'
 )
 GROUP BY s.name;
 

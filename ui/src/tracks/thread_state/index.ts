@@ -15,18 +15,18 @@
 import {BigintMath as BIMath} from '../../base/bigint_math';
 import {search} from '../../base/binary_search';
 import {assertFalse} from '../../base/logging';
+import {duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {cropText} from '../../common/canvas_utils';
 import {colorForState} from '../../common/colorizer';
 import {LONG, NUM, NUM_NULL, STR_NULL} from '../../common/query_result';
 import {translateState} from '../../common/thread_state';
-import {duration, Time, time} from '../../common/time';
 import {TrackData} from '../../common/track_data';
 import {TrackController} from '../../controller/track_controller';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
-import {PluginContext} from '../../public';
+import {NewTrackArgs, TrackBase} from '../../frontend/track';
+import {Plugin, PluginContext, PluginDescriptor} from '../../public';
 
 
 export const THREAD_STATE_TRACK_KIND = 'ThreadStateTrack';
@@ -162,7 +162,7 @@ const MARGIN_TOP = 3;
 const RECT_HEIGHT = 12;
 const EXCESS_WIDTH = 10;
 
-class ThreadStateTrack extends Track<Config, Data> {
+class ThreadStateTrack extends TrackBase<Config, Data> {
   static readonly kind = THREAD_STATE_TRACK_KIND;
   static create(args: NewTrackArgs): ThreadStateTrack {
     return new ThreadStateTrack(args);
@@ -283,12 +283,14 @@ class ThreadStateTrack extends Track<Config, Data> {
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrack(ThreadStateTrack);
-  ctx.registerTrackController(ThreadStateTrackController);
+class ThreadState implements Plugin {
+  onActivate(ctx: PluginContext): void {
+    ctx.LEGACY_registerTrack(ThreadStateTrack);
+    ctx.LEGACY_registerTrackController(ThreadStateTrackController);
+  }
 }
 
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.ThreadState',
-  activate,
+  plugin: ThreadState,
 };
