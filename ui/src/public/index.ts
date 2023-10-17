@@ -17,11 +17,9 @@ import m from 'mithril';
 import {Hotkey} from '../base/hotkeys';
 import {duration, Span, time} from '../base/time';
 import {EngineProxy} from '../common/engine';
-import {TrackControllerFactory} from '../controller/track_controller';
 import {Store} from '../frontend/store';
 import {PxSpan, TimeScale} from '../frontend/time_scale';
-import {SliceRect, TrackCreator} from '../frontend/track';
-import {TrackButtonAttrs} from '../frontend/track_panel';
+import {SliceRect} from '../frontend/track';
 
 export {EngineProxy} from '../common/engine';
 export {
@@ -150,22 +148,6 @@ export interface MetricVisualisation {
 export interface PluginContext {
   readonly viewer: Viewer;
 
-  // DEPRECATED. In prior versions of the UI tracks were split into a
-  // 'TrackController' and a 'Track'. In more recent versions of the UI
-  // the functionality of |TrackController| has been merged into Track so
-  // |TrackController|s are not necessary in new code.
-  LEGACY_registerTrackController(track: TrackControllerFactory): void;
-
-  // Register a track factory. The core UI invokes |TrackCreator| to
-  // construct tracks discovered by invoking |TrackProvider|s.
-  // The split between 'construction' and 'discovery' allows
-  // plugins to reuse common tracks for new data. For example: the
-  // dev.perfetto.AndroidGpu plugin could register a TrackProvider
-  // which returns GPU counter tracks. The counter track factory itself
-  // could be registered in dev.perfetto.CounterTrack - a whole
-  // different plugin.
-  LEGACY_registerTrack(track: TrackCreator): void;
-
   // Add a command.
   addCommand(command: Command): void;
 }
@@ -196,8 +178,7 @@ export interface Track {
       windowSpan: PxSpan, tStart: time, tEnd: time, depth: number): SliceRect
       |undefined;
   getHeight(): number;
-  getTrackShellButtons(): Array<m.Vnode<TrackButtonAttrs>>;
-  getContextMenu(): m.Vnode<any>|null;
+  getTrackShellButtons(): m.Children;
   onMouseMove(position: {x: number, y: number}): void;
   onMouseClick(position: {x: number, y: number}): boolean;
   onMouseOut(): void;
@@ -230,6 +211,12 @@ export interface TrackDescriptor {
   // Optional: The CPU number associated with this track.
   cpu?: number;
 
+  // Optional: The UTID associated with this track.
+  utid?: number;
+
+  // Optional: The UPID associated with this track.
+  upid?: number;
+
   // Optional: A list of tags used for sorting, grouping and "chips".
   tags?: TrackTags;
 }
@@ -245,7 +232,7 @@ export interface TrackDescriptor {
 // (for non-thread tracks) or a tid and secondary sort key (mapping of tid to
 // primary sort key is done independently).
 export enum PrimaryTrackSortKey {
-  DEBUG_SLICE_TRACK,
+  DEBUG_TRACK,
   NULL_TRACK,
   PROCESS_SCHEDULING_TRACK,
   PROCESS_SUMMARY_TRACK,

@@ -318,7 +318,7 @@ export class CounterTrack extends BasicAsyncTrack<Data> {
     return MARGIN_TOP + RECT_HEIGHT;
   }
 
-  getContextMenu(): m.Vnode<any> {
+  getTrackShellButtons(): m.Children {
     const currentScale = this.store.state.scale;
     const scales: {name: CounterScaleOptions, humanName: string}[] = [
       {name: 'ZERO_BASED', humanName: 'Zero based'},
