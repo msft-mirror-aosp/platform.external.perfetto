@@ -23,7 +23,7 @@ import {
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-import {PrimaryTrackSortKey, TrackTags} from '../public/index';
+import {PrimaryTrackSortKey} from '../public/index';
 
 import {Direction} from './event_set';
 
@@ -123,7 +123,8 @@ export const MAX_TIME = 180;
 //     state entries now require a URI and old track implementations are no
 //     longer registered.
 // 40. Ported counter, process summary/sched, & cpu_freq to plugin tracks.
-export const STATE_VERSION = 40;
+// 41. Ported all remaining tracks.
+export const STATE_VERSION = 41;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -218,25 +219,17 @@ export type TraceSource =
     TraceFileSource|TraceArrayBufferSource|TraceUrlSource|TraceHttpRpcSource;
 
 export interface TrackState {
+  uri: string;
   id: string;
-  engineId: string;
-  kind: string;
   name: string;
   labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  tags: TrackTags;
-  config: {
-    trackId?: number;
-    trackIds?: number[];
-  };
-  uri?: string;
   state?: unknown;
 }
 
 export interface TrackGroupState {
   id: string;
-  engineId: string;
   name: string;
   collapsed: boolean;
   tracks: string[];  // Child track ids.
@@ -350,7 +343,7 @@ export interface CpuProfileSampleSelection {
 export interface ChromeSliceSelection {
   kind: 'CHROME_SLICE';
   id: number;
-  table: string;
+  table?: string;
 }
 
 export interface ThreadStateSelection {
@@ -554,7 +547,6 @@ export interface State {
   ftracePagination: Pagination;
   ftraceFilter: FtraceFilterState;
   traceConversionInProgress: boolean;
-  visualisedArgs: string[];
 
   /**
    * This state is updated on the frontend at 60Hz and eventually syncronised to
