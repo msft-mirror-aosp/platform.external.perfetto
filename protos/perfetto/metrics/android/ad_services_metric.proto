@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2023 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,24 @@ syntax = "proto2";
 
 package perfetto.protos;
 
-import "protos/perfetto/config/interceptors/console_config.proto";
+// Next: 2
+message AdServicesUiMetric {
+  optional double latency = 1;
+}
 
-// Configuration for trace packet interception. Used for diverting trace data to
-// non-Perfetto sources (e.g., logging to the console, ETW) when using the
-// Perfetto SDK.
-message InterceptorConfig {
-  // Matches the name given to RegisterInterceptor().
-  optional string name = 1;
+// Next: 2
+message AdServicesAdIdMetric {
+  optional double latency = 1;
+}
 
-  optional ConsoleConfig console_config = 100;
+// Next: 2
+message AdServicesAppSetIdMetric {
+  optional double latency = 1;
+}
+
+// Next: 4
+message AdServicesMetric {
+  repeated AdServicesUiMetric ui_metric = 1;
+  repeated AdServicesAdIdMetric ad_id_metric = 2;
+  repeated AdServicesAppSetIdMetric app_set_id_metric = 3;
 }
