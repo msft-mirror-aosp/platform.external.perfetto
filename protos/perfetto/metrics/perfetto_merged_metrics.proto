@@ -143,6 +143,12 @@ message AndroidBootMetric {
   optional ProcessStateDurations systemui_durations = 2;
   optional ProcessStateDurations launcher_durations = 3;
   optional ProcessStateDurations gms_durations = 4;
+  // Launcher related boot metrics
+  message LauncherBreakdown {
+    //  reports cold start time of NexusLauncher
+    optional int64 cold_start_dur = 1;
+  }
+  optional LauncherBreakdown launcher_breakdown = 5;
 }
 
 // End of protos/perfetto/metrics/android/android_boot.proto
@@ -2276,6 +2282,7 @@ message TraceMetadata {
   optional string unique_session_name = 8;
   optional string trace_config_pbtxt = 9;
   optional int64 sched_duration_ns = 10;
+  optional int64 tracing_started_ns = 11;
 }
 
 // Stats counters for the trace.

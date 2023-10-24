@@ -13,7 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
+import {v4 as uuidv4} from 'uuid';
 
+import {Disposable} from '../../base/disposable';
 import {Actions, DEBUG_SLICE_TRACK_KIND} from '../../common/actions';
 import {EngineProxy} from '../../common/engine';
 import {SCROLLING_TRACK_GROUP} from '../../common/state';
@@ -77,8 +79,8 @@ export class DebugTrackV2 extends CustomSqlTableSliceTrack<DebugTrackV2Types> {
     };
   }
 
-  async initSqlTable(tableName: string): Promise<void> {
-    super.initSqlTable(tableName);
+  async onInit(): Promise<Disposable> {
+    return super.onInit();
   }
 
   getTrackShellButtons(): m.Children {
@@ -144,14 +146,19 @@ export async function addDebugSliceTrack(
       from prepared_data
       order by ts;`);
 
-  globals.dispatch(Actions.addTrack({
-    uri: DEBUG_SLICE_TRACK_URI,
-    name: trackName.trim() || `Debug Track ${debugTrackId}`,
-    trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
-    trackGroup: SCROLLING_TRACK_GROUP,
-    initialState: {
-      sqlTableName,
-      columns: sliceColumns,
-    },
-  }));
+  const trackInstanceId = uuidv4();
+  globals.dispatchMultiple([
+    Actions.addTrack({
+      id: trackInstanceId,
+      uri: DEBUG_SLICE_TRACK_URI,
+      name: trackName.trim() || `Debug Track ${debugTrackId}`,
+      trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
+      trackGroup: SCROLLING_TRACK_GROUP,
+      initialState: {
+        sqlTableName,
+        columns: sliceColumns,
+      },
+    }),
+    Actions.toggleTrackPinned({trackId: trackInstanceId}),
+  ]);
 }
