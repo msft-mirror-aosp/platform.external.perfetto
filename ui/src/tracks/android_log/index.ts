@@ -154,14 +154,14 @@ class AndroidLog implements Plugin {
         await ctx.engine.query(`select count(1) as cnt from android_logs`);
     const count = result.firstRow({cnt: NUM}).cnt;
     if (count > 0) {
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: 'perfetto.AndroidLog',
         displayName: 'Android logs',
         kind: ANDROID_LOGS_TRACK_KIND,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           return new TrackWithControllerAdapter<Config, Data>(
               ctx.engine,
-              trackInstanceId,
+              trackKey,
               {},
               AndroidLogTrack,
               AndroidLogTrackController);

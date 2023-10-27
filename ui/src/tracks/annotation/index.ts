@@ -38,7 +38,7 @@ class AnnotationPlugin implements Plugin {
     await this.addAnnotationCounterTracks(ctx);
   }
 
-  private async addAnnotationTracks(ctx: PluginContextTrace<undefined>) {
+  private async addAnnotationTracks(ctx: PluginContextTrace) {
     const {engine} = ctx;
 
     const result = await engine.query(`
@@ -56,18 +56,18 @@ class AnnotationPlugin implements Plugin {
       const id = it.id;
       const name = it.name;
 
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.Annotation#${id}`,
         displayName: name,
         kind: SLICE_TRACK_KIND,
         tags: {
           metric: true,
         },
-        track: (({trackInstanceId}) => {
+        track: (({trackKey}) => {
           return new ChromeSliceTrack(
               engine,
               0,
-              trackInstanceId,
+              trackKey,
               id,
               'annotation',
           );
@@ -109,7 +109,7 @@ class AnnotationPlugin implements Plugin {
         maximumValue,
       };
 
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.Annotation#counter${id}`,
         displayName: name,
         kind: COUNTER_TRACK_KIND,
