@@ -288,7 +288,8 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
     const index = search(data.starts, time.toTime());
     if (index === -1) return false;
     const id = data.ids[index];
-    globals.makeSelection(Actions.selectThreadState({id, trackId: this.id}));
+    globals.makeSelection(
+        Actions.selectThreadState({id, trackKey: this.trackKey}));
     return true;
   }
 }
@@ -297,7 +298,7 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
 class ThreadState implements Plugin {
   onActivate(_ctx: PluginContext): void {}
 
-  async onTraceLoad(ctx: PluginContextTrace<undefined>): Promise<void> {
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const {engine} = ctx;
     const result = await engine.query(`
       select
@@ -328,30 +329,30 @@ class ThreadState implements Plugin {
       const displayName =
           getTrackName({utid, tid, threadName, kind: THREAD_STATE_TRACK_KIND});
 
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.ThreadState#${upid}.${utid}`,
         displayName,
         kind: THREAD_STATE_TRACK_KIND,
         utid: utid,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           return new TrackWithControllerAdapter<Config, Data>(
               ctx.engine,
-              trackInstanceId,
+              trackKey,
               {utid},
               ThreadStateTrack,
               ThreadStateTrackController);
         },
       });
 
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.ThreadState#${utid}.v2`,
         displayName,
         kind: THREAD_STATE_TRACK_V2_KIND,
         utid,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           const track = ThreadStateTrackV2.create({
             engine: ctx.engine,
-            trackId: trackInstanceId,
+            trackKey,
           });
           track.config = {utid};
           return track;

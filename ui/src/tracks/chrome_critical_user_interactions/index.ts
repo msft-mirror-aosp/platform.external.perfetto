@@ -71,27 +71,27 @@ export class CriticalUserInteractionTrack extends
 }
 
 export function addCriticalUserInteractionTrack() {
-  const trackId = uuidv4();
+  const trackKey = uuidv4();
   globals.dispatchMultiple([
     Actions.addTrack({
-      id: trackId,
+      key: trackKey,
       uri: CriticalUserInteractionTrack.kind,
       name: `Chrome Interactions`,
       trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
       trackGroup: SCROLLING_TRACK_GROUP,
     }),
-    Actions.toggleTrackPinned({trackId}),
+    Actions.toggleTrackPinned({trackKey}),
   ]);
 }
 
 class CriticalUserInteractionPlugin implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.addTrack({
+    ctx.registerStaticTrack({
       uri: CriticalUserInteractionTrack.kind,
       kind: CriticalUserInteractionTrack.kind,
       displayName: 'Chrome Interactions',
       track: (trackCtx) => new CriticalUserInteractionTrack(
-          {engine: ctx.engine, trackId: trackCtx.trackInstanceId}),
+          {engine: ctx.engine, trackKey: trackCtx.trackKey}),
     });
   }
 

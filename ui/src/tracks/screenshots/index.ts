@@ -83,15 +83,15 @@ export async function decideTracks(engine: Engine):
 class ScreenshotsPlugin implements Plugin {
   onActivate(_ctx: PluginContext): void {}
 
-  async onTraceLoad(ctx: PluginContextTrace<undefined>): Promise<void> {
-    ctx.addTrack({
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    ctx.registerStaticTrack({
       uri: 'perfetto.Screenshots',
       displayName: 'Screenshots',
       kind: ScreenshotsTrack.kind,
-      track: ({trackInstanceId}) => {
+      track: ({trackKey}) => {
         return new ScreenshotsTrack({
           engine: ctx.engine,
-          trackId: trackInstanceId,
+          trackKey,
         });
       },
     });

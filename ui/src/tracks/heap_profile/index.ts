@@ -232,15 +232,15 @@ class HeapProfilePlugin implements Plugin {
   `);
     for (const it = result.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.HeapProfile#${upid}`,
         displayName: 'Heap Profile',
         kind: HEAP_PROFILE_TRACK_KIND,
         upid,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           return new TrackWithControllerAdapter(
               ctx.engine,
-              trackInstanceId,
+              trackKey,
               {upid},
               HeapProfileTrack,
               HeapProfileTrackController);
