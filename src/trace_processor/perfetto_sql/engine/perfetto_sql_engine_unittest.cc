@@ -109,6 +109,22 @@ TEST_F(PerfettoSqlEngineTest, CreateTableFunctionDupe) {
   ASSERT_TRUE(res.ok());
 }
 
+TEST_F(PerfettoSqlEngineTest, CreatePerfettoViewSmoke) {
+  auto res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO VIEW foo AS SELECT 42 AS bar"));
+  ASSERT_TRUE(res.ok());
+}
+
+TEST_F(PerfettoSqlEngineTest, CreatePerfettoViewWithSchemaSmoke) {
+  auto res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO VIEW foo(bar INT) AS SELECT 42 AS bar"));
+  ASSERT_TRUE(res.ok());
+
+  res = engine_.Execute(SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO VIEW foo2(bar INT) AS SELECT 42 AS bar; SELECT 1"));
+  ASSERT_TRUE(res.ok());
+}
+
 TEST_F(PerfettoSqlEngineTest, CreateMacro) {
   auto res_create = engine_.Execute(SqlSource::FromExecuteQuery(
       "CREATE PERFETTO MACRO foo() RETURNS TableOrSubquery AS select 42 AS x"));

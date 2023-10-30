@@ -23,7 +23,7 @@ import {
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-import {PrimaryTrackSortKey, TrackTags} from '../public/index';
+import {PrimaryTrackSortKey} from '../public/index';
 
 import {Direction} from './event_set';
 
@@ -33,6 +33,11 @@ import {Direction} from './event_set';
  * serialize for use in postMessage.
  */
 export interface ObjectById<Class extends{id: string}> { [id: string]: Class; }
+
+// Same as ObjectById but the key parameter is called `key` rather than `id`.
+export interface ObjectByKey<Class extends {key: string}> {
+  [key: string]: Class;
+}
 
 export interface Timestamped {
   lastUpdate: number;
@@ -123,7 +128,9 @@ export const MAX_TIME = 180;
 //     state entries now require a URI and old track implementations are no
 //     longer registered.
 // 40. Ported counter, process summary/sched, & cpu_freq to plugin tracks.
-export const STATE_VERSION = 40;
+// 41. Ported all remaining tracks.
+// 42. Rename trackId -> trackKey.
+export const STATE_VERSION = 42;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -218,25 +225,18 @@ export type TraceSource =
     TraceFileSource|TraceArrayBufferSource|TraceUrlSource|TraceHttpRpcSource;
 
 export interface TrackState {
-  id: string;
-  engineId: string;
-  kind: string;
+  uri: string;
+  key: string;
   name: string;
   labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  tags: TrackTags;
-  config: {
-    trackId?: number;
-    trackIds?: number[];
-  };
-  uri?: string;
+  params?: unknown;
   state?: unknown;
 }
 
 export interface TrackGroupState {
   id: string;
-  engineId: string;
   name: string;
   collapsed: boolean;
   tracks: string[];  // Child track ids.
@@ -350,7 +350,7 @@ export interface CpuProfileSampleSelection {
 export interface ChromeSliceSelection {
   kind: 'CHROME_SLICE';
   id: number;
-  table: string;
+  table?: string;
 }
 
 export interface ThreadStateSelection {
@@ -361,7 +361,7 @@ export interface ThreadStateSelection {
 export interface LogSelection {
   kind: 'LOG';
   id: number;
-  trackId: string;
+  trackKey: string;
 }
 
 export interface GenericSliceSelection {
@@ -378,7 +378,7 @@ export type Selection =
     (NoteSelection|SliceSelection|CounterSelection|HeapProfileSelection|
      CpuProfileSampleSelection|ChromeSliceSelection|ThreadStateSelection|
      AreaSelection|PerfSamplesSelection|LogSelection|GenericSliceSelection)&
-    {trackId?: string};
+    {trackKey?: string};
 export type SelectionKind = Selection['kind'];  // 'THREAD_STATE' | 'SLICE' ...
 
 export interface Pagination {
@@ -534,8 +534,8 @@ export interface State {
   traceTime: TraceTime;
   traceUuid?: string;
   trackGroups: ObjectById<TrackGroupState>;
-  tracks: ObjectById<TrackState>;
-  uiTrackIdByTraceTrackId: {[key: number]: string;};
+  tracks: ObjectByKey<TrackState>;
+  trackKeyByTrackId: {[key: number]: string;};
   utidToThreadSortKey: UtidToTrackSortKey;
   areas: ObjectById<AreaById>;
   aggregatePreferences: ObjectById<AggregationState>;
@@ -554,7 +554,6 @@ export interface State {
   ftracePagination: Pagination;
   ftraceFilter: FtraceFilterState;
   traceConversionInProgress: boolean;
-  visualisedArgs: string[];
 
   /**
    * This state is updated on the frontend at 60Hz and eventually syncronised to
@@ -945,9 +944,9 @@ export function getBuiltinChromeCategoryList(): string[] {
   ];
 }
 
-export function getContainingTrackId(state: State, trackId: string): null|
+export function getContainingTrackId(state: State, trackKey: string): null|
     string {
-  const track = state.tracks[trackId];
+  const track = state.tracks[trackKey];
   if (!track) {
     return null;
   }

@@ -454,7 +454,6 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
   }
 
   onMouseClick({x}: {x: number}) {
-    console.log(this.mousePos);
     const data = this.data();
     if (data === undefined) return false;
     const {visibleTimeScale} = globals.frontendLocalState;
@@ -462,7 +461,7 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
     const index = search(data.starts, time.toTime());
     const id = index === -1 ? undefined : data.ids[index];
     if (!id || this.utidHoveredInThisTrack === -1) return false;
-    globals.makeSelection(Actions.selectSlice({id, trackId: this.id}));
+    globals.makeSelection(Actions.selectSlice({id, trackKey: this.trackKey}));
     return true;
   }
 }
@@ -481,15 +480,15 @@ class CpuSlices implements Plugin {
       const uri = `perfetto.CpuSlices#cpu${cpu}`;
       const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
       const config: Config = {cpu};
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri,
         displayName: name,
         kind: CPU_SLICE_TRACK_KIND,
         cpu,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           return new TrackWithControllerAdapter<Config, Data>(
               ctx.engine,
-              trackInstanceId,
+              trackKey,
               config,
               CpuSliceTrack,
               CpuSliceTrackController);

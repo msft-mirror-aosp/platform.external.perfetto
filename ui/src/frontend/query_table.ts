@@ -17,6 +17,7 @@ import m from 'mithril';
 
 import {BigintMath} from '../base/bigint_math';
 import {copyToClipboard} from '../base/clipboard';
+import {isString} from '../base/object_utils';
 import {Duration, Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {QueryResponse} from '../common/queries';
@@ -57,7 +58,7 @@ function hasTrackId(row: Row): row is Row&{track_id: Numeric} {
 }
 
 function hasType(row: Row): row is Row&{type: string} {
-  return ('type' in row && typeof row.type === 'string');
+  return ('type' in row && isString(row.type));
 }
 
 function hasId(row: Row): row is Row&{id: Numeric} {
@@ -141,20 +142,20 @@ class QueryTableRow implements m.ClassComponent<QueryTableRowAttrs> {
     const sliceStart = Time.fromRaw(BigInt(row.ts));
     // row.dur can be negative. Clamp to 1ns.
     const sliceDur = BigintMath.max(BigInt(row.dur), 1n);
-    const uiTrackId = globals.state.uiTrackIdByTraceTrackId[trackId];
-    if (uiTrackId !== undefined) {
-      reveal(uiTrackId, sliceStart, Time.add(sliceStart, sliceDur), true);
+    const trackKey = globals.state.trackKeyByTrackId[trackId];
+    if (trackKey !== undefined) {
+      reveal(trackKey, sliceStart, Time.add(sliceStart, sliceDur), true);
       const sliceId = getSliceId(row);
       if (sliceId !== undefined) {
-        this.selectSlice(sliceId, uiTrackId, nextTab);
+        this.selectSlice(sliceId, trackKey, nextTab);
       }
     }
   }
 
-  private selectSlice(sliceId: number, uiTrackId: string, nextTab?: string) {
+  private selectSlice(sliceId: number, trackKey: string, nextTab?: string) {
     const action = Actions.selectChromeSlice({
       id: sliceId,
-      trackId: uiTrackId,
+      trackKey,
       table: 'slice',
     });
     globals.makeSelection(action, {tab: nextTab});

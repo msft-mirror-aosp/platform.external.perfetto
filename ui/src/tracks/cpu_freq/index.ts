@@ -533,15 +533,15 @@ class CpuFreq implements Plugin {
         const freqTrackId = row.cpuFreqId;
         const idleTrackId = row.cpuIdleId === null ? undefined : row.cpuIdleId;
 
-        ctx.addTrack({
+        ctx.registerStaticTrack({
           uri: `perfetto.CpuFreq#${cpu}`,
           displayName: `Cpu ${cpu} Frequency`,
           kind: CPU_FREQ_TRACK_KIND,
           cpu,
-          track: ({trackInstanceId}) => {
+          track: ({trackKey}) => {
             return new TrackWithControllerAdapter<Config, Data>(
                 engine,
-                trackInstanceId,
+                trackKey,
                 {
                   cpu,
                   maximumValue: maxCpuFreq,

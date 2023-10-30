@@ -26,24 +26,18 @@ test('createEmptyState', () => {
 test('getContainingTrackId', () => {
   const state: State = createEmptyState();
   state.tracks['a'] = {
-    id: 'a',
-    engineId: 'engine',
-    kind: 'Foo',
+    key: 'a',
+    uri: 'Foo',
     name: 'a track',
     trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
-    config: {},
-    tags: {},
   };
 
   state.tracks['b'] = {
-    id: 'b',
-    engineId: 'engine',
-    kind: 'Foo',
+    key: 'b',
+    uri: 'Foo',
     name: 'b track',
     trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
-    config: {},
     trackGroup: 'containsB',
-    tags: {},
   };
 
   expect(getContainingTrackId(state, 'z')).toEqual(null);

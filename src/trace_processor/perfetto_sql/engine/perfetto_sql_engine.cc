@@ -236,6 +236,11 @@ PerfettoSqlEngine::ExecuteUntilLastStatement(SqlSource sql_source) {
       RETURN_IF_ERROR(AddTracebackIfNeeded(
           RegisterRuntimeTable(cst->name, cst->sql), parser.statement_sql()));
       source = RewriteToDummySql(parser.statement_sql());
+    } else if (auto* create_view = std::get_if<PerfettoSqlParser::CreateView>(
+                   &parser.statement())) {
+      RETURN_IF_ERROR(AddTracebackIfNeeded(ExecuteCreateView(*create_view),
+                                           parser.statement_sql()));
+      source = RewriteToDummySql(parser.statement_sql());
     } else if (auto* include = std::get_if<PerfettoSqlParser::Include>(
                    &parser.statement())) {
       RETURN_IF_ERROR(ExecuteInclude(*include, parser));
@@ -317,19 +322,11 @@ PerfettoSqlEngine::ExecuteUntilLastStatement(SqlSource sql_source) {
   return ExecutionResult{std::move(*res), stats};
 }
 
-base::Status PerfettoSqlEngine::RegisterSqlFunction(bool replace,
-                                                    std::string prototype_str,
-                                                    std::string return_type_str,
-                                                    SqlSource sql) {
-  // Parse all the arguments into a more friendly form.
-  Prototype prototype;
-  base::Status status =
-      ParsePrototype(base::StringView(prototype_str), prototype);
-  if (!status.ok()) {
-    return base::ErrStatus("CREATE PERFETTO FUNCTION[prototype=%s]: %s",
-                           prototype_str.c_str(), status.c_message());
-  }
-
+base::Status PerfettoSqlEngine::RegisterRuntimeFunction(
+    bool replace,
+    const FunctionPrototype& prototype,
+    std::string return_type_str,
+    SqlSource sql) {
   // Parse the return type into a enum format.
   auto opt_return_type =
       sql_argument::ParseType(base::StringView(return_type_str));
@@ -337,7 +334,7 @@ base::Status PerfettoSqlEngine::RegisterSqlFunction(bool replace,
     return base::ErrStatus(
         "CREATE PERFETTO FUNCTION[prototype=%s, return=%s]: unknown return "
         "type specified",
-        prototype_str.c_str(), return_type_str.c_str());
+        prototype.ToString().c_str(), return_type_str.c_str());
   }
 
   int created_argc = static_cast<int>(prototype.arguments.size());
@@ -351,13 +348,13 @@ base::Status PerfettoSqlEngine::RegisterSqlFunction(bool replace,
     std::unique_ptr<CreatedFunction::Context> created_fn_ctx =
         CreatedFunction::MakeContext(this);
     ctx = created_fn_ctx.get();
-    RETURN_IF_ERROR(RegisterCppFunction<CreatedFunction>(
+    RETURN_IF_ERROR(RegisterStaticFunction<CreatedFunction>(
         prototype.function_name.c_str(), created_argc,
         std::move(created_fn_ctx)));
   }
   return CreatedFunction::ValidateOrPrepare(
-      ctx, replace, std::move(prototype), std::move(prototype_str),
-      std::move(*opt_return_type), std::move(return_type_str), std::move(sql));
+      ctx, replace, std::move(prototype), std::move(*opt_return_type),
+      std::move(return_type_str), std::move(sql));
 }
 
 base::Status PerfettoSqlEngine::RegisterRuntimeTable(std::string name,
@@ -434,6 +431,11 @@ base::Status PerfettoSqlEngine::RegisterRuntimeTable(std::string name,
       .status();
 }
 
+base::Status PerfettoSqlEngine::ExecuteCreateView(
+    const PerfettoSqlParser::CreateView& create_view) {
+  return Execute(create_view.sql).status();
+}
+
 base::Status PerfettoSqlEngine::EnableSqlFunctionMemoization(
     const std::string& name) {
   constexpr size_t kSupportedArgCount = 1;
@@ -485,31 +487,20 @@ base::StatusOr<SqlSource> PerfettoSqlEngine::ExecuteCreateFunction(
     const PerfettoSqlParser& parser) {
   if (!cf.is_table) {
     RETURN_IF_ERROR(
-        RegisterSqlFunction(cf.replace, cf.prototype, cf.returns, cf.sql));
+        RegisterRuntimeFunction(cf.replace, cf.prototype, cf.returns, cf.sql));
     return RewriteToDummySql(parser.statement_sql());
   }
 
-  RuntimeTableFunction::State state{cf.prototype, cf.sql, {}, {}, std::nullopt};
-  base::StringView function_name;
-  RETURN_IF_ERROR(
-      ParseFunctionName(state.prototype_str.c_str(), function_name));
-
-  // Parse all the arguments into a more friendly form.
-  base::Status status =
-      ParsePrototype(state.prototype_str.c_str(), state.prototype);
-  if (!status.ok()) {
-    return base::ErrStatus("CREATE PERFETTO FUNCTION[prototype=%s]: %s",
-                           state.prototype_str.c_str(), status.c_message());
-  }
+  RuntimeTableFunction::State state{cf.sql, cf.prototype, {}, std::nullopt};
 
   // Parse the return type into a enum format.
-  status =
+  base::Status status =
       sql_argument::ParseArgumentDefinitions(cf.returns, state.return_values);
   if (!status.ok()) {
     return base::ErrStatus(
         "CREATE PERFETTO FUNCTION[prototype=%s, return=%s]: unknown return "
         "type specified",
-        state.prototype_str.c_str(), cf.returns.c_str());
+        state.prototype.ToString().c_str(), cf.returns.c_str());
   }
 
   // Verify that the provided SQL prepares to a statement correctly.

@@ -93,7 +93,7 @@ export function createEmptyState(): State {
     newEngineMode: 'USE_HTTP_RPC_IF_AVAILABLE',
     traceTime: {...defaultTraceTime},
     tracks: {},
-    uiTrackIdByTraceTrackId: {},
+    trackKeyByTrackId: {},
     utidToThreadSortKey: {},
     aggregatePreferences: {},
     trackGroups: {},
@@ -104,7 +104,6 @@ export function createEmptyState(): State {
     queries: {},
     permalink: {},
     notes: {},
-    visualisedArgs: [],
 
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get() ?
         autosaveConfigStore.get() :

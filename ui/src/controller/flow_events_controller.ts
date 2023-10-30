@@ -21,14 +21,8 @@ import {Area} from '../common/state';
 import {Flow, globals} from '../frontend/globals';
 import {publishConnectedFlows, publishSelectedFlows} from '../frontend/publish';
 import {asSliceSqlId} from '../frontend/sql_types';
-import {
-  ACTUAL_FRAMES_SLICE_TRACK_KIND,
-  Config as ActualConfig,
-} from '../tracks/actual_frames';
-import {
-  Config as SliceConfig,
-  SLICE_TRACK_KIND,
-} from '../tracks/chrome_slices';
+import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../tracks/actual_frames';
+import {SLICE_TRACK_KIND} from '../tracks/chrome_slices';
 
 import {Controller} from './controller';
 
@@ -206,7 +200,7 @@ export class FlowEventsController extends Controller<'main'> {
     const uiTrackIdToInfo = new Map<string, null|Info>();
     const trackIdToInfo = new Map<number, null|Info>();
 
-    const trackIdToUiTrackId = globals.state.uiTrackIdByTraceTrackId;
+    const trackIdToUiTrackId = globals.state.trackKeyByTrackId;
     const tracks = globals.state.tracks;
 
     const getInfo = (trackId: number): null|Info => {
@@ -237,22 +231,12 @@ export class FlowEventsController extends Controller<'main'> {
       // anything if there is only one TP track in this async track. In
       // that case experimental_slice_layout is just an expensive way
       // to find out depth === layout_depth.
-      const trackIds = track.config.trackIds;
+      const trackInfo = pluginManager.resolveTrackInfo(track.uri);
+      const trackIds = trackInfo?.trackIds;
       if (trackIds === undefined || trackIds.length <= 1) {
         uiTrackIdToInfo.set(uiTrackId, null);
         trackIdToInfo.set(trackId, null);
         return null;
-      }
-
-      // Perform the same check for "plugin" style tracks.
-      if (track.uri) {
-        const trackInfo = pluginManager.resolveTrackInfo(track.uri);
-        const trackIds = trackInfo?.trackIds;
-        if (trackIds === undefined || trackIds.length <= 1) {
-          uiTrackIdToInfo.set(uiTrackId, null);
-          trackIdToInfo.set(trackId, null);
-          return null;
-        }
       }
 
       const newInfo = {
@@ -390,19 +374,16 @@ export class FlowEventsController extends Controller<'main'> {
 
     for (const uiTrackId of area.tracks) {
       const track = globals.state.tracks[uiTrackId];
-      if (track === undefined) {
-        continue;
-      }
-      if (track.kind === SLICE_TRACK_KIND) {
-        trackIds.push((track.config as SliceConfig).trackId);
-      } else if (track.kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
-        const actualConfig = track.config as ActualConfig;
-        for (const trackId of actualConfig.trackIds) {
-          trackIds.push(trackId);
-        }
-      } else if (track.config.trackIds !== undefined) {
-        for (const trackId of track.config.trackIds) {
-          trackIds.push(trackId);
+      if (track?.uri !== undefined) {
+        const trackInfo = pluginManager.resolveTrackInfo(track.uri);
+        const kind = trackInfo?.kind;
+        if (kind === SLICE_TRACK_KIND ||
+            kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
+          if (trackInfo?.trackIds) {
+            for (const trackId of trackInfo.trackIds) {
+              trackIds.push(trackId);
+            }
+          }
         }
       }
     }

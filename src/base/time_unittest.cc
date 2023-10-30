@@ -73,26 +73,31 @@ TEST(TimeTest, GetTime) {
   EXPECT_LE(elapsed_cputime.count(), 50 * ns_in_ms);
 }
 
+// This test can work only on Posix platforms which respect the TZ env var.
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
 TEST(TimeTest, GetTimezoneOffsetMins) {
   const char* tz = getenv("TZ");
   std::string tz_save(tz ? tz : "");
   auto reset_tz_on_exit = OnScopeExit([&] {
     if (!tz_save.empty())
-      setenv("TZ", tz_save.c_str(), 1);
+      base::SetEnv("TZ", tz_save.c_str());
   });
 
   // Note: the sign is reversed in the semantic of the TZ env var.
   // UTC+2 means "2 hours to reach UTC", not "2 hours ahead of UTC".
 
-  setenv("TZ", "UTC+2", true);
+  base::SetEnv("TZ", "UTC+2");
   EXPECT_EQ(GetTimezoneOffsetMins(), -2 * 60);
 
-  setenv("TZ", "UTC-2", true);
+  base::SetEnv("TZ", "UTC-2");
   EXPECT_EQ(GetTimezoneOffsetMins(), 2 * 60);
 
-  setenv("TZ", "UTC-07:45", true);
+  base::SetEnv("TZ", "UTC-07:45");
   EXPECT_EQ(GetTimezoneOffsetMins(), 7 * 60 + 45);
 }
+#endif
 
 }  // namespace
 }  // namespace base
