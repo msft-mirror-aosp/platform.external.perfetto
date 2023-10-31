@@ -29,7 +29,6 @@ import {
   ConversionJobName,
   ConversionJobStatus,
 } from '../common/conversion_jobs';
-import {Engine} from '../common/engine';
 import {
   HighPrecisionTime,
   HighPrecisionTimeSpan,
@@ -47,6 +46,7 @@ import {
 import {TimestampFormat, timestampFormat} from '../common/timestamp_format';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
+import {Engine} from '../trace_processor/engine';
 
 import {Analytics, initAnalytics} from './analytics';
 import {BottomTabList} from './bottom_tab';
@@ -283,7 +283,7 @@ class Globals {
     sliceIds: new Float64Array(0),
     tsStarts: new BigInt64Array(0),
     utids: new Float64Array(0),
-    trackIds: [],
+    trackKeys: [],
     sources: [],
     totalResults: 0,
   };
@@ -663,7 +663,7 @@ class Globals {
       sliceIds: new Float64Array(0),
       tsStarts: new BigInt64Array(0),
       utids: new Float64Array(0),
-      trackIds: [],
+      trackKeys: [],
       sources: [],
       totalResults: 0,
     };

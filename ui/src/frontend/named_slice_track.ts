@@ -16,7 +16,7 @@ import {Actions} from '../common/actions';
 import {
   getColorForSlice,
 } from '../common/colorizer';
-import {STR_NULL} from '../common/query_result';
+import {STR_NULL} from '../trace_processor/query_result';
 
 import {
   BASE_SLICE_ROW,
@@ -70,7 +70,7 @@ export abstract class NamedSliceTrack<
   onSliceClick(args: OnSliceClickArgs<T['slice']>) {
     globals.makeSelection(Actions.selectChromeSlice({
       id: args.slice.id,
-      trackId: this.trackId,
+      trackKey: this.trackKey,
 
       // |table| here can be either 'slice' or 'annotation'. The
       // AnnotationSliceTrack overrides the onSliceClick and sets this to

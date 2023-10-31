@@ -15,14 +15,6 @@
 import {BigintMath as BIMath} from '../../base/bigint_math';
 import {Duration, duration, time} from '../../base/time';
 import {
-  LONG,
-  LONG_NULL,
-  NUM,
-  NUM_NULL,
-  STR,
-  STR_NULL,
-} from '../../common/query_result';
-import {
   SliceData,
   SliceTrackBase,
 } from '../../frontend/slice_track_base';
@@ -34,6 +26,14 @@ import {
   PluginDescriptor,
 } from '../../public';
 import {getTrackName} from '../../public/utils';
+import {
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+} from '../../trace_processor/query_result';
 
 export const EXPECTED_FRAMES_SLICE_TRACK_KIND = 'ExpectedFramesSliceTrack';
 
@@ -41,9 +41,9 @@ class SliceTrack extends SliceTrackBase {
   private maxDur = Duration.ZERO;
 
   constructor(
-      private engine: EngineProxy, maxDepth: number, trackInstanceId: string,
+      private engine: EngineProxy, maxDepth: number, trackKey: string,
       private trackIds: number[], namespace?: string) {
-    super(maxDepth, trackInstanceId, '', namespace);
+    super(maxDepth, trackKey, '', namespace);
   }
 
   async onBoundsChange(start: time, end: time, resolution: duration):
@@ -189,16 +189,16 @@ class ExpectedFramesPlugin implements Plugin {
       const displayName = getTrackName(
           {name: trackName, upid, pid, processName, kind: 'ExpectedFrames'});
 
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.ExpectedFrames#${upid}`,
         displayName,
         trackIds,
         kind: EXPECTED_FRAMES_SLICE_TRACK_KIND,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           return new SliceTrack(
               engine,
               maxDepth,
-              trackInstanceId,
+              trackKey,
               trackIds,
           );
         },

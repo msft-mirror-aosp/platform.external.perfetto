@@ -14,7 +14,6 @@
 
 import {Actions} from '../../common/actions';
 import {Color, colorForState} from '../../common/colorizer';
-import {NUM_NULL, STR} from '../../common/query_result';
 import {Selection} from '../../common/state';
 import {translateState} from '../../common/thread_state';
 import {
@@ -29,6 +28,7 @@ import {
   SliceLayout,
 } from '../../frontend/slice_layout';
 import {NewTrackArgs} from '../../frontend/track';
+import {NUM_NULL, STR} from '../../trace_processor/query_result';
 
 export const THREAD_STATE_ROW = {
   ...BASE_SLICE_ROW,
@@ -111,7 +111,7 @@ export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
   onSliceClick(args: OnSliceClickArgs<ThreadStateTrackTypes['slice']>) {
     globals.makeSelection(Actions.selectThreadState({
       id: args.slice.id,
-      trackId: this.trackId,
+      trackKey: this.trackKey,
     }));
   }
 

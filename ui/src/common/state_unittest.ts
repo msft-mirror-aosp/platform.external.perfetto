@@ -26,14 +26,14 @@ test('createEmptyState', () => {
 test('getContainingTrackId', () => {
   const state: State = createEmptyState();
   state.tracks['a'] = {
-    id: 'a',
+    key: 'a',
     uri: 'Foo',
     name: 'a track',
     trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
   };
 
   state.tracks['b'] = {
-    id: 'b',
+    key: 'b',
     uri: 'Foo',
     name: 'b track',
     trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
@@ -51,6 +51,7 @@ test('state is serializable', () => {
   const restored: State = deserializeStateObject(json);
 
   // Remove nonSerializableState from original
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const serializableState: any = state as any;
   delete serializableState['nonSerializableState'];
 

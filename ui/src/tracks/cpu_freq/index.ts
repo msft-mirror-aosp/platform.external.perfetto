@@ -20,13 +20,6 @@ import {calcCachedBucketSize} from '../../common/cache_utils';
 import {drawTrackHoverTooltip} from '../../common/canvas_utils';
 import {hueForCpu} from '../../common/colorizer';
 import {
-  LONG,
-  LONG_NULL,
-  NUM,
-  NUM_NULL,
-  QueryResult,
-} from '../../common/query_result';
-import {
   TrackAdapter,
   TrackControllerAdapter,
   TrackWithControllerAdapter,
@@ -41,6 +34,13 @@ import {
   PluginContextTrace,
   PluginDescriptor,
 } from '../../public';
+import {
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  QueryResult,
+} from '../../trace_processor/query_result';
 
 
 export const CPU_FREQ_TRACK_KIND = 'CpuFreqTrack';
@@ -533,15 +533,15 @@ class CpuFreq implements Plugin {
         const freqTrackId = row.cpuFreqId;
         const idleTrackId = row.cpuIdleId === null ? undefined : row.cpuIdleId;
 
-        ctx.addTrack({
+        ctx.registerStaticTrack({
           uri: `perfetto.CpuFreq#${cpu}`,
           displayName: `Cpu ${cpu} Frequency`,
           kind: CPU_FREQ_TRACK_KIND,
           cpu,
-          track: ({trackInstanceId}) => {
+          track: ({trackKey}) => {
             return new TrackWithControllerAdapter<Config, Data>(
                 engine,
-                trackInstanceId,
+                trackKey,
                 {
                   cpu,
                   maximumValue: maxCpuFreq,

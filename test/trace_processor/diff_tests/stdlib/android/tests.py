@@ -636,207 +636,367 @@ class AndroidStdlib(TestSuite):
             message_type="perfetto.third_party.perftools.profiles.Profile",
             post_processing=PrintProfileProto,
             contents="""
-        Sample:
-        Values: 0
-        Stack:
-        /system/bin/apexd (0x0)
-        /system/bin/servicemanager (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            /system/bin/apexd (0x0)
+            /system/bin/servicemanager (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        /system/bin/bootanimation (0x0)
-        /system/bin/surfaceflinger (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            /system/bin/bootanimation (0x0)
+            /system/bin/surfaceflinger (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        /system/bin/cameraserver (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            /system/bin/cameraserver (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        /system/bin/storaged (0x0)
-        /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            /system/bin/storaged (0x0)
+            /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        /system/bin/surfaceflinger (0x0)
-        /system/bin/bootanimation (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            /system/bin/surfaceflinger (0x0)
+            /system/bin/bootanimation (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        /system/bin/surfaceflinger (0x0)
-        /vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            /system/bin/surfaceflinger (0x0)
+            /vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        media.metrics (0x0)
-        /system/bin/audioserver (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            media.metrics (0x0)
+            /system/bin/audioserver (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        system_server (0x0)
-        /system/bin/servicemanager (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            system_server (0x0)
+            /system/bin/servicemanager (0x0)
 
-        Sample:
-        Values: 0
-        Stack:
-        system_server (0x0)
-        /system/bin/surfaceflinger (0x0)
+            Sample:
+            Values: 0
+            Stack:
+            system_server (0x0)
+            /system/bin/surfaceflinger (0x0)
 
-        Sample:
-        Values: 105827054
-        Stack:
-        /system/bin/installd (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 1004933
+            Stack:
+            /vendor/bin/hw/android.hardware.sensors-service.example (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 11316
-        Stack:
-        system_server (0x0)
-        /apex/com.android.os.statsd/bin/statsd (0x0)
+            Sample:
+            Values: 105827054
+            Stack:
+            /system/bin/installd (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 12567639
-        Stack:
-        /system/bin/servicemanager (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 11316
+            Stack:
+            system_server (0x0)
+            /apex/com.android.os.statsd/bin/statsd (0x0)
 
-        Sample:
-        Values: 137623
-        Stack:
-        /vendor/bin/hw/android.hardware.lights-service.example (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 12567639
+            Stack:
+            /system/bin/servicemanager (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 140719
-        Stack:
-        system_server (0x0)
-        /system/bin/storaged (0x0)
+            Sample:
+            Values: 137623
+            Stack:
+            /vendor/bin/hw/android.hardware.lights-service.example (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 150044
-        Stack:
-        /vendor/bin/hw/android.hardware.input.processor-service.example (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 140719
+            Stack:
+            system_server (0x0)
+            /system/bin/storaged (0x0)
 
-        Sample:
-        Values: 1877718
-        Stack:
-        /system/bin/surfaceflinger (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 150044
+            Stack:
+            /vendor/bin/hw/android.hardware.input.processor-service.example (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 19303
-        Stack:
-        system_server (0x0)
-        /vendor/bin/hw/android.hardware.sensors-service.example (0x0)
+            Sample:
+            Values: 1877718
+            Stack:
+            /system/bin/surfaceflinger (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 210889
-        Stack:
-        /system/bin/servicemanager (0x0)
-        /apex/com.android.os.statsd/bin/statsd (0x0)
+            Sample:
+            Values: 19303
+            Stack:
+            system_server (0x0)
+            /vendor/bin/hw/android.hardware.sensors-service.example (0x0)
 
-        Sample:
-        Values: 21505514
-        Stack:
-        /system/bin/idmap2d (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 210889
+            Stack:
+            /system/bin/servicemanager (0x0)
+            /apex/com.android.os.statsd/bin/statsd (0x0)
 
-        Sample:
-        Values: 25394
-        Stack:
-        /system/bin/servicemanager (0x0)
-        /system/bin/surfaceflinger (0x0)
+            Sample:
+            Values: 21505514
+            Stack:
+            /system/bin/idmap2d (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 2552696
-        Stack:
-        /system/bin/hwservicemanager (0x0)
-        /system/bin/cameraserver (0x0)
+            Sample:
+            Values: 2221699
+            Stack:
+            /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 273686
-        Stack:
-        /vendor/bin/hw/android.hardware.sensors-service.example (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 25394
+            Stack:
+            /system/bin/servicemanager (0x0)
+            /system/bin/surfaceflinger (0x0)
 
-        Sample:
-        Values: 28045
-        Stack:
-        /apex/com.android.os.statsd/bin/statsd (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 2552696
+            Stack:
+            /system/bin/hwservicemanager (0x0)
+            /system/bin/cameraserver (0x0)
 
-        Sample:
-        Values: 297647
-        Stack:
-        /system/bin/hwservicemanager (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 28045
+            Stack:
+            /apex/com.android.os.statsd/bin/statsd (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 3483649
-        Stack:
-        system_server (0x0)
-        /system/bin/audioserver (0x0)
+            Sample:
+            Values: 297647
+            Stack:
+            /system/bin/hwservicemanager (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 3677545
-        Stack:
-        /system/bin/servicemanager (0x0)
-        /system/bin/audioserver (0x0)
+            Sample:
+            Values: 3483649
+            Stack:
+            system_server (0x0)
+            /system/bin/audioserver (0x0)
 
-        Sample:
-        Values: 3991341
-        Stack:
-        /system/bin/servicemanager (0x0)
-        /system/bin/cameraserver (0x0)
+            Sample:
+            Values: 3677545
+            Stack:
+            /system/bin/servicemanager (0x0)
+            /system/bin/audioserver (0x0)
 
-        Sample:
-        Values: 41164
-        Stack:
-        system_server (0x0)
-        /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
+            Sample:
+            Values: 3991341
+            Stack:
+            /system/bin/servicemanager (0x0)
+            /system/bin/cameraserver (0x0)
 
-        Sample:
-        Values: 4948091
-        Stack:
-        system_server (0x0)
-        /system/bin/cameraserver (0x0)
+            Sample:
+            Values: 41164
+            Stack:
+            system_server (0x0)
+            /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
 
-        Sample:
-        Values: 502254
-        Stack:
-        /vendor/bin/hw/android.hardware.health-service.cuttlefish (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 4948091
+            Stack:
+            system_server (0x0)
+            /system/bin/cameraserver (0x0)
 
-        Sample:
-        Values: 629626
-        Stack:
-        /apex/com.android.hardware.vibrator/bin/hw/android.hardware.vibrator-service.example (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 629626
+            Stack:
+            /apex/com.android.hardware.vibrator/bin/hw/android.hardware.vibrator-service.example (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 78428525
-        Stack:
-        /vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu (0x0)
-        /system/bin/surfaceflinger (0x0)
+            Sample:
+            Values: 78428525
+            Stack:
+            /vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu (0x0)
+            /system/bin/surfaceflinger (0x0)
 
-        Sample:
-        Values: 81216
-        Stack:
-        /system/bin/vold (0x0)
-        system_server (0x0)
+            Sample:
+            Values: 81216
+            Stack:
+            /system/bin/vold (0x0)
+            system_server (0x0)
 
-        Sample:
-        Values: 837989
-        Stack:
-        /system/bin/servicemanager (0x0)
-        /system/bin/storaged (0x0)
+            Sample:
+            Values: 837989
+            Stack:
+            /system/bin/servicemanager (0x0)
+            /system/bin/storaged (0x0)
         """))
+
+  def test_android_dvfs_counters(self):
+      return DiffTestBlueprint(
+          trace=TextProto(r"""
+          packet {
+            ftrace_events {
+              cpu: 0
+              event {
+                timestamp: 200001000000
+                pid: 2
+                clock_set_rate {
+                  name : "domain@1"
+                  state: 400000
+                }
+              }
+              event {
+                timestamp: 200003000000
+                pid: 2
+                clock_set_rate {
+                  name: "domain@1"
+                  state: 1024000
+                }
+              }
+              event {
+                timestamp: 200005000000
+                pid: 2
+                clock_set_rate {
+                  name: "domain@1"
+                  state: 1024000
+                }
+              }
+            }
+            trusted_uid: 9999
+            trusted_packet_sequence_id: 2
+          }
+         """),
+         query="""
+         INCLUDE PERFETTO MODULE android.dvfs;
+         SELECT * FROM android_dvfs_counters;
+         """,
+         out=Csv("""
+         "name","ts","value","dur"
+         "domain@1 Frequency",200001000000,400000.000000,2000000
+         "domain@1 Frequency",200003000000,1024000.000000,2000000
+         "domain@1 Frequency",200005000000,1024000.000000,1
+         """))
+
+  def test_android_dvfs_counter_stats(self):
+      return DiffTestBlueprint(
+          trace=TextProto(r"""
+          packet {
+            ftrace_events {
+              cpu: 0
+              event {
+                timestamp: 200001000000
+                pid: 2
+                clock_set_rate {
+                  name : "domain@1"
+                  state: 400000
+                }
+              }
+              event {
+                timestamp: 200001000000
+                pid: 2
+                clock_set_rate {
+                name : "bus_throughput"
+                state: 1014000
+                }
+              }
+              event {
+                timestamp: 200003000000
+                pid: 2
+                clock_set_rate {
+                  name: "domain@1"
+                  state: 1024000
+                }
+              }
+              event {
+                timestamp: 200003000000
+                pid: 2
+                clock_set_rate {
+                  name: "bus_throughput"
+                  state: 553000
+                }
+              }
+              event {
+                timestamp: 200005000000
+                pid: 2
+                clock_set_rate {
+                  name: "domain@1"
+                  state: 1024000
+                }
+              }
+              event {
+                timestamp: 200005000000
+                pid: 527
+                clock_set_rate {
+                  name: "bus_throughput"
+                  state: 553000
+                }
+              }
+            }
+            trusted_uid: 9999
+            trusted_packet_sequence_id: 2
+          }
+         """),
+         query="""
+         INCLUDE PERFETTO MODULE android.dvfs;
+         SELECT * FROM android_dvfs_counter_stats;
+         """,
+         out=Csv("""
+         "name","max","min","dur","wgt_avg"
+         "bus_throughput Frequency",1014000.000000,553000.000000,4000000,783499.942375
+         "domain@1 Frequency",1024000.000000,400000.000000,4000000,712000.078000
+         """))
+
+  def test_android_dvfs_counter_residency(self):
+      return DiffTestBlueprint(
+          trace=TextProto(r"""
+          packet {
+            ftrace_events {
+              cpu: 0
+              event {
+                timestamp: 200001000001
+                pid: 2
+                clock_set_rate {
+                name : "bus_throughput"
+                state: 1014000
+                }
+              }
+              event {
+                timestamp: 200003000001
+                pid: 2
+                clock_set_rate {
+                  name: "bus_throughput"
+                  state: 553000
+                }
+              }
+              event {
+                timestamp: 200005000000
+                pid: 527
+                clock_set_rate {
+                  name: "bus_throughput"
+                  state: 553000
+                }
+              }
+            }
+            trusted_uid: 9999
+            trusted_packet_sequence_id: 2
+          }
+         """),
+         query="""
+         INCLUDE PERFETTO MODULE android.dvfs;
+         SELECT * FROM android_dvfs_counter_residency;
+         """,
+         out=Csv("""
+         "name","value","dur","pct"
+         "bus_throughput Frequency",553000.000000,2000000,50.000000
+         "bus_throughput Frequency",1014000.000000,2000000,50.000000
+         """))

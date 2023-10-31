@@ -14,14 +14,6 @@
 
 import {BigintMath as BIMath} from '../../base/bigint_math';
 import {duration, time} from '../../base/time';
-import {
-  LONG,
-  LONG_NULL,
-  NUM,
-  NUM_NULL,
-  STR,
-  STR_NULL,
-} from '../../common/query_result';
 import {SliceData, SliceTrackBase} from '../../frontend/slice_track_base';
 import {
   EngineProxy,
@@ -31,6 +23,14 @@ import {
   PluginDescriptor,
 } from '../../public';
 import {getTrackName} from '../../public/utils';
+import {
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+} from '../../trace_processor/query_result';
 
 export const ACTUAL_FRAMES_SLICE_TRACK_KIND = 'ActualFramesSliceTrack';
 
@@ -45,9 +45,9 @@ class SliceTrack extends SliceTrackBase {
   private maxDur = 0n;
 
   constructor(
-      private engine: EngineProxy, maxDepth: number, trackInstanceId: string,
+      private engine: EngineProxy, maxDepth: number, trackKey: string,
       private trackIds: number[], namespace?: string) {
-    super(maxDepth, trackInstanceId, 'actual_frame_timeline_slice', namespace);
+    super(maxDepth, trackKey, 'actual_frame_timeline_slice', namespace);
   }
 
   async onBoundsChange(start: time, end: time, resolution: duration):
@@ -155,7 +155,7 @@ class SliceTrack extends SliceTrackBase {
 class ActualFrames implements Plugin {
   onActivate(_ctx: PluginContext): void {}
 
-  async onTraceLoad(ctx: PluginContextTrace<undefined>): Promise<void> {
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const {engine} = ctx;
     const result = await engine.query(`
       with process_async_tracks as materialized (
@@ -205,16 +205,16 @@ class ActualFrames implements Plugin {
       const displayName =
           getTrackName({name: trackName, upid, pid, processName, kind});
 
-      ctx.addTrack({
+      ctx.registerStaticTrack({
         uri: `perfetto.ActualFrames#${upid}`,
         displayName,
         trackIds,
         kind: ACTUAL_FRAMES_SLICE_TRACK_KIND,
-        track: ({trackInstanceId}) => {
+        track: ({trackKey}) => {
           return new SliceTrack(
               engine,
               maxDepth,
-              trackInstanceId,
+              trackKey,
               trackIds,
           );
         },

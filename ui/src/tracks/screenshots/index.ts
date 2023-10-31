@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {AddTrackArgs} from '../../common/actions';
-import {Engine} from '../../common/engine';
 import {
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
@@ -25,6 +24,7 @@ import {
   PluginDescriptor,
   PrimaryTrackSortKey,
 } from '../../public';
+import {Engine} from '../../trace_processor/engine';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
@@ -83,15 +83,15 @@ export async function decideTracks(engine: Engine):
 class ScreenshotsPlugin implements Plugin {
   onActivate(_ctx: PluginContext): void {}
 
-  async onTraceLoad(ctx: PluginContextTrace<undefined>): Promise<void> {
-    ctx.addTrack({
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    ctx.registerStaticTrack({
       uri: 'perfetto.Screenshots',
       displayName: 'Screenshots',
       kind: ScreenshotsTrack.kind,
-      track: ({trackInstanceId}) => {
+      track: ({trackKey}) => {
         return new ScreenshotsTrack({
           engine: ctx.engine,
-          trackId: trackInstanceId,
+          trackKey,
         });
       },
     });

@@ -14,9 +14,9 @@
 
 import {globals} from '../frontend/globals';
 import {Plugin} from '../public';
+import {Engine} from '../trace_processor/engine';
 
 import {createEmptyState} from './empty_state';
-import {Engine} from './engine';
 import {PluginManager, PluginRegistry} from './plugins';
 import {ViewerImpl} from './viewer';
 
@@ -26,9 +26,8 @@ class FakeEngine extends Engine {
   rpcSendRequestBytes(_data: Uint8Array) {}
 }
 
-function makeMockPlugin(): Plugin<any> {
+function makeMockPlugin(): Plugin {
   return {
-    migrate: jest.fn(),
     onActivate: jest.fn(),
     onDeactivate: jest.fn(),
     onTraceLoad: jest.fn(),
@@ -41,7 +40,9 @@ const engine = new FakeEngine();
 globals.initStore(createEmptyState());
 
 // We use `any` here to avoid checking possibly undefined types in tests.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let mockPlugin: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let manager: any;
 
 describe('PluginManger', () => {
@@ -90,18 +91,5 @@ describe('PluginManger', () => {
     manager.deactivatePlugin('foo');
 
     expect(mockPlugin.onTraceUnload).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not invoke migrate at activation time', () => {
-    manager.activatePlugin('foo', viewer);
-
-    expect(mockPlugin.migrate).not.toHaveBeenCalled();
-  });
-
-  it('invokes migrate when trace is loaded', () => {
-    manager.activatePlugin('foo', viewer);
-    manager.onTraceLoad(engine);
-
-    expect(mockPlugin.migrate).toHaveBeenCalledTimes(1);
   });
 });

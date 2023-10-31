@@ -17,10 +17,10 @@ import m from 'mithril';
 import {Icons} from '../base/semantic_icons';
 import {duration, Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
-import {EngineProxy} from '../common/engine';
 import {runQuery} from '../common/queries';
-import {LONG, LONG_NULL, NUM, STR_NULL} from '../common/query_result';
 import {raf} from '../core/raf_scheduler';
+import {EngineProxy} from '../trace_processor/engine';
+import {LONG, LONG_NULL, NUM, STR_NULL} from '../trace_processor/query_result';
 import {addDebugSliceTrack} from '../tracks/debug/slice_track';
 import {Button} from '../widgets/button';
 import {DetailsShell} from '../widgets/details_shell';
@@ -205,7 +205,7 @@ async function getAnnotationSlice(
     name: it.name ?? 'null',
     ts: Time.fromRaw(it.ts),
     dur: it.dur,
-    sqlTrackId: it.trackId,
+    trackId: it.trackId,
     threadDur: it.threadDur ?? undefined,
     category: it.cat ?? undefined,
     absTime: it.absTime ?? undefined,
@@ -247,7 +247,8 @@ export class ChromeSliceDetailsTab extends
     const {id, table} = this.config;
     const details = await getSliceDetails(this.engine, id, table);
 
-    if (details !== undefined && details.thread !== undefined) {
+    if (details !== undefined && details.thread !== undefined &&
+        details.dur > 0) {
       this.breakdownByThreadState = await breakDownIntervalByThreadState(
           this.engine,
           TimeSpan.fromTimeAndDuration(details.ts, details.dur),
