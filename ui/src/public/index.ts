@@ -16,12 +16,13 @@ import m from 'mithril';
 
 import {Hotkey} from '../base/hotkeys';
 import {duration, Span, time} from '../base/time';
-import {EngineProxy} from '../common/engine';
 import {Store} from '../frontend/store';
 import {PxSpan, TimeScale} from '../frontend/time_scale';
 import {SliceRect} from '../frontend/track';
+import {EngineProxy} from '../trace_processor/engine';
 
-export {EngineProxy} from '../common/engine';
+export {createStore, Store} from '../frontend/store';
+export {EngineProxy} from '../trace_processor/engine';
 export {
   LONG,
   LONG_NULL,
@@ -29,8 +30,7 @@ export {
   NUM_NULL,
   STR,
   STR_NULL,
-} from '../common/query_result';
-export {createStore, Store} from '../frontend/store';
+} from '../trace_processor/query_result';
 
 
 // An imperative API for plugins to change the UI.
@@ -57,6 +57,7 @@ export interface Viewer {
     openQuery(query: string, title: string): void;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   commands: {run(name: string, ...args: any[]): void;}
 }
 
@@ -66,6 +67,7 @@ export interface Command {
   // A human-friendly name for this command.
   name: string;
   // Callback is called when the command is invoked.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   callback: (...args: any[]) => void;
   // Default hotkey for this command.
   // Note: this is just the default and may be changed by the user.
