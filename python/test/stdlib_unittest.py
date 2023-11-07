@@ -54,8 +54,8 @@ SELECT 1;
 -- Second line.
 -- @arg utid INT              Utid of thread.
 -- @arg name STRING           String name.
--- @ret BOOL Exists.
 CREATE PERFETTO FUNCTION foo_fn(utid INT, name STRING)
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -156,8 +156,8 @@ SELECT 1;
 --
 -- @arg utid2 INT             Uint.
 -- @arg name STRING           String name.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_fn(utid INT, name STRING)
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -174,8 +174,8 @@ SELECT 1;
 --
 -- @arg utid INT
 -- @arg name STRING           String name.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_fn(utid INT, name STRING)
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -189,9 +189,8 @@ SELECT 1;
     res = parse_file(
         'foo/bar.sql', f'''
 -- Comment
---
--- @ret BOOL
 CREATE PERFETTO FUNCTION foo_fn()
+--
 RETURNS BOOL
 AS
 SELECT TRUE;
@@ -211,8 +210,8 @@ SELECT TRUE;
 -- long
 --
 -- description.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_fn()
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -234,8 +233,8 @@ SELECT 1;
 -- @arg name STRING            String name
 --                             which spans across multiple lines
 -- inconsistently.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_fn(utid INT, name STRING)
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -256,8 +255,8 @@ SELECT 1;
     res = parse_file(
         'foo/bar.sql', f'''
 -- Function comment.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_SnakeCase()
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -312,12 +311,12 @@ SELECT 1;
     res = parse_file(
         'foo/bar.sql', f'''
 -- Function foo.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_fn(
     -- Utid of thread.
     utid INT,
     -- String name.
     name STRING)
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -339,13 +338,13 @@ SELECT 1;
     res = parse_file(
         'foo/bar.sql', f'''
 -- Function foo.
--- @ret BOOL                  Exists.
 CREATE PERFETTO FUNCTION foo_fn(
     -- Multi
     -- line
     --
     -- comment.
     arg INT)
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
@@ -361,15 +360,40 @@ SELECT 1;
     self.assertEqual(fn.return_type, 'BOOL')
     self.assertEqual(fn.return_desc, 'Exists.')
 
+  def test_function_with_multiline_return_comment(self):
+    res = parse_file(
+        'foo/bar.sql', f'''
+-- Function foo.
+CREATE PERFETTO FUNCTION foo_fn(
+    -- Arg
+    arg INT)
+-- Multi
+-- line
+-- return
+-- comment.
+RETURNS BOOL
+AS
+SELECT 1;
+    '''.strip())
+    self.assertListEqual(res.errors, [])
+
+    fn = res.functions[0]
+    self.assertEqual(fn.name, 'foo_fn')
+    self.assertEqual(fn.desc, 'Function foo.')
+    self.assertEqual(fn.args, {
+        'arg': Arg('INT', 'Arg'),
+    })
+    self.assertEqual(fn.return_type, 'BOOL')
+    self.assertEqual(fn.return_desc, 'Multi line return comment.')
+
   def test_create_or_replace_table_banned(self):
     res = parse_file(
         'common/bar.sql', f'''
 -- Table.
 CREATE OR REPLACE PERFETTO TABLE foo(
     -- Column.
-    x INT,
+    x INT
 )
-RETURNS BOOL
 AS
 SELECT 1;
 
@@ -383,9 +407,8 @@ SELECT 1;
 -- Table.
 CREATE OR REPLACE PERFETTO VIEW foo(
     -- Column.
-    x INT,
+    x INT
 )
-RETURNS BOOL
 AS
 SELECT 1;
 
@@ -397,11 +420,34 @@ SELECT 1;
     res = parse_file(
         'foo/bar.sql', f'''
 -- Function foo.
--- @ret BOOL                  Exists.
 CREATE OR REPLACE PERFETTO FUNCTION foo_fn()
+-- Exists.
 RETURNS BOOL
 AS
 SELECT 1;
     '''.strip())
     # Expecting an error: CREATE OR REPLACE is not allowed in stdlib.
     self.assertEqual(len(res.errors), 1)
+
+  def test_function_with_new_style_docs_with_parenthesis(self):
+    res = parse_file(
+        'foo/bar.sql', f'''
+-- Function foo.
+CREATE PERFETTO FUNCTION foo_fn(
+    -- Utid of thread (important).
+    utid INT)
+-- Exists.
+RETURNS BOOL
+AS
+SELECT 1;
+    '''.strip())
+    self.assertListEqual(res.errors, [])
+
+    fn = res.functions[0]
+    self.assertEqual(fn.name, 'foo_fn')
+    self.assertEqual(fn.desc, 'Function foo.')
+    self.assertEqual(fn.args, {
+        'utid': Arg('INT', 'Utid of thread (important).'),
+    })
+    self.assertEqual(fn.return_type, 'BOOL')
+    self.assertEqual(fn.return_desc, 'Exists.')

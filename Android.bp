@@ -10760,6 +10760,7 @@ filegroup {
         "src/trace_processor/db/storage/dummy_storage.cc",
         "src/trace_processor/db/storage/id_storage.cc",
         "src/trace_processor/db/storage/numeric_storage.cc",
+        "src/trace_processor/db/storage/set_id_storage.cc",
         "src/trace_processor/db/storage/storage.cc",
         "src/trace_processor/db/storage/string_storage.cc",
     ],
@@ -10771,6 +10772,7 @@ filegroup {
     srcs: [
         "src/trace_processor/db/storage/id_storage_unittest.cc",
         "src/trace_processor/db/storage/numeric_storage_unittest.cc",
+        "src/trace_processor/db/storage/set_id_storage_unittest.cc",
         "src/trace_processor/db/storage/string_storage_unittest.cc",
     ],
 }
@@ -11790,8 +11792,10 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/experimental/slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/experimental/thread_executing_span.sql",
         "src/trace_processor/perfetto_sql/stdlib/experimental/thread_state_flattened.sql",
+        "src/trace_processor/perfetto_sql/stdlib/intervals/overlap.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu_idle.sql",
         "src/trace_processor/perfetto_sql/stdlib/pkvm/hypervisor.sql",
+        "src/trace_processor/perfetto_sql/stdlib/sched/thread_level_parallelism.sql",
     ],
     cmd: "$(location tools/gen_amalgamated_sql.py) --namespace=stdlib --cpp-out=$(out) $(in)",
     out: [
