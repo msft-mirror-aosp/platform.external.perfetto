@@ -1313,6 +1313,8 @@ perfetto_filegroup(
         "src/trace_processor/db/storage/id_storage.h",
         "src/trace_processor/db/storage/numeric_storage.cc",
         "src/trace_processor/db/storage/numeric_storage.h",
+        "src/trace_processor/db/storage/set_id_storage.cc",
+        "src/trace_processor/db/storage/set_id_storage.h",
         "src/trace_processor/db/storage/storage.cc",
         "src/trace_processor/db/storage/storage.h",
         "src/trace_processor/db/storage/string_storage.cc",
@@ -2277,6 +2279,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/intervals:intervals
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/intervals/overlap.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/linux:linux
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_linux",
@@ -2293,6 +2303,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/sched:sched
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_sched_sched",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/sched/thread_level_parallelism.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib:stdlib
 perfetto_cc_amalgamated_sql(
     name = "src_trace_processor_perfetto_sql_stdlib_stdlib",
@@ -2302,8 +2320,10 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_chrome_chrome_sql",
         ":src_trace_processor_perfetto_sql_stdlib_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_experimental_experimental",
+        ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
         ":src_trace_processor_perfetto_sql_stdlib_linux_linux",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
+        ":src_trace_processor_perfetto_sql_stdlib_sched_sched",
     ],
     outs = [
         "src/trace_processor/perfetto_sql/stdlib/stdlib.h",
@@ -5786,6 +5806,14 @@ perfetto_py_binary(
     ],
     main = "tools/gen_cc_proto_descriptor.py",
     python_version = "PY3",
+)
+
+perfetto_go_proto_library(
+    name = "protos_perfetto_config_protos_go_proto",
+    visibility = PERFETTO_CONFIG.go_proto_library_visibility,
+    deps = [
+        ":protos_perfetto_config_protos",
+    ],
 )
 
 perfetto_go_proto_library(
