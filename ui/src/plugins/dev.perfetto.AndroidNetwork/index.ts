@@ -44,7 +44,7 @@ class AndroidNetwork implements Plugin {
   }
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.addCommand({
+    ctx.registerCommand({
       id: 'dev.perfetto.AndroidNetwork#batteryEvents',
       name: 'Run query: Pin battery events',
       callback: async (track) => {
@@ -64,7 +64,7 @@ class AndroidNetwork implements Plugin {
       },
     });
 
-    ctx.addCommand({
+    ctx.registerCommand({
       id: 'dev.perfetto.AndroidNetwork#activityTrack',
       name: 'Run query: Visualize Network Activity',
       callback: async (groupby, filter, trackName) => {
@@ -78,7 +78,7 @@ class AndroidNetwork implements Plugin {
           if (filter === null) return;
         }
 
-        var suffix = new Date().getTime();
+        const suffix = new Date().getTime();
         await ctx.engine.query(`
           SELECT RUN_METRIC(
             'android/network_activity_template.sql',
@@ -91,7 +91,7 @@ class AndroidNetwork implements Plugin {
         `);
 
         // The first group column is used for the slice name.
-        var groupCols = groupby.replaceAll(' ', '').split(',');
+        const groupCols = groupby.replaceAll(' ', '').split(',');
         await this.addSimpleTrack(
             ctx.engine,
             trackName || 'Network Activity',
