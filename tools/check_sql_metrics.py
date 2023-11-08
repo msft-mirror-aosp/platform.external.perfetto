@@ -27,9 +27,10 @@ from typing import Dict, Tuple, List
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(ROOT_DIR))
 
-from python.generators.sql_processing.utils import match_pattern
-from python.generators.sql_processing.utils import check_banned_words
 from python.generators.sql_processing.utils import check_banned_create_table_as
+from python.generators.sql_processing.utils import check_banned_create_view_as
+from python.generators.sql_processing.utils import check_banned_words
+from python.generators.sql_processing.utils import match_pattern
 from python.generators.sql_processing.utils import DROP_TABLE_VIEW_PATTERN
 from python.generators.sql_processing.utils import CREATE_TABLE_VIEW_PATTERN
 
@@ -58,7 +59,7 @@ def match_create_table_pattern_to_dict(
     sql: str, pattern: str) -> Dict[str, Tuple[int, str]]:
   res = {}
   for line_num, matches in match_pattern(pattern, sql).items():
-    res[matches[2]] = [line_num, str(matches[1])]
+    res[matches[3]] = [line_num, str(matches[2])]
   return res
 
 
@@ -82,6 +83,7 @@ def check(path: str) -> List[str]:
   errors = check_banned_create_table_as(sql,
                                         path.split(ROOT_DIR)[1],
                                         CREATE_TABLE_ALLOWLIST)
+  errors += check_banned_create_view_as(sql, path.split(ROOT_DIR)[1])
   for name, [line, type] in create_table_view_dir.items():
     if name not in drop_table_view_dir:
       errors.append(f'Missing DROP before CREATE {type.upper()} "{name}"\n'
