@@ -30,29 +30,29 @@ from python.generators.sql_processing.docs_parse import parse_file
 from python.generators.sql_processing.utils import check_banned_create_table_as
 from python.generators.sql_processing.utils import check_banned_create_view_as
 from python.generators.sql_processing.utils import check_banned_words
+from python.generators.sql_processing.utils import check_banned_include_all
 
+# Allowlist path are relative to the stdlib root.
 CREATE_TABLE_ALLOWLIST = {
-    '/src/trace_processor/perfetto_sql/stdlib/android/binder.sql': [
+    '/android/binder.sql': [
         'internal_oom_score', 'internal_async_binder_reply',
         'internal_binder_async_txn_raw'
     ],
-    '/src/trace_processor/perfetto_sql/stdlib/android/monitor_contention.sql': [
+    '/android/monitor_contention.sql': [
         'internal_isolated', 'android_monitor_contention_chain',
         'android_monitor_contention'
     ],
-    '/src/trace_processor/perfetto_sql/stdlib/chrome/tasks.sql': [
+    '/chrome/tasks.sql': [
         'internal_chrome_mojo_slices', 'internal_chrome_java_views',
         'internal_chrome_scheduler_tasks', 'internal_chrome_tasks'
     ],
-    ('/src/trace_processor/perfetto_sql/stdlib/experimental/'
+    ('/experimental/'
      'thread_executing_span.sql'): [
         'internal_wakeup', 'experimental_thread_executing_span_graph',
         'internal_critical_path', 'internal_wakeup_graph',
         'experimental_thread_executing_span_graph'
     ],
-    '/src/trace_processor/perfetto_sql/stdlib/experimental/flat_slices.sql': [
-        'experimental_slice_flattened'
-    ]
+    '/experimental/flat_slices.sql': ['experimental_slice_flattened']
 }
 
 
@@ -110,13 +110,18 @@ def main():
       if 'RUN_METRIC' in line:
         errors.append(f"RUN_METRIC is banned in standard library.\n"
                       f"Offending file: {path}\n")
+      if 'insert into' in line.casefold():
+        errors.append(f"INSERT INTO table is not allowed in standard library.\n"
+                      f"Offending file: {path}\n")
 
     errors += parsed.errors
     errors += check_banned_words(sql, path)
-    errors += check_banned_create_table_as(sql,
-                                           path.split(ROOT_DIR)[1],
-                                           CREATE_TABLE_ALLOWLIST)
+    errors += check_banned_create_table_as(
+        sql,
+        path.split(ROOT_DIR)[1],
+        args.stdlib_sources.split(ROOT_DIR)[1], CREATE_TABLE_ALLOWLIST)
     errors += check_banned_create_view_as(sql, path.split(ROOT_DIR)[1])
+    errors += check_banned_include_all(sql, path.split(ROOT_DIR)[1])
 
   if errors:
     sys.stderr.write("\n".join(errors))

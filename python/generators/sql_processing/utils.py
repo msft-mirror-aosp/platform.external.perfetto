@@ -14,6 +14,7 @@
 
 from enum import Enum
 import re
+import os
 from typing import Dict, List
 
 NAME = r'[a-zA-Z_\d\{\}]+'
@@ -50,6 +51,9 @@ CREATE_VIEW_AS_PATTERN = update_pattern(fr'^CREATE VIEW ({NAME}) AS')
 
 DROP_TABLE_VIEW_PATTERN = update_pattern(fr'^DROP (TABLE|VIEW) IF EXISTS '
                                          fr'({NAME});$')
+
+INCLUDE_ALL_PATTERN = update_pattern(
+    fr'^INCLUDE PERFETTO MODULE [a-zA-Z0-9_\.]*\*;')
 
 CREATE_FUNCTION_PATTERN = update_pattern(
     # Function name.
@@ -163,6 +167,7 @@ def check_banned_words(sql: str, path: str) -> List[str]:
       errors.append('SELECT IMPORT is deprecated in trace processor. '
                     'Use INCLUDE PERFETTO MODULE instead.\n'
                     f'Offending file: {path}')
+
   return errors
 
 
@@ -173,12 +178,16 @@ def check_banned_create_table_as(sql: str, filename: str,
   errors = []
   for _, matches in match_pattern(CREATE_TABLE_AS_PATTERN, sql).items():
     name = matches[0]
-    if filename not in allowlist:
+    # Normalize paths before checking presence in the allowlist so it will
+    # work on Windows for the Chrome stdlib presubmit.
+    allowlist_normpath = dict(
+        (os.path.normpath(path), tables) for path, tables in allowlist.items())
+    if os.path.normpath(filename) not in allowlist_normpath:
       errors.append(f"CREATE TABLE '{name}' is deprecated."
                     "Use CREATE PERFETTO TABLE instead.\n"
                     f"Offending file: {filename}\n")
       continue
-    if name not in allowlist[filename]:
+    if name not in allowlist_normpath[os.path.normpath(filename)]:
       errors.append(
           f"Table '{name}' uses CREATE TABLE which is deprecated "
           "and this table is not allowlisted. Use CREATE PERFETTO TABLE.\n"
@@ -188,17 +197,18 @@ def check_banned_create_table_as(sql: str, filename: str,
 
 # Given SQL string check whether there is (not allowlisted) usage of
 # CREATE TABLE {name} AS.
-def check_banned_create_table_as(sql: str, filename: str,
+def check_banned_create_table_as(sql: str, filename: str, stdlib_path: str,
                                  allowlist: Dict[str, List[str]]) -> List[str]:
   errors = []
   for _, matches in match_pattern(CREATE_TABLE_AS_PATTERN, sql).items():
     name = matches[0]
-    if filename not in allowlist:
+    allowlist_key = filename[len(stdlib_path):]
+    if allowlist_key not in allowlist:
       errors.append(f"CREATE TABLE '{name}' is deprecated. "
                     "Use CREATE PERFETTO TABLE instead.\n"
                     f"Offending file: {filename}\n")
       continue
-    if name not in allowlist[filename]:
+    if name not in allowlist[allowlist_key]:
       errors.append(
           f"Table '{name}' uses CREATE TABLE which is deprecated "
           "and this table is not allowlisted. Use CREATE PERFETTO TABLE.\n"
@@ -214,4 +224,14 @@ def check_banned_create_view_as(sql: str, filename: str) -> List[str]:
     errors.append(f"CREATE VIEW '{name}' is deprecated. "
                   "Use CREATE PERFETTO VIEW instead.\n"
                   f"Offending file: {filename}\n")
+  return errors
+
+
+# Given SQL string check whether there is usage of CREATE VIEW {name} AS.
+def check_banned_include_all(sql: str, filename: str) -> List[str]:
+  errors = []
+  for _, matches in match_pattern(INCLUDE_ALL_PATTERN, sql).items():
+    errors.append(
+        f"INCLUDE PERFETTO MODULE with wildcards is not allowed in stdlib. "
+        f"Import specific modules instead. Offending file: {filename}")
   return errors
