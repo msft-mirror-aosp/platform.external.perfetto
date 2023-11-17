@@ -284,6 +284,53 @@ RULES = [
         r'/plugins/.*',
         'widgets should only depend on base',
     ),
+    NoDep(
+        r'/widgets/.*',
+        r'/common/.*',
+        'widgets should only depend on base',
+    ),
+
+    # Bigtrace
+    NoDep(
+        r'/bigtrace/.*',
+        r'/frontend/.*',
+        'bigtrace should not depend on frontend',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/core/.*',
+        'bigtrace should not depend on core',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/common/.*',
+        'bigtrace should not depend on common',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/engine/.*',
+        'bigtrace should not depend on engine',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/tracks/.*',
+        'bigtrace should not depend on trace_processor',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/traceconv/.*',
+        'bigtrace should not depend on traceconv',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/tracks/.*',
+        'bigtrace should not depend on tracks',
+    ),
+    NoDep(
+        r'/bigtrace/.*',
+        r'/controller/.*',
+        'bigtrace should not depend on controller',
+    ),
 
     # Fails at the moment as we have several circular dependencies. One
     # example:
