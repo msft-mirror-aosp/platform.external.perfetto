@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {featureFlags} from '../common/feature_flags';
-import {globals} from './globals';
+import {featureFlags} from '../core/feature_flags';
 
 let lastReloadDialogTime = 0;
 const kMinTimeBetweenDialogsMs = 10000;
 const changedPaths = new Set<string>();
 
-export function initLiveReloadIfLocalhost() {
+export function initLiveReloadIfLocalhost(embeddedMode: boolean) {
   if (!location.origin.startsWith('http://localhost:')) return;
-  if (globals.embeddedMode) return;
+  if (embeddedMode) return;
 
   const monitor = new EventSource('/live_reload');
   monitor.onmessage = (msg) => {
