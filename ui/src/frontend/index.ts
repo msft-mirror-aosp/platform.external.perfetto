@@ -24,7 +24,6 @@ import {reportError, setErrorHandler} from '../base/logging';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
 import {CommandManager} from '../common/commands';
 import {createEmptyState} from '../common/empty_state';
-import {RECORDING_V2_FLAG} from '../common/feature_flags';
 import {flattenArgs, traceEvent} from '../common/metatracing';
 import {pluginManager, pluginRegistry} from '../common/plugins';
 import {State} from '../common/state';
@@ -32,6 +31,8 @@ import {initController, runControllers} from '../controller';
 import {
   isGetCategoriesResponse,
 } from '../controller/chrome_proxy_record_controller';
+import {RECORDING_V2_FLAG} from '../core/feature_flags';
+import {initLiveReloadIfLocalhost} from '../core/live_reload';
 import {raf} from '../core/raf_scheduler';
 import {initWasm} from '../trace_processor/wasm_engine_proxy';
 import {setScheduleFullRedraw} from '../widgets/raf';
@@ -45,7 +46,6 @@ import {FlagsPage} from './flags_page';
 import {globals} from './globals';
 import {HomePage} from './home_page';
 import {InsightsPage} from './insights_page';
-import {initLiveReloadIfLocalhost} from './live_reload';
 import {MetricsPage} from './metrics_page';
 import {postMessageHandler} from './post_message_handler';
 import {QueryPage} from './query_page';
@@ -76,8 +76,7 @@ class FrontendApi {
     // Only redraw if something other than the frontendLocalState changed.
     let key: keyof State;
     for (key in state) {
-      if (key !== 'frontendLocalState' && key !== 'visibleTracks' &&
-          oldState[key] !== state[key]) {
+      if (key !== 'frontendLocalState' && oldState[key] !== state[key]) {
         raf.scheduleFullRedraw();
         break;
       }
@@ -308,7 +307,7 @@ function onCssLoaded() {
     m.render(document.body, m(App, globals.router.resolve()));
   };
 
-  initLiveReloadIfLocalhost();
+  initLiveReloadIfLocalhost(globals.embeddedMode);
 
   if (!RECORDING_V2_FLAG.get()) {
     updateAvailableAdbDevices();
