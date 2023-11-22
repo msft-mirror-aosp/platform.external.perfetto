@@ -21,6 +21,11 @@
 #include "src/trace_processor/db/storage/types.h"
 
 namespace perfetto {
+
+namespace protos::pbzero {
+class SerializedColumn_Storage;
+}
+
 namespace trace_processor {
 namespace storage {
 
@@ -29,8 +34,7 @@ class SetIdStorage final : public Storage {
  public:
   using SetId = uint32_t;
 
-  explicit SetIdStorage(const void* data, uint32_t size)
-      : data_(static_cast<const uint32_t*>(data)), size_(size) {}
+  explicit SetIdStorage(const std::vector<uint32_t>* data) : values_(data) {}
 
   RangeOrBitVector Search(FilterOp op,
                           SqlValue value,
@@ -46,7 +50,11 @@ class SetIdStorage final : public Storage {
 
   void Sort(uint32_t* rows, uint32_t rows_size) const override;
 
-  uint32_t size() const override { return size_; }
+  void Serialize(protos::pbzero::SerializedColumn_Storage*) const override;
+
+  uint32_t size() const override {
+    return static_cast<uint32_t>(values_->size());
+  }
 
  private:
   BitVector IndexSearch(FilterOp, SqlValue, uint32_t*, uint32_t) const;
@@ -54,8 +62,9 @@ class SetIdStorage final : public Storage {
                                       SqlValue val,
                                       RowMap::Range search_range) const;
 
-  const SetId* data_ = nullptr;
-  const uint32_t size_ = 0;
+  // TODO(b/307482437): After the migration vectors should be owned by storage,
+  // so change from pointer to value.
+  const std::vector<SetId>* values_ = nullptr;
 };
 
 }  // namespace storage

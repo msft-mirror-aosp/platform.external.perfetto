@@ -27,12 +27,10 @@ import {
   DeferredAction,
 } from '../common/actions';
 import {cacheTrace} from '../common/cache_manager';
-import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../common/feature_flags';
 import {
   HighPrecisionTime,
   HighPrecisionTimeSpan,
 } from '../common/high_precision_time';
-import {HttpRpcEngine} from '../common/http_rpc_engine';
 import {
   getEnabledMetatracingCategories,
   isMetatracingEnabled,
@@ -45,7 +43,7 @@ import {
   PendingDeeplinkState,
   ProfileType,
 } from '../common/state';
-import {resetEngineWorker, WasmEngineProxy} from '../common/wasm_engine_proxy';
+import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {BottomTabList} from '../frontend/bottom_tab';
 import {
   FtraceStat,
@@ -64,6 +62,7 @@ import {
 } from '../frontend/publish';
 import {Router} from '../frontend/router';
 import {Engine} from '../trace_processor/engine';
+import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {
   LONG,
   LONG_NULL,
@@ -73,6 +72,10 @@ import {
   STR,
   STR_NULL,
 } from '../trace_processor/query_result';
+import {
+  resetEngineWorker,
+  WasmEngineProxy,
+} from '../trace_processor/wasm_engine_proxy';
 
 import {
   CounterAggregationController,

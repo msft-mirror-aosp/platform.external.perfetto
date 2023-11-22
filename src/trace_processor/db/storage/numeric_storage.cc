@@ -16,7 +16,11 @@
  */
 
 #include "src/trace_processor/db/storage/numeric_storage.h"
+
+#include <cstddef>
 #include <string>
+
+#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/db/storage/types.h"
@@ -197,9 +201,9 @@ void TypedLinearSearch(T typed_val,
 
 }  // namespace
 
-RangeOrBitVector NumericStorage::Search(FilterOp op,
-                                        SqlValue value,
-                                        RowMap::Range range) const {
+RangeOrBitVector NumericStorageBase::Search(FilterOp op,
+                                            SqlValue value,
+                                            RowMap::Range range) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB, "NumericStorage::Search",
                     [&range, op](metatrace::Record* r) {
                       r->AddArg("Start", std::to_string(range.start));
@@ -224,11 +228,11 @@ RangeOrBitVector NumericStorage::Search(FilterOp op,
   return RangeOrBitVector(LinearSearchInternal(op, value, range));
 }
 
-RangeOrBitVector NumericStorage::IndexSearch(FilterOp op,
-                                             SqlValue value,
-                                             uint32_t* indices,
-                                             uint32_t indices_count,
-                                             bool sorted) const {
+RangeOrBitVector NumericStorageBase::IndexSearch(FilterOp op,
+                                                 SqlValue value,
+                                                 uint32_t* indices,
+                                                 uint32_t indices_count,
+                                                 bool sorted) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB, "NumericStorage::IndexSearch",
                     [indices_count, op](metatrace::Record* r) {
                       r->AddArg("Count", std::to_string(indices_count));
@@ -243,9 +247,9 @@ RangeOrBitVector NumericStorage::IndexSearch(FilterOp op,
       IndexSearchInternal(op, value, indices, indices_count));
 }
 
-BitVector NumericStorage::LinearSearchInternal(FilterOp op,
-                                               SqlValue sql_val,
-                                               RowMap::Range range) const {
+BitVector NumericStorageBase::LinearSearchInternal(FilterOp op,
+                                                   SqlValue sql_val,
+                                                   RowMap::Range range) const {
   std::optional<NumericValue> val = GetNumericTypeVariant(type_, sql_val);
   if (op == FilterOp::kIsNotNull)
     return BitVector(size(), true);
@@ -272,10 +276,11 @@ BitVector NumericStorage::LinearSearchInternal(FilterOp op,
   return std::move(builder).Build();
 }
 
-BitVector NumericStorage::IndexSearchInternal(FilterOp op,
-                                              SqlValue sql_val,
-                                              uint32_t* indices,
-                                              uint32_t indices_count) const {
+BitVector NumericStorageBase::IndexSearchInternal(
+    FilterOp op,
+    SqlValue sql_val,
+    uint32_t* indices,
+    uint32_t indices_count) const {
   std::optional<NumericValue> val = GetNumericTypeVariant(type_, sql_val);
   if (op == FilterOp::kIsNotNull)
     return BitVector(indices_count, true);
@@ -299,7 +304,7 @@ BitVector NumericStorage::IndexSearchInternal(FilterOp op,
   return std::move(builder).Build();
 }
 
-RowMap::Range NumericStorage::BinarySearchIntrinsic(
+RowMap::Range NumericStorageBase::BinarySearchIntrinsic(
     FilterOp op,
     SqlValue sql_val,
     RowMap::Range search_range) const {
@@ -337,7 +342,7 @@ RowMap::Range NumericStorage::BinarySearchIntrinsic(
   return RowMap::Range();
 }
 
-RowMap::Range NumericStorage::BinarySearchExtrinsic(
+RowMap::Range NumericStorageBase::BinarySearchExtrinsic(
     FilterOp op,
     SqlValue sql_val,
     uint32_t* indices,
@@ -377,7 +382,7 @@ RowMap::Range NumericStorage::BinarySearchExtrinsic(
   return RowMap::Range();
 }
 
-void NumericStorage::StableSort(uint32_t* rows, uint32_t rows_size) const {
+void NumericStorageBase::StableSort(uint32_t* rows, uint32_t rows_size) const {
   NumericValue val = *GetNumericTypeVariant(type_, SqlValue::Long(0));
   std::visit(
       [this, &rows, rows_size](auto val_data) {
@@ -393,7 +398,39 @@ void NumericStorage::StableSort(uint32_t* rows, uint32_t rows_size) const {
       val);
 }
 
-void NumericStorage::Sort(uint32_t*, uint32_t) const {}
+void NumericStorageBase::Sort(uint32_t*, uint32_t) const {}
+
+void NumericStorageBase::Serialize(
+    protos::pbzero::SerializedColumn::Storage* msg) const {
+  auto* numeric_storage_msg = msg->set_numeric_storage();
+  numeric_storage_msg->set_is_sorted(is_sorted_);
+  numeric_storage_msg->set_column_type(static_cast<uint32_t>(type_));
+
+  auto* values_msg = numeric_storage_msg->set_values();
+  values_msg->set_size(size_);
+
+  uint32_t type_size;
+  switch (type_) {
+    case ColumnType::kInt64:
+      type_size = sizeof(int64_t);
+      break;
+    case ColumnType::kInt32:
+      type_size = sizeof(int32_t);
+      break;
+    case ColumnType::kUint32:
+      type_size = sizeof(uint32_t);
+      break;
+    case ColumnType::kDouble:
+      type_size = sizeof(double_t);
+      break;
+    case ColumnType::kDummy:
+    case ColumnType::kId:
+    case ColumnType::kString:
+      PERFETTO_FATAL("Invalid column type for NumericStorage");
+  }
+  values_msg->set_data(static_cast<const uint8_t*>(data_),
+                       static_cast<size_t>(type_size * size_));
+}
 
 }  // namespace storage
 }  // namespace trace_processor

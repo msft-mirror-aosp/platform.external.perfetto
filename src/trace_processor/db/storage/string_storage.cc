@@ -15,10 +15,12 @@
  */
 
 #include "src/trace_processor/db/storage/string_storage.h"
+
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/status_or.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/trace_processor/basic_types.h"
+#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 #include "perfetto/base/logging.h"
 #include "src/trace_processor/containers/bit_vector.h"
@@ -224,7 +226,7 @@ BitVector StringStorage::LinearSearchInternal(FilterOp op,
       (op == FilterOp::kIsNull || op == FilterOp::kIsNotNull)
           ? StringPool::Id::Null()
           : string_pool_->InternString(base::StringView(sql_val.AsString()));
-  const StringPool::Id* start = data_ + range.start;
+  const StringPool::Id* start = values_->data() + range.start;
   PERFETTO_TP_TRACE(
       metatrace::Category::DB, "StringStorage::Search",
       [range, op, &sql_val](metatrace::Record* r) {
@@ -329,7 +331,7 @@ RangeOrBitVector StringStorage::IndexSearchInternal(FilterOp op,
       (op == FilterOp::kIsNull || op == FilterOp::kIsNotNull)
           ? StringPool::Id::Null()
           : string_pool_->InternString(base::StringView(sql_val.AsString()));
-  const StringPool::Id* start = data_;
+  const StringPool::Id* start = values_->data();
   PERFETTO_TP_TRACE(
       metatrace::Category::DB, "StringStorage::IndexSearch",
       [indices_size, op, &sql_val](metatrace::Record* r) {
@@ -423,26 +425,27 @@ RowMap::Range StringStorage::BinarySearchIntrinsic(
 
   switch (op) {
     case FilterOp::kEq:
-      return RowMap::Range(
-          LowerBoundIntrinsic(string_pool_, data_, val_str, search_range),
-          UpperBoundIntrinsic(string_pool_, data_, val_str, search_range));
+      return RowMap::Range(LowerBoundIntrinsic(string_pool_, values_->data(),
+                                               val_str, search_range),
+                           UpperBoundIntrinsic(string_pool_, values_->data(),
+                                               val_str, search_range));
     case FilterOp::kLe: {
-      return RowMap::Range(
-          search_range.start,
-          UpperBoundIntrinsic(string_pool_, data_, val_str, search_range));
+      return RowMap::Range(search_range.start,
+                           UpperBoundIntrinsic(string_pool_, values_->data(),
+                                               val_str, search_range));
     }
     case FilterOp::kLt:
-      return RowMap::Range(
-          search_range.start,
-          LowerBoundIntrinsic(string_pool_, data_, val_str, search_range));
+      return RowMap::Range(search_range.start,
+                           LowerBoundIntrinsic(string_pool_, values_->data(),
+                                               val_str, search_range));
     case FilterOp::kGe:
-      return RowMap::Range(
-          LowerBoundIntrinsic(string_pool_, data_, val_str, search_range),
-          search_range.end);
+      return RowMap::Range(LowerBoundIntrinsic(string_pool_, values_->data(),
+                                               val_str, search_range),
+                           search_range.end);
     case FilterOp::kGt:
-      return RowMap::Range(
-          UpperBoundIntrinsic(string_pool_, data_, val_str, search_range),
-          search_range.end);
+      return RowMap::Range(UpperBoundIntrinsic(string_pool_, values_->data(),
+                                               val_str, search_range),
+                           search_range.end);
 
     case FilterOp::kNe:
       PERFETTO_FATAL("Shouldn't be called");
@@ -464,17 +467,28 @@ RowMap::Range StringStorage::BinarySearchExtrinsic(FilterOp,
 void StringStorage::StableSort(uint32_t* indices, uint32_t indices_size) const {
   std::stable_sort(indices, indices + indices_size,
                    [this](uint32_t a_idx, uint32_t b_idx) {
-                     return string_pool_->Get(data_[a_idx]) <
-                            string_pool_->Get(data_[b_idx]);
+                     return string_pool_->Get(values_->data()[a_idx]) <
+                            string_pool_->Get(values_->data()[b_idx]);
                    });
 }
 
 void StringStorage::Sort(uint32_t* indices, uint32_t indices_size) const {
   std::sort(indices, indices + indices_size,
             [this](uint32_t a_idx, uint32_t b_idx) {
-              return string_pool_->Get(data_[a_idx]) <
-                     string_pool_->Get(data_[b_idx]);
+              return string_pool_->Get(values_->data()[a_idx]) <
+                     string_pool_->Get(values_->data()[b_idx]);
             });
+}
+
+void StringStorage::Serialize(
+    protos::pbzero::SerializedColumn::Storage* msg) const {
+  auto* string_storage = msg->set_string_storage();
+  string_storage->set_is_sorted(is_sorted_);
+
+  auto* vec_msg = string_storage->set_values();
+  vec_msg->set_size(size());
+  vec_msg->set_data(reinterpret_cast<const uint8_t*>(values_->data()),
+                    sizeof(StringPool::Id) * size());
 }
 
 }  // namespace storage
