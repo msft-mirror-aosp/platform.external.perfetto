@@ -15,13 +15,6 @@
 import m from 'mithril';
 
 import {duration, Time, time} from '../../base/time';
-import {
-  ColumnType,
-  durationFromSql,
-  LONG,
-  STR,
-  timeFromSql,
-} from '../../common/query_result';
 import {raf} from '../../core/raf_scheduler';
 import {
   BottomTab,
@@ -50,9 +43,16 @@ import {
   ThreadState,
   threadStateRef,
 } from '../../frontend/thread_state';
+import {DurationWidget} from '../../frontend/widgets/duration';
 import {Timestamp} from '../../frontend/widgets/timestamp';
+import {
+  ColumnType,
+  durationFromSql,
+  LONG,
+  STR,
+  timeFromSql,
+} from '../../trace_processor/query_result';
 import {DetailsShell} from '../../widgets/details_shell';
-import {DurationWidget} from '../../widgets/duration';
 import {GridLayout} from '../../widgets/grid_layout';
 import {Section} from '../../widgets/section';
 import {

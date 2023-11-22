@@ -16,12 +16,12 @@ import m from 'mithril';
 import {v4 as uuidv4} from 'uuid';
 
 import {Actions} from '../../common/actions';
-import {EngineProxy} from '../../common/engine';
 import {SCROLLING_TRACK_GROUP} from '../../common/state';
 import {BaseCounterTrack} from '../../frontend/base_counter_track';
 import {globals} from '../../frontend/globals';
 import {TrackButton} from '../../frontend/track_panel';
 import {PrimaryTrackSortKey, TrackContext} from '../../public';
+import {EngineProxy} from '../../trace_processor/engine';
 
 import {DEBUG_COUNTER_TRACK_URI} from '.';
 
@@ -36,16 +36,15 @@ export interface CounterDebugTrackConfig {
   columns: CounterColumns;
 }
 
-export class DebugCounterTrack extends
-    BaseCounterTrack<CounterDebugTrackConfig> {
-  constructor(engine: EngineProxy, trackKey: string) {
+export class DebugCounterTrack extends BaseCounterTrack {
+  private config: CounterDebugTrackConfig;
+
+  constructor(engine: EngineProxy, ctx: TrackContext) {
     super({
       engine,
-      trackKey,
+      trackKey: ctx.trackKey,
     });
-  }
 
-  onCreate(ctx: TrackContext): void {
     // TODO(stevegolton): Validate params before type asserting.
     // TODO(stevegolton): Avoid just pushing this config up for some base
     // class to use. Be more explicit.
@@ -66,11 +65,8 @@ export class DebugCounterTrack extends
     ];
   }
 
-  async initSqlTable(tableName: string): Promise<void> {
-    await this.engine.query(`
-      create view ${tableName} as
-      select * from ${this.config.sqlTableName};
-    `);
+  getSqlSource(): string {
+    return `select * from ${this.config.sqlTableName}`;
   }
 }
 

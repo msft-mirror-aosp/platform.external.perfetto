@@ -198,6 +198,15 @@ message DataSourceDescriptor {
   // contents, and knows how to stop referring to the already-emitted data.
   optional bool handles_incremental_state_clear = 4;
 
+  // If true, indicates that the data source does nothing upon Flush. This
+  // allows the service to reduce the flush-related IPC traffic and better deal
+  // with frozen producers (see go/perfetto-frozen). This is usually the case
+  // for data sources like 'track_event' that don't have access to the various
+  // thread task runners to post a flush task and rely purely on server-side
+  // scraping.
+  // Introduced in v39 / Android V.
+  optional bool no_flush = 9;
+
   // Optional specification about available GPU counters.
   optional GpuCounterDescriptor gpu_counter_descriptor = 5 [lazy = true];
 
@@ -923,6 +932,9 @@ message AndroidPowerConfig {
 
     // Avg current.
     BATTERY_COUNTER_CURRENT_AVG = 4;
+
+    // Instantaneous voltage.
+    BATTERY_COUNTER_VOLTAGE = 5;
   }
   optional uint32 battery_poll_ms = 1;
   repeated BatteryCounters battery_counters = 2;
@@ -2978,7 +2990,7 @@ message TraceConfig {
   // long (e.g. 24h) traces, where suspend can inflate them to weeks of
   // wall-time, making them more likely to hit device reboots (and hence loss).
   // This option also changes consistently the semantic of
-  // TrigerConfig.stop_delay_ms.
+  // TriggerConfig.stop_delay_ms.
   optional bool prefer_suspend_clock_for_duration = 36;
 
   // This is set when --dropbox is passed to the Perfetto command line client
@@ -4462,9 +4474,9 @@ message LayerProto {
   optional PositionProto requested_position = 12;
   // The layer's size.
   optional SizeProto size = 13;
-  // The layer's crop in it's own bounds.
+  // The layer's crop in its own bounds.
   optional RectProto crop = 14;
-  // The layer's crop in it's parent's bounds.
+  // The layer's crop in its parent's bounds.
   optional RectProto final_crop = 15 [deprecated = true];
   optional bool is_opaque = 16;
   optional bool invalidate = 17;
@@ -10828,7 +10840,6 @@ enum ChromeRAILMode {
   RAIL_MODE_LOAD = 4;
 }
 
-// Next id: 2
 message ChromeRendererSchedulerState {
   optional ChromeRAILMode rail_mode = 1;
 
@@ -13466,7 +13477,7 @@ message TracePacket {
   // 1. There are no prior events for the sequence because of data loss, e.g.
   //    due to ring buffer wrapping.
   // 2. There are no prior events for the sequence because it didn't start
-  //    before this packet (= there's definitely no preceeding data loss).
+  //    before this packet (= there's definitely no preceding data loss).
   //
   // Given that older SDK versions do not support this flag, this flag not
   // being present for a particular sequence does not necessarily imply data

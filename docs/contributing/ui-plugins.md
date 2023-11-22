@@ -64,8 +64,8 @@ They can be accessed via the omnibox.
 Follow the [create a plugin](#create-a-plugin) to get an initial
 skeleton for your plugin.
 
-To add your first command, add a call to `ctx.addCommand()` in either your
-`onActivate()` or `onTraceLoad()` hooks. The recommendation is to register
+To add your first command, add a call to `ctx.registerCommand()` in either
+your `onActivate()` or `onTraceLoad()` hooks. The recommendation is to register
 commands in `onActivate()` by default unless they require something from
 `TracePluginContext` which is not available on `PluginContext`.
 
@@ -76,7 +76,7 @@ available all the time the plugin is active.
 ```typescript
 class MyPlugin implements Plugin {
   onActivate(ctx: PluginContext): void {
-    ctx.addCommand(
+    ctx.registerCommand(
        {
          id: 'dev.perfetto.ExampleSimpleCommand#LogHelloPlugin',
          name: 'Log "Hello, plugin!"',
@@ -86,7 +86,7 @@ class MyPlugin implements Plugin {
   }
 
   onTraceLoad(ctx: TracePluginContext): void {
-    ctx.addCommand(
+    ctx.registerCommand(
        {
          id: 'dev.perfetto.ExampleSimpleTraceCommand#LogHelloTrace',
          name: 'Log "Hello, trace!"',
@@ -114,6 +114,26 @@ Examples:
 - [dev.perfetto.ExampleSimpleCommand](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.ExampleSimpleCommand/index.ts).
 - [dev.perfetto.CoreCommands](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.CoreCommands/index.ts).
 - [dev.perfetto.ExampleState](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/plugins/dev.perfetto.ExampleState/index.ts).
+
+#### Hotkeys
+
+A default hotkey may be provided when registering a command.
+
+```typescript
+ctx.registerCommand({
+  id: 'dev.perfetto.ExampleSimpleCommand#LogHelloWorld',
+  name: 'Log "Hello, World!"',
+  callback: () => console.log('Hello, World!'),
+  defaultHotkey: 'Shift+H',
+});
+```
+
+Even though the hotkey is a string, it's format checked at compile time using 
+typescript's [template literal types](https://www.typescriptlang.org/docs/handbook/2/template-literal-types.html).
+
+See [hotkey.ts](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/base/hotkeys.ts)
+for more details on how the hotkey syntax works, and for the available keys and
+modifiers.
 
 ### Tracks
 TBD

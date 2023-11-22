@@ -17,14 +17,13 @@ import m from 'mithril';
 import {Icons} from '../base/semantic_icons';
 import {duration, Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
-import {EngineProxy} from '../common/engine';
 import {runQuery} from '../common/queries';
-import {LONG, LONG_NULL, NUM, STR_NULL} from '../common/query_result';
 import {raf} from '../core/raf_scheduler';
+import {EngineProxy} from '../trace_processor/engine';
+import {LONG, LONG_NULL, NUM, STR_NULL} from '../trace_processor/query_result';
 import {addDebugSliceTrack} from '../tracks/debug/slice_track';
 import {Button} from '../widgets/button';
 import {DetailsShell} from '../widgets/details_shell';
-import {DurationWidget} from '../widgets/duration';
 import {GridLayout, GridLayoutColumn} from '../widgets/grid_layout';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 import {Section} from '../widgets/section';
@@ -36,7 +35,6 @@ import {
   NewBottomTabArgs,
 } from './bottom_tab';
 import {FlowPoint, globals} from './globals';
-import {runQueryInNewTab} from './query_result_tab';
 import {renderArguments} from './slice_args';
 import {renderDetails} from './slice_details';
 import {getSlice, SliceDetails, SliceRef} from './sql/slice';
@@ -45,6 +43,7 @@ import {
   breakDownIntervalByThreadState,
 } from './sql/thread_state';
 import {asSliceSqlId} from './sql_types';
+import {DurationWidget} from './widgets/duration';
 
 interface ContextMenuItem {
   name: string;
@@ -92,7 +91,7 @@ const ITEMS: ContextMenuItem[] = [
   {
     name: 'Average duration of slice name',
     shouldDisplay: (slice: SliceDetails) => hasName(slice),
-    run: (slice: SliceDetails) => runQueryInNewTab(
+    run: (slice: SliceDetails) => globals.openQuery(
         `SELECT AVG(dur) / 1e9 FROM slice WHERE name = '${slice.name!}'`,
         `${slice.name} average dur`,
         ),
@@ -150,7 +149,6 @@ const ITEMS: ContextMenuItem[] = [
                                         AND short_blocked_method IS NOT NULL
                                   ORDER BY depth
                                 ) SELECT ts, dur, name FROM merged`,
-                    columns: ['ts', 'dur', 'name'],
                   },
                   `Binder names (${getProcessNameFromSlice(slice)}:${
                       getThreadNameFromSlice(slice)})`,

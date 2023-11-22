@@ -17,14 +17,12 @@ import {v4 as uuidv4} from 'uuid';
 
 import {Disposable} from '../../base/disposable';
 import {Actions} from '../../common/actions';
-import {EngineProxy} from '../../common/engine';
 import {SCROLLING_TRACK_GROUP} from '../../common/state';
 import {globals} from '../../frontend/globals';
-import {
-  NamedSliceTrackTypes,
-} from '../../frontend/named_slice_track';
+import {NamedSliceTrackTypes} from '../../frontend/named_slice_track';
 import {TrackButton} from '../../frontend/track_panel';
 import {PrimaryTrackSortKey, TrackContext} from '../../public';
+import {EngineProxy} from '../../trace_processor/engine';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
@@ -47,19 +45,16 @@ export interface DebugTrackV2Config {
   columns: SliceColumns;
 }
 
-interface DebugTrackV2Types extends NamedSliceTrackTypes {
-  config: DebugTrackV2Config;
-}
+export class DebugTrackV2 extends
+    CustomSqlTableSliceTrack<NamedSliceTrackTypes> {
+  private config: DebugTrackV2Config;
 
-export class DebugTrackV2 extends CustomSqlTableSliceTrack<DebugTrackV2Types> {
-  constructor(engine: EngineProxy, trackKey: string) {
+  constructor(engine: EngineProxy, ctx: TrackContext) {
     super({
       engine,
-      trackKey,
+      trackKey: ctx.trackKey,
     });
-  }
 
-  onCreate(ctx: TrackContext): void {
     // TODO(stevegolton): Validate params before type asserting.
     // TODO(stevegolton): Avoid just pushing this config up for some base
     // class to use. Be more explicit.
@@ -68,7 +63,7 @@ export class DebugTrackV2 extends CustomSqlTableSliceTrack<DebugTrackV2Types> {
 
   getSqlDataSource(): CustomSqlTableDefConfig {
     return {
-      sqlTableName: this.config.sqlTableName,
+      sqlTableName: this.config!.sqlTableName,
     };
   }
 
@@ -76,7 +71,7 @@ export class DebugTrackV2 extends CustomSqlTableSliceTrack<DebugTrackV2Types> {
     return {
       kind: DebugSliceDetailsTab.kind,
       config: {
-        sqlTableName: this.config.sqlTableName,
+        sqlTableName: this.config!.sqlTableName,
         title: 'Debug Slice',
       },
     };
@@ -103,9 +98,12 @@ let debugTrackCount = 0;
 export interface SqlDataSource {
   // SQL source selecting the necessary data.
   sqlSource: string;
+
+  // Optional: Rename columns from the query result.
+  // If omitted, original column names from the query are used instead.
   // The caller is responsible for ensuring that the number of items in this
   // list matches the number of columns returned by sqlSource.
-  columns: string[];
+  columns?: string[];
 }
 
 export async function addDebugSliceTrack(

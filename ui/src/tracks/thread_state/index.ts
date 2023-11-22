@@ -19,7 +19,6 @@ import {duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {cropText} from '../../common/canvas_utils';
 import {colorForState} from '../../common/colorizer';
-import {LONG, NUM, NUM_NULL, STR_NULL} from '../../common/query_result';
 import {translateState} from '../../common/thread_state';
 import {
   TrackAdapter,
@@ -37,6 +36,12 @@ import {
   PluginDescriptor,
 } from '../../public';
 import {getTrackName} from '../../public/utils';
+import {
+  LONG,
+  NUM,
+  NUM_NULL,
+  STR_NULL,
+} from '../../trace_processor/query_result';
 
 import {
   ThreadStateTrack as ThreadStateTrackV2,
@@ -350,12 +355,12 @@ class ThreadState implements Plugin {
         kind: THREAD_STATE_TRACK_V2_KIND,
         utid,
         track: ({trackKey}) => {
-          const track = ThreadStateTrackV2.create({
-            engine: ctx.engine,
-            trackKey,
-          });
-          track.config = {utid};
-          return track;
+          return new ThreadStateTrackV2(
+              {
+                engine: ctx.engine,
+                trackKey,
+              },
+              utid);
         },
       });
     }

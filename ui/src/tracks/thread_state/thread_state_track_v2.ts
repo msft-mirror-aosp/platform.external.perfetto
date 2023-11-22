@@ -14,11 +14,10 @@
 
 import {Actions} from '../../common/actions';
 import {Color, colorForState} from '../../common/colorizer';
-import {NUM_NULL, STR} from '../../common/query_result';
 import {Selection} from '../../common/state';
 import {translateState} from '../../common/thread_state';
 import {
-  BASE_SLICE_ROW,
+  BASE_ROW,
   BaseSliceTrack,
   BaseSliceTrackTypes,
   OnSliceClickArgs,
@@ -29,32 +28,24 @@ import {
   SliceLayout,
 } from '../../frontend/slice_layout';
 import {NewTrackArgs} from '../../frontend/track';
+import {NUM_NULL, STR} from '../../trace_processor/query_result';
 
 export const THREAD_STATE_ROW = {
-  ...BASE_SLICE_ROW,
+  ...BASE_ROW,
   state: STR,
   ioWait: NUM_NULL,
 };
 
 export type ThreadStateRow = typeof THREAD_STATE_ROW;
 
-export interface ThreadStateTrackConfig {
-  utid: number;
-}
-
 export interface ThreadStateTrackTypes extends BaseSliceTrackTypes {
   row: ThreadStateRow;
-  config: ThreadStateTrackConfig;
 }
 
 export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
-  static create(args: NewTrackArgs) {
-    return new ThreadStateTrack(args);
-  }
-
   protected sliceLayout: SliceLayout = {...SLICE_LAYOUT_FLAT_DEFAULTS};
 
-  constructor(args: NewTrackArgs) {
+  constructor(args: NewTrackArgs, private utid: number) {
     super(args);
   }
 
@@ -76,7 +67,7 @@ export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
         0 as depth
       from thread_state
       where
-        utid = ${this.config.utid} and
+        utid = ${this.utid} and
         state != 'x' and
         state != 'S'
     `;
@@ -96,7 +87,6 @@ export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
     for (const slice of slices) {
       if (slice === this.hoveredSlice) {
         slice.color = {
-          c: slice.baseColor.c,
           h: slice.baseColor.h,
           s: slice.baseColor.s,
           l: 30,

@@ -69,14 +69,14 @@ export function serializeStateObject(object: unknown): string {
   return json;
 }
 
-export function deserializeStateObject(json: string): any {
+export function deserializeStateObject<T>(json: string): T {
   const object = JSON.parse(json, (_key, value) => {
     if (isSerializedBigint(value)) {
       return BigInt(value.value);
     }
     return value;
   });
-  return object;
+  return object as T;
 }
 
 export async function saveState(stateOrConfig: State|

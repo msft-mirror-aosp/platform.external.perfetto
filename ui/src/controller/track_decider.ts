@@ -21,23 +21,23 @@ import {
   AddTrackArgs,
   DeferredAction,
 } from '../common/actions';
-import {Engine, EngineProxy} from '../common/engine';
-import {featureFlags, PERF_SAMPLE_FLAG} from '../common/feature_flags';
 import {pluginManager} from '../common/plugins';
-import {
-  NUM,
-  NUM_NULL,
-  STR,
-  STR_NULL,
-} from '../common/query_result';
 import {
   InThreadTrackSortKey,
   SCROLLING_TRACK_GROUP,
   TrackSortKey,
   UtidToTrackSortKey,
 } from '../common/state';
+import {featureFlags, PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {PrimaryTrackSortKey} from '../public';
 import {getTrackName} from '../public/utils';
+import {Engine, EngineProxy} from '../trace_processor/engine';
+import {
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+} from '../trace_processor/query_result';
 import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../tracks/actual_frames';
 import {ASYNC_SLICE_TRACK_KIND} from '../tracks/async_slices';
 import {
@@ -1609,7 +1609,7 @@ class TrackDecider {
 
   async decideTracks(): Promise<DeferredAction[]> {
     {
-      const result = screenshotDecideTracks(this.engine);
+      const result = screenshotDecideTracks();
       if (result !== null) {
         const {tracksToAdd} = await result;
         this.tracksToAdd.push(...tracksToAdd);

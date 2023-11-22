@@ -15,19 +15,20 @@
 import {v4 as uuidv4} from 'uuid';
 
 import {Actions, AddTrackArgs, DeferredAction} from '../../common/actions';
-import {Engine} from '../../common/engine';
-import {featureFlags} from '../../common/feature_flags';
 import {
   generateSqlWithInternalLayout,
 } from '../../common/internal_layout_utils';
 import {ObjectByKey} from '../../common/state';
+import {featureFlags} from '../../core/feature_flags';
 import {
+  NUM,
   Plugin,
   PluginContext,
   PluginContextTrace,
   PluginDescriptor,
   PrimaryTrackSortKey,
 } from '../../public';
+import {Engine, EngineProxy} from '../../trace_processor/engine';
 import {CustomSqlDetailsPanelConfig} from '../custom_sql_table_slices';
 import {NULL_TRACK_URI} from '../null_track';
 
@@ -159,6 +160,37 @@ class ChromeScrollJankPlugin implements Plugin {
     await this.addTopLevelScrollTrack(ctx);
     await this.addEventLatencyTrack(ctx);
     await this.addScrollJankV3ScrollTrack(ctx);
+
+    if (!ENABLE_CHROME_SCROLL_JANK_PLUGIN.get()) {
+      return;
+    }
+
+    if (!await isChromeTrace(ctx.engine)) {
+      return;
+    }
+
+    // Initialise the chrome_tasks_delaying_input_processing table. It will be
+    // used in the tracks above.
+    await ctx.engine.query(`
+      select RUN_METRIC(
+        'chrome/chrome_tasks_delaying_input_processing.sql',
+        'duration_causing_jank_ms',
+        /* duration_causing_jank_ms = */ '8');`);
+
+    const query = `
+       select
+         s1.full_name,
+         s1.duration_ms,
+         s1.slice_id,
+         s1.thread_dur_ms,
+         s2.id,
+         s2.ts,
+         s2.dur,
+         s2.track_id
+       from chrome_tasks_delaying_input_processing s1
+       join slice s2 on s1.slice_id=s2.id
+       `;
+    ctx.tabs.openQuery(query, 'Scroll Jank: long tasks');
   }
 
   private async addChromeScrollJankTrack(ctx: PluginContextTrace):
@@ -265,16 +297,7 @@ class ChromeScrollJankPlugin implements Plugin {
       displayName: 'Chrome Scroll Input Latencies',
       kind: EventLatencyTrack.kind,
       track: ({trackKey}) => {
-        const track = new EventLatencyTrack({
-          engine: ctx.engine,
-          trackKey,
-        });
-
-        track.config = {
-          baseTable,
-        };
-
-        return track;
+        return new EventLatencyTrack({engine: ctx.engine, trackKey}, baseTable);
       },
     });
   }
@@ -296,6 +319,21 @@ class ChromeScrollJankPlugin implements Plugin {
       },
     });
   }
+}
+
+async function isChromeTrace(engine: EngineProxy) {
+  const queryResult = await engine.query(`
+      select utid, upid
+      from thread
+      where name='CrBrowserMain'
+      `);
+
+  const it = queryResult.iter({
+    utid: NUM,
+    upid: NUM,
+  });
+
+  return it.valid();
 }
 
 export const plugin: PluginDescriptor = {

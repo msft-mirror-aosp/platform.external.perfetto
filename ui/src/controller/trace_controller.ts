@@ -27,27 +27,15 @@ import {
   DeferredAction,
 } from '../common/actions';
 import {cacheTrace} from '../common/cache_manager';
-import {Engine} from '../common/engine';
-import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../common/feature_flags';
 import {
   HighPrecisionTime,
   HighPrecisionTimeSpan,
 } from '../common/high_precision_time';
-import {HttpRpcEngine} from '../common/http_rpc_engine';
 import {
   getEnabledMetatracingCategories,
   isMetatracingEnabled,
 } from '../common/metatracing';
 import {pluginManager} from '../common/plugins';
-import {
-  LONG,
-  LONG_NULL,
-  NUM,
-  NUM_NULL,
-  QueryError,
-  STR,
-  STR_NULL,
-} from '../common/query_result';
 import {onSelectionChanged} from '../common/selection_observer';
 import {
   defaultTraceTime,
@@ -55,7 +43,7 @@ import {
   PendingDeeplinkState,
   ProfileType,
 } from '../common/state';
-import {resetEngineWorker, WasmEngineProxy} from '../common/wasm_engine_proxy';
+import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {BottomTabList} from '../frontend/bottom_tab';
 import {
   FtraceStat,
@@ -72,8 +60,22 @@ import {
   publishRealtimeOffset,
   publishThreads,
 } from '../frontend/publish';
-import {runQueryInNewTab} from '../frontend/query_result_tab';
 import {Router} from '../frontend/router';
+import {Engine} from '../trace_processor/engine';
+import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
+import {
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  QueryError,
+  STR,
+  STR_NULL,
+} from '../trace_processor/query_result';
+import {
+  resetEngineWorker,
+  WasmEngineProxy,
+} from '../trace_processor/wasm_engine_proxy';
 
 import {
   CounterAggregationController,
@@ -616,7 +618,7 @@ export class TraceController extends Controller<States> {
             pendingDeeplink.visStart, pendingDeeplink.visEnd);
       }
       if (pendingDeeplink.query !== undefined) {
-        runQueryInNewTab(pendingDeeplink.query, 'Deeplink Query');
+        globals.openQuery(pendingDeeplink.query, 'Deeplink Query');
       }
     }
 
@@ -677,7 +679,11 @@ export class TraceController extends Controller<States> {
     if (profile.numRows() !== 1) return;
     const row = profile.firstRow({ts: LONG, type: STR, upid: NUM});
     const ts = Time.fromRaw(row.ts);
-    const type = profileType(row.type);
+    let profType = row.type;
+    if (profType == 'heap_profile:libc.malloc,com.android.art') {
+      profType = 'heap_profile:com.android.art,libc.malloc';
+    }
+    const type = profileType(profType);
     const upid = row.upid;
     globals.dispatch(Actions.selectHeapProfile({id: 0, upid, ts, type}));
   }

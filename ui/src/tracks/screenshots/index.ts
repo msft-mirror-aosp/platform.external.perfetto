@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {AddTrackArgs} from '../../common/actions';
-import {Engine} from '../../common/engine';
 import {
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
@@ -64,13 +63,10 @@ export type DecideTracksResult = {
 };
 
 // TODO(stevegolton): Use suggestTrack().
-export async function decideTracks(engine: Engine):
-    Promise<DecideTracksResult> {
+export async function decideTracks(): Promise<DecideTracksResult> {
   const result: DecideTracksResult = {
     tracksToAdd: [],
   };
-
-  await engine.query(`INCLUDE PERFETTO MODULE android.screenshots`);
 
   result.tracksToAdd.push({
     uri: 'perfetto.Screenshots',
@@ -84,6 +80,8 @@ class ScreenshotsPlugin implements Plugin {
   onActivate(_ctx: PluginContext): void {}
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    await ctx.engine.query(`INCLUDE PERFETTO MODULE android.screenshots`);
+
     ctx.registerStaticTrack({
       uri: 'perfetto.Screenshots',
       displayName: 'Screenshots',
