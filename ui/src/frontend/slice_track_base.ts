@@ -145,7 +145,7 @@ export abstract class SliceTrackBase extends BasicAsyncTrack<SliceData> {
 
       let color: string;
       if (colorOverride === undefined) {
-        color = colorObj.c;
+        color = cachedHsluvToHex(colorObj.h, colorObj.s, colorObj.l);
       } else {
         color = colorOverride;
       }
