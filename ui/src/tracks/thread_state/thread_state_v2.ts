@@ -17,7 +17,7 @@ import {Color, colorForState} from '../../common/colorizer';
 import {Selection} from '../../common/state';
 import {translateState} from '../../common/thread_state';
 import {
-  BASE_SLICE_ROW,
+  BASE_ROW,
   BaseSliceTrack,
   BaseSliceTrackTypes,
   OnSliceClickArgs,
@@ -31,7 +31,7 @@ import {NewTrackArgs} from '../../frontend/track';
 import {NUM_NULL, STR} from '../../trace_processor/query_result';
 
 export const THREAD_STATE_ROW = {
-  ...BASE_SLICE_ROW,
+  ...BASE_ROW,
   state: STR,
   ioWait: NUM_NULL,
 };
@@ -44,19 +44,14 @@ export interface ThreadStateTrackConfig {
 
 export interface ThreadStateTrackTypes extends BaseSliceTrackTypes {
   row: ThreadStateRow;
-  config: ThreadStateTrackConfig;
 }
 
 export const THREAD_STATE_TRACK_V2_KIND = 'ThreadStateTrackV2';
 
 export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
-  static create(args: NewTrackArgs) {
-    return new ThreadStateTrack(args);
-  }
-
   protected sliceLayout: SliceLayout = {...SLICE_LAYOUT_FLAT_DEFAULTS};
 
-  constructor(args: NewTrackArgs) {
+  constructor(args: NewTrackArgs, private utid: number) {
     super(args);
   }
 
@@ -78,7 +73,7 @@ export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
         0 as depth
       from thread_state
       where
-        utid = ${this.config.utid} and
+        utid = ${this.utid} and
         state != 'x' and
         state != 'S'
     `;
