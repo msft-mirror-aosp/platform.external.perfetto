@@ -16,10 +16,9 @@ import m from 'mithril';
 
 import {Hotkey} from '../base/hotkeys';
 import {duration, Span, time} from '../base/time';
-import {Color} from '../common/colorizer';
+import {ColorScheme} from '../common/colorizer';
 import {Store} from '../frontend/store';
 import {PxSpan, TimeScale} from '../frontend/time_scale';
-import {SliceRect} from '../frontend/track';
 import {EngineProxy} from '../trace_processor/engine';
 
 export {createStore, Store} from '../frontend/store';
@@ -60,8 +59,8 @@ export interface Slice {
   // These can be changed by the Impl.
   title: string;
   subTitle: string;
-  baseColor: Color;
-  color: Color;
+  colorScheme: ColorScheme;
+  isHighlighted: boolean;
 }
 
 export interface Command {
@@ -162,6 +161,14 @@ export interface TrackContext {
   // when the permalink was shared, which might be from an old version of this
   // track.
   mountStore<State>(migrate: Migrate<State>): Store<State>;
+}
+
+export interface SliceRect {
+  left: number;
+  width: number;
+  top: number;
+  height: number;
+  visible: boolean;
 }
 
 export interface Track {
