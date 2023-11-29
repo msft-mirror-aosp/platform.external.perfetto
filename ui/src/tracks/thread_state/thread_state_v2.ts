@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {Actions} from '../../common/actions';
-import {Color, colorForState} from '../../common/colorizer';
+import {colorForState} from '../../common/colorizer';
 import {Selection} from '../../common/state';
 import {translateState} from '../../common/thread_state';
 import {
@@ -35,18 +35,12 @@ export const THREAD_STATE_ROW = {
   state: STR,
   ioWait: NUM_NULL,
 };
+
 export type ThreadStateRow = typeof THREAD_STATE_ROW;
-
-
-export interface ThreadStateTrackConfig {
-  utid: number;
-}
 
 export interface ThreadStateTrackTypes extends BaseSliceTrackTypes {
   row: ThreadStateRow;
 }
-
-export const THREAD_STATE_TRACK_V2_KIND = 'ThreadStateTrackV2';
 
 export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
   protected sliceLayout: SliceLayout = {...SLICE_LAYOUT_FLAT_DEFAULTS};
@@ -62,11 +56,15 @@ export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
 
   getSqlSource(): string {
     // Do not display states 'x' and 'S' (dead & sleeping).
+    // Note: Thread state tracks V1 basically ignores incomplete slices, faking
+    // their duration as 1 instead. Let's just do this here as well for now to
+    // achieve feature parity with tracks V1 and tackle the issue of overlapping
+    // incomplete slices later.
     return `
       select
         id,
         ts,
-        dur,
+        max(dur, 1) as dur,
         cpu,
         state,
         io_wait as ioWait,
@@ -84,21 +82,13 @@ export class ThreadStateTrack extends BaseSliceTrack<ThreadStateTrackTypes> {
     const baseSlice = super.rowToSlice(row);
     const ioWait = row.ioWait === null ? undefined : !!row.ioWait;
     const title = translateState(row.state, ioWait);
-    const baseColor: Color = colorForState(title);
-    return {...baseSlice, title, baseColor};
+    const color = colorForState(title);
+    return {...baseSlice, title, colorScheme: color};
   }
 
   onUpdatedSlices(slices: ThreadStateTrackTypes['slice'][]) {
     for (const slice of slices) {
-      if (slice === this.hoveredSlice) {
-        slice.color = {
-          h: slice.baseColor.h,
-          s: slice.baseColor.s,
-          l: 30,
-        };
-      } else {
-        slice.color = slice.baseColor;
-      }
+      slice.isHighlighted = (slice === this.hoveredSlice);
     }
   }
 
