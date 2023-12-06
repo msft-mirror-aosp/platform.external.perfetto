@@ -60,7 +60,7 @@ const TRACKS_V2_FLAG = featureFlags.register({
   id: 'tracksV2.1',
   name: 'Tracks V2',
   description: 'Show tracks built on top of the Track V2 API.',
-  defaultValue: false,
+  defaultValue: true,
 });
 
 const TRACKS_V2_COMPARE_FLAG = featureFlags.register({
@@ -860,12 +860,13 @@ class TrackDecider {
       }
 
       const priority = InThreadTrackSortKey.THREAD_SCHEDULING_STATE_TRACK;
+      const name =
+          getTrackName({utid, tid, threadName, kind: THREAD_STATE_TRACK_KIND});
 
       if (showV1()) {
-        const kind = THREAD_STATE_TRACK_KIND;
         this.tracksToAdd.push({
           uri: `perfetto.ThreadState#${upid}.${utid}`,
-          name: getTrackName({utid, tid, threadName, kind}),
+          name,
           trackGroup: uuid,
           trackSortKey: {
             utid,
@@ -877,8 +878,7 @@ class TrackDecider {
       if (showV2()) {
         this.tracksToAdd.push({
           uri: `perfetto.ThreadState#${utid}.v2`,
-          name:
-              getTrackName({utid, tid, threadName, kind: 'ThreadStateTrackV2'}),
+          name,
           trackGroup: uuid,
           trackSortKey: {
             utid,
