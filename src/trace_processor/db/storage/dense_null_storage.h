@@ -14,11 +14,13 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_PROCESSOR_DB_STORAGE_FAKE_STORAGE_H_
-#define SRC_TRACE_PROCESSOR_DB_STORAGE_FAKE_STORAGE_H_
+#ifndef SRC_TRACE_PROCESSOR_DB_STORAGE_DENSE_NULL_STORAGE_H_
+#define SRC_TRACE_PROCESSOR_DB_STORAGE_DENSE_NULL_STORAGE_H_
 
 #include <memory>
-#include "src/trace_processor/containers/row_map.h"
+#include <variant>
+
+#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/storage/storage.h"
 #include "src/trace_processor/db/storage/types.h"
 
@@ -26,9 +28,13 @@ namespace perfetto {
 namespace trace_processor {
 namespace storage {
 
-// Fake implementation of Storage for use in tests.
-class FakeStorage final : public Storage {
+// Storage which introduces the layer of nullability but without changing the
+// "spacing" of the underlying storage i.e. this storage simply "masks" out
+// rows in the underlying storage with nulls.
+class DenseNullStorage : public Storage {
  public:
+  DenseNullStorage(std::unique_ptr<Storage> inner, const BitVector* non_null);
+
   SearchValidationResult ValidateSearchConstraints(SqlValue,
                                                    FilterOp) const override;
 
@@ -48,44 +54,15 @@ class FakeStorage final : public Storage {
 
   void Serialize(StorageProto*) const override;
 
-  static std::unique_ptr<Storage> SearchAll(uint32_t size) {
-    return std::unique_ptr<Storage>(
-        new FakeStorage(size, SearchStrategy::kAll));
-  }
-
-  static std::unique_ptr<Storage> SearchNone(uint32_t size) {
-    return std::unique_ptr<Storage>(
-        new FakeStorage(size, SearchStrategy::kNone));
-  }
-
-  static std::unique_ptr<Storage> SearchSubset(uint32_t size, RowMap::Range r) {
-    std::unique_ptr<FakeStorage> storage(
-        new FakeStorage(size, SearchStrategy::kRange));
-    storage->range_ = r;
-    return std::move(storage);
-  }
-
-  static std::unique_ptr<Storage> SearchSubset(uint32_t size, BitVector bv) {
-    std::unique_ptr<FakeStorage> storage(
-        new FakeStorage(size, SearchStrategy::kBitVector));
-    storage->bit_vector_ = std::move(bv);
-    return std::move(storage);
-  }
-
-  uint32_t size() const override { return size_; }
+  uint32_t size() const override { return non_null_->size(); }
 
  private:
-  enum SearchStrategy { kNone, kAll, kRange, kBitVector };
-  FakeStorage(uint32_t size, SearchStrategy strategy);
-
-  uint32_t size_ = 0;
-  SearchStrategy strategy_ = SearchStrategy::kNone;
-  RowMap::Range range_;
-  BitVector bit_vector_;
+  std::unique_ptr<Storage> inner_;
+  const BitVector* non_null_ = nullptr;
 };
 
 }  // namespace storage
 }  // namespace trace_processor
 }  // namespace perfetto
 
-#endif  // SRC_TRACE_PROCESSOR_DB_STORAGE_FAKE_STORAGE_H_
+#endif  // SRC_TRACE_PROCESSOR_DB_STORAGE_DENSE_NULL_STORAGE_H_
