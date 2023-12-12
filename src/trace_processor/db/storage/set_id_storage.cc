@@ -58,7 +58,7 @@ uint32_t LowerBoundIntrinsic(const SetId* data, SetId id, RowMap::Range range) {
 
 }  // namespace
 
-SetIdStorage::SearchValidationResult SetIdStorage::ValidateSearchConstraints(
+SearchValidationResult SetIdStorage::ValidateSearchConstraints(
     SqlValue val,
     FilterOp op) const {
   // NULL checks.
@@ -101,11 +101,11 @@ SetIdStorage::SearchValidationResult SetIdStorage::ValidateSearchConstraints(
     case SqlValue::kString:
       // Any string is always more than any numeric.
       if (op == FilterOp::kLt || op == FilterOp::kLe) {
-        return Storage::SearchValidationResult::kAllData;
+        return SearchValidationResult::kAllData;
       }
-      return Storage::SearchValidationResult::kNoData;
+      return SearchValidationResult::kNoData;
     case SqlValue::kBytes:
-      return Storage::SearchValidationResult::kNoData;
+      return SearchValidationResult::kNoData;
   }
 
   // TODO(b/307482437): Remove after adding support for double
@@ -141,16 +141,6 @@ RangeOrBitVector SetIdStorage::Search(FilterOp op,
 
   PERFETTO_DCHECK(search_range.end <= size());
 
-  // After this switch we assume the search is valid.
-  switch (ValidateSearchConstraints(sql_val, op)) {
-    case SearchValidationResult::kOk:
-      break;
-    case SearchValidationResult::kAllData:
-      return RangeOrBitVector(Range(0, search_range.end));
-    case SearchValidationResult::kNoData:
-      return RangeOrBitVector(Range());
-  }
-
   uint32_t val = static_cast<uint32_t>(sql_val.AsLong());
 
   if (op == FilterOp::kNe) {
@@ -178,16 +168,6 @@ RangeOrBitVector SetIdStorage::IndexSearch(FilterOp op,
                       r->AddArg("Op",
                                 std::to_string(static_cast<uint32_t>(op)));
                     });
-
-  // After this switch we assume the search is valid.
-  switch (ValidateSearchConstraints(sql_val, op)) {
-    case SearchValidationResult::kOk:
-      break;
-    case SearchValidationResult::kAllData:
-      return RangeOrBitVector(Range(0, indices_size));
-    case SearchValidationResult::kNoData:
-      return RangeOrBitVector(Range());
-  }
 
   uint32_t val = static_cast<uint32_t>(sql_val.AsLong());
 

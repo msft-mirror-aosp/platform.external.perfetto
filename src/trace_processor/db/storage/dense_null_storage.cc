@@ -32,9 +32,13 @@ DenseNullStorage::DenseNullStorage(std::unique_ptr<Storage> inner,
                                    const BitVector* non_null)
     : inner_(std::move(inner)), non_null_(non_null) {}
 
-Storage::SearchValidationResult DenseNullStorage::ValidateSearchConstraints(
+SearchValidationResult DenseNullStorage::ValidateSearchConstraints(
     SqlValue sql_val,
     FilterOp op) const {
+  if (op == FilterOp::kIsNull) {
+    return SearchValidationResult::kOk;
+  }
+
   return inner_->ValidateSearchConstraints(sql_val, op);
 }
 
@@ -42,6 +46,23 @@ RangeOrBitVector DenseNullStorage::Search(FilterOp op,
                                           SqlValue sql_val,
                                           RowMap::Range in) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB, "DenseNullStorage::Search");
+
+  if (op == FilterOp::kIsNull) {
+    switch (inner_->ValidateSearchConstraints(sql_val, op)) {
+      case SearchValidationResult::kNoData: {
+        // There is no need to search in underlying storage. It's enough to
+        // intersect the |non_null_|.
+        BitVector res = non_null_->IntersectRange(in.start, in.end);
+        res.Not();
+        res.Resize(in.end, false);
+        return RangeOrBitVector(std::move(res));
+      }
+      case SearchValidationResult::kAllData:
+        return RangeOrBitVector(in);
+      case SearchValidationResult::kOk:
+        break;
+    }
+  }
 
   RangeOrBitVector inner_res = inner_->Search(op, sql_val, in);
   BitVector res;
