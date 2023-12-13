@@ -32,9 +32,13 @@ DenseNullStorage::DenseNullStorage(std::unique_ptr<Storage> inner,
                                    const BitVector* non_null)
     : inner_(std::move(inner)), non_null_(non_null) {}
 
-Storage::SearchValidationResult DenseNullStorage::ValidateSearchConstraints(
+SearchValidationResult DenseNullStorage::ValidateSearchConstraints(
     SqlValue sql_val,
     FilterOp op) const {
+  if (op == FilterOp::kIsNull) {
+    return SearchValidationResult::kOk;
+  }
+
   return inner_->ValidateSearchConstraints(sql_val, op);
 }
 
@@ -42,6 +46,23 @@ RangeOrBitVector DenseNullStorage::Search(FilterOp op,
                                           SqlValue sql_val,
                                           RowMap::Range in) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB, "DenseNullStorage::Search");
+
+  if (op == FilterOp::kIsNull) {
+    switch (inner_->ValidateSearchConstraints(sql_val, op)) {
+      case SearchValidationResult::kNoData: {
+        // There is no need to search in underlying storage. It's enough to
+        // intersect the |non_null_|.
+        BitVector res = non_null_->IntersectRange(in.start, in.end);
+        res.Not();
+        res.Resize(in.end, false);
+        return RangeOrBitVector(std::move(res));
+      }
+      case SearchValidationResult::kAllData:
+        return RangeOrBitVector(in);
+      case SearchValidationResult::kOk:
+        break;
+    }
+  }
 
   RangeOrBitVector inner_res = inner_->Search(op, sql_val, in);
   BitVector res;
@@ -57,7 +78,6 @@ RangeOrBitVector DenseNullStorage::Search(FilterOp op,
   } else {
     res = std::move(inner_res).TakeIfBitVector();
   }
-  PERFETTO_DCHECK(res.size() == in.end);
 
   if (op == FilterOp::kIsNull) {
     // For IS NULL, we need to add any rows in |non_null_| which are zeros: we
@@ -72,6 +92,8 @@ RangeOrBitVector DenseNullStorage::Search(FilterOp op,
     // are removed as they would not match.
     res.And(*non_null_);
   }
+
+  PERFETTO_DCHECK(res.size() == in.end);
   return RangeOrBitVector(std::move(res));
 }
 
@@ -98,10 +120,8 @@ RangeOrBitVector DenseNullStorage::IndexSearch(FilterOp op,
     builder.Append(non_null_->IsSet(indices[i]));
   }
   BitVector non_null = std::move(builder).Build();
-  PERFETTO_DCHECK(non_null.size() == indices_size);
 
   BitVector res = std::move(inner_res).TakeIfBitVector();
-  PERFETTO_DCHECK(res.size() == indices_size);
 
   if (op == FilterOp::kIsNull) {
     BitVector null = std::move(non_null);
@@ -110,6 +130,8 @@ RangeOrBitVector DenseNullStorage::IndexSearch(FilterOp op,
   } else {
     res.And(non_null);
   }
+
+  PERFETTO_DCHECK(res.size() == indices_size);
   return RangeOrBitVector(std::move(res));
 }
 
