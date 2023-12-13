@@ -81,17 +81,6 @@ export class FlowEventsRendererArgs {
       for (const trackId of getTrackIds(track)) {
         this.trackIdToTrackPanel.set(trackId, {panel: panel.state, yStart});
       }
-
-      // Register new "plugin track" ids
-      const trackState = globals.state.tracks[panel.attrs.trackKey];
-      if (trackState.uri) {
-        const trackInfo = pluginManager.resolveTrackInfo(trackState.uri);
-        if (trackInfo?.trackIds) {
-          for (const trackId of trackInfo.trackIds) {
-            this.trackIdToTrackPanel.set(trackId, {panel: panel.state, yStart});
-          }
-        }
-      }
     } else if (
         panel.state instanceof TrackGroupPanel &&
         hasTrackGroupId(panel.attrs)) {
@@ -151,19 +140,12 @@ export class FlowEventsRenderer {
 
   private getSliceRect(args: FlowEventsRendererArgs, point: FlowPoint):
       SliceRect|undefined {
-    const {visibleTimeScale, visibleTimeSpan, windowSpan} =
-        globals.frontendLocalState;
     const trackPanel = args.trackIdToTrackPanel.get(point.trackId) ?.panel;
     if (!trackPanel) {
       return undefined;
     }
     return trackPanel.getSliceRect(
-        visibleTimeScale,
-        visibleTimeSpan,
-        windowSpan,
-        point.sliceStartTs,
-        point.sliceEndTs,
-        point.depth);
+        point.sliceStartTs, point.sliceEndTs, point.depth);
   }
 
   render(ctx: CanvasRenderingContext2D, args: FlowEventsRendererArgs) {

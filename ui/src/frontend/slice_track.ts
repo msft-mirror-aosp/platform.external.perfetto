@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {duration, Span, Time, time} from '../base/time';
+import {Time, time} from '../base/time';
 import {Actions} from '../common/actions';
 import {cropText, drawIncompleteSlice} from '../common/canvas_utils';
 import {getColorForSlice} from '../common/colorizer';
@@ -24,7 +24,7 @@ import {SliceRect} from '../public';
 import {CROP_INCOMPLETE_SLICE_FLAG} from './base_slice_track';
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
-import {PxSpan, TimeScale} from './time_scale';
+import {PanelSize} from './panel';
 
 export const SLICE_TRACK_KIND = 'ChromeSliceTrack';
 const SLICE_HEIGHT = 18;
@@ -77,21 +77,20 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
     return '12px Roboto Condensed';
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
     const data = this.data;
     if (data === undefined) return;  // Can't possibly draw anything.
 
-    const {visibleTimeSpan, visibleWindowTime, visibleTimeScale, windowSpan} =
-        globals.frontendLocalState;
+    const {visibleTimeSpan, visibleTimeScale} = globals.frontendLocalState;
 
     // If the cached trace slices don't fully cover the visible time range,
     // show a gray rectangle with a "Loading..." label.
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        visibleTimeScale.hpTimeToPx(visibleWindowTime.start),
-        visibleTimeScale.hpTimeToPx(visibleWindowTime.end),
+        0,
+        size.width,
         visibleTimeScale.timeToPx(data.start),
         visibleTimeScale.timeToPx(data.end),
     );
@@ -126,11 +125,16 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
         continue;
       }
 
-      const rect = this.getSliceRect(
-          visibleTimeScale, visibleTimeSpan, windowSpan, tStart, tEnd, depth);
-      if (!rect || !rect.visible) {
-        continue;
-      }
+      const pxEnd = size.width;
+      const left = Math.max(visibleTimeScale.timeToPx(tStart), 0);
+      const right = Math.min(visibleTimeScale.timeToPx(tEnd), pxEnd);
+
+      const rect = {
+        left,
+        width: Math.max(right - left, 1),
+        top: TRACK_PADDING + depth * SLICE_HEIGHT,
+        height: SLICE_HEIGHT,
+      };
 
       const currentSelection = globals.state.currentSelection;
       const isSelected = currentSelection &&
@@ -340,15 +344,18 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
     return SLICE_HEIGHT * (this.maxDepth + 1) + 2 * TRACK_PADDING;
   }
 
-  getSliceRect(
-      visibleTimeScale: TimeScale, visibleWindow: Span<time, duration>,
-      windowSpan: PxSpan, tStart: time, tEnd: time, depth: number): SliceRect
-      |undefined {
+  getSliceRect(tStart: time, tEnd: time, depth: number): SliceRect|undefined {
+    const {
+      windowSpan,
+      visibleTimeScale,
+      visibleTimeSpan,
+    } = globals.frontendLocalState;
+
     const pxEnd = windowSpan.end;
     const left = Math.max(visibleTimeScale.timeToPx(tStart), 0);
     const right = Math.min(visibleTimeScale.timeToPx(tEnd), pxEnd);
 
-    const visible = visibleWindow.intersects(tStart, tEnd);
+    const visible = visibleTimeSpan.intersects(tStart, tEnd);
 
     return {
       left,

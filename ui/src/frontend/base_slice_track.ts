@@ -17,7 +17,6 @@ import {assertExists} from '../base/logging';
 import {clamp, floatEqual} from '../base/math_utils';
 import {
   duration,
-  Span,
   Time,
   time,
 } from '../base/time';
@@ -30,18 +29,18 @@ import {
 import {colorCompare} from '../common/color';
 import {UNEXPECTED_PINK} from '../common/colorizer';
 import {Selection, SelectionKind} from '../common/state';
+import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {Slice, SliceRect} from '../public';
 import {LONG, NUM} from '../trace_processor/query_result';
 
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
+import {PanelSize} from './panel';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
 import {constraintsToQuerySuffix} from './sql_utils';
-import {PxSpan, TimeScale} from './time_scale';
 import {NewTrackArgs, TrackBase} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey, TrackCache} from './track_cache';
-import {featureFlags} from '../core/feature_flags';
 
 // The common class that underpins all tracks drawing slices.
 
@@ -327,7 +326,7 @@ export abstract class BaseSliceTrack<
     return `${size}px Roboto Condensed`;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO(hjd): fonts and colors should come from the CSS and not hardcoded
     // here.
     const {
@@ -446,8 +445,10 @@ export abstract class BaseSliceTrack<
       if (slice.flags & SLICE_FLAGS_INSTANT) {
         this.drawChevron(ctx, slice.x, y, sliceHeight);
       } else if (slice.flags & SLICE_FLAGS_INCOMPLETE) {
-        const w = CROP_INCOMPLETE_SLICE_FLAG.get() ? slice.w : Math.max(slice.w - 2, 2);
-        drawIncompleteSlice(ctx, slice.x, y, w, sliceHeight, !CROP_INCOMPLETE_SLICE_FLAG.get());
+        const w = CROP_INCOMPLETE_SLICE_FLAG.get() ? slice.w :
+                                                     Math.max(slice.w - 2, 2);
+        drawIncompleteSlice(
+            ctx, slice.x, y, w, sliceHeight, !CROP_INCOMPLETE_SLICE_FLAG.get());
       } else {
         const w = Math.max(slice.w, SLICE_MIN_WIDTH_PX);
         ctx.fillRect(slice.x, y, w, sliceHeight);
@@ -545,8 +546,8 @@ export abstract class BaseSliceTrack<
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        timeScale.hpTimeToPx(vizTime.start),
-        timeScale.hpTimeToPx(vizTime.end),
+        0,
+        size.width,
         timeScale.timeToPx(this.slicesKey.start),
         timeScale.timeToPx(this.slicesKey.end));
 
@@ -815,12 +816,15 @@ export abstract class BaseSliceTrack<
     }
 
     for (const slice of this.incomplete) {
+      const visibleTimeScale = globals.frontendLocalState.visibleTimeScale;
       const startPx = CROP_INCOMPLETE_SLICE_FLAG.get() ?
-        globals.frontendLocalState.visibleTimeScale.timeToPx(slice.startNsQ) : slice.x;
+          visibleTimeScale.timeToPx(slice.startNsQ) :
+          slice.x;
       const cropUnfinishedSlicesCondition = CROP_INCOMPLETE_SLICE_FLAG.get() ?
         startPx + INCOMPLETE_SLICE_WIDTH_PX >= x : true;
 
-      if (slice.depth === depth && startPx <= x && cropUnfinishedSlicesCondition) {
+      if (slice.depth === depth && startPx <= x &&
+          cropUnfinishedSlicesCondition) {
         return slice;
       }
     }
@@ -962,17 +966,20 @@ export abstract class BaseSliceTrack<
     return this.computedTrackHeight;
   }
 
-  getSliceRect(
-      visibleTimeScale: TimeScale, visibleWindow: Span<time, duration>,
-      windowSpan: PxSpan, tStart: time, tEnd: time, depth: number): SliceRect
-      |undefined {
+  getSliceRect(tStart: time, tEnd: time, depth: number): SliceRect|undefined {
     this.updateSliceAndTrackHeight();
+
+    const {
+      windowSpan,
+      visibleTimeScale,
+      visibleTimeSpan,
+    } = globals.frontendLocalState;
 
     const pxEnd = windowSpan.end;
     const left = Math.max(visibleTimeScale.timeToPx(tStart), 0);
     const right = Math.min(visibleTimeScale.timeToPx(tEnd), pxEnd);
 
-    const visible = visibleWindow.intersects(tStart, tEnd);
+    const visible = visibleTimeSpan.intersects(tStart, tEnd);
 
     const totalSliceHeight = this.computedRowSpacing + this.computedSliceHeight;
 

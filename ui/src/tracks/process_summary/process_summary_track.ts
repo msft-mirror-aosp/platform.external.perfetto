@@ -20,6 +20,7 @@ import {TrackAdapter, TrackControllerAdapter} from '../../common/track_adapter';
 import {LIMIT, TrackData} from '../../common/track_data';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
+import {PanelSize} from '../../frontend/panel';
 import {NewTrackArgs} from '../../frontend/track';
 import {NUM} from '../../trace_processor/query_result';
 
@@ -130,9 +131,11 @@ export class ProcessSummaryTrackController extends
   }
 
   async onDestroy(): Promise<void> {
-    await this.query(`drop table if exists ${
-        this.tableName(
-            'window')}; drop table if exists ${this.tableName('span')}`);
+    if (this.engine.isAlive) {
+      await this.engine.query(`drop table if exists ${
+          this.tableName(
+              'window')}; drop table if exists ${this.tableName('span')}`);
+    }
   }
 }
 
@@ -142,10 +145,6 @@ const TRACK_HEIGHT = MARGIN_TOP * 2 + RECT_HEIGHT;
 const SUMMARY_HEIGHT = TRACK_HEIGHT - MARGIN_TOP;
 
 export class ProcessSummaryTrack extends TrackAdapter<Config, Data> {
-  static create(args: NewTrackArgs): ProcessSummaryTrack {
-    return new ProcessSummaryTrack(args);
-  }
-
   constructor(args: NewTrackArgs) {
     super(args);
   }
@@ -154,10 +153,9 @@ export class ProcessSummaryTrack extends TrackAdapter<Config, Data> {
     return TRACK_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     const {
       visibleTimeScale,
-      windowSpan,
     } = globals.frontendLocalState;
     const data = this.data();
     if (data === undefined) return;  // Can't possibly draw anything.
@@ -165,8 +163,8 @@ export class ProcessSummaryTrack extends TrackAdapter<Config, Data> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        windowSpan.start,
-        windowSpan.end,
+        0,
+        size.width,
         visibleTimeScale.timeToPx(data.start),
         visibleTimeScale.timeToPx(data.end));
 
@@ -175,8 +173,8 @@ export class ProcessSummaryTrack extends TrackAdapter<Config, Data> {
 
   // TODO(dproy): Dedup with CPU slices.
   renderSummary(ctx: CanvasRenderingContext2D, data: Data): void {
-    const {visibleTimeScale, windowSpan} = globals.frontendLocalState;
-    const startPx = windowSpan.start;
+    const {visibleTimeScale} = globals.frontendLocalState;
+    const startPx = 0;
     const bottomY = TRACK_HEIGHT;
 
     let lastX = startPx;

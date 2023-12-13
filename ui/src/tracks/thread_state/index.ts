@@ -28,6 +28,7 @@ import {
 import {TrackData} from '../../common/track_data';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
+import {PanelSize} from '../../frontend/panel';
 import {NewTrackArgs} from '../../frontend/track';
 import {
   Plugin,
@@ -170,7 +171,10 @@ class ThreadStateTrackController extends TrackControllerAdapter<Config, Data> {
   }
 
   async onDestroy() {
-    await this.query(`drop view if exists ${this.tableName('thread_state')}`);
+    if (this.engine.isAlive) {
+      await this.engine.query(
+          `drop view if exists ${this.tableName('thread_state')}`);
+    }
   }
 }
 
@@ -179,10 +183,6 @@ const RECT_HEIGHT = 12;
 const EXCESS_WIDTH = 10;
 
 class ThreadStateTrack extends TrackAdapter<Config, Data> {
-  static create(args: NewTrackArgs): ThreadStateTrack {
-    return new ThreadStateTrack(args);
-  }
-
   constructor(args: NewTrackArgs) {
     super(args);
   }
@@ -191,11 +191,10 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
     return 2 * MARGIN_TOP + RECT_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     const {
       visibleTimeScale: timeScale,
       visibleTimeSpan,
-      windowSpan,
     } = globals.frontendLocalState;
     const data = this.data();
     const charWidth = ctx.measureText('dbpqaouk').width / 8;
@@ -209,8 +208,8 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        windowSpan.start,
-        windowSpan.end,
+        0,
+        size.width,
         timeScale.timeToPx(data.start),
         timeScale.timeToPx(data.end),
     );
@@ -261,7 +260,7 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
           const rectStart =
               Math.max(0 - EXCESS_WIDTH, timeScale.timeToPx(tStart));
           const rectEnd =
-              Math.min(windowSpan.end + EXCESS_WIDTH, timeScale.timeToPx(tEnd));
+              Math.min(size.width + EXCESS_WIDTH, timeScale.timeToPx(tEnd));
           ctx.strokeStyle = colorScheme.base.cssString;
           ctx.beginPath();
           ctx.lineWidth = 3;

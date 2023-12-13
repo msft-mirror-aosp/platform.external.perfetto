@@ -1302,6 +1302,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/db/storage/arrangement_storage.cc",
         "src/trace_processor/db/storage/arrangement_storage.h",
+        "src/trace_processor/db/storage/dense_null_storage.cc",
+        "src/trace_processor/db/storage/dense_null_storage.h",
         "src/trace_processor/db/storage/dummy_storage.cc",
         "src/trace_processor/db/storage/dummy_storage.h",
         "src/trace_processor/db/storage/id_storage.cc",
@@ -1319,6 +1321,7 @@ perfetto_filegroup(
         "src/trace_processor/db/storage/string_storage.cc",
         "src/trace_processor/db/storage/string_storage.h",
         "src/trace_processor/db/storage/types.h",
+        "src/trace_processor/db/storage/utils.cc",
         "src/trace_processor/db/storage/utils.h",
     ],
 )
@@ -4460,6 +4463,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/net.proto",
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
+        "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",

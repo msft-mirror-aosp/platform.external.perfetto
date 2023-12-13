@@ -5944,6 +5944,7 @@ genrule {
         "protos/perfetto/trace/ftrace/net.proto",
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
+        "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",
@@ -6362,6 +6363,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/net.proto",
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
+        "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",
@@ -6443,6 +6445,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/net.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/oom.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/panel.gen.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/perf_trace_counters.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/power.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/printk.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/raw_syscalls.gen.cc",
@@ -6524,6 +6527,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/net.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/oom.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/panel.gen.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/perf_trace_counters.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/power.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/printk.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/raw_syscalls.gen.h",
@@ -6601,6 +6605,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/net.proto",
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
+        "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",
@@ -6681,6 +6686,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/net.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/oom.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/panel.pb.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/perf_trace_counters.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/power.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/printk.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/raw_syscalls.pb.cc",
@@ -6761,6 +6767,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/net.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/oom.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/panel.pb.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/perf_trace_counters.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/power.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/printk.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/raw_syscalls.pb.h",
@@ -6838,6 +6845,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/net.proto",
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
+        "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",
@@ -6919,6 +6927,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/net.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/oom.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/panel.pbzero.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/perf_trace_counters.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/power.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/printk.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/raw_syscalls.pbzero.cc",
@@ -7000,6 +7009,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/net.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/oom.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/panel.pbzero.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/perf_trace_counters.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/power.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/printk.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/raw_syscalls.pbzero.h",
@@ -10938,6 +10948,11 @@ filegroup {
     ],
 }
 
+// GN: //src/trace_processor/db:compare
+filegroup {
+    name: "perfetto_src_trace_processor_db_compare",
+}
+
 // GN: //src/trace_processor/db:db
 filegroup {
     name: "perfetto_src_trace_processor_db_db",
@@ -10964,6 +10979,7 @@ filegroup {
     name: "perfetto_src_trace_processor_db_storage_storage",
     srcs: [
         "src/trace_processor/db/storage/arrangement_storage.cc",
+        "src/trace_processor/db/storage/dense_null_storage.cc",
         "src/trace_processor/db/storage/dummy_storage.cc",
         "src/trace_processor/db/storage/id_storage.cc",
         "src/trace_processor/db/storage/null_storage.cc",
@@ -10972,6 +10988,7 @@ filegroup {
         "src/trace_processor/db/storage/set_id_storage.cc",
         "src/trace_processor/db/storage/storage.cc",
         "src/trace_processor/db/storage/string_storage.cc",
+        "src/trace_processor/db/storage/utils.cc",
     ],
 }
 
@@ -10980,6 +10997,7 @@ filegroup {
     name: "perfetto_src_trace_processor_db_storage_unittests",
     srcs: [
         "src/trace_processor/db/storage/arrangement_storage_unittest.cc",
+        "src/trace_processor/db/storage/dense_null_storage_unittest.cc",
         "src/trace_processor/db/storage/id_storage_unittest.cc",
         "src/trace_processor/db/storage/null_storage_unittest.cc",
         "src/trace_processor/db/storage/numeric_storage_unittest.cc",
@@ -13367,6 +13385,7 @@ java_library {
         "protos/perfetto/trace/ftrace/net.proto",
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
+        "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",
@@ -13799,6 +13818,7 @@ cc_test {
         ":perfetto_src_shared_lib_unittests",
         ":perfetto_src_trace_processor_containers_containers",
         ":perfetto_src_trace_processor_containers_unittests",
+        ":perfetto_src_trace_processor_db_compare",
         ":perfetto_src_trace_processor_db_db",
         ":perfetto_src_trace_processor_db_storage_fake_storage",
         ":perfetto_src_trace_processor_db_storage_storage",
@@ -15469,4 +15489,30 @@ license {
     license_text: [
         "LICENSE",
     ],
+}
+
+// TODO(b/315118713): use list of proto file sources instead of merged proto
+gensrcs {
+    name: "perfetto_trace_javastream_protos",
+    srcs: [
+        "protos/perfetto/trace/perfetto_trace.proto",
+    ],
+    tools: [
+        "aprotoc",
+        "protoc-gen-javastream",
+        "soong_zip",
+    ],
+    cmd: "mkdir -p $(genDir)/$(in) " +
+      "&& $(location aprotoc) " +
+        "--plugin=$(location protoc-gen-javastream) " +
+        "--javastream_out=$(genDir)/$(in) " +
+        "-Iexternal/protobuf/src " +
+        "-Iexternal/perfetto " +
+        "-I . $(in) " +
+      "&& $(location soong_zip) " +
+        "-jar -o $(out) -C $(genDir)/$(in) -D $(genDir)/$(in)",
+    data: [
+        ":libprotobuf-internal-protos",
+    ],
+    output_extension: "srcjar",
 }
