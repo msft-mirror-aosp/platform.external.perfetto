@@ -37,7 +37,7 @@ cc_test {
   ],
   test_suites: [
     "cts",
-    "mts",
+    "mts-art",
     "vts10",
     "general-tests",
   ],
@@ -57,7 +57,8 @@ cc_test {
         ":CtsPerfettoProducerApp",
         ":CtsPerfettoReleaseApp",
         ":CtsPerfettoDebuggableApp",
-        ":CtsPerfettoReporterApp"
+        ":CtsPerfettoReporterApp",
+        "perfetto_device_preparer.sh",
   ],
   stl: "libc++_static",
   min_sdk_version: "31",
