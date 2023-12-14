@@ -47,6 +47,7 @@ import {globals} from './globals';
 import {HomePage} from './home_page';
 import {InsightsPage} from './insights_page';
 import {MetricsPage} from './metrics_page';
+import {PluginsPage} from './plugins_page';
 import {postMessageHandler} from './post_message_handler';
 import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
@@ -71,7 +72,7 @@ class FrontendApi {
     // recently than the visible time handled by the frontend @ 60fps,
     // update it. This typically happens when restoring the state from a
     // permalink.
-    globals.frontendLocalState.mergeState(state.frontendLocalState);
+    globals.timeline.mergeState(state.frontendLocalState);
 
     // Only redraw if something other than the frontendLocalState changed.
     let key: keyof State;
@@ -233,6 +234,7 @@ function main() {
     '/info': TraceInfoPage,
     '/widgets': WidgetsPage,
     '/viz': VizPage,
+    '/plugins': PluginsPage,
   });
   router.onRouteChanged = routeChange;
 
