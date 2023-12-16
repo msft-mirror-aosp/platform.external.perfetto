@@ -18,16 +18,25 @@
 
 #include <variant>
 
+#include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/db/storage/storage.h"
 #include "src/trace_processor/db/storage/types.h"
 
 namespace perfetto {
+
+namespace protos::pbzero {
+class SerializedColumn_Storage;
+}
+
 namespace trace_processor {
 namespace storage {
 
 // Storage for all numeric type data (i.e. doubles, int32, int64, uint32).
 class NumericStorageBase : public Storage {
  public:
+  SearchValidationResult ValidateSearchConstraints(SqlValue,
+                                                   FilterOp) const override;
+
   RangeOrBitVector Search(FilterOp op,
                           SqlValue value,
                           RowMap::Range range) const override;
@@ -42,37 +51,42 @@ class NumericStorageBase : public Storage {
 
   void Sort(uint32_t* rows, uint32_t rows_size) const override;
 
-  uint32_t size() const override { return size_; }
+  void Serialize(StorageProto*) const override;
+
+  inline uint32_t size() const override { return size_; }
 
  protected:
   NumericStorageBase(const void* data,
                      uint32_t size,
                      ColumnType type,
                      bool is_sorted = false)
-      : type_(type), data_(data), size_(size), is_sorted_(is_sorted) {}
+      : size_(size), data_(data), storage_type_(type), is_sorted_(is_sorted) {}
 
  private:
+  // All viable numeric values for ColumnTypes.
+  using NumericValue = std::variant<uint32_t, int32_t, int64_t, double>;
+
   BitVector LinearSearchInternal(FilterOp op,
-                                 SqlValue val,
+                                 NumericValue val,
                                  RowMap::Range) const;
 
   BitVector IndexSearchInternal(FilterOp op,
-                                SqlValue value,
+                                NumericValue value,
                                 uint32_t* indices,
                                 uint32_t indices_count) const;
 
   RowMap::Range BinarySearchIntrinsic(FilterOp op,
-                                      SqlValue val,
+                                      NumericValue val,
                                       RowMap::Range search_range) const;
 
   RowMap::Range BinarySearchExtrinsic(FilterOp op,
-                                      SqlValue val,
+                                      NumericValue val,
                                       uint32_t* indices,
                                       uint32_t indices_count) const;
 
-  const ColumnType type_ = ColumnType::kDummy;
-  const void* data_ = nullptr;
   const uint32_t size_ = 0;
+  const void* data_ = nullptr;
+  const ColumnType storage_type_ = ColumnType::kDummy;
   const bool is_sorted_ = false;
 };
 

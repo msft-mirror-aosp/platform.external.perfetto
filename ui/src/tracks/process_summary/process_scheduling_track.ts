@@ -19,6 +19,7 @@ import {duration, time, Time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {calcCachedBucketSize} from '../../common/cache_utils';
 import {drawTrackHoverTooltip} from '../../common/canvas_utils';
+import {Color} from '../../common/color';
 import {colorForThread} from '../../common/colorizer';
 import {
   TrackAdapter,
@@ -27,6 +28,7 @@ import {
 import {TrackData} from '../../common/track_data';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
+import {PanelSize} from '../../frontend/panel';
 import {NewTrackArgs} from '../../frontend/track';
 import {
   LONG,
@@ -188,10 +190,6 @@ export class ProcessSchedulingTrackController extends
 }
 
 export class ProcessSchedulingTrack extends TrackAdapter<Config, Data> {
-  static create(args: NewTrackArgs): ProcessSchedulingTrack {
-    return new ProcessSchedulingTrack(args);
-  }
-
   private mousePos?: {x: number, y: number};
   private utidHoveredInThisTrack = -1;
 
@@ -203,13 +201,12 @@ export class ProcessSchedulingTrack extends TrackAdapter<Config, Data> {
     return TRACK_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
     const {
       visibleTimeScale,
-      visibleWindowTime,
       visibleTimeSpan,
-    } = globals.frontendLocalState;
+    } = globals.timeline;
     const data = this.data();
 
     if (data === undefined) return;  // Can't possibly draw anything.
@@ -219,8 +216,8 @@ export class ProcessSchedulingTrack extends TrackAdapter<Config, Data> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        visibleTimeScale.hpTimeToPx(visibleWindowTime.start),
-        visibleTimeScale.hpTimeToPx(visibleWindowTime.end),
+        0,
+        size.width,
         visibleTimeScale.timeToPx(data.start),
         visibleTimeScale.timeToPx(data.end));
 
@@ -250,20 +247,18 @@ export class ProcessSchedulingTrack extends TrackAdapter<Config, Data> {
       const isHovering = globals.state.hoveredUtid !== -1;
       const isThreadHovered = globals.state.hoveredUtid === utid;
       const isProcessHovered = globals.state.hoveredPid === pid;
-      const color = colorForThread(threadInfo);
+      const colorScheme = colorForThread(threadInfo);
+      let color: Color;
       if (isHovering && !isThreadHovered) {
         if (!isProcessHovered) {
-          color.l = 90;
-          color.s = 0;
+          color = colorScheme.disabled;
         } else {
-          color.l = Math.min(color.l + 30, 80);
-          color.s -= 20;
+          color = colorScheme.variant;
         }
       } else {
-        color.l = Math.min(color.l + 10, 60);
-        color.s -= 20;
+        color = colorScheme.base;
       }
-      ctx.fillStyle = `hsl(${color.h}, ${color.s}%, ${color.l}%)`;
+      ctx.fillStyle = color.cssString;
       const y = MARGIN_TOP + cpuTrackHeight * cpu + cpu;
       ctx.fillRect(rectStart, y, rectEnd - rectStart, cpuTrackHeight);
     }
@@ -293,7 +288,7 @@ export class ProcessSchedulingTrack extends TrackAdapter<Config, Data> {
 
     const cpuTrackHeight = Math.floor(RECT_HEIGHT / data.maxCpu);
     const cpu = Math.floor((pos.y - MARGIN_TOP) / (cpuTrackHeight + 1));
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     const t = visibleTimeScale.pxToHpTime(pos.x).toTime('floor');
 
     const [i, j] = searchRange(data.starts, t, searchEq(data.cpus, cpu));

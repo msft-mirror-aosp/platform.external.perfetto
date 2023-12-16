@@ -51,6 +51,7 @@ from diff_tests.parser.android.tests_bugreport import AndroidBugreport
 from diff_tests.parser.android.tests_games import AndroidGames
 from diff_tests.parser.android.tests_surfaceflinger_layers import SurfaceFlingerLayers
 from diff_tests.parser.android.tests_surfaceflinger_transactions import SurfaceFlingerTransactions
+from diff_tests.parser.android.tests_shell_transitions import ShellTransitions
 from diff_tests.parser.android_fs.tests import AndroidFs
 from diff_tests.parser.atrace.tests import Atrace
 from diff_tests.parser.atrace.tests_error_handling import AtraceErrorHandling
@@ -171,6 +172,8 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
                             'SurfaceFlingerLayers').fetch(),
       *SurfaceFlingerTransactions(index_path, 'parser/android',
                                   'SurfaceFlingerTransactions').fetch(),
+      *ShellTransitions(index_path, 'parser/android',
+                        'ShellTransitions').fetch(),
       *TrackEvent(index_path, 'parser/track_event', 'TrackEvent').fetch(),
       *TranslatedArgs(index_path, 'parser/translated_args',
                       'TranslatedArgs').fetch(),
@@ -216,13 +219,20 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *WebView(index_path, 'metrics/webview', 'WebView').fetch(),
   ]
 
+  chrome_test_dir = os.path.abspath(
+      os.path.join(__file__, '../../../data/chrome'))
+  chrome_stdlib_tests = [
+      *ChromeInteractions(index_path, 'stdlib/chrome', 'ChromeInteractions',
+                          chrome_test_dir).fetch(),
+      *ChromeScrollJankStdlib(index_path, 'stdlib/chrome',
+                              'ChromeScrollJankStdlib',
+                              chrome_test_dir).fetch(),
+      *ChromeStdlib(index_path, 'stdlib/chrome', 'ChromeStdlib',
+                    chrome_test_dir).fetch(),
+  ]
+
   stdlib_tests = [
       *AndroidStdlib(index_path, 'stdlib/android', 'AndroidStdlib').fetch(),
-      *ChromeInteractions(index_path, 'stdlib/chrome',
-                          'ChromeInteractions').fetch(),
-      *ChromeScrollJankStdlib(index_path, 'stdlib/chrome',
-                              'ChromeScrollJankStdlib').fetch(),
-      *ChromeStdlib(index_path, 'stdlib/chrome', 'ChromeStdlib').fetch(),
       *DynamicTables(index_path, 'stdlib/dynamic_tables',
                      'DynamicTables').fetch(),
       *LinuxStdlib(index_path, 'stdlib/linux', 'LinuxStdlib').fetch(),
@@ -248,7 +258,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *StdlibIntervals(index_path, 'stdlib/intervals',
                        'StdlibIntervals').fetch(),
       *Timestamps(index_path, 'stdlib/timestamps', 'Timestamps').fetch(),
-  ]
+  ] + chrome_stdlib_tests
 
   syntax_tests = [
       *PerfettoFunction(index_path, 'syntax', 'PerfettoFunction').fetch(),

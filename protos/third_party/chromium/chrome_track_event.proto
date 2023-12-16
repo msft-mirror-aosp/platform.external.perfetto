@@ -751,6 +751,7 @@ message RendererMainThreadTaskExecution {
     TASK_TYPE_STORAGE = 82;
     TASK_TYPE_NETWORKING_UNFREEZABLE_IMAGE_LOADING = 83;
     TASK_TYPE_MAIN_THREAD_TASK_QUEUE_V8_LOW_PRIORITY = 84;
+    TASK_TYPE_CLIPBOARD = 85;
   }
 
   enum FrameType {
@@ -1460,7 +1461,7 @@ message PageLoad {
 
 message StartUp {
   // This enum must be kept up to date with LaunchCauseMetrics.LaunchCause.
-  enum LauchCauseType {
+  enum LaunchCauseType {
     OTHER = 0;
     CUSTOM_TAB = 1;
     TWA = 2;
@@ -1483,7 +1484,8 @@ message StartUp {
   }
 
   optional int64 activity_id = 1;
-  optional LauchCauseType launch_cause = 2;
+  // deprecated field 2.
+  optional LaunchCauseType launch_cause = 3;
 }
 
 message WebContentInteraction {

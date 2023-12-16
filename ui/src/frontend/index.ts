@@ -20,7 +20,7 @@ import {Draft} from 'immer';
 import m from 'mithril';
 
 import {defer} from '../base/deferred';
-import {reportError, setErrorHandler} from '../base/logging';
+import {addErrorHandler, reportError} from '../base/logging';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
 import {CommandManager} from '../common/commands';
 import {createEmptyState} from '../common/empty_state';
@@ -47,6 +47,7 @@ import {globals} from './globals';
 import {HomePage} from './home_page';
 import {InsightsPage} from './insights_page';
 import {MetricsPage} from './metrics_page';
+import {PluginsPage} from './plugins_page';
 import {postMessageHandler} from './post_message_handler';
 import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
@@ -71,7 +72,7 @@ class FrontendApi {
     // recently than the visible time handled by the frontend @ 60fps,
     // update it. This typically happens when restoring the state from a
     // permalink.
-    globals.frontendLocalState.mergeState(state.frontendLocalState);
+    globals.timeline.mergeState(state.frontendLocalState);
 
     // Only redraw if something other than the frontendLocalState changed.
     let key: keyof State;
@@ -205,8 +206,11 @@ function main() {
 
   document.head.append(script, css);
 
+  // Route errors to both the UI bugreport dialog and Analytics (if enabled).
+  addErrorHandler(maybeShowErrorDialog);
+  addErrorHandler((e) => globals.logging.logError(e));
+
   // Add Error handlers for JS error and for uncaught exceptions in promises.
-  setErrorHandler((err: string) => maybeShowErrorDialog(err));
   window.addEventListener('error', (e) => reportError(e));
   window.addEventListener('unhandledrejection', (e) => reportError(e));
 
@@ -230,6 +234,7 @@ function main() {
     '/info': TraceInfoPage,
     '/widgets': WidgetsPage,
     '/viz': VizPage,
+    '/plugins': PluginsPage,
   });
   router.onRouteChanged = routeChange;
 

@@ -24,6 +24,7 @@ import {
   drawIncompleteSlice,
   drawTrackHoverTooltip,
 } from '../../common/canvas_utils';
+import {Color} from '../../common/color';
 import {colorForThread} from '../../common/colorizer';
 import {
   TrackAdapter,
@@ -33,6 +34,7 @@ import {
 import {TrackData} from '../../common/track_data';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
+import {PanelSize} from '../../frontend/panel';
 import {NewTrackArgs} from '../../frontend/track';
 import {
   EngineProxy,
@@ -196,7 +198,10 @@ class CpuSliceTrackController extends TrackControllerAdapter<Config, Data> {
   }
 
   async onDestroy() {
-    await this.query(`drop table if exists ${this.tableName('sched_cached')}`);
+    if (this.engine.isAlive) {
+      await this.engine.query(
+          `drop table if exists ${this.tableName('sched_cached')}`);
+    }
   }
 }
 
@@ -205,10 +210,6 @@ const RECT_HEIGHT = 24;
 const TRACK_HEIGHT = MARGIN_TOP * 2 + RECT_HEIGHT;
 
 class CpuSliceTrack extends TrackAdapter<Config, Data> {
-  static create(args: NewTrackArgs): CpuSliceTrack {
-    return new CpuSliceTrack(args);
-  }
-
   private mousePos?: {x: number, y: number};
   private utidHoveredInThisTrack = -1;
 
@@ -220,9 +221,9 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
     return TRACK_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
-    const {visibleTimeScale, windowSpan} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     const data = this.data();
 
     if (data === undefined) return;  // Can't possibly draw anything.
@@ -232,8 +233,8 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        windowSpan.start,
-        windowSpan.end,
+        0,
+        size.width,
         visibleTimeScale.timeToPx(data.start),
         visibleTimeScale.timeToPx(data.end));
 
@@ -245,7 +246,7 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
       visibleTimeScale,
       visibleTimeSpan,
       visibleWindowTime,
-    } = globals.frontendLocalState;
+    } = globals.timeline;
     assertTrue(data.starts.length === data.ends.length);
     assertTrue(data.starts.length === data.utids.length);
 
@@ -285,20 +286,22 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
       const isHovering = globals.state.hoveredUtid !== -1;
       const isThreadHovered = globals.state.hoveredUtid === utid;
       const isProcessHovered = globals.state.hoveredPid === pid;
-      const color = colorForThread(threadInfo);
+      const colorScheme = colorForThread(threadInfo);
+      let color: Color;
+      let textColor: Color;
       if (isHovering && !isThreadHovered) {
         if (!isProcessHovered) {
-          color.l = 90;
-          color.s = 0;
+          color = colorScheme.disabled;
+          textColor = colorScheme.textDisabled;
         } else {
-          color.l = Math.min(color.l + 30, 80);
-          color.s -= 20;
+          color = colorScheme.variant;
+          textColor = colorScheme.textVariant;
         }
       } else {
-        color.l = Math.min(color.l + 10, 60);
-        color.s -= 20;
+        color = colorScheme.base;
+        textColor = colorScheme.textBase;
       }
-      ctx.fillStyle = `hsl(${color.h}, ${color.s}%, ${color.l}%)`;
+      ctx.fillStyle = color.cssString;
       if (data.isIncomplete[i]) {
         drawIncompleteSlice(ctx, rectStart, MARGIN_TOP, rectWidth, RECT_HEIGHT);
       } else {
@@ -330,10 +333,10 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
       title = cropText(title, charWidth, visibleWidth);
       subTitle = cropText(subTitle, charWidth, visibleWidth);
       const rectXCenter = left + visibleWidth / 2;
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = textColor.cssString;
       ctx.font = '12px Roboto Condensed';
       ctx.fillText(title, rectXCenter, MARGIN_TOP + RECT_HEIGHT / 2 - 1);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.fillStyle = textColor.setAlpha(0.6).cssString;
       ctx.font = '10px Roboto Condensed';
       ctx.fillText(subTitle, rectXCenter, MARGIN_TOP + RECT_HEIGHT / 2 + 9);
     }
@@ -352,7 +355,7 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
         const rectWidth = Math.max(1, rectEnd - rectStart);
 
         // Draw a rectangle around the slice that is currently selected.
-        ctx.strokeStyle = `hsl(${color.h}, ${color.s}%, 30%)`;
+        ctx.strokeStyle = color.base.setHSL({l: 30}).cssString;
         ctx.beginPath();
         ctx.lineWidth = 3;
         ctx.strokeRect(rectStart, MARGIN_TOP - 1.5, rectWidth, RECT_HEIGHT + 3);
@@ -422,7 +425,7 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
     const data = this.data();
     this.mousePos = pos;
     if (data === undefined) return;
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     if (pos.y < MARGIN_TOP || pos.y > MARGIN_TOP + RECT_HEIGHT) {
       this.utidHoveredInThisTrack = -1;
       globals.dispatch(Actions.setHoveredUtidAndPid({utid: -1, pid: -1}));
@@ -456,7 +459,7 @@ class CpuSliceTrack extends TrackAdapter<Config, Data> {
   onMouseClick({x}: {x: number}) {
     const data = this.data();
     if (data === undefined) return false;
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     const time = visibleTimeScale.pxToHpTime(x);
     const index = search(data.starts, time.toTime());
     const id = index === -1 ? undefined : data.ids[index];

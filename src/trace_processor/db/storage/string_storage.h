@@ -16,14 +16,18 @@
 #ifndef SRC_TRACE_PROCESSOR_DB_STORAGE_STRING_STORAGE_H_
 #define SRC_TRACE_PROCESSOR_DB_STORAGE_STRING_STORAGE_H_
 
-#include <variant>
-
+#include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/storage/storage.h"
 #include "src/trace_processor/db/storage/types.h"
 
 namespace perfetto {
+
+namespace protos::pbzero {
+class SerializedColumn_Storage;
+}
+
 namespace trace_processor {
 namespace storage {
 
@@ -34,6 +38,9 @@ class StringStorage final : public Storage {
                 const std::vector<StringPool::Id>* data,
                 bool is_sorted = false)
       : values_(data), string_pool_(string_pool), is_sorted_(is_sorted) {}
+
+  SearchValidationResult ValidateSearchConstraints(SqlValue,
+                                                   FilterOp) const override;
 
   RangeOrBitVector Search(FilterOp op,
                           SqlValue value,
@@ -48,18 +55,19 @@ class StringStorage final : public Storage {
 
   void Sort(uint32_t* rows, uint32_t rows_size) const override;
 
+  void Serialize(StorageProto*) const override;
+
   uint32_t size() const override {
     return static_cast<uint32_t>(values_->size());
   }
 
  private:
-  BitVector LinearSearchInternal(FilterOp, SqlValue, RowMap::Range) const;
+  BitVector LinearSearch(FilterOp, SqlValue, RowMap::Range) const;
 
   RangeOrBitVector IndexSearchInternal(FilterOp op,
                                        SqlValue sql_val,
                                        uint32_t* indices,
-                                       uint32_t indices_size,
-                                       bool) const;
+                                       uint32_t indices_size) const;
 
   RowMap::Range BinarySearchExtrinsic(FilterOp,
                                       SqlValue,

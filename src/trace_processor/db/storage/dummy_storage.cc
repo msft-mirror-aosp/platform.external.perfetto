@@ -15,10 +15,16 @@
  */
 
 #include "src/trace_processor/db/storage/dummy_storage.h"
+#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto {
 namespace trace_processor {
 namespace storage {
+
+SearchValidationResult DummyStorage::ValidateSearchConstraints(SqlValue,
+                                                               FilterOp) const {
+  PERFETTO_FATAL("Shouldn't be called");
+}
 
 RangeOrBitVector DummyStorage::Search(FilterOp, SqlValue, RowMap::Range) const {
   PERFETTO_FATAL("Shouldn't be called");
@@ -42,6 +48,10 @@ void DummyStorage::Sort(uint32_t*, uint32_t) const {
 
 uint32_t DummyStorage::size() const {
   return 0;
+}
+
+void DummyStorage::Serialize(StorageProto*) const {
+  PERFETTO_FATAL("Shouldn't be called");
 }
 
 }  // namespace storage

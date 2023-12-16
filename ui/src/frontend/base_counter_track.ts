@@ -29,6 +29,7 @@ import {MenuItem, PopupMenu2} from '../widgets/menu';
 
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
+import {PanelSize} from './panel';
 import {constraintsToQuerySuffix} from './sql_utils';
 import {NewTrackArgs, TrackBase} from './track';
 import {CacheKey, TrackCache} from './track_cache';
@@ -61,7 +62,7 @@ export interface RenderOptions {
   yBoundaries: 'strict'|'human_readable';
 }
 
-export abstract class BaseCounterTrack<Config = {}> extends TrackBase<Config> {
+export abstract class BaseCounterTrack extends TrackBase {
   protected readonly tableName: string;
 
   // This is the over-skirted cached bounds:
@@ -175,12 +176,11 @@ export abstract class BaseCounterTrack<Config = {}> extends TrackBase<Config> {
     ];
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
     const {
       visibleTimeScale: timeScale,
       visibleWindowTime: vizTime,
-      windowSpan,
-    } = globals.frontendLocalState;
+    } = globals.timeline;
 
     {
       const windowSizePx = Math.max(1, timeScale.pxSpan.delta);
@@ -237,7 +237,7 @@ export abstract class BaseCounterTrack<Config = {}> extends TrackBase<Config> {
     }
 
     const effectiveHeight = this.getHeight() - MARGIN_TOP;
-    const endPx = windowSpan.end;
+    const endPx = size.width;
     const zeroY = MARGIN_TOP + effectiveHeight / (minimumValue < 0 ? 2 : 1);
 
     // Quantize the Y axis to quarters of powers of tens (7.5K, 10K, 12.5K).
@@ -373,8 +373,8 @@ export abstract class BaseCounterTrack<Config = {}> extends TrackBase<Config> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        windowSpan.start,
-        windowSpan.end,
+        0,
+        size.width,
         timeScale.timeToPx(this.countersKey.start),
         timeScale.timeToPx(this.countersKey.end));
   }
@@ -383,7 +383,7 @@ export abstract class BaseCounterTrack<Config = {}> extends TrackBase<Config> {
     const data = this.counters;
     if (data === undefined) return;
     this.mousePos = pos;
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     const time = visibleTimeScale.pxToHpTime(pos.x);
 
     let values = data.lastValues;

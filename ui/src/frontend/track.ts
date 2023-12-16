@@ -14,53 +14,21 @@
 
 import m from 'mithril';
 
-import {assertExists} from '../base/logging';
-import {duration, Span, time} from '../base/time';
-import {Track, TrackContext} from '../public';
+import {time} from '../base/time';
+import {SliceRect, Track, TrackContext} from '../public';
 import {EngineProxy} from '../trace_processor/engine';
 
-import {PxSpan, TimeScale} from './time_scale';
-
+import {PanelSize} from './panel';
 // Args passed to the track constructors when creating a new track.
 export interface NewTrackArgs {
   trackKey: string;
   engine: EngineProxy;
 }
 
-// This interface forces track implementations to have some static properties.
-// Typescript does not have abstract static members, which is why this needs to
-// be in a separate interface.
-export interface TrackCreator {
-  // Store the kind explicitly as a string as opposed to using class.kind in
-  // case we ever minify our code.
-  readonly kind: string;
-
-  // We need the |create| method because the stored value in the registry can be
-  // an abstract class, and we cannot call 'new' on an abstract class.
-  create(args: NewTrackArgs): TrackBase;
-}
-
-export interface SliceRect {
-  left: number;
-  width: number;
-  top: number;
-  height: number;
-  visible: boolean;
-}
-
 // The abstract class that needs to be implemented by all tracks.
-export abstract class TrackBase<Config = {}> implements Track {
+export abstract class TrackBase implements Track {
   protected readonly trackKey: string;
   protected readonly engine: EngineProxy;
-  private _config?: Config;
-
-  get config(): Config {
-    return assertExists(this._config);
-  }
-
-  set config(x: Config) {
-    this._config = x;
-  }
 
   constructor(args: NewTrackArgs) {
     this.trackKey = args.trackKey;
@@ -73,7 +41,8 @@ export abstract class TrackBase<Config = {}> implements Track {
   // this object is removed.
   onDestroy() {}
 
-  protected abstract renderCanvas(ctx: CanvasRenderingContext2D): void;
+  protected abstract renderCanvas(
+      ctx: CanvasRenderingContext2D, size: PanelSize): void;
 
   getHeight(): number {
     return 40;
@@ -95,18 +64,16 @@ export abstract class TrackBase<Config = {}> implements Track {
 
   onFullRedraw(): void {}
 
-  render(ctx: CanvasRenderingContext2D) {
-    this.renderCanvas(ctx);
+  render(ctx: CanvasRenderingContext2D, size: PanelSize) {
+    this.renderCanvas(ctx, size);
   }
 
   // Returns a place where a given slice should be drawn. Should be implemented
   // only for track types that support slices e.g. chrome_slice, async_slices
   // tStart - slice start time in seconds, tEnd - slice end time in seconds,
   // depth - slice depth
-  getSliceRect(
-      _visibleTimeScale: TimeScale, _visibleWindow: Span<time, duration>,
-      _windowSpan: PxSpan, _tStart: time, _tEnd: time,
-      _depth: number): SliceRect|undefined {
+  getSliceRect(_tStart: time, _tEnd: time, _depth: number): SliceRect
+      |undefined {
     return undefined;
   }
 }

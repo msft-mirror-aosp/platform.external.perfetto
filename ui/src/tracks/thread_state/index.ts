@@ -28,6 +28,7 @@ import {
 import {TrackData} from '../../common/track_data';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
+import {PanelSize} from '../../frontend/panel';
 import {NewTrackArgs} from '../../frontend/track';
 import {
   Plugin,
@@ -48,7 +49,6 @@ import {
 } from './thread_state_v2';
 
 export const THREAD_STATE_TRACK_KIND = 'ThreadStateTrack';
-export const THREAD_STATE_TRACK_V2_KIND = 'ThreadStateTrackV2';
 
 interface Data extends TrackData {
   strings: string[];
@@ -171,7 +171,10 @@ class ThreadStateTrackController extends TrackControllerAdapter<Config, Data> {
   }
 
   async onDestroy() {
-    await this.query(`drop view if exists ${this.tableName('thread_state')}`);
+    if (this.engine.isAlive) {
+      await this.engine.query(
+          `drop view if exists ${this.tableName('thread_state')}`);
+    }
   }
 }
 
@@ -180,10 +183,6 @@ const RECT_HEIGHT = 12;
 const EXCESS_WIDTH = 10;
 
 class ThreadStateTrack extends TrackAdapter<Config, Data> {
-  static create(args: NewTrackArgs): ThreadStateTrack {
-    return new ThreadStateTrack(args);
-  }
-
   constructor(args: NewTrackArgs) {
     super(args);
   }
@@ -192,12 +191,11 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
     return 2 * MARGIN_TOP + RECT_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     const {
       visibleTimeScale: timeScale,
       visibleTimeSpan,
-      windowSpan,
-    } = globals.frontendLocalState;
+    } = globals.timeline;
     const data = this.data();
     const charWidth = ctx.measureText('dbpqaouk').width / 8;
 
@@ -210,8 +208,8 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        windowSpan.start,
-        windowSpan.end,
+        0,
+        size.width,
         timeScale.timeToPx(data.start),
         timeScale.timeToPx(data.end),
     );
@@ -246,21 +244,15 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
           currentSelection.kind === 'THREAD_STATE' &&
           currentSelection.id === data.ids[i];
 
-      const color = colorForState(state);
-
-      let colorStr = `hsl(${color.h},${color.s}%,${color.l}%)`;
-      if (color.a) {
-        colorStr = `hsla(${color.h},${color.s}%,${color.l}%, ${color.a})`;
-      }
-      ctx.fillStyle = colorStr;
-
+      const colorScheme = colorForState(state);
+      ctx.fillStyle = colorScheme.base.cssString;
       ctx.fillRect(rectStart, MARGIN_TOP, rectWidth, RECT_HEIGHT);
 
       // Don't render text when we have less than 10px to play with.
       if (rectWidth < 10 || state === 'Sleeping') continue;
       const title = cropText(state, charWidth, rectWidth);
       const rectXCenter = rectStart + rectWidth / 2;
-      ctx.fillStyle = color.l > 80 ? '#404040' : '#fff';
+      ctx.fillStyle = colorScheme.textBase.cssString;
       ctx.fillText(title, rectXCenter, MARGIN_TOP + RECT_HEIGHT / 2 + 3);
 
       if (isSelected) {
@@ -268,9 +260,8 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
           const rectStart =
               Math.max(0 - EXCESS_WIDTH, timeScale.timeToPx(tStart));
           const rectEnd =
-              Math.min(windowSpan.end + EXCESS_WIDTH, timeScale.timeToPx(tEnd));
-          const color = colorForState(state);
-          ctx.strokeStyle = `hsl(${color.h},${color.s}%,${color.l * 0.7}%)`;
+              Math.min(size.width + EXCESS_WIDTH, timeScale.timeToPx(tEnd));
+          ctx.strokeStyle = colorScheme.base.cssString;
           ctx.beginPath();
           ctx.lineWidth = 3;
           ctx.strokeRect(
@@ -288,7 +279,7 @@ class ThreadStateTrack extends TrackAdapter<Config, Data> {
   onMouseClick({x}: {x: number}) {
     const data = this.data();
     if (data === undefined) return false;
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     const time = visibleTimeScale.pxToHpTime(x);
     const index = search(data.starts, time.toTime());
     if (index === -1) return false;
@@ -352,15 +343,15 @@ class ThreadState implements Plugin {
       ctx.registerStaticTrack({
         uri: `perfetto.ThreadState#${utid}.v2`,
         displayName,
-        kind: THREAD_STATE_TRACK_V2_KIND,
+        kind: THREAD_STATE_TRACK_KIND,
         utid,
         track: ({trackKey}) => {
-          const track = ThreadStateTrackV2.create({
-            engine: ctx.engine,
-            trackKey,
-          });
-          track.config = {utid};
-          return track;
+          return new ThreadStateTrackV2(
+              {
+                engine: ctx.engine,
+                trackKey,
+              },
+              utid);
         },
       });
     }
