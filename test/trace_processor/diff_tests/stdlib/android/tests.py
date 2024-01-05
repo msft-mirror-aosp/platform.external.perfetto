@@ -227,7 +227,27 @@ class AndroidStdlib(TestSuite):
         SELECT ANDROID_STANDARDIZE_SLICE_NAME(slice.name) name
         FROM slice
         """,
-        out=Path('android_slice_standardization.out'))
+        out=Csv("""
+        "name"
+        "Lock contention on <...>"
+        "monitor contention with <...>"
+        "SuspendThreadByThreadId <...>"
+        "LoadApkAssetsFd <...>"
+        "relayoutWindow <...>"
+        "CoroutineContinuation"
+        "Choreographer#doFrame"
+        "DrawFrames"
+        "APK load"
+        "OpenDexFilesFromOat"
+        "Open oat file"
+        "CoroutineContinuation"
+        "Garbage Collector"
+        "Handler: android.view.View"
+        "Handler: android.os.AsyncTask"
+        "Handler: com.android.systemui.broadcast.ActionReceiver"
+        "Handler: com.android.keyguard.KeyguardUpdateMonitor"
+        "Handler: com.android.systemui.qs.TileServiceManager"
+        """))
 
   def test_monitor_contention_extraction(self):
     return DiffTestBlueprint(
