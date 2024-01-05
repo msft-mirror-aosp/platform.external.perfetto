@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/db/storage/dense_null_storage.h"
+#include "src/trace_processor/db/storage/dense_null_overlay.h"
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -23,6 +23,7 @@
 #include "src/trace_processor/db/storage/fake_storage.h"
 #include "src/trace_processor/db/storage/numeric_storage.h"
 #include "src/trace_processor/db/storage/types.h"
+#include "src/trace_processor/db/storage/utils.h"
 #include "test/gtest_and_gmock.h"
 
 namespace perfetto {
@@ -34,95 +35,84 @@ using testing::ElementsAre;
 using testing::IsEmpty;
 using Range = RowMap::Range;
 
-std::vector<uint32_t> ToIndexVector(RangeOrBitVector& r_or_bv) {
-  RowMap rm;
-  if (r_or_bv.IsBitVector()) {
-    rm = RowMap(std::move(r_or_bv).TakeIfBitVector());
-  } else {
-    Range range = std::move(r_or_bv).TakeIfRange();
-    rm = RowMap(range.start, range.end);
-  }
-  return rm.GetAllIndices();
-}
-
-TEST(DenseNullStorage, NoFilteringSearch) {
+TEST(DenseNullOverlay, NoFilteringSearch) {
   std::vector<uint32_t> data{0, 1, 0, 1, 0};
   auto numeric =
       std::make_unique<NumericStorage<uint32_t>>(&data, ColumnType::kUint32);
 
   BitVector bv{0, 1, 0, 1, 0};
-  DenseNullStorage storage(std::move(numeric), &bv);
+  DenseNullOverlay storage(std::move(numeric), &bv);
 
   auto res = storage.Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(1, 3));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1, 3));
 }
 
-TEST(DenseNullStorage, RestrictInputSearch) {
+TEST(DenseNullOverlay, RestrictInputSearch) {
   std::vector<uint32_t> data{0, 1, 0, 1, 0};
   auto numeric =
       std::make_unique<NumericStorage<uint32_t>>(&data, ColumnType::kUint32);
 
   BitVector bv{0, 1, 0, 1, 0};
-  DenseNullStorage storage(std::move(numeric), &bv);
+  DenseNullOverlay storage(std::move(numeric), &bv);
 
   auto res = storage.Search(FilterOp::kGe, SqlValue::Long(0), Range(1, 3));
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(1));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1));
 }
 
-TEST(DenseNullStorage, RangeFilterSearch) {
+TEST(DenseNullOverlay, RangeFilterSearch) {
   auto fake = FakeStorage::SearchSubset(5, Range(1, 3));
 
   BitVector bv{0, 1, 0, 1, 0};
-  DenseNullStorage storage(std::move(fake), &bv);
+  DenseNullOverlay storage(std::move(fake), &bv);
 
   auto res = storage.Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(1));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1));
 }
 
-TEST(DenseNullStorage, BitvectorFilterSearch) {
+TEST(DenseNullOverlay, BitvectorFilterSearch) {
   auto fake = FakeStorage::SearchSubset(5, BitVector({0, 1, 1, 0, 0}));
 
   BitVector bv{0, 1, 0, 1, 0};
-  DenseNullStorage storage(std::move(fake), &bv);
+  DenseNullOverlay storage(std::move(fake), &bv);
 
   auto res = storage.Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(1));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1));
 }
 
-TEST(DenseNullStorage, IsNullSearch) {
+TEST(DenseNullOverlay, IsNullSearch) {
   auto fake = FakeStorage::SearchSubset(5, BitVector({1, 1, 0, 0, 1}));
 
   BitVector bv{1, 0, 0, 1, 1};
-  DenseNullStorage storage(std::move(fake), &bv);
+  DenseNullOverlay storage(std::move(fake), &bv);
 
   auto res = storage.Search(FilterOp::kIsNull, SqlValue(), Range(0, 5));
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(0, 1, 2, 4));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0, 1, 2, 4));
 }
 
-TEST(DenseNullStorage, IndexSearch) {
+TEST(DenseNullOverlay, IndexSearch) {
   std::vector<uint32_t> data{1, 0, 0, 1, 1, 1};
   auto numeric =
       std::make_unique<NumericStorage<uint32_t>>(&data, ColumnType::kUint32);
 
   BitVector bv{1, 0, 0, 1, 1, 1};
-  DenseNullStorage storage(std::move(numeric), &bv);
+  DenseNullOverlay storage(std::move(numeric), &bv);
 
   std::vector<uint32_t> index({5, 2, 3, 4, 1});
   auto res = storage.IndexSearch(FilterOp::kGe, SqlValue::Long(0), index.data(),
                                  static_cast<uint32_t>(index.size()), false);
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(0, 2, 3));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0, 2, 3));
 }
 
-TEST(DenseNullStorage, IsNullIndexSearch) {
+TEST(DenseNullOverlay, IsNullIndexSearch) {
   auto fake = FakeStorage::SearchSubset(6, BitVector({0, 0, 0, 1, 1, 1}));
 
   BitVector bv{0, 1, 0, 1, 1, 1};
-  DenseNullStorage storage(std::move(fake), &bv);
+  DenseNullOverlay storage(std::move(fake), &bv);
 
   std::vector<uint32_t> index({5, 2, 3, 4, 1});
   auto res = storage.IndexSearch(FilterOp::kIsNull, SqlValue(), index.data(),
                                  static_cast<uint32_t>(index.size()), false);
-  ASSERT_THAT(ToIndexVector(res), ElementsAre(0, 1, 2, 3));
+  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0, 1, 2, 3));
 }
 
 }  // namespace
