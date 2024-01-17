@@ -728,7 +728,6 @@ perfetto_filegroup(
     name = "include_perfetto_ext_tracing_ipc_ipc",
     srcs = [
         "include/perfetto/ext/tracing/ipc/consumer_ipc_client.h",
-        "include/perfetto/ext/tracing/ipc/default_socket.h",
         "include/perfetto/ext/tracing/ipc/producer_ipc_client.h",
         "include/perfetto/ext/tracing/ipc/service_ipc_host.h",
     ],
@@ -1631,6 +1630,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/metadata_module.h",
         "src/trace_processor/importers/proto/statsd_module.cc",
         "src/trace_processor/importers/proto/statsd_module.h",
+        "src/trace_processor/importers/proto/string_encoding_utils.cc",
+        "src/trace_processor/importers/proto/string_encoding_utils.h",
         "src/trace_processor/importers/proto/system_probes_module.cc",
         "src/trace_processor/importers/proto/system_probes_module.h",
         "src/trace_processor/importers/proto/system_probes_parser.cc",
@@ -3530,6 +3531,7 @@ perfetto_proto_library(
         "protos/perfetto/common/interceptor_descriptor.proto",
         "protos/perfetto/common/observable_events.proto",
         "protos/perfetto/common/perf_events.proto",
+        "protos/perfetto/common/protolog_common.proto",
         "protos/perfetto/common/sys_stats_counters.proto",
         "protos/perfetto/common/trace_stats.proto",
         "protos/perfetto/common/tracing_service_capabilities.proto",
@@ -3569,6 +3571,7 @@ perfetto_proto_library(
         "protos/perfetto/config/android/android_system_property_config.proto",
         "protos/perfetto/config/android/network_trace_config.proto",
         "protos/perfetto/config/android/packages_list_config.proto",
+        "protos/perfetto/config/android/protolog_config.proto",
         "protos/perfetto/config/android/surfaceflinger_layers_config.proto",
         "protos/perfetto/config/android/surfaceflinger_transactions_config.proto",
     ],
@@ -3829,6 +3832,7 @@ perfetto_proto_library(
     srcs = [
         "protos/perfetto/config/chrome/chrome_config.proto",
         "protos/perfetto/config/chrome/scenario_config.proto",
+        "protos/perfetto/config/chrome/v8_config.proto",
         "protos/perfetto/config/data_source_config.proto",
         "protos/perfetto/config/etw/etw_config.proto",
         "protos/perfetto/config/interceptor_config.proto",
@@ -4272,6 +4276,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/android/initial_display_state.proto",
         "protos/perfetto/trace/android/network_trace.proto",
         "protos/perfetto/trace/android/packages_list.proto",
+        "protos/perfetto/trace/android/protolog.proto",
         "protos/perfetto/trace/android/shell_transition.proto",
         "protos/perfetto/trace/android/surfaceflinger_common.proto",
         "protos/perfetto/trace/android/surfaceflinger_layers.proto",
@@ -4289,6 +4294,7 @@ perfetto_proto_library(
 perfetto_proto_library(
     name = "protos_perfetto_trace_android_winscope_deps_protos",
     srcs = [
+        "protos/perfetto/trace/android/protolog.proto",
         "protos/perfetto/trace/android/shell_transition.proto",
         "protos/perfetto/trace/android/surfaceflinger_common.proto",
         "protos/perfetto/trace/android/surfaceflinger_layers.proto",
@@ -4296,6 +4302,9 @@ perfetto_proto_library(
     ],
     visibility = [
         PERFETTO_CONFIG.proto_library_visibility,
+    ],
+    deps = [
+        ":protos_perfetto_common_protos",
     ],
 )
 
@@ -4326,6 +4335,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/chrome/chrome_benchmark_metadata.proto",
         "protos/perfetto/trace/chrome/chrome_metadata.proto",
         "protos/perfetto/trace/chrome/chrome_trace_event.proto",
+        "protos/perfetto/trace/chrome/v8.proto",
     ],
     visibility = [
         PERFETTO_CONFIG.proto_library_visibility,
@@ -4515,6 +4525,7 @@ perfetto_proto_library(
     deps = [
         ":protos_perfetto_common_protos",
         ":protos_perfetto_trace_android_protos",
+        ":protos_perfetto_trace_chrome_protos",
         ":protos_perfetto_trace_gpu_protos",
         ":protos_perfetto_trace_profiling_protos",
         ":protos_perfetto_trace_track_event_protos",
@@ -4527,6 +4538,7 @@ perfetto_cc_protozero_library(
     deps = [
         ":protos_perfetto_common_zero",
         ":protos_perfetto_trace_android_zero",
+        ":protos_perfetto_trace_chrome_zero",
         ":protos_perfetto_trace_gpu_zero",
         ":protos_perfetto_trace_interned_data_protos",
         ":protos_perfetto_trace_profiling_zero",

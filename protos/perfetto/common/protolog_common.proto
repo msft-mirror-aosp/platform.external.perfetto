@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
-#ifndef INCLUDE_PERFETTO_EXT_TRACING_IPC_DEFAULT_SOCKET_H_
-#define INCLUDE_PERFETTO_EXT_TRACING_IPC_DEFAULT_SOCKET_H_
+syntax = "proto2";
 
-// TODO(khokhlov): Migrate usages of "perfetto/ext/tracing/ipc/default_socket.h"
-// in Chromium to include "perfetto/tracing/internal/default_socket.h" instead,
-// then delete this file.
-#include "perfetto/tracing/default_socket.h"
+package perfetto.protos;
 
-#endif  // INCLUDE_PERFETTO_EXT_TRACING_IPC_DEFAULT_SOCKET_H_
+enum ProtoLogLevel {
+  PROTOLOG_LEVEL_UNDEFINED = 0;
+  PROTOLOG_LEVEL_DEBUG = 1;
+  PROTOLOG_LEVEL_VERBOSE = 2;
+  PROTOLOG_LEVEL_INFO = 3;
+  PROTOLOG_LEVEL_WARN = 4;
+  PROTOLOG_LEVEL_ERROR = 5;
+  PROTOLOG_LEVEL_WTF = 6;
+}
