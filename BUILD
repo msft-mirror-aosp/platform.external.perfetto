@@ -280,7 +280,6 @@ perfetto_cc_library(
         ":src_trace_processor_util_stdlib",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
-        ":src_trace_processor_views_views",
     ],
     hdrs = [
         ":include_perfetto_base_base",
@@ -466,13 +465,13 @@ perfetto_cc_library(
         ":src_traced_service_service",
         ":src_tracing_common",
         ":src_tracing_core_core",
-        ":src_tracing_core_service",
-        ":src_tracing_core_zlib_compressor",
         ":src_tracing_ipc_common",
         ":src_tracing_ipc_consumer_consumer",
         ":src_tracing_ipc_default_socket",
         ":src_tracing_ipc_producer_producer",
         ":src_tracing_ipc_service_service",
+        ":src_tracing_service_service",
+        ":src_tracing_service_zlib_compressor",
     ],
     hdrs = [
         ":include_perfetto_base_base",
@@ -1354,8 +1353,6 @@ perfetto_filegroup(
         "src/trace_processor/db/table.h",
         "src/trace_processor/db/typed_column.h",
         "src/trace_processor/db/typed_column_internal.h",
-        "src/trace_processor/db/view.cc",
-        "src/trace_processor/db/view.h",
     ],
 )
 
@@ -2206,8 +2203,6 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/flamegraph_construction_algorithms.h",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.h",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/view.cc",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/view.h",
     ],
 )
 
@@ -2663,17 +2658,6 @@ perfetto_filegroup(
     ],
 )
 
-# GN target: //src/trace_processor/views:views
-perfetto_filegroup(
-    name = "src_trace_processor_views_views",
-    srcs = [
-        "src/trace_processor/views/macros.h",
-        "src/trace_processor/views/macros_internal.h",
-        "src/trace_processor/views/slice_views.h",
-        "src/trace_processor/views/view_destructors.cc",
-    ],
-)
-
 # GN target: //src/trace_processor:demangle
 perfetto_cc_library(
     name = "src_trace_processor_demangle",
@@ -3037,7 +3021,6 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_tracing_core_core",
     srcs = [
-        "src/tracing/core/histogram.h",
         "src/tracing/core/id_allocator.cc",
         "src/tracing/core/id_allocator.h",
         "src/tracing/core/in_process_shared_memory.cc",
@@ -3052,30 +3035,6 @@ perfetto_filegroup(
         "src/tracing/core/trace_writer_impl.cc",
         "src/tracing/core/trace_writer_impl.h",
         "src/tracing/core/virtual_destructors.cc",
-    ],
-)
-
-# GN target: //src/tracing/core:service
-perfetto_filegroup(
-    name = "src_tracing_core_service",
-    srcs = [
-        "src/tracing/core/metatrace_writer.cc",
-        "src/tracing/core/metatrace_writer.h",
-        "src/tracing/core/packet_stream_validator.cc",
-        "src/tracing/core/packet_stream_validator.h",
-        "src/tracing/core/trace_buffer.cc",
-        "src/tracing/core/trace_buffer.h",
-        "src/tracing/core/tracing_service_impl.cc",
-        "src/tracing/core/tracing_service_impl.h",
-    ],
-)
-
-# GN target: //src/tracing/core:zlib_compressor
-perfetto_filegroup(
-    name = "src_tracing_core_zlib_compressor",
-    srcs = [
-        "src/tracing/core/zlib_compressor.cc",
-        "src/tracing/core/zlib_compressor.h",
     ],
 )
 
@@ -3128,6 +3087,31 @@ perfetto_filegroup(
     name = "src_tracing_ipc_default_socket",
     srcs = [
         "src/tracing/ipc/default_socket.cc",
+    ],
+)
+
+# GN target: //src/tracing/service:service
+perfetto_filegroup(
+    name = "src_tracing_service_service",
+    srcs = [
+        "src/tracing/service/histogram.h",
+        "src/tracing/service/metatrace_writer.cc",
+        "src/tracing/service/metatrace_writer.h",
+        "src/tracing/service/packet_stream_validator.cc",
+        "src/tracing/service/packet_stream_validator.h",
+        "src/tracing/service/trace_buffer.cc",
+        "src/tracing/service/trace_buffer.h",
+        "src/tracing/service/tracing_service_impl.cc",
+        "src/tracing/service/tracing_service_impl.h",
+    ],
+)
+
+# GN target: //src/tracing/service:zlib_compressor
+perfetto_filegroup(
+    name = "src_tracing_service_zlib_compressor",
+    srcs = [
+        "src/tracing/service/zlib_compressor.cc",
+        "src/tracing/service/zlib_compressor.h",
     ],
 )
 
@@ -5115,7 +5099,6 @@ perfetto_cc_library(
         ":src_tracing_client_api_without_backends",
         ":src_tracing_common",
         ":src_tracing_core_core",
-        ":src_tracing_core_service",
         ":src_tracing_in_process_backend",
         ":src_tracing_ipc_common",
         ":src_tracing_ipc_consumer_consumer",
@@ -5123,6 +5106,7 @@ perfetto_cc_library(
         ":src_tracing_ipc_producer_producer",
         ":src_tracing_ipc_service_service",
         ":src_tracing_platform_impl",
+        ":src_tracing_service_service",
         ":src_tracing_system_backend",
     ],
     hdrs = [
@@ -5284,7 +5268,6 @@ perfetto_cc_library(
         ":src_trace_processor_util_stdlib",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
-        ":src_trace_processor_views_views",
     ],
     hdrs = [
         ":include_perfetto_base_base",
@@ -5452,7 +5435,6 @@ perfetto_cc_binary(
         ":src_trace_processor_util_stdlib",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
-        ":src_trace_processor_views_views",
         "src/trace_processor/trace_processor_shell.cc",
     ],
     visibility = [
@@ -5672,7 +5654,6 @@ perfetto_cc_binary(
         ":src_trace_processor_util_stdlib",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
-        ":src_trace_processor_views_views",
         ":src_traceconv_lib",
         ":src_traceconv_main",
         ":src_traceconv_pprofbuilder",
