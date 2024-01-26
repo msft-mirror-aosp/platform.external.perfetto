@@ -28,7 +28,6 @@ import {
   TimeSpan,
 } from '../base/time';
 import {Actions} from '../common/actions';
-import {pluginManager} from '../common/plugins';
 import {runQuery} from '../common/queries';
 import {
   DurationPrecision,
@@ -39,7 +38,6 @@ import {
 import {raf} from '../core/raf_scheduler';
 import {Command} from '../public';
 import {EngineProxy} from '../trace_processor/engine';
-import {addDebugSliceTrack} from '../tracks/debug/slice_track';
 import {THREAD_STATE_TRACK_KIND} from '../tracks/thread_state';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
@@ -61,6 +59,7 @@ import {Utid} from './sql_types';
 import {getThreadInfo} from './thread_and_process_info';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
+import {addDebugSliceTrack} from './debug_tracks';
 
 function renderPermalink(): m.Children {
   const permalink = globals.state.permalink;
@@ -245,7 +244,7 @@ export class App implements m.ClassComponent {
 
       if (firstThreadStateTrack) {
         const trackInfo = globals.state.tracks[firstThreadStateTrack];
-        const trackDesc = pluginManager.resolveTrackInfo(trackInfo.uri);
+        const trackDesc = globals.trackManager.resolveTrackInfo(trackInfo.uri);
         if (trackDesc?.kind === THREAD_STATE_TRACK_KIND &&
             trackDesc?.utid !== undefined) {
           return trackDesc?.utid;
@@ -321,12 +320,12 @@ export class App implements m.ClassComponent {
 
             if (engine !== undefined && trackUtid != 0) {
               await runQuery(
-                  `SELECT IMPORT('experimental.thread_executing_span');`,
-                  engine);
+                `SELECT IMPORT('experimental.thread_executing_span');`,
+                engine);
               await addDebugSliceTrack(
-                  engine,
-                  {
-                    sqlSource: `
+                engine,
+                {
+                  sqlSource: `
                    SELECT
                       cr.id,
                       cr.utid,
@@ -343,12 +342,12 @@ export class App implements m.ClassComponent {
                     JOIN thread USING(utid)
                     JOIN process USING(upid)
                   `,
-                    columns: criticalPathsliceLiteColumnNames,
-                  },
-                  (await getThreadInfo(engine, trackUtid as Utid)).name ??
+                  columns: criticalPathsliceLiteColumnNames,
+                },
+                (await getThreadInfo(engine, trackUtid as Utid)).name ??
                       '<thread name>',
-                  criticalPathsliceLiteColumns,
-                  criticalPathsliceLiteColumnNames);
+                criticalPathsliceLiteColumns,
+                criticalPathsliceLiteColumnNames);
             }
           },
     },
@@ -363,26 +362,26 @@ export class App implements m.ClassComponent {
 
             if (engine !== undefined && trackUtid != 0) {
               await runQuery(
-                  `SELECT IMPORT('experimental.thread_executing_span');`,
-                  engine);
+                `SELECT IMPORT('experimental.thread_executing_span');`,
+                engine);
               await addDebugSliceTrack(
-                  engine,
-                  {
-                    sqlSource: `
+                engine,
+                {
+                  sqlSource: `
                         SELECT cr.id, cr.utid, cr.ts, cr.dur, cr.name, cr.table_name
                         FROM
                         internal_critical_path_stack(
                           ${trackUtid},
                           ${window.start},
                           ${window.end} - ${
-                        window.start}, 1, 1, 1, 1) cr WHERE name IS NOT NULL
+  window.start}, 1, 1, 1, 1) cr WHERE name IS NOT NULL
                   `,
-                    columns: criticalPathsliceColumnNames,
-                  },
-                  (await getThreadInfo(engine, trackUtid as Utid)).name ??
+                  columns: criticalPathsliceColumnNames,
+                },
+                (await getThreadInfo(engine, trackUtid as Utid)).name ??
                       '<thread name>',
-                  criticalPathSliceColumns,
-                  criticalPathsliceColumnNames);
+                criticalPathSliceColumns,
+                criticalPathsliceColumnNames);
             }
           },
     },
@@ -397,7 +396,7 @@ export class App implements m.ClassComponent {
 
             if (engine !== undefined && trackUtid != 0) {
               runQueryInNewTab(
-                  `SELECT IMPORT('experimental.thread_executing_span');
+                `SELECT IMPORT('experimental.thread_executing_span');
                    SELECT *
                       FROM
                         experimental_thread_executing_span_critical_path_graph(
@@ -405,8 +404,8 @@ export class App implements m.ClassComponent {
                          ${trackUtid},
                          ${window.start},
                          ${window.end} - ${window.start}) cr`,
-                  'Critical path',
-                  'omnibox_query');
+                'Critical path',
+                'omnibox_query');
             }
           },
     },
@@ -507,7 +506,7 @@ export class App implements m.ClassComponent {
       name: 'Find track by URI',
       callback:
           async () => {
-            const tracks = Array.from(pluginManager.trackRegistry.values());
+            const tracks = globals.trackManager.getAllTracks();
             const options = tracks.map(({uri}): PromptOption => {
               return {key: uri, displayName: uri};
             });
@@ -527,19 +526,19 @@ export class App implements m.ClassComponent {
 
               // Find the first track with this URI
               const firstTrack = Object.values(globals.state.tracks)
-                                     .find(({uri}) => uri === selectedUri);
+                .find(({uri}) => uri === selectedUri);
               if (firstTrack) {
                 console.log(firstTrack);
                 verticalScrollToTrack(firstTrack.key, true);
                 const traceTime = globals.stateTraceTimeTP();
                 globals.makeSelection(
-                    Actions.selectArea({
-                      area: {
-                        start: traceTime.start,
-                        end: traceTime.end,
-                        tracks: [firstTrack.key],
-                      },
-                    }),
+                  Actions.selectArea({
+                    area: {
+                      start: traceTime.start,
+                      end: traceTime.end,
+                      tracks: [firstTrack.key],
+                    },
+                  }),
                 );
               } else {
                 alert(`No tracks with uri ${selectedUri} on the timeline`);
@@ -575,10 +574,10 @@ export class App implements m.ClassComponent {
     if (msgTTL > 0 || engineIsBusy) {
       setTimeout(() => raf.scheduleFullRedraw(), msgTTL * 1000);
       return m(
-          `.omnibox.message-mode`, m(`input[readonly][disabled][ref=omnibox]`, {
-            value: '',
-            placeholder: globals.state.status.msg,
-          }));
+        `.omnibox.message-mode`, m(`input[readonly][disabled][ref=omnibox]`, {
+          value: '',
+          placeholder: globals.state.status.msg,
+        }));
     }
 
     if (this.omniboxMode === OmniboxMode.Command) {
@@ -725,9 +724,9 @@ export class App implements m.ClassComponent {
       },
       onSubmit: (value, alt) => {
         globals.openQuery(
-            undoCommonChatAppReplacements(value),
-            alt ? 'Pinned query' : 'Omnibox query',
-            alt ? undefined : 'omnibox_query');
+          undoCommonChatAppReplacements(value),
+          alt ? 'Pinned query' : 'Omnibox query',
+          alt ? undefined : 'omnibox_query');
       },
       onClose: () => {
         this.queryText = '';
@@ -769,7 +768,7 @@ export class App implements m.ClassComponent {
       onSubmit: (value, _mod, shift) => {
         executeSearch(shift);
         globals.dispatch(
-            Actions.setOmnibox({omnibox: value, mode: 'SEARCH', force: true}));
+          Actions.setOmnibox({omnibox: value, mode: 'SEARCH', force: true}));
         if (this.omniboxInputEl) {
           this.omniboxInputEl.blur();
         }
@@ -780,27 +779,27 @@ export class App implements m.ClassComponent {
 
   private renderStepThrough() {
     return m(
-        '.stepthrough',
-        m('.current',
-          `${
-              globals.currentSearchResults.totalResults === 0 ?
-                  '0 / 0' :
-                  `${globals.state.searchIndex + 1} / ${
-                      globals.currentSearchResults.totalResults}`}`),
-        m('button',
-          {
-            onclick: () => {
-              executeSearch(true /* reverse direction */);
-            },
+      '.stepthrough',
+      m('.current',
+        `${
+          globals.currentSearchResults.totalResults === 0 ?
+            '0 / 0' :
+            `${globals.state.searchIndex + 1} / ${
+              globals.currentSearchResults.totalResults}`}`),
+      m('button',
+        {
+          onclick: () => {
+            executeSearch(true /* reverse direction */);
           },
-          m('i.material-icons.left', 'keyboard_arrow_left')),
-        m('button',
-          {
-            onclick: () => {
-              executeSearch();
-            },
+        },
+        m('i.material-icons.left', 'keyboard_arrow_left')),
+      m('button',
+        {
+          onclick: () => {
+            executeSearch();
           },
-          m('i.material-icons.right', 'keyboard_arrow_right')));
+        },
+        m('i.material-icons.right', 'keyboard_arrow_right')));
   }
 
   view({children}: m.Vnode): m.Children {
@@ -818,20 +817,20 @@ export class App implements m.ClassComponent {
     }
 
     return m(
-        HotkeyContext,
-        {hotkeys},
-        m(
-            'main',
-            m(Sidebar),
-            m(Topbar, {
-              omnibox: this.renderOmnibox(),
-            }),
-            m(Alerts),
-            children,
-            m(CookieConsent),
-            maybeRenderFullscreenModalDialog(),
-            globals.state.perfDebug && m('.perf-stats'),
-            ),
+      HotkeyContext,
+      {hotkeys},
+      m(
+        'main',
+        m(Sidebar),
+        m(Topbar, {
+          omnibox: this.renderOmnibox(),
+        }),
+        m(Alerts),
+        children,
+        m(CookieConsent),
+        maybeRenderFullscreenModalDialog(),
+        globals.state.perfDebug && m('.perf-stats'),
+      ),
     );
   }
 
@@ -866,7 +865,7 @@ export class App implements m.ClassComponent {
           omniboxEl.select();
         } else {
           omniboxEl.setSelectionRange(
-              this.pendingCursorPlacement, this.pendingCursorPlacement);
+            this.pendingCursorPlacement, this.pendingCursorPlacement);
           this.pendingCursorPlacement = -1;
         }
       }

@@ -29,6 +29,7 @@ import {
   ConversionJobName,
   ConversionJobStatus,
 } from '../common/conversion_jobs';
+import {createEmptyState} from '../common/empty_state';
 import {
   HighPrecisionTime,
   HighPrecisionTimeSpan,
@@ -45,6 +46,7 @@ import {
 } from '../common/state';
 import {TabManager} from '../common/tab_registry';
 import {TimestampFormat, timestampFormat} from '../common/timestamp_format';
+import {TrackManager} from '../common/track_cache';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {Engine} from '../trace_processor/engine';
@@ -248,7 +250,7 @@ class Globals {
 
   private _testing = false;
   private _dispatch?: Dispatch = undefined;
-  private _store?: Store<State>;
+  private _store = createStore(createEmptyState());
   private _timeline?: Timeline = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
@@ -286,6 +288,7 @@ class Globals {
   private _traceTzOffset = Time.ZERO;
   private _openQueryHandler?: OpenQueryHandler;
   private _tabManager = new TabManager();
+  private _trackManager = new TrackManager(this._store);
 
   scrollToTrackKey?: string|number;
   httpRpcState: HttpRpcState = {connected: false};
@@ -311,18 +314,15 @@ class Globals {
 
   engines = new Map<string, Engine>();
 
-  initialize(
-      dispatch: Dispatch, router: Router, initialState: State,
-      cmdManager: CommandManager) {
+  initialize(dispatch: Dispatch, router: Router, cmdManager: CommandManager) {
     this._dispatch = dispatch;
     this._router = router;
-    this._store = createStore(initialState);
     this._cmdManager = cmdManager;
     this._timeline = new Timeline();
 
     setPerfHooks(
-        () => this.state.perfDebug,
-        () => this.dispatch(Actions.togglePerfDebug({})));
+      () => this.state.perfDebug,
+      () => this.dispatch(Actions.togglePerfDebug({})));
 
     this._serviceWorkerController = new ServiceWorkerController();
     this._testing =
@@ -653,14 +653,13 @@ class Globals {
       // the set of selected tracks via toggling per-track checkboxes.
       // Fix that.
       onSelectionChanged(
-          this.state.currentSelection ?? undefined,
-          tab === 'current_selection');
+        this.state.currentSelection ?? undefined,
+        tab === 'current_selection');
     }
   }
 
   resetForTesting() {
     this._dispatch = undefined;
-    this._store = undefined;
     this._timeline = undefined;
     this._serviceWorkerController = undefined;
 
@@ -784,23 +783,27 @@ class Globals {
     return this._tabManager;
   }
 
+  get trackManager() {
+    return this._trackManager;
+  }
+
   // Offset between t=0 and the configured time domain.
   timestampOffset(): time {
     const fmt = timestampFormat();
     switch (fmt) {
-      case TimestampFormat.Timecode:
-      case TimestampFormat.Seconds:
-        return this.state.traceTime.start;
-      case TimestampFormat.Raw:
-      case TimestampFormat.RawLocale:
-        return Time.ZERO;
-      case TimestampFormat.UTC:
-        return this.utcOffset;
-      case TimestampFormat.TraceTz:
-        return this.traceTzOffset;
-      default:
-        const x: never = fmt;
-        throw new Error(`Unsupported format ${x}`);
+    case TimestampFormat.Timecode:
+    case TimestampFormat.Seconds:
+      return this.state.traceTime.start;
+    case TimestampFormat.Raw:
+    case TimestampFormat.RawLocale:
+      return Time.ZERO;
+    case TimestampFormat.UTC:
+      return this.utcOffset;
+    case TimestampFormat.TraceTz:
+      return this.traceTzOffset;
+    default:
+      const x: never = fmt;
+      throw new Error(`Unsupported format ${x}`);
     }
   }
 
@@ -816,7 +819,7 @@ class Globals {
     if (selection === null) {
       return {start, end};
     } else if (
-        selection.kind === 'SLICE' || selection.kind === 'CHROME_SLICE') {
+      selection.kind === 'SLICE' || selection.kind === 'CHROME_SLICE') {
       const slice = this.sliceDetails;
       if (slice.ts && slice.dur !== undefined && slice.dur > 0) {
         start = slice.ts;
@@ -827,7 +830,7 @@ class Globals {
         // a)slice.dur === -1 -> unfinished slice
         // b)slice.dur === 0  -> instant event
         end = slice.dur === -1n ? Time.add(start, INCOMPLETE_SLICE_DURATION) :
-                                  Time.add(start, INSTANT_FOCUS_DURATION);
+          Time.add(start, INSTANT_FOCUS_DURATION);
       }
     } else if (selection.kind === 'THREAD_STATE') {
       const threadState = this.threadStateDetails;

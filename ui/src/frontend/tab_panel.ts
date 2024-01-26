@@ -35,9 +35,12 @@ export class TabPanel implements m.ClassComponent {
   private detailsHeight = getDetailsHeight();
 
   view() {
-    const tabs = globals.state.tabs.openTabs.map((uri): TabWithContent => {
-      const tabDesc = globals.tabManager.resolveTab(uri);
-      if (exists(tabDesc)) {
+    const tabMan = globals.tabManager;
+    const tabList = globals.store.state.tabs.openTabs;
+
+    const resolvedTabs = tabMan.resolveTabs(tabList);
+    const tabs = resolvedTabs.map(({uri, tab: tabDesc}): TabWithContent => {
+      if (tabDesc) {
         return {
           key: uri,
           hasCloseButton: true,
@@ -63,13 +66,13 @@ export class TabPanel implements m.ClassComponent {
 
     const tabDropdownEntries =
         globals.tabManager.tabs.filter((tab) => tab.isEphemeral === false)
-            .map(({content, uri}): TabDropdownEntry => {
-              return {
-                key: uri,
-                title: content.getTitle(),
-                onClick: () => globals.dispatch(Actions.showTab({uri})),
-              };
-            });
+          .map(({content, uri}): TabDropdownEntry => {
+            return {
+              key: uri,
+              title: content.getTitle(),
+              onClick: () => globals.dispatch(Actions.showTab({uri})),
+            };
+          });
 
     return [
       m(DragHandle, {
@@ -84,15 +87,15 @@ export class TabPanel implements m.ClassComponent {
         onTabClose: (key) => globals.dispatch(Actions.hideTab({uri: key})),
       }),
       m(
-          '.details-panel-container',
-          {
-            style: {height: `${this.detailsHeight}px`},
-          },
-          tabs.map(({key, content}) => {
-            const active = key === globals.state.tabs.currentTab;
-            return m(Gate, {open: active}, content);
-          }),
-          ),
+        '.details-panel-container',
+        {
+          style: {height: `${this.detailsHeight}px`},
+        },
+        tabs.map(({key, content}) => {
+          const active = key === globals.state.tabs.currentTab;
+          return m(Gate, {open: active}, content);
+        }),
+      ),
     ];
   }
 
