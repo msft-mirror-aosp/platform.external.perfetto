@@ -23,7 +23,6 @@ import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
 import {CommandManager} from '../common/commands';
-import {createEmptyState} from '../common/empty_state';
 import {flattenArgs, traceEvent} from '../common/metatracing';
 import {pluginManager, pluginRegistry} from '../common/plugins';
 import {State} from '../common/state';
@@ -250,7 +249,7 @@ function main() {
 
   const cmdManager = new CommandManager();
 
-  globals.initialize(dispatch, router, createEmptyState(), cmdManager);
+  globals.initialize(dispatch, router, cmdManager);
 
   globals.serviceWorkerController.install();
 
@@ -261,8 +260,8 @@ function main() {
   // controller's worker can't access chrome.runtime.
   // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
   const extensionPort = window.chrome && chrome.runtime ?
-      chrome.runtime.connect(EXTENSION_ID) :
-      undefined;
+    chrome.runtime.connect(EXTENSION_ID) :
+    undefined;
 
   setExtensionAvailability(extensionPort !== undefined);
 
@@ -273,13 +272,13 @@ function main() {
     });
     // This forwards the messages from the extension to the controller.
     extensionPort.onMessage.addListener(
-        (message: object, _port: chrome.runtime.Port) => {
-          if (isGetCategoriesResponse(message)) {
-            globals.dispatch(Actions.setChromeCategories(message));
-            return;
-          }
-          extensionLocalChannel.port2.postMessage(message);
-        });
+      (message: object, _port: chrome.runtime.Port) => {
+        if (isGetCategoriesResponse(message)) {
+          globals.dispatch(Actions.setChromeCategories(message));
+          return;
+        }
+        extensionLocalChannel.port2.postMessage(message);
+      });
   }
 
   // This forwards the messages from the controller to the extension
@@ -324,9 +323,9 @@ function onCssLoaded() {
     updateAvailableAdbDevices();
     try {
       navigator.usb.addEventListener(
-          'connect', () => updateAvailableAdbDevices());
+        'connect', () => updateAvailableAdbDevices());
       navigator.usb.addEventListener(
-          'disconnect', () => updateAvailableAdbDevices());
+        'disconnect', () => updateAvailableAdbDevices());
     } catch (e) {
       console.error('WebUSB API not supported');
     }

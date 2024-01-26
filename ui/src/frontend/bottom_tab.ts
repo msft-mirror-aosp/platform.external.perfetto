@@ -114,7 +114,7 @@ export abstract class BottomTab<Config = {}> extends BottomTabBase<Config> {
     super(args);
   }
 
-  abstract viewTab(): void|m.Children;
+  abstract viewTab(): m.Children;
 
   close(): void {
     closeTab(this.uuid);
@@ -122,7 +122,7 @@ export abstract class BottomTab<Config = {}> extends BottomTabBase<Config> {
 
   renderPanel(): m.Children {
     return m(
-        BottomTabAdapter,
+      BottomTabAdapter,
         {key: this.uuid, panel: this} as BottomTabAdapterAttrs);
   }
 }
@@ -260,7 +260,7 @@ export class BottomTabList {
     if (tab.uuid === globals.state.currentTab && this.tabs.length > 0) {
       const newActiveIndex = index === this.tabs.length ? index - 1 : index;
       globals.dispatch(Actions.setCurrentTab(
-          {tab: tabSelectionKey(this.tabs[newActiveIndex])}));
+        {tab: tabSelectionKey(this.tabs[newActiveIndex])}));
     }
     raf.scheduleFullRedraw();
   }

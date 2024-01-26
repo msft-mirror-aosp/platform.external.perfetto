@@ -29,20 +29,16 @@ import {
   TrackContext,
 } from '../../public';
 import {ChromeSliceTrack} from '../chrome_slices';
-
-export const VISUALISED_ARGS_SLICE_TRACK_URI = 'perfetto.VisualisedArgs';
-
-export interface VisualisedArgsState {
-  argName: string;
-  maxDepth: number;
-  trackId: number;
-}
+import {
+  VISUALISED_ARGS_SLICE_TRACK_URI,
+  VisualisedArgsState,
+} from '../../frontend/visualized_args_tracks';
 
 export class VisualisedArgsTrack extends ChromeSliceTrack {
   private helperViewName: string;
 
   constructor(
-      engine: EngineProxy, maxDepth: number, trackKey: string, trackId: number,
+    engine: EngineProxy, maxDepth: number, trackKey: string, trackId: number,
       private argName: string) {
     const uuid = uuidv4();
     const namespace = `__arg_visualisation_helper_${argName}_${uuid}`;
@@ -121,11 +117,11 @@ class VisualisedArgsPlugin implements Plugin {
         // worse than the situation we had before with track config.
         const params = trackCtx.params as VisualisedArgsState;
         return new VisualisedArgsTrack(
-            ctx.engine,
-            params.maxDepth,
-            trackCtx.trackKey,
-            params.trackId,
-            params.argName,
+          ctx.engine,
+          params.maxDepth,
+          trackCtx.trackKey,
+          params.trackId,
+          params.argName,
         );
       },
     });
