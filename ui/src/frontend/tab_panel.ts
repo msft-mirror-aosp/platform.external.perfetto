@@ -67,10 +67,18 @@ export class TabPanel implements m.ClassComponent {
     const tabDropdownEntries =
         globals.tabManager.tabs.filter((tab) => tab.isEphemeral === false)
           .map(({content, uri}): TabDropdownEntry => {
+            // Check if the tab is already open
+            const isOpen = globals.state.tabs.openTabs.find((openTabUri) => {
+              return openTabUri === uri;
+            });
+            const clickAction = isOpen ?
+              Actions.hideTab({uri}) :
+              Actions.showTab({uri});
             return {
               key: uri,
               title: content.getTitle(),
-              onClick: () => globals.dispatch(Actions.showTab({uri})),
+              onClick: () => globals.dispatch(clickAction),
+              checked: isOpen !== undefined,
             };
           });
 
@@ -104,12 +112,12 @@ export class TabPanel implements m.ClassComponent {
     if (!exists(cs)) {
       return m(EmptyState, {
         className: 'pf-noselection',
-        header: 'No selection',
-        detail: 'Please select something',
+        header: 'Nothing selected',
+        detail: 'Selection details will appear here',
       });
     }
 
-    const sectionReg = globals.tabManager.currentSelectionSections;
+    const sectionReg = globals.tabManager.detailsPanels;
     const allSections = Array.from(sectionReg.values());
 
     // Get the first "truthy" current selection section
