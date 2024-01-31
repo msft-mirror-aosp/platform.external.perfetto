@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
 import {duration, Time, time} from '../../base/time';
 import {colorForFtrace} from '../../common/colorizer';
 import {LIMIT, TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
+import {FtracePanel} from '../../frontend/ftrace_panel';
 import {globals} from '../../frontend/globals';
 import {PanelSize} from '../../frontend/panel';
 import {
@@ -90,7 +93,7 @@ class FtraceRawTrack implements Track {
     };
 
     const it = queryRes.iter(
-        {tsQuant: LONG, type: STR, name: STR},
+      {tsQuant: LONG, type: STR, name: STR},
     );
     for (let row = 0; it.valid(); it.next(), row++) {
       result.timestamps[row] = it.tsQuant;
@@ -112,7 +115,7 @@ class FtraceRawTrack implements Track {
     const dataEndPx = visibleTimeScale.timeToPx(data.end);
 
     checkerboardExcept(
-        ctx, this.getHeight(), 0, size.width, dataStartPx, dataEndPx);
+      ctx, this.getHeight(), 0, size.width, dataStartPx, dataEndPx);
 
     const diamondSideLen = RECT_HEIGHT / Math.sqrt(2);
 
@@ -150,6 +153,15 @@ class FtraceRawPlugin implements Plugin {
         },
       });
     }
+
+    ctx.registerTab({
+      uri: 'perfetto.FtraceRaw#FtraceEventsTab',
+      isEphemeral: false,
+      content: {
+        render: () => m(FtracePanel),
+        getTitle: () => 'Ftrace Events',
+      },
+    });
   }
 
   private async lookupCpuCores(engine: EngineProxy): Promise<number[]> {

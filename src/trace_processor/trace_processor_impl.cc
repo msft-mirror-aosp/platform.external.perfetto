@@ -56,6 +56,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/clock_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/import.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/math.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.h"
@@ -69,6 +70,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/ancestor.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/connected_flow.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/descendant.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dominator_tree.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_annotated_stack.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_counter_dur.h"
@@ -100,8 +102,7 @@
 #include "protos/perfetto/trace/trace.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 namespace {
 
 template <typename SqlFunction, typename Ptr = typename SqlFunction::Context*>
@@ -837,6 +838,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(
       storage->window_manager_shell_transition_handlers_table());
 
+  RegisterStaticTable(storage->protolog_table());
+
   RegisterStaticTable(storage->metadata_table());
   RegisterStaticTable(storage->cpu_table());
   RegisterStaticTable(storage->cpu_freq_table());
@@ -891,6 +894,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       new ExperimentalFlatSlice(&context_)));
   engine_->RegisterStaticTableFunction(
       std::make_unique<DominatorTree>(context_.storage->mutable_string_pool()));
+  engine_->RegisterStaticTableFunction(
+      std::make_unique<Dfs>(context_.storage->mutable_string_pool()));
 
   // Metrics.
   RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
@@ -1005,5 +1010,4 @@ base::Status TraceProcessorImpl::DisableAndReadMetatrace(
   return base::OkStatus();
 }
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

@@ -32,7 +32,13 @@ export {
   STR,
   STR_NULL,
 } from '../trace_processor/query_result';
-export {BottomTabAdapter} from './utils';
+export {BottomTabToSCSAdapter} from './utils';
+
+// This is a temporary fix until this is available in the plugin API.
+export {
+  createDebugSliceTrackActions,
+  addDebugSliceTrack,
+} from '../frontend/debug_tracks';
 
 export interface Slice {
   // These properties are updated only once per query result when the Slice
@@ -317,12 +323,11 @@ export interface TabDescriptor {
   uri: string;  // TODO(stevegolton): Maybe optional for ephemeral tabs.
   content: Tab;
   isEphemeral?: boolean;  // Defaults false
-  // TODO(stevegolton): Implement these lifecycle hooks.
-  // onShow?: () => void;
-  // onHide?: () => void;
+  onHide?(): void;
+  onShow?(): void;
 }
 
-export interface CurrentSelectionSection {
+export interface DetailsPanel {
   render(selection: Selection): m.Children;
 }
 
@@ -397,8 +402,9 @@ export interface PluginContextTrace extends PluginContext {
   // is deactivated or when the trace is unloaded.
   registerTab(tab: TabDescriptor): void;
 
-  // Register a current selection handler.
-  registerCurrentSelectionSection(sel: CurrentSelectionSection): void;
+  // Register a hook into the current selection tab rendering logic that allows
+  // customization of the current selection tab content.
+  registerDetailsPanel(sel: DetailsPanel): void;
 
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;

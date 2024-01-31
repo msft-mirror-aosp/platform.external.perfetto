@@ -27,7 +27,10 @@ import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
 import {PanelSize} from '../../frontend/panel';
+import {asThreadStateSqlId} from '../../frontend/sql_types';
+import {ThreadStateTab} from '../../frontend/thread_state_tab';
 import {
+  BottomTabToSCSAdapter,
   EngineProxy,
   Plugin,
   PluginContext,
@@ -151,7 +154,7 @@ class ThreadStateTrack implements Track {
         {shortState: string | undefined; ioWait: boolean | undefined},
         number>();
     function internState(
-        shortState: string|undefined, ioWait: boolean|undefined) {
+      shortState: string|undefined, ioWait: boolean|undefined) {
       let idx = stringIndexes.get({shortState, ioWait});
       if (idx !== undefined) return idx;
       idx = data.strings.length;
@@ -197,7 +200,7 @@ class ThreadStateTrack implements Track {
   async onDestroy() {
     if (this.engine.isAlive) {
       await this.engine.query(
-          `drop view if exists ${this.tableName('thread_state')}`);
+        `drop view if exists ${this.tableName('thread_state')}`);
     }
     this.fetcher.dispose();
   }
@@ -221,12 +224,12 @@ class ThreadStateTrack implements Track {
     let drawRectOnSelected = () => {};
 
     checkerboardExcept(
-        ctx,
-        this.getHeight(),
-        0,
-        size.width,
-        timeScale.timeToPx(data.start),
-        timeScale.timeToPx(data.end),
+      ctx,
+      this.getHeight(),
+      0,
+      size.width,
+      timeScale.timeToPx(data.start),
+      timeScale.timeToPx(data.end),
     );
 
     ctx.textAlign = 'center';
@@ -280,10 +283,10 @@ class ThreadStateTrack implements Track {
           ctx.beginPath();
           ctx.lineWidth = 3;
           ctx.strokeRect(
-              rectStart,
-              MARGIN_TOP - 1.5,
-              rectEnd - rectStart,
-              RECT_HEIGHT + 3);
+            rectStart,
+            MARGIN_TOP - 1.5,
+            rectEnd - rectStart,
+            RECT_HEIGHT + 3);
           ctx.closePath();
         };
       }
@@ -300,7 +303,7 @@ class ThreadStateTrack implements Track {
     if (index === -1) return false;
     const id = data.ids[index];
     globals.makeSelection(
-        Actions.selectThreadState({id, trackKey: this.trackKey}));
+      Actions.selectThreadState({id, trackKey: this.trackKey}));
     return true;
   }
 }
@@ -357,14 +360,29 @@ class ThreadState implements Plugin {
         utid,
         track: ({trackKey}) => {
           return new ThreadStateTrackV2(
-              {
-                engine: ctx.engine,
-                trackKey,
-              },
-              utid);
+            {
+              engine: ctx.engine,
+              trackKey,
+            },
+            utid);
         },
       });
     }
+
+    ctx.registerDetailsPanel(new BottomTabToSCSAdapter({
+      tabFactory: (sel) => {
+        if (sel.kind !== 'THREAD_STATE') {
+          return undefined;
+        }
+        return new ThreadStateTab({
+          config: {
+            id: asThreadStateSqlId(sel.id),
+          },
+          engine: ctx.engine,
+          uuid: uuidv4(),
+        });
+      },
+    }));
   }
 }
 

@@ -35,9 +35,12 @@ export class TabPanel implements m.ClassComponent {
   private detailsHeight = getDetailsHeight();
 
   view() {
-    const tabs = globals.state.tabs.openTabs.map((uri): TabWithContent => {
-      const tabDesc = globals.tabManager.resolveTab(uri);
-      if (exists(tabDesc)) {
+    const tabMan = globals.tabManager;
+    const tabList = globals.store.state.tabs.openTabs;
+
+    const resolvedTabs = tabMan.resolveTabs(tabList);
+    const tabs = resolvedTabs.map(({uri, tab: tabDesc}): TabWithContent => {
+      if (tabDesc) {
         return {
           key: uri,
           hasCloseButton: true,
@@ -63,13 +66,21 @@ export class TabPanel implements m.ClassComponent {
 
     const tabDropdownEntries =
         globals.tabManager.tabs.filter((tab) => tab.isEphemeral === false)
-            .map(({content, uri}): TabDropdownEntry => {
-              return {
-                key: uri,
-                title: content.getTitle(),
-                onClick: () => globals.dispatch(Actions.showTab({uri})),
-              };
+          .map(({content, uri}): TabDropdownEntry => {
+            // Check if the tab is already open
+            const isOpen = globals.state.tabs.openTabs.find((openTabUri) => {
+              return openTabUri === uri;
             });
+            const clickAction = isOpen ?
+              Actions.hideTab({uri}) :
+              Actions.showTab({uri});
+            return {
+              key: uri,
+              title: content.getTitle(),
+              onClick: () => globals.dispatch(clickAction),
+              checked: isOpen !== undefined,
+            };
+          });
 
     return [
       m(DragHandle, {
@@ -84,15 +95,15 @@ export class TabPanel implements m.ClassComponent {
         onTabClose: (key) => globals.dispatch(Actions.hideTab({uri: key})),
       }),
       m(
-          '.details-panel-container',
-          {
-            style: {height: `${this.detailsHeight}px`},
-          },
-          tabs.map(({key, content}) => {
-            const active = key === globals.state.tabs.currentTab;
-            return m(Gate, {open: active}, content);
-          }),
-          ),
+        '.details-panel-container',
+        {
+          style: {height: `${this.detailsHeight}px`},
+        },
+        tabs.map(({key, content}) => {
+          const active = key === globals.state.tabs.currentTab;
+          return m(Gate, {open: active}, content);
+        }),
+      ),
     ];
   }
 
@@ -101,12 +112,11 @@ export class TabPanel implements m.ClassComponent {
     if (!exists(cs)) {
       return m(EmptyState, {
         className: 'pf-noselection',
-        header: 'No selection',
-        detail: 'Please select something',
-      });
+        title: 'Nothing selected',
+      }, 'Selection details will appear here');
     }
 
-    const sectionReg = globals.tabManager.currentSelectionSections;
+    const sectionReg = globals.tabManager.detailsPanels;
     const allSections = Array.from(sectionReg.values());
 
     // Get the first "truthy" current selection section
@@ -116,10 +126,9 @@ export class TabPanel implements m.ClassComponent {
     if (!Boolean(section)) {
       return m(EmptyState, {
         className: 'pf-noselection',
-        header: 'No details available',
-        detail: `Selection kind: '${cs.kind}'`,
+        title: 'No details available',
         icon: 'warning',
-      });
+      }, `Selection kind: '${cs.kind}'`);
     } else {
       return section;
     }

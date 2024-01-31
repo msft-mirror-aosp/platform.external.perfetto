@@ -15,6 +15,8 @@
 import {BigintMath as BIMath} from '../../base/bigint_math';
 import {clamp} from '../../base/math_utils';
 import {Duration, duration, time} from '../../base/time';
+import {uuidv4} from '../../base/uuid';
+import {ChromeSliceDetailsTab} from '../../frontend/chrome_slice_details_tab';
 import {
   NAMED_ROW,
   NamedSliceTrack,
@@ -27,6 +29,7 @@ import {
 } from '../../frontend/slice_track';
 import {NewTrackArgs} from '../../frontend/track';
 import {
+  BottomTabToSCSAdapter,
   EngineProxy,
   Plugin,
   PluginContext,
@@ -144,7 +147,7 @@ export class ChromeSliceTrack extends SliceTrackLEGACY {
         // it is less than or equal to one, incase the thread duration exceeds
         // the total duration.
         cpuTimeRatio = Math.min(
-            Math.round(BIMath.ratio(it.threadDur, it.dur) * 100) / 100, 1);
+          Math.round(BIMath.ratio(it.threadDur, it.dur) * 100) / 100, 1);
       }
       slices.cpuTimeRatio![row] = cpuTimeRatio;
     }
@@ -268,10 +271,10 @@ class ChromeSlicesPlugin implements Plugin {
         kind: SLICE_TRACK_KIND,
         track: ({trackKey}) => {
           return new ChromeSliceTrack(
-              engine,
-              maxDepth,
-              trackKey,
-              trackId,
+            engine,
+            maxDepth,
+            trackKey,
+            trackId,
           );
         },
       });
@@ -292,6 +295,22 @@ class ChromeSlicesPlugin implements Plugin {
         },
       });
     }
+
+    ctx.registerDetailsPanel(new BottomTabToSCSAdapter({
+      tabFactory: (sel) => {
+        if (sel.kind !== 'CHROME_SLICE') {
+          return undefined;
+        }
+        return new ChromeSliceDetailsTab({
+          config: {
+            table: sel.table ?? 'slice',
+            id: sel.id,
+          },
+          engine: ctx.engine,
+          uuid: uuidv4(),
+        });
+      },
+    }));
   }
 }
 

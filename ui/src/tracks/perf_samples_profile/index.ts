@@ -19,6 +19,7 @@ import {ProfileType} from '../../common/state';
 import {TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {FLAMEGRAPH_HOVERED_COLOR} from '../../frontend/flamegraph';
+import {FlamegraphDetailsPanel} from '../../frontend/flamegraph_panel';
 import {globals} from '../../frontend/globals';
 import {PanelSize} from '../../frontend/panel';
 import {TimeScale} from '../../frontend/time_scale';
@@ -119,17 +120,17 @@ class PerfSamplesProfileTrack implements Track {
           selection.leftTs <= centerX && selection.rightTs >= centerX;
       const strokeWidth = isSelected ? 3 : 0;
       this.drawMarker(
-          ctx,
-          visibleTimeScale.timeToPx(centerX),
-          this.centerY,
-          isHovered,
-          strokeWidth);
+        ctx,
+        visibleTimeScale.timeToPx(centerX),
+        this.centerY,
+        isHovered,
+        strokeWidth);
     }
   }
 
   drawMarker(
-      ctx: CanvasRenderingContext2D, x: number, y: number, isHovered: boolean,
-      strokeWidth: number): void {
+    ctx: CanvasRenderingContext2D, x: number, y: number, isHovered: boolean,
+    strokeWidth: number): void {
     ctx.beginPath();
     ctx.moveTo(x, y - this.markerWidth);
     ctx.lineTo(x - this.markerWidth, y);
@@ -189,8 +190,8 @@ class PerfSamplesProfileTrack implements Track {
 
   // If the markers overlap the rightmost one will be selected.
   findTimestampIndex(
-      left: number, timeScale: TimeScale, data: Data, x: number, y: number,
-      right: number): number {
+    left: number, timeScale: TimeScale, data: Data, x: number, y: number,
+    right: number): number {
     let index = -1;
     if (left !== -1) {
       const start = Time.fromRaw(data.tsStarts[left]);
@@ -223,7 +224,7 @@ class PerfSamplesProfilePlugin implements Plugin {
       select distinct upid, pid
       from perf_sample join thread using (utid) join process using (upid)
       where callsite_id is not null
-  `);
+    `);
     for (const it = result.iter({upid: NUM, pid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
       const pid = it.pid;
@@ -235,6 +236,16 @@ class PerfSamplesProfilePlugin implements Plugin {
         track: () => new PerfSamplesProfileTrack(ctx.engine, upid),
       });
     }
+
+    ctx.registerDetailsPanel({
+      render: (sel) => {
+        if (sel.kind === 'PERF_SAMPLES') {
+          return m(FlamegraphDetailsPanel);
+        } else {
+          return undefined;
+        }
+      },
+    });
   }
 }
 
