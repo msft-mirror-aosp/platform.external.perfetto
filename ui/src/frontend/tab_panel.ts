@@ -21,7 +21,6 @@ import {EmptyState} from '../widgets/empty_state';
 
 import {
   DragHandle,
-  getDetailsHeight,
   Tab,
   TabDropdownEntry,
 } from './drag_handle';
@@ -32,7 +31,8 @@ interface TabWithContent extends Tab {
 }
 
 export class TabPanel implements m.ClassComponent {
-  private detailsHeight = getDetailsHeight();
+  // Tabs panel starts collapsed.
+  private detailsHeight = 0;
 
   view() {
     const tabMan = globals.tabManager;
@@ -112,9 +112,8 @@ export class TabPanel implements m.ClassComponent {
     if (!exists(cs)) {
       return m(EmptyState, {
         className: 'pf-noselection',
-        header: 'Nothing selected',
-        detail: 'Selection details will appear here',
-      });
+        title: 'Nothing selected',
+      }, 'Selection details will appear here');
     }
 
     const sectionReg = globals.tabManager.detailsPanels;
@@ -127,10 +126,9 @@ export class TabPanel implements m.ClassComponent {
     if (!Boolean(section)) {
       return m(EmptyState, {
         className: 'pf-noselection',
-        header: 'No details available',
-        detail: `Selection kind: '${cs.kind}'`,
+        title: 'No details available',
         icon: 'warning',
-      });
+      }, `Selection kind: '${cs.kind}'`);
     } else {
       return section;
     }
