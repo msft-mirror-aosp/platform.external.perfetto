@@ -34,15 +34,11 @@ class SelectorOverlay : public Column {
   SearchValidationResult ValidateSearchConstraints(SqlValue,
                                                    FilterOp) const override;
 
-  RangeOrBitVector Search(FilterOp op,
-                          SqlValue value,
-                          Range range) const override;
+  RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
 
-  RangeOrBitVector IndexSearch(FilterOp op,
-                               SqlValue value,
-                               uint32_t* indices,
-                               uint32_t indices_count,
-                               bool sorted) const override;
+  RangeOrBitVector IndexSearch(FilterOp p, SqlValue, Indices) const override;
+
+  Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
 
   void StableSort(uint32_t* rows, uint32_t rows_size) const override;
 
@@ -51,6 +47,8 @@ class SelectorOverlay : public Column {
   void Serialize(StorageProto*) const override;
 
   uint32_t size() const override { return selector_->size(); }
+
+  std::string_view name() const override { return "SelectorOverlay"; }
 
  private:
   std::unique_ptr<Column> inner_ = nullptr;

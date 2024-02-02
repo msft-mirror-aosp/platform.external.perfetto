@@ -39,11 +39,9 @@ class DummyStorage final : public Column {
   SearchValidationResult ValidateSearchConstraints(SqlValue,
                                                    FilterOp) const override;
 
-  RangeOrBitVector IndexSearch(FilterOp,
-                               SqlValue,
-                               uint32_t*,
-                               uint32_t,
-                               bool) const override;
+  RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+
+  Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
 
   void StableSort(uint32_t*, uint32_t) const override;
 
@@ -52,6 +50,8 @@ class DummyStorage final : public Column {
   void Serialize(StorageProto*) const override;
 
   uint32_t size() const override;
+
+  std::string_view name() const override { return "DummyStorage"; }
 };
 
 }  // namespace column
