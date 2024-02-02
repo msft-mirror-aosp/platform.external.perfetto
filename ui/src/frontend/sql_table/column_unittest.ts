@@ -72,11 +72,12 @@ test('fromSqlTableColumn', () => {
     },
   });
 
-  expect(argColumn(table.columns[3] as ArgSetIdColumn, 'foo.bar')).toEqual({
-    expression: 'extract_arg(arg_set_id, \'foo.bar\')',
-    alias: '_arg_arg_set_id_foo_bar',
-    title: 'Arg foo.bar',
-  });
+  expect(argColumn('slice', table.columns[3] as ArgSetIdColumn, 'foo.bar'))
+    .toEqual({
+      expression: 'extract_arg(slice.arg_set_id, \'foo.bar\')',
+      alias: '_arg_arg_set_id_foo_bar',
+      title: 'Arg foo.bar',
+    });
 });
 
 function formatSqlProjectionsForColumn(c: Column): string {
@@ -85,7 +86,7 @@ function formatSqlProjectionsForColumn(c: Column): string {
 
 test('sqlProjections', () => {
   const format = (c: SqlTableColumn) =>
-      formatSqlProjectionsForColumn(columnFromSqlTableColumn(c));
+    formatSqlProjectionsForColumn(columnFromSqlTableColumn(c));
 
   expect(format(table.columns[0])).toEqual('id as id');
   expect(format(table.columns[1])).toEqual('name as name');

@@ -49,7 +49,7 @@ export class FtraceController extends Controller<'main'> {
 
   run() {
     if (this.shouldUpdate()) {
-      this.oldSpan = globals.frontendLocalState.visibleWindowTime;
+      this.oldSpan = globals.timeline.visibleWindowTime;
       this.oldFtraceFilter = globals.state.ftraceFilter;
       this.oldPagination = globals.state.ftracePagination;
       if (globals.state.ftracePagination.count > 0) {
@@ -69,7 +69,7 @@ export class FtraceController extends Controller<'main'> {
 
   private shouldUpdate(): boolean {
     // Has the visible window moved?
-    const visibleWindow = globals.frontendLocalState.visibleWindowTime;
+    const visibleWindow = globals.timeline.visibleWindowTime;
     if (!this.oldSpan.equals(visibleWindow)) {
       return true;
     }
@@ -129,15 +129,15 @@ export class FtraceController extends Controller<'main'> {
       limit ${count} offset ${offset};`);
     const events: FtraceEvent[] = [];
     const it = queryRes.iter(
-        {
-          id: NUM,
-          ts: LONG,
-          name: STR,
-          cpu: NUM,
-          thread: STR_NULL,
-          process: STR_NULL,
-          args: STR,
-        },
+      {
+        id: NUM,
+        ts: LONG,
+        name: STR,
+        cpu: NUM,
+        thread: STR_NULL,
+        process: STR_NULL,
+        args: STR,
+      },
     );
     for (let row = 0; it.valid(); it.next(), row++) {
       events.push({

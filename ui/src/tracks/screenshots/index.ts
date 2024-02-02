@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {uuidv4} from '../../base/uuid';
 import {AddTrackArgs} from '../../common/actions';
+import {
+  GenericSliceDetailsTabConfig,
+} from '../../frontend/generic_slice_details_tab';
 import {
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
-import {NewTrackArgs, TrackBase} from '../../frontend/track';
 import {
+  BottomTabToSCSAdapter,
+  NUM,
   Plugin,
   PluginContext,
   PluginContextTrace,
   PluginDescriptor,
   PrimaryTrackSortKey,
 } from '../../public';
+import {Engine} from '../../trace_processor/engine';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
@@ -36,9 +42,6 @@ import {
 
 class ScreenshotsTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTypes> {
   static readonly kind = 'dev.perfetto.ScreenshotsTrack';
-  static create(args: NewTrackArgs): TrackBase {
-    return new ScreenshotsTrack(args);
-  }
 
   getSqlDataSource(): CustomSqlTableDefConfig {
     return {
@@ -63,16 +66,24 @@ export type DecideTracksResult = {
 };
 
 // TODO(stevegolton): Use suggestTrack().
-export async function decideTracks(): Promise<DecideTracksResult> {
+export async function decideTracks(engine: Engine):
+    Promise<DecideTracksResult> {
   const result: DecideTracksResult = {
     tracksToAdd: [],
   };
 
-  result.tracksToAdd.push({
-    uri: 'perfetto.Screenshots',
-    name: 'Screenshots',
-    trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-  });
+  const res =
+      await engine.query('select count() as count from android_screenshots');
+  const {count} = res.firstRow({count: NUM});
+
+  if (count > 0) {
+    result.tracksToAdd.push({
+      uri: 'perfetto.Screenshots',
+      name: 'Screenshots',
+      trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
+    });
+  }
+
   return result;
 }
 
@@ -82,17 +93,40 @@ class ScreenshotsPlugin implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     await ctx.engine.query(`INCLUDE PERFETTO MODULE android.screenshots`);
 
-    ctx.registerStaticTrack({
-      uri: 'perfetto.Screenshots',
-      displayName: 'Screenshots',
-      kind: ScreenshotsTrack.kind,
-      track: ({trackKey}) => {
-        return new ScreenshotsTrack({
-          engine: ctx.engine,
-          trackKey,
-        });
-      },
-    });
+    const res = await ctx.engine.query(
+      'select count() as count from android_screenshots');
+    const {count} = res.firstRow({count: NUM});
+
+    if (count > 0) {
+      const displayName = 'Screenshots';
+      const uri = 'perfetto.Screenshots';
+      ctx.registerTrack({
+        uri,
+        displayName,
+        kind: ScreenshotsTrack.kind,
+        trackFactory: ({trackKey}) => {
+          return new ScreenshotsTrack({
+            engine: ctx.engine,
+            trackKey,
+          });
+        },
+      });
+
+      ctx.registerDetailsPanel(new BottomTabToSCSAdapter({
+        tabFactory: (selection) => {
+          if (selection.kind === 'GENERIC_SLICE' &&
+              selection.detailsPanelConfig.kind === ScreenshotTab.kind) {
+            const config = selection.detailsPanelConfig.config;
+            return new ScreenshotTab({
+              config: config as GenericSliceDetailsTabConfig,
+              engine: ctx.engine,
+              uuid: uuidv4(),
+            });
+          }
+          return undefined;
+        },
+      }));
+    }
   }
 }
 

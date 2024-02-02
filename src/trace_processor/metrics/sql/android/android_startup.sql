@@ -60,7 +60,7 @@ JOIN slice ON (
 WHERE l.startup_id = $startup_id AND slice.name GLOB 'Start proc: *';
 
 -- Returns the fully drawn slice proto given a launch id.
-CREATE PERFETTO FUNCTION report_fully_drawn_for_launch(startup_id INT)
+CREATE OR REPLACE PERFETTO FUNCTION report_fully_drawn_for_launch(startup_id INT)
 RETURNS PROTO AS
 SELECT
   startup_slice_proto(report_fully_drawn_ts - launch_ts)
@@ -194,7 +194,7 @@ SELECT
       launch_to_main_thread_slice_proto(launches.startup_id, 'bindApplication'),
       'time_activity_manager', (
         SELECT startup_slice_proto(l.ts - launches.ts)
-        FROM internal_startup_events l
+        FROM _startup_events l
         WHERE l.ts BETWEEN launches.ts AND launches.ts + launches.dur
       ),
       'time_post_fork',

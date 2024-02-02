@@ -113,18 +113,37 @@ WITH all_main_thread_relevant_slices AS (
                s.name = 'measure'
             OR s.name = 'layout'
             OR s.name = 'configChanged'
+            OR s.name = 'animation'
+            OR s.name = 'input'
+            OR s.name = 'traversal'
             OR s.name = 'Contending for pthread mutex'
+            OR s.name = 'postAndWait'
             OR s.name GLOB 'monitor contention with*'
             OR s.name GLOB 'SuspendThreadByThreadId*'
             OR s.name GLOB 'LoadApkAssetsFd*'
             OR s.name GLOB '*binder transaction*'
             OR s.name GLOB 'inflate*'
             OR s.name GLOB 'Lock contention on*'
-            OR s.name GLOB '*CancellableContinuationImpl*'
+            OR s.name GLOB 'android.os.Handler: kotlinx.coroutines*'
             OR s.name GLOB 'relayoutWindow*'
             OR s.name GLOB 'ImageDecoder#decode*'
             OR s.name GLOB 'NotificationStackScrollLayout#onMeasure'
             OR s.name GLOB 'ExpNotRow#*'
+            OR s.name GLOB 'GC: Wait For*'
+            OR (
+                -- Some top level handler slices
+                    s.depth = 0
+                AND s.name NOT GLOB '*Choreographer*'
+                AND s.name NOT GLOB '*Input*'
+                AND s.name NOT GLOB '*input*'
+                AND s.name NOT GLOB 'android.os.Handler: #*'
+                AND (
+                   -- Handler pattern heuristics
+                      s.name GLOB '*Handler: *$*'
+                   OR s.name GLOB '*.*.*: *$*'
+                   OR s.name GLOB '*.*$*: #*'
+                )
+            )
         )
     UNION ALL
     SELECT

@@ -20,7 +20,7 @@ import {
   Time,
   time,
 } from '../base/time';
-import {hueForCpu} from '../common/colorizer';
+import {colorForCpu} from '../common/colorizer';
 import {timestampFormat, TimestampFormat} from '../common/timestamp_format';
 
 import {
@@ -39,11 +39,15 @@ import {
   TickGenerator,
   TickType,
 } from './gridline_helper';
-import {Panel, PanelSize} from './panel';
+import {PanelSize} from './panel';
+import {Panel} from './panel_container';
 import {PxSpan, TimeScale} from './time_scale';
 
-export class OverviewTimelinePanel extends Panel {
+export class OverviewTimelinePanel implements Panel {
   private static HANDLE_SIZE_PX = 5;
+  readonly kind = 'panel';
+  readonly selectable = false;
+  readonly trackKey = undefined;
 
   private width = 0;
   private gesture?: DragGestureHandler;
@@ -51,6 +55,8 @@ export class OverviewTimelinePanel extends Panel {
   private traceTime?: Span<time, duration>;
   private dragStrategy?: DragStrategy;
   private readonly boundOnMouseMove = this.onMouseMove.bind(this);
+
+  constructor(readonly key: string) {}
 
   // Must explicitly type now; arguments types are no longer auto-inferred.
   // https://github.com/Microsoft/TypeScript/issues/1373
@@ -76,7 +82,7 @@ export class OverviewTimelinePanel extends Panel {
   oncreate(vnode: m.CVnodeDOM) {
     this.onupdate(vnode);
     (vnode.dom as HTMLElement)
-        .addEventListener('mousemove', this.boundOnMouseMove);
+      .addEventListener('mousemove', this.boundOnMouseMove);
   }
 
   onremove({dom}: m.CVnodeDOM) {
@@ -85,11 +91,15 @@ export class OverviewTimelinePanel extends Panel {
       this.gesture = undefined;
     }
     (dom as HTMLElement)
-        .removeEventListener('mousemove', this.boundOnMouseMove);
+      .removeEventListener('mousemove', this.boundOnMouseMove);
   }
 
-  view() {
-    return m('.overview-timeline');
+  get mithril(): m.Children {
+    return m('.overview-timeline', {
+      oncreate: (vnode) => this.oncreate(vnode),
+      onupdate: (vnode) => this.onupdate(vnode),
+      onremove: (vnode) => this.onremove(vnode),
+    });
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
@@ -135,7 +145,8 @@ export class OverviewTimelinePanel extends Panel {
           const xEnd = Math.ceil(this.timeScale.timeToPx(loads[i].end));
           const yOff = Math.floor(headerHeight + y * trackHeight);
           const lightness = Math.ceil((1 - loads[i].load * 0.7) * 100);
-          ctx.fillStyle = `hsl(${hueForCpu(y)}, 50%, ${lightness}%)`;
+          const color = colorForCpu(y).setHSL({s: 50, l: lightness});
+          ctx.fillStyle = color.cssString;
           ctx.fillRect(xStart, yOff, xEnd - xStart, Math.ceil(trackHeight));
         }
         y++;
@@ -152,10 +163,10 @@ export class OverviewTimelinePanel extends Panel {
 
     ctx.fillStyle = OVERVIEW_TIMELINE_NON_VISIBLE_COLOR;
     ctx.fillRect(
-        TRACK_SHELL_WIDTH - 1,
-        headerHeight,
-        vizStartPx - TRACK_SHELL_WIDTH,
-        tracksHeight);
+      TRACK_SHELL_WIDTH - 1,
+      headerHeight,
+      vizStartPx - TRACK_SHELL_WIDTH,
+      tracksHeight);
     ctx.fillRect(vizEndPx, headerHeight, this.width - vizEndPx, tracksHeight);
 
     // Draw brushes.
@@ -167,15 +178,15 @@ export class OverviewTimelinePanel extends Panel {
     const hbarHeight = tracksHeight * 0.4;
     // Draw handlebar
     ctx.fillRect(
-        vizStartPx - Math.floor(hbarWidth / 2) - 1,
-        headerHeight,
-        hbarWidth,
-        hbarHeight);
+      vizStartPx - Math.floor(hbarWidth / 2) - 1,
+      headerHeight,
+      hbarWidth,
+      hbarHeight);
     ctx.fillRect(
-        vizEndPx - Math.floor(hbarWidth / 2),
-        headerHeight,
-        hbarWidth,
-        hbarHeight);
+      vizEndPx - Math.floor(hbarWidth / 2),
+      headerHeight,
+      hbarWidth,
+      hbarHeight);
   }
 
   private onMouseMove(e: MouseEvent) {
@@ -225,7 +236,7 @@ export class OverviewTimelinePanel extends Panel {
   }
 
   private static extractBounds(timeScale: TimeScale): [number, number] {
-    const vizTime = globals.frontendLocalState.visibleWindowTime;
+    const vizTime = globals.timeline.visibleWindowTime;
     return [
       Math.floor(timeScale.hpTimeToPx(vizTime.start)),
       Math.ceil(timeScale.hpTimeToPx(vizTime.end)),
@@ -239,30 +250,31 @@ export class OverviewTimelinePanel extends Panel {
 
 // Print a timestamp in the configured time format
 function renderTimestamp(
-    ctx: CanvasRenderingContext2D,
-    time: time,
-    x: number,
-    y: number,
-    minWidth: number,
-    ): void {
+  ctx: CanvasRenderingContext2D,
+  time: time,
+  x: number,
+  y: number,
+  minWidth: number,
+): void {
   const fmt = timestampFormat();
   switch (fmt) {
-    case TimestampFormat.UTC:
-    case TimestampFormat.Timecode:
-      renderTimecode(ctx, time, x, y, minWidth);
-      break;
-    case TimestampFormat.Raw:
-      ctx.fillText(time.toString(), x, y, minWidth);
-      break;
-    case TimestampFormat.RawLocale:
-      ctx.fillText(time.toLocaleString(), x, y, minWidth);
-      break;
-    case TimestampFormat.Seconds:
-      ctx.fillText(Time.formatSeconds(time), x, y, minWidth);
-      break;
-    default:
-      const z: never = fmt;
-      throw new Error(`Invalid timestamp ${z}`);
+  case TimestampFormat.UTC:
+  case TimestampFormat.TraceTz:
+  case TimestampFormat.Timecode:
+    renderTimecode(ctx, time, x, y, minWidth);
+    break;
+  case TimestampFormat.Raw:
+    ctx.fillText(time.toString(), x, y, minWidth);
+    break;
+  case TimestampFormat.RawLocale:
+    ctx.fillText(time.toLocaleString(), x, y, minWidth);
+    break;
+  case TimestampFormat.Seconds:
+    ctx.fillText(Time.formatSeconds(time), x, y, minWidth);
+    break;
+  default:
+    const z: never = fmt;
+    throw new Error(`Invalid timestamp ${z}`);
   }
 }
 
@@ -270,12 +282,12 @@ function renderTimestamp(
 // DdHH:MM:SS
 // mmm uuu nnn
 function renderTimecode(
-    ctx: CanvasRenderingContext2D,
-    time: time,
-    x: number,
-    y: number,
-    minWidth: number,
-    ): void {
+  ctx: CanvasRenderingContext2D,
+  time: time,
+  x: number,
+  y: number,
+  minWidth: number,
+): void {
   const timecode = Time.toTimecode(time);
   const {dhhmmss} = timecode;
   ctx.fillText(dhhmmss, x, y, minWidth);

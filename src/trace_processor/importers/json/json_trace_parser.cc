@@ -16,12 +16,15 @@
 
 #include "src/trace_processor/importers/json/json_trace_parser.h"
 
-#include <cinttypes>
-#include <limits>
+#include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
+#include <utility>
 
+#include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/hash.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/string_view.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
@@ -30,7 +33,10 @@
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/json/json_utils.h"
+#include "src/trace_processor/importers/systrace/systrace_line.h"
+#include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/tables/slice_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
@@ -88,12 +94,33 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
   char phase = *ph.asCString();
 
   std::optional<uint32_t> opt_pid;
-  std::optional<uint32_t> opt_tid;
+  if (value.isMember("pid")) {
+    if (value["pid"].isString()) {
+      // If the pid is a string, treat raw id of the interned string as the pid.
+      // This "hack" which allows emitting "quick-and-dirty" compact JSON
+      // traces: relying on these traces for production is necessarily brittle
+      // as it is not a part of the actual spec.
+      const char* proc_name = value["pid"].asCString();
+      opt_pid = storage->InternString(proc_name).raw_id();
+      procs->SetProcessMetadata(*opt_pid, std::nullopt, proc_name,
+                                base::StringView());
+    } else {
+      opt_pid = json::CoerceToUint32(value["pid"]);
+    }
+  }
 
-  if (value.isMember("pid"))
-    opt_pid = json::CoerceToUint32(value["pid"]);
-  if (value.isMember("tid"))
-    opt_tid = json::CoerceToUint32(value["tid"]);
+  std::optional<uint32_t> opt_tid;
+  if (value.isMember("tid")) {
+    if (value["tid"].isString()) {
+      // See the comment for |pid| string handling above: the same applies here.
+      StringId thread_name_id = storage->InternString(value["tid"].asCString());
+      opt_tid = thread_name_id.raw_id();
+      procs->UpdateThreadName(*opt_tid, thread_name_id,
+                              ThreadNamePriority::kOther);
+    } else {
+      opt_tid = json::CoerceToUint32(value["tid"]);
+    }
+  }
 
   uint32_t pid = opt_pid.value_or(0);
   uint32_t tid = opt_tid.value_or(pid);
@@ -109,8 +136,7 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
   base::StringView name = value.isMember("name")
                               ? base::StringView(value["name"].asCString())
                               : base::StringView();
-  StringId name_id = name.empty() ? storage->InternString("[No name]")
-                                  : storage->InternString(name);
+  StringId name_id = name.empty() ? kNullStringId : storage->InternString(name);
 
   auto args_inserter = [this, &value](ArgsTracker::BoundInserter* inserter) {
     if (value.isMember("args")) {
@@ -128,7 +154,8 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
     row.ts = timestamp;
     row.track_id = track_id;
     row.category = cat_id;
-    row.name = name_id;
+    row.name =
+        name_id == kNullStringId ? storage->InternString("[No name]") : name_id;
     row.thread_ts = json::CoerceToTs(value["tts"]);
     // tdur will only exist on 'X' events.
     row.thread_dur = json::CoerceToTs(value["tdur"]);
@@ -166,15 +193,31 @@ void JsonTraceParser::ParseJsonPacket(int64_t timestamp,
     case 'b':
     case 'e':
     case 'n': {
-      if (!opt_pid || id.empty()) {
+      Json::Value id2 = value.isMember("id2") ? value["id2"] : Json::Value();
+      std::string local = id2.isMember("local") ? id2["local"].asString() : "";
+      std::string global =
+          id2.isMember("global") ? id2["global"].asString() : "";
+      if (!opt_pid || (id.empty() && global.empty() && local.empty())) {
         context_->storage->IncrementStats(stats::json_parser_failure);
         break;
       }
       UniquePid upid = context_->process_tracker->GetOrCreateProcess(pid);
-      int64_t cookie = static_cast<int64_t>(base::Hasher::Combine(id.c_str()));
-      StringId scope = kNullStringId;
-      TrackId track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
-          name_id, upid, cookie, true /* source_id_is_process_scoped */, scope);
+      TrackId track_id;
+      if (!id.empty() || !global.empty()) {
+        const std::string& real_id = id.empty() ? global : id;
+        int64_t cookie = static_cast<int64_t>(
+            base::Hasher::Combine(cat_id.raw_id(), real_id));
+        track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
+            name_id, upid, cookie, false /* source_id_is_process_scoped */,
+            kNullStringId /* source_scope */);
+      } else {
+        PERFETTO_DCHECK(!local.empty());
+        int64_t cookie =
+            static_cast<int64_t>(base::Hasher::Combine(cat_id.raw_id(), local));
+        track_id = context_->track_tracker->InternLegacyChromeAsyncTrack(
+            name_id, upid, cookie, true /* source_id_is_process_scoped */,
+            kNullStringId /* source_scope */);
+      }
 
       if (phase == 'b') {
         slice_tracker->BeginTyped(storage->mutable_slice_table(),

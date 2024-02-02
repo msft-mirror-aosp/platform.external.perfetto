@@ -32,8 +32,6 @@ source_set("db") {
     "table.h",
     "typed_column.h",
     "typed_column_internal.h",
-    "view.cc",
-    "view.h",
   ]
   deps = [
     "../../../gn:default_deps",
@@ -44,13 +42,16 @@ source_set("db") {
     "../util:glob",
     "../util:regex",
     "../util:util",
-    "overlays",
-    "storage",
+    "column",
   ]
 }
 
-perfetto_tp_tables("view_unittest") {
-  sources = [ "view_unittest.py" ]
+source_set("compare") {
+  sources = [ "compare.h" ]
+  deps = [
+    "../../../include/perfetto/trace_processor",
+    "../containers",
+  ]
 }
 
 perfetto_unittest_source_set("unittests") {
@@ -60,18 +61,18 @@ perfetto_unittest_source_set("unittests") {
     "compare_unittest.cc",
     "query_executor_unittest.cc",
     "runtime_table_unittest.cc",
-    "view_unittest.cc",
   ]
   deps = [
     ":db",
-    ":view_unittest",
     "../../../gn:default_deps",
     "../../../gn:gtest_and_gmock",
+    "../../../include/perfetto/trace_processor:basic_types",
     "../../base",
+    "../../base:test_support",
+    "../containers",
     "../tables",
-    "../views",
-    "overlays",
-    "storage",
+    "column",
+    "column:fake_storage",
   ]
 }
 
@@ -84,6 +85,7 @@ if (enable_perfetto_benchmarks) {
       "../../../gn:default_deps",
       "../../../include/perfetto/base",
       "../../../include/perfetto/ext/base",
+      "../../../include/perfetto/trace_processor:basic_types",
       "../../base:test_support",
       "../tables:tables_python",
     ]

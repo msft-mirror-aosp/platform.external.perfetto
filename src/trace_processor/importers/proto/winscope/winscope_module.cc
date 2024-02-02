@@ -23,16 +23,22 @@ using perfetto::protos::pbzero::TracePacket;
 
 WinscopeModule::WinscopeModule(TraceProcessorContext* context)
     : surfaceflinger_layers_parser_(context),
-      surfaceflinger_transactions_parser_(context) {
+      surfaceflinger_transactions_parser_(context),
+      shell_transitions_parser_(context),
+      protolog_parser_(context) {
   RegisterForField(TracePacket::kSurfaceflingerLayersSnapshotFieldNumber,
                    context);
   RegisterForField(TracePacket::kSurfaceflingerTransactionsFieldNumber,
                    context);
+  RegisterForField(TracePacket::kShellTransitionFieldNumber, context);
+  RegisterForField(TracePacket::kShellHandlerMappingsFieldNumber, context);
+  RegisterForField(TracePacket::kProtologMessageFieldNumber, context);
+  RegisterForField(TracePacket::kProtologViewerConfigFieldNumber, context);
 }
 
 void WinscopeModule::ParseTracePacketData(const TracePacket::Decoder& decoder,
                                           int64_t timestamp,
-                                          const TracePacketData&,
+                                          const TracePacketData& data,
                                           uint32_t field_id) {
   switch (field_id) {
     case TracePacket::kSurfaceflingerLayersSnapshotFieldNumber:
@@ -42,6 +48,21 @@ void WinscopeModule::ParseTracePacketData(const TracePacket::Decoder& decoder,
     case TracePacket::kSurfaceflingerTransactionsFieldNumber:
       surfaceflinger_transactions_parser_.Parse(
           timestamp, decoder.surfaceflinger_transactions());
+      return;
+    case TracePacket::kShellTransitionFieldNumber:
+      shell_transitions_parser_.ParseTransition(decoder.shell_transition());
+      return;
+    case TracePacket::kShellHandlerMappingsFieldNumber:
+      shell_transitions_parser_.ParseHandlerMappings(
+          decoder.shell_handler_mappings());
+      return;
+    case TracePacket::kProtologMessageFieldNumber:
+      protolog_parser_.ParseProtoLogMessage(
+          data.sequence_state.get(), decoder.protolog_message(), timestamp);
+      return;
+    case TracePacket::kProtologViewerConfigFieldNumber:
+      protolog_parser_.ParseProtoLogViewerConfig(
+          decoder.protolog_viewer_config());
       return;
   }
 }

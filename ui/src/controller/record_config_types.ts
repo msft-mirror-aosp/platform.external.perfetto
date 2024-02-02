@@ -39,6 +39,7 @@ export const recordConfigValidator = record({
 
   gpuFreq: bool(),
   gpuMemTotal: bool(),
+  gpuWorkPeriod: bool(),
 
   ftrace: bool(),
   atrace: bool(),
@@ -103,6 +104,8 @@ export const recordConfigValidator = record({
   uiRendering: bool(),
   inputEvents: bool(),
   navigationAndLoading: bool(),
+  audio: bool(),
+  video: bool(),
 
   symbolizeKsyms: bool(),
 
@@ -112,7 +115,7 @@ export const recordConfigValidator = record({
   targetCmdLine: arrayOf(str()),
 });
 export const namedRecordConfigValidator = record(
-    {title: requiredStr, key: requiredStr, config: recordConfigValidator});
+  {title: requiredStr, key: requiredStr, config: recordConfigValidator});
 export type NamedRecordConfig =
     ValidatedType<typeof namedRecordConfigValidator>;
 export type RecordConfig = ValidatedType<typeof recordConfigValidator>;

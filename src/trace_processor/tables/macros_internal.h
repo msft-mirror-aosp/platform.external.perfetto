@@ -17,11 +17,20 @@
 #ifndef SRC_TRACE_PROCESSOR_TABLES_MACROS_INTERNAL_H_
 #define SRC_TRACE_PROCESSOR_TABLES_MACROS_INTERNAL_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
-#include "perfetto/ext/base/small_vector.h"
+#include "perfetto/base/logging.h"
+#include "src/trace_processor/containers/row_map.h"
+#include "src/trace_processor/containers/string_pool.h"
+#include "src/trace_processor/db/column.h"
+#include "src/trace_processor/db/column/types.h"
+#include "src/trace_processor/db/column_storage.h"
+#include "src/trace_processor/db/column_storage_overlay.h"
 #include "src/trace_processor/db/table.h"
-#include "src/trace_processor/db/typed_column.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -63,18 +72,18 @@ class RootParentTable : public Table {
 class MacroTable : public Table {
  protected:
   // Constructors for tables created by the regular constructor.
-  MacroTable(StringPool* pool, const Table* parent = nullptr)
+  MacroTable(StringPool* pool, const MacroTable* parent = nullptr)
       : Table(pool), allow_inserts_(true), parent_(parent) {
     if (!parent) {
       overlays_.emplace_back();
-      columns_.emplace_back(Column::IdColumn(this, 0, 0));
+      columns_.emplace_back(ColumnLegacy::IdColumn(this, 0, 0));
       columns_.emplace_back(
-          Column("type", &type_, Column::kNonNull, this, 1, 0));
+          ColumnLegacy("type", &type_, ColumnLegacy::kNonNull, this, 1, 0));
       return;
     }
 
     overlays_.resize(parent->overlays().size() + 1);
-    for (const Column& col : parent->columns()) {
+    for (const ColumnLegacy& col : parent->columns()) {
       columns_.emplace_back(col, this, col.index_in_table(),
                             col.overlay_index());
     }
@@ -82,7 +91,7 @@ class MacroTable : public Table {
 
   // Constructor for tables created by SelectAndExtendParent.
   MacroTable(StringPool* pool,
-             const Table& parent,
+             const MacroTable& parent,
              const RowMap& parent_overlay)
       : Table(pool), allow_inserts_(false) {
     row_count_ = parent_overlay.size();
@@ -92,7 +101,7 @@ class MacroTable : public Table {
     }
     overlays_.emplace_back(ColumnStorageOverlay(row_count_));
 
-    for (const Column& col : parent.columns()) {
+    for (const ColumnLegacy& col : parent.columns()) {
       columns_.emplace_back(col, this, col.index_in_table(),
                             col.overlay_index());
     }
@@ -154,7 +163,7 @@ class MacroTable : public Table {
   ColumnStorage<StringPool::Id> type_;
 
  private:
-  const Table* parent_ = nullptr;
+  const MacroTable* parent_ = nullptr;
 };
 
 // Abstract iterator class for macro tables.

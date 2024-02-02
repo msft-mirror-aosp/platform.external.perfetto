@@ -13,7 +13,12 @@
 // limitations under the License.
 
 import {defer} from '../base/deferred';
-import {assertExists, reportError, setErrorHandler} from '../base/logging';
+import {
+  addErrorHandler,
+  assertExists,
+  ErrorDetails,
+  reportError,
+} from '../base/logging';
 import {time} from '../base/time';
 import {
   ConversionJobName,
@@ -60,7 +65,7 @@ function openTraceInLegacy(buffer: Uint8Array) {
   });
 }
 
-function forwardError(error: string) {
+function forwardError(error: ErrorDetails) {
   selfWorker.postMessage({
     kind: 'error',
     error,
@@ -84,9 +89,9 @@ async function runTraceconv(trace: Blob, args: string[]) {
   await deferredRuntimeInitialized;
   module.FS.mkdir('/fs');
   module.FS.mount(
-      assertExists(module.FS.filesystems.WORKERFS),
-      {blobs: [{name: 'trace.proto', data: trace}]},
-      '/fs');
+    assertExists(module.FS.filesystems.WORKERFS),
+    {blobs: [{name: 'trace.proto', data: trace}]},
+    '/fs');
   updateStatus('Converting trace');
   module.callMain(args);
   updateStatus('Trace conversion completed');
@@ -115,9 +120,9 @@ function isConvertTraceAndDownload(msg: Args):
 }
 
 async function ConvertTraceAndDownload(
-    trace: Blob,
-    format: Format,
-    truncate?: 'start'|'end'): Promise<void> {
+  trace: Blob,
+  format: Format,
+  truncate?: 'start'|'end'): Promise<void> {
   const jobName = format === 'json' ? 'convert_json' : 'convert_systrace';
   updateJobStatus(jobName, ConversionJobStatus.InProgress);
   const outPath = '/trace.json';
@@ -151,7 +156,7 @@ function isConvertTraceAndOpenInLegacy(msg: Args):
 }
 
 async function ConvertTraceAndOpenInLegacy(
-trace: Blob, truncate?: 'start'|'end') {
+  trace: Blob, truncate?: 'start'|'end') {
   const jobName = 'open_in_legacy';
   updateJobStatus(jobName, ConversionJobStatus.InProgress);
   const outPath = '/trace.json';
@@ -221,7 +226,7 @@ async function ConvertTraceToPprof(trace: Blob, pid: number, ts: time) {
 selfWorker.onmessage = (msg: MessageEvent) => {
   self.addEventListener('error', (e) => reportError(e));
   self.addEventListener('unhandledrejection', (e) => reportError(e));
-  setErrorHandler((err: string) => forwardError(err));
+  addErrorHandler((error: ErrorDetails) => forwardError(error));
   const args = msg.data as Args;
   if (isConvertTraceAndDownload(args)) {
     ConvertTraceAndDownload(args.trace, args.format, args.truncate);

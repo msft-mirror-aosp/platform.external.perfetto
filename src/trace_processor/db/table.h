@@ -19,11 +19,14 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "perfetto/base/logging.h"
@@ -152,7 +155,7 @@ class Table {
     // Pretty much any application of a RowMap will break the requirements on
     // kSetId so remove it.
     for (auto& col : table.columns_) {
-      col.flags_ &= ~Column::Flag::kSetId;
+      col.flags_ &= ~ColumnLegacy::Flag::kSetId;
     }
     return table;
   }
@@ -161,39 +164,20 @@ class Table {
   Table Sort(const std::vector<Order>& od) const;
 
   // Returns the column at index |idx| in the Table.
-  const Column& GetColumn(uint32_t idx) const { return columns_[idx]; }
-
-  // Returns the column index with the given name or std::nullopt otherwise.
-  std::optional<uint32_t> GetColumnIndexByName(const char* name) const {
-    auto it = std::find_if(
-        columns_.begin(), columns_.end(),
-        [name](const Column& col) { return strcmp(col.name(), name) == 0; });
-    if (it == columns_.end())
-      return std::nullopt;
-    return static_cast<uint32_t>(std::distance(columns_.begin(), it));
-  }
+  const ColumnLegacy& GetColumn(uint32_t idx) const { return columns_[idx]; }
 
   // Returns the column with the given name or nullptr otherwise.
-  const Column* GetColumnByName(const char* name) const {
-    std::optional<uint32_t> opt_idx = GetColumnIndexByName(name);
-    if (!opt_idx)
-      return nullptr;
-    return &columns_[*opt_idx];
+  const ColumnLegacy* GetColumnByName(const char* name) const {
+    auto it = std::find_if(columns_.begin(), columns_.end(),
+                           [name](const ColumnLegacy& col) {
+                             return std::string_view(col.name()) == name;
+                           });
+    return it == columns_.end() ? nullptr : &*it;
   }
 
   template <typename T>
   const TypedColumn<T>& GetTypedColumnByName(const char* name) const {
     return *TypedColumn<T>::FromColumn(GetColumnByName(name));
-  }
-
-  template <typename T>
-  const IdColumn<T>& GetIdColumnByName(const char* name) const {
-    return *IdColumn<T>::FromColumn(GetColumnByName(name));
-  }
-
-  // Returns the number of columns in the Table.
-  uint32_t GetColumnCount() const {
-    return static_cast<uint32_t>(columns_.size());
   }
 
   // Returns an iterator into the Table.
@@ -202,24 +186,9 @@ class Table {
   // Creates a copy of this table.
   Table Copy() const;
 
-  // Computes the schema of this table and returns it.
-  Schema ComputeSchema() const {
-    Schema schema;
-    schema.columns.reserve(columns_.size());
-    for (const auto& col : columns_) {
-      schema.columns.emplace_back(
-          Schema::Column{col.name(), col.type(), col.IsId(), col.IsSorted(),
-                         col.IsHidden(), col.IsSetId()});
-    }
-    return schema;
-  }
-
   uint32_t row_count() const { return row_count_; }
   StringPool* string_pool() const { return string_pool_; }
-  const std::vector<ColumnStorageOverlay>& overlays() const {
-    return overlays_;
-  }
-  const std::vector<Column>& columns() const { return columns_; }
+  const std::vector<ColumnLegacy>& columns() const { return columns_; }
 
  protected:
   explicit Table(StringPool* pool);
@@ -231,15 +200,18 @@ class Table {
     }
     return rm;
   }
+  const std::vector<ColumnStorageOverlay>& overlays() const {
+    return overlays_;
+  }
 
   std::vector<ColumnStorageOverlay> overlays_;
-  std::vector<Column> columns_;
+  std::vector<ColumnLegacy> columns_;
   uint32_t row_count_ = 0;
 
   StringPool* string_pool_ = nullptr;
 
  private:
-  friend class Column;
+  friend class ColumnLegacy;
   friend class View;
 
   Table CopyExceptOverlays() const;

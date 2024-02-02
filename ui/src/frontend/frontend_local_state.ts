@@ -26,7 +26,6 @@ import {
   VisibleState,
 } from '../common/state';
 import {raf} from '../core/raf_scheduler';
-import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 
 import {globals} from './globals';
 import {ratelimit} from './rate_limiters';
@@ -45,20 +44,6 @@ function chooseLatest<T extends Timestamped>(current: T, next: T): T {
     return Object.assign({}, next);
   }
   return current;
-}
-
-// Calculate the space a scrollbar takes up so that we can subtract it from
-// the canvas width.
-function calculateScrollbarWidth() {
-  const outer = document.createElement('div');
-  outer.style.overflowY = 'scroll';
-  const inner = document.createElement('div');
-  outer.appendChild(inner);
-  document.body.appendChild(outer);
-  const width =
-      outer.getBoundingClientRect().width - inner.getBoundingClientRect().width;
-  document.body.removeChild(outer);
-  return width;
 }
 
 // Immutable object describing a (high precision) time window, providing methods
@@ -96,8 +81,8 @@ export class TimeWindow {
     this.hpTimeSpan =
         new HighPrecisionTimeSpan(start, start.addNanos(durationNanos));
     this.timeSpan = new TimeSpan(
-        this.hpTimeSpan.start.toTime('floor'),
-        this.hpTimeSpan.end.toTime('ceil'));
+      this.hpTimeSpan.start.toTime('floor'),
+      this.hpTimeSpan.end.toTime('ceil'));
   }
 
   static fromHighPrecisionTimeSpan(span: Span<HighPrecisionTime>): TimeWindow {
@@ -107,7 +92,7 @@ export class TimeWindow {
   // Pan the window by certain number of seconds
   pan(offset: HighPrecisionTime) {
     return new TimeWindow(
-        this.hpTimeSpan.start.add(offset), this.hpTimeSpan.duration.nanos);
+      this.hpTimeSpan.start.add(offset), this.hpTimeSpan.duration.nanos);
   }
 
   // Zoom in or out a bit centered on a specific offset from the root
@@ -133,9 +118,9 @@ export class TimeWindow {
 
   createTimeScale(startPx: number, endPx: number): TimeScale {
     return new TimeScale(
-        this.hpTimeSpan.start,
-        this.hpTimeSpan.duration.nanos,
-        new PxSpan(startPx, endPx));
+      this.hpTimeSpan.start,
+      this.hpTimeSpan.duration.nanos,
+      new PxSpan(startPx, endPx));
   }
 
   get earliest(): time {
@@ -151,20 +136,13 @@ export class TimeWindow {
  * State that is shared between several frontend components, but not the
  * controller. This state is updated at 60fps.
  */
-export class FrontendLocalState {
+export class Timeline {
   private visibleWindow = new TimeWindow();
   private _timeScale = this.visibleWindow.createTimeScale(0, 0);
   private _windowSpan = PxSpan.ZERO;
-  showPanningHint = false;
-  showCookieConsent = false;
-  scrollToTrackKey?: string|number;
-  httpRpcState: HttpRpcState = {connected: false};
-  newVersionAvailable = false;
 
   // This is used to calculate the tracks within a Y range for area selection.
   areaY: Range = {};
-
-  private scrollBarWidth?: number;
 
   private _visibleState: VisibleState = {
     lastUpdate: 0,
@@ -179,29 +157,17 @@ export class FrontendLocalState {
   // and a |timeScale| have a notion of time range. That should live in one
   // place only.
 
-  getScrollbarWidth() {
-    if (this.scrollBarWidth === undefined) {
-      this.scrollBarWidth = calculateScrollbarWidth();
-    }
-    return this.scrollBarWidth;
-  }
-
-  setHttpRpcState(httpRpcState: HttpRpcState) {
-    this.httpRpcState = httpRpcState;
-    raf.scheduleFullRedraw();
-  }
-
   zoomVisibleWindow(ratio: number, centerPoint: number) {
     this.visibleWindow = this.visibleWindow.zoom(ratio, centerPoint);
     this._timeScale = this.visibleWindow.createTimeScale(
-        this._windowSpan.start, this._windowSpan.end);
+      this._windowSpan.start, this._windowSpan.end);
     this.kickUpdateLocalState();
   }
 
   panVisibleWindow(delta: HighPrecisionTime) {
     this.visibleWindow = this.visibleWindow.pan(delta);
     this._timeScale = this.visibleWindow.createTimeScale(
-        this._windowSpan.start, this._windowSpan.end);
+      this._windowSpan.start, this._windowSpan.end);
     this.kickUpdateLocalState();
   }
 
@@ -218,20 +184,19 @@ export class FrontendLocalState {
     const visibleStateWasUpdated = previousVisibleState !== this._visibleState;
     if (visibleStateWasUpdated) {
       this.updateLocalTime(new HighPrecisionTimeSpan(
-          HighPrecisionTime.fromTime(this._visibleState.start),
-          HighPrecisionTime.fromTime(this._visibleState.end),
-          ));
+        HighPrecisionTime.fromTime(this._visibleState.start),
+        HighPrecisionTime.fromTime(this._visibleState.end),
+      ));
     }
   }
 
   // Set the highlight box to draw
   selectArea(
-      start: time, end: time,
-      tracks = this._selectedArea ? this._selectedArea.tracks : []) {
+    start: time, end: time,
+    tracks = this._selectedArea ? this._selectedArea.tracks : []) {
     assertTrue(
-        end >= start,
-        `Impossible select area: start [${start}] >= end [${end}]`);
-    this.showPanningHint = true;
+      end >= start,
+      `Impossible select area: start [${start}] >= end [${end}]`);
     this._selectedArea = {start, end, tracks};
     raf.scheduleFullRedraw();
   }
@@ -254,9 +219,9 @@ export class FrontendLocalState {
     const start = ts.start.clamp(traceBounds.start, traceBounds.end);
     const end = ts.end.clamp(traceBounds.start, traceBounds.end);
     this.visibleWindow = TimeWindow.fromHighPrecisionTimeSpan(
-        new HighPrecisionTimeSpan(start, end));
+      new HighPrecisionTimeSpan(start, end));
     this._timeScale = this.visibleWindow.createTimeScale(
-        this._windowSpan.start, this._windowSpan.end);
+      this._windowSpan.start, this._windowSpan.end);
     this.updateResolution();
   }
 

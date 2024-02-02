@@ -19,6 +19,8 @@
 #include <bitset>
 #include <random>
 
+#include "perfetto/protozero/scattered_heap_buffer.h"
+#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 #include "src/trace_processor/containers/bit_vector_iterators.h"
 #include "test/gtest_and_gmock.h"
 
@@ -543,6 +545,14 @@ TEST(BitVectorUnittest, BuilderSkip) {
   ASSERT_TRUE(bv.IsSet(127));
 }
 
+TEST(BitVectorUnittest, BuilderSkipAll) {
+  BitVector::Builder builder(128, 128);
+  BitVector bv = std::move(builder).Build();
+
+  ASSERT_EQ(bv.size(), 128u);
+  ASSERT_EQ(bv.CountSetBits(), 0u);
+}
+
 TEST(BitVectorUnittest, BuilderBitsInCompleteWordsUntilFull) {
   BitVector::Builder builder(128 + 1);
 
@@ -718,6 +728,38 @@ TEST(BitVectorUnittest, QueryStressTest) {
     set_it.Next();
   }
   ASSERT_FALSE(set_it);
+}
+
+TEST(BitVectorUnittest, SerializeSimple) {
+  BitVector bv{1, 0, 1, 0, 1, 0, 1};
+  protozero::HeapBuffered<protos::pbzero::SerializedColumn::BitVector> msg;
+  bv.Serialize(msg.get());
+  auto buffer = msg.SerializeAsArray();
+
+  protos::pbzero::SerializedColumn::BitVector::Decoder decoder(buffer.data(),
+                                                               buffer.size());
+  ASSERT_EQ(decoder.size(), 7u);
+}
+
+TEST(BitVectorUnittest, SerializeDeserializeSimple) {
+  BitVector bv{1, 0, 1, 0, 1, 0, 1};
+  protozero::HeapBuffered<protos::pbzero::SerializedColumn::BitVector> msg;
+  bv.Serialize(msg.get());
+  auto buffer = msg.SerializeAsArray();
+
+  protos::pbzero::SerializedColumn::BitVector::Decoder decoder(buffer.data(),
+                                                               buffer.size());
+
+  BitVector des;
+  des.Deserialize(decoder);
+
+  ASSERT_EQ(des.size(), 7u);
+  ASSERT_EQ(des.CountSetBits(), 4u);
+
+  ASSERT_TRUE(des.IsSet(0));
+  ASSERT_TRUE(des.IsSet(2));
+  ASSERT_TRUE(des.IsSet(4));
+  ASSERT_TRUE(des.IsSet(6));
 }
 
 }  // namespace

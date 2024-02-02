@@ -16,7 +16,7 @@ import m from 'mithril';
 
 import {time, Time} from '../base/time';
 import {Actions} from '../common/actions';
-import {colorForString} from '../common/colorizer';
+import {colorForFtrace} from '../common/colorizer';
 import {StringListPatch} from '../common/state';
 import {DetailsShell} from '../widgets/details_shell';
 import {
@@ -56,18 +56,18 @@ export class FtracePanel implements m.ClassComponent {
 
   view(_: m.CVnode<{}>) {
     return m(
-        DetailsShell,
+      DetailsShell,
+      {
+        title: this.renderTitle(),
+        buttons: this.renderFilterPanel(),
+      },
+      m(
+        VirtualScrollContainer,
         {
-          title: this.renderTitle(),
-          buttons: this.renderFilterPanel(),
+          onScroll: this.onScroll,
         },
-        m(
-            VirtualScrollContainer,
-            {
-              onScroll: this.onScroll,
-            },
-            m('.ftrace-panel', this.renderRows()),
-            ),
+        m('.ftrace-panel', this.renderRows()),
+      ),
     );
   }
 
@@ -129,28 +129,28 @@ export class FtracePanel implements m.ClassComponent {
             id: name,
             name: `${name} (${count})`,
             checked: !globals.state.ftraceFilter.excludedNames.some(
-                (excluded: string) => excluded === name),
+              (excluded: string) => excluded === name),
           };
         });
 
     return m(
-        PopupMultiSelect,
-        {
-          label: 'Filter',
-          minimal: true,
-          icon: 'filter_list_alt',
-          popupPosition: PopupPosition.Top,
-          options,
-          onChange: (diffs: MultiSelectDiff[]) => {
-            const excludedNames: StringListPatch[] = diffs.map(
-                ({id, checked}) => [checked ? 'remove' : 'add', id],
-            );
-            globals.dispatchMultiple([
-              Actions.updateFtraceFilter({excludedNames}),
-              Actions.requestTrackReload({}),
-            ]);
-          },
+      PopupMultiSelect,
+      {
+        label: 'Filter',
+        minimal: true,
+        icon: 'filter_list_alt',
+        popupPosition: PopupPosition.Top,
+        options,
+        onChange: (diffs: MultiSelectDiff[]) => {
+          const excludedNames: StringListPatch[] = diffs.map(
+            ({id, checked}) => [checked ? 'remove' : 'add', id],
+          );
+          globals.dispatchMultiple([
+            Actions.updateFtraceFilter({excludedNames}),
+            Actions.requestTrackReload({}),
+          ]);
         },
+      },
     );
   }
 
@@ -160,13 +160,13 @@ export class FtracePanel implements m.ClassComponent {
     const rows: m.Children = [];
 
     rows.push(m(
-        `.row`,
-        m('.cell.row-header', 'Timestamp'),
-        m('.cell.row-header', 'Name'),
-        m('.cell.row-header', 'CPU'),
-        m('.cell.row-header', 'Process'),
-        m('.cell.row-header', 'Args'),
-        ));
+      `.row`,
+      m('.cell.row-header', 'Timestamp'),
+      m('.cell.row-header', 'Name'),
+      m('.cell.row-header', 'CPU'),
+      m('.cell.row-header', 'Process'),
+      m('.cell.row-header', 'Args'),
+    ));
 
     if (data) {
       const {events, offset, numEvents} = data;
@@ -177,26 +177,21 @@ export class FtracePanel implements m.ClassComponent {
 
         const rank = i + offset;
 
-        const color = colorForString(name);
-        const hsl = `hsl(
-          ${color.h},
-          ${color.s - 20}%,
-          ${Math.min(color.l + 10, 60)}%
-        )`;
+        const color = colorForFtrace(name).base.cssString;
 
         rows.push(m(
-            `.row`,
-            {
-              style: {top: `${(rank + 1.0) * ROW_H}px`},
-              onmouseover: this.onRowOver.bind(this, ts),
-              onmouseout: this.onRowOut.bind(this),
-            },
-            m('.cell', timestamp),
-            m('.cell', m('span.colour', {style: {background: hsl}}), name),
-            m('.cell', cpu),
-            m('.cell', process),
-            m('.cell', args),
-            ));
+          `.row`,
+          {
+            style: {top: `${(rank + 1.0) * ROW_H}px`},
+            onmouseover: this.onRowOver.bind(this, ts),
+            onmouseout: this.onRowOut.bind(this),
+          },
+          m('.cell', timestamp),
+          m('.cell', m('span.colour', {style: {background: color}}), name),
+          m('.cell', cpu),
+          m('.cell', process),
+          m('.cell', args),
+        ));
       }
       return m('.rows', {style: {height: `${numEvents * ROW_H}px`}}, rows);
     } else {

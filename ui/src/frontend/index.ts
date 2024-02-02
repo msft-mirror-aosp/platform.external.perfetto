@@ -20,10 +20,8 @@ import {Draft} from 'immer';
 import m from 'mithril';
 
 import {defer} from '../base/deferred';
-import {reportError, setErrorHandler} from '../base/logging';
+import {addErrorHandler, reportError} from '../base/logging';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
-import {CommandManager} from '../common/commands';
-import {createEmptyState} from '../common/empty_state';
 import {flattenArgs, traceEvent} from '../common/metatracing';
 import {pluginManager, pluginRegistry} from '../common/plugins';
 import {State} from '../common/state';
@@ -31,7 +29,7 @@ import {initController, runControllers} from '../controller';
 import {
   isGetCategoriesResponse,
 } from '../controller/chrome_proxy_record_controller';
-import {RECORDING_V2_FLAG} from '../core/feature_flags';
+import {RECORDING_V2_FLAG, featureFlags} from '../core/feature_flags';
 import {initLiveReloadIfLocalhost} from '../core/live_reload';
 import {raf} from '../core/raf_scheduler';
 import {initWasm} from '../trace_processor/wasm_engine_proxy';
@@ -47,42 +45,58 @@ import {globals} from './globals';
 import {HomePage} from './home_page';
 import {InsightsPage} from './insights_page';
 import {MetricsPage} from './metrics_page';
+import {PluginsPage} from './plugins_page';
 import {postMessageHandler} from './post_message_handler';
 import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
 import {Route, Router} from './router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
+import {Store} from './store';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
 import {ViewerPage} from './viewer_page';
 import {VizPage} from './viz_page';
 import {WidgetsPage} from './widgets_page';
+import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
+import {showModal} from '../widgets/modal';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
+
+
+const CSP_WS_PERMISSIVE_PORT = featureFlags.register({
+  id: 'cspAllowAnyWebsocketPort',
+  name: 'Relax Content Security Policy for 127.0.0.1:*',
+  description: 'Allows simultaneous usage of several trace_processor_shell ' +
+               '-D --http-port 1234 by opening ' +
+               'https://ui.perfetto.dev/#!/?rpc_port=1234',
+  defaultValue: false,
+});
 
 class FrontendApi {
   constructor() {
     globals.store.subscribe(this.handleStoreUpdate);
   }
 
-  private handleStoreUpdate = (state: State, oldState: State) => {
+  private handleStoreUpdate = (store: Store<State>, oldState: State) => {
+    const newState = store.state;
+
     // If the visible time in the global state has been updated more
     // recently than the visible time handled by the frontend @ 60fps,
     // update it. This typically happens when restoring the state from a
     // permalink.
-    globals.frontendLocalState.mergeState(state.frontendLocalState);
+    globals.timeline.mergeState(newState.frontendLocalState);
 
     // Only redraw if something other than the frontendLocalState changed.
     let key: keyof State;
-    for (key in state) {
-      if (key !== 'frontendLocalState' && oldState[key] !== state[key]) {
+    for (key in store.state) {
+      if (key !== 'frontendLocalState' && oldState[key] !== newState[key]) {
         raf.scheduleFullRedraw();
         break;
       }
     }
 
-    // Run in microtask to aboid avoid reentry
+    // Run in microtask to avoid avoid reentry
     setTimeout(runControllers, 0);
   };
 
@@ -125,6 +139,20 @@ function routeChange(route: Route) {
 
 function setupContentSecurityPolicy() {
   // Note: self and sha-xxx must be quoted, urls data: and blob: must not.
+
+  let rpcPolicy = [
+    'http://127.0.0.1:9001',  // For trace_processor_shell --httpd.
+    'ws://127.0.0.1:9001',    // Ditto, for the websocket RPC.
+  ];
+  if (CSP_WS_PERMISSIVE_PORT.get()) {
+    const route = Router.parseUrl(window.location.href);
+    if (/^\d+$/.exec(route.args.rpc_port ?? '')) {
+      rpcPolicy = [
+        `http://127.0.0.1:${route.args.rpc_port}`,
+        `ws://127.0.0.1:${route.args.rpc_port}`,
+      ];
+    }
+  }
   const policy = {
     'default-src': [
       `'self'`,
@@ -144,14 +172,12 @@ function setupContentSecurityPolicy() {
     'object-src': ['none'],
     'connect-src': [
       `'self'`,
-      'http://127.0.0.1:9001',  // For trace_processor_shell --httpd.
-      'ws://127.0.0.1:9001',    // Ditto, for the websocket RPC.
       'ws://127.0.0.1:8037',    // For the adb websocket server.
       'https://*.google-analytics.com',
       'https://*.googleapis.com',  // For Google Cloud Storage fetches.
       'blob:',
       'data:',
-    ],
+    ].concat(rpcPolicy),
     'img-src': [
       `'self'`,
       'data:',
@@ -190,8 +216,10 @@ function main() {
   css.href = globals.root + 'perfetto.css';
   css.onload = () => cssLoadPromise.resolve();
   css.onerror = (err) => cssLoadPromise.reject(err);
-  const favicon = document.head.querySelector('#favicon') as HTMLLinkElement;
-  if (favicon) favicon.href = globals.root + 'assets/favicon.png';
+  const favicon = document.head.querySelector('#favicon');
+  if (favicon instanceof HTMLLinkElement) {
+    favicon.href = globals.root + 'assets/favicon.png';
+  }
 
   // Load the script to detect if this is a Googler (see comments on globals.ts)
   // and initialize GA after that (or after a timeout if something goes wrong).
@@ -205,8 +233,11 @@ function main() {
 
   document.head.append(script, css);
 
+  // Route errors to both the UI bugreport dialog and Analytics (if enabled).
+  addErrorHandler(maybeShowErrorDialog);
+  addErrorHandler((e) => globals.logging.logError(e));
+
   // Add Error handlers for JS error and for uncaught exceptions in promises.
-  setErrorHandler((err: string) => maybeShowErrorDialog(err));
   window.addEventListener('error', (e) => reportError(e));
   window.addEventListener('unhandledrejection', (e) => reportError(e));
 
@@ -230,6 +261,7 @@ function main() {
     '/info': TraceInfoPage,
     '/widgets': WidgetsPage,
     '/viz': VizPage,
+    '/plugins': PluginsPage,
   });
   router.onRouteChanged = routeChange;
 
@@ -238,9 +270,7 @@ function main() {
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  const cmdManager = new CommandManager();
-
-  globals.initialize(dispatch, router, createEmptyState(), cmdManager);
+  globals.initialize(dispatch, router);
 
   globals.serviceWorkerController.install();
 
@@ -249,9 +279,10 @@ function main() {
 
   // We proxy messages between the extension and the controller because the
   // controller's worker can't access chrome.runtime.
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
   const extensionPort = window.chrome && chrome.runtime ?
-      chrome.runtime.connect(EXTENSION_ID) :
-      undefined;
+    chrome.runtime.connect(EXTENSION_ID) :
+    undefined;
 
   setExtensionAvailability(extensionPort !== undefined);
 
@@ -262,13 +293,13 @@ function main() {
     });
     // This forwards the messages from the extension to the controller.
     extensionPort.onMessage.addListener(
-        (message: object, _port: chrome.runtime.Port) => {
-          if (isGetCategoriesResponse(message)) {
-            globals.dispatch(Actions.setChromeCategories(message));
-            return;
-          }
-          extensionLocalChannel.port2.postMessage(message);
-        });
+      (message: object, _port: chrome.runtime.Port) => {
+        if (isGetCategoriesResponse(message)) {
+          globals.dispatch(Actions.setChromeCategories(message));
+          return;
+        }
+        extensionLocalChannel.port2.postMessage(message);
+      });
   }
 
   // This forwards the messages from the controller to the extension
@@ -291,10 +322,19 @@ function main() {
   }
 
   for (const plugin of pluginRegistry.values()) {
-    pluginManager.activatePlugin(plugin.pluginId);
-  }
+    const id = `plugin_${plugin.pluginId}`;
+    const name = `Plugin: ${plugin.pluginId}`;
+    const flag = featureFlags.register({
+      id,
+      name,
+      description: `Overrides '${id}' plugin.`,
+      defaultValue: true,
+    });
 
-  cmdManager.registerCommandSource(pluginManager);
+    if (flag.get()) {
+      pluginManager.activatePlugin(plugin.pluginId);
+    }
+  }
 }
 
 function onCssLoaded() {
@@ -313,13 +353,14 @@ function onCssLoaded() {
     updateAvailableAdbDevices();
     try {
       navigator.usb.addEventListener(
-          'connect', () => updateAvailableAdbDevices());
+        'connect', () => updateAvailableAdbDevices());
       navigator.usb.addEventListener(
-          'disconnect', () => updateAvailableAdbDevices());
+        'disconnect', () => updateAvailableAdbDevices());
     } catch (e) {
       console.error('WebUSB API not supported');
     }
   }
+
 
   // Will update the chip on the sidebar footer that notifies that the RPC is
   // connected. Has no effect on the controller (which will repeat this check
@@ -327,9 +368,9 @@ function onCssLoaded() {
   // Don't auto-open any trace URLs until we get a response here because we may
   // accidentially clober the state of an open trace processor instance
   // otherwise.
+  maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-
     globals.dispatch(Actions.maybeSetPendingDeeplink({
       ts: route.args.ts,
       tid: route.args.tid,
@@ -358,6 +399,32 @@ function onCssLoaded() {
     // cases.
     routeChange(route);
   });
+}
+
+// If the URL is /#!?rpc_port=1234, change the default RPC port.
+// For security reasons, this requires toggling a flag. Detect this and tell the
+// user what to do in this case.
+function maybeChangeRpcPortFromFragment() {
+  const route = Router.parseUrl(window.location.href);
+  if (route.args.rpc_port !== undefined) {
+    if (!CSP_WS_PERMISSIVE_PORT.get()) {
+      showModal({
+        title: 'Using a different port requires a flag change',
+        content: m('div',
+          m('span',
+            'For security reasons before connecting to a non-standard ' +
+            'TraceProcessor port you need to manually enable the flag to ' +
+            'relax the Content Security Policy and restart the UI.',
+          )),
+        buttons: [{
+          text: 'Take me to the flags page',
+          primary: true,
+          action: () => Router.navigate('#!/flags/cspAllowAnyWebsocketPort')}],
+      });
+    } else {
+      HttpRpcEngine.rpcPort = route.args.rpc_port;
+    }
+  }
 }
 
 main();

@@ -20,9 +20,11 @@
 
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/trace_processor/basic_types.h"
 #include "src/base/test/utils.h"
 #include "src/trace_processor/db/table.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
+#include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/tables/slice_tables_py.h"
 #include "src/trace_processor/tables/track_tables_py.h"
 
@@ -35,6 +37,7 @@ using ThreadTrackTable = tables::ThreadTrackTable;
 using ExpectedFrameTimelineSliceTable = tables::ExpectedFrameTimelineSliceTable;
 using RawTable = tables::RawTable;
 using FtraceEventTable = tables::FtraceEventTable;
+using HeapGraphObjectTable = tables::HeapGraphObjectTable;
 
 // `SELECT * FROM SLICE` on android_monitor_contention_trace.at
 static char kSliceTable[] = "test/data/slice_table_for_benchmarks.csv";
@@ -49,6 +52,10 @@ static char kRawTable[] = "test/data/raw_cpu_for_benchmarks.csv";
 // `SELECT id, cpu FROM ftrace_event` on chrome_android_systrace.pftrace.
 static char kFtraceEventTable[] =
     "test/data/ftrace_event_cpu_for_benchmarks.csv";
+
+// `SELECT id, upid, reference_set_id FROM heap_graph_object` on
+static char kHeapGraphObjectTable[] =
+    "test/data/heap_pgraph_object_for_benchmarks_query.csv";
 
 enum DB { V1, V2 };
 
@@ -193,6 +200,24 @@ struct FtraceEventTableForBenchmark {
   tables::FtraceEventTable table_{&pool_, &raw_};
 };
 
+struct HeapGraphObjectTableForBenchmark {
+  explicit HeapGraphObjectTableForBenchmark(benchmark::State& state) {
+    std::vector<std::string> table_rows_as_string =
+        ReadCSV(state, kHeapGraphObjectTable);
+
+    for (size_t i = 1; i < table_rows_as_string.size(); ++i) {
+      std::vector<std::string> row_vec = SplitCSVLine(table_rows_as_string[i]);
+
+      HeapGraphObjectTable::Row row;
+      row.upid = *base::StringToUInt32(row_vec[1]);
+      row.reference_set_id = base::StringToUInt32(row_vec[2]);
+      table_.Insert(row);
+    }
+  }
+  StringPool pool_;
+  HeapGraphObjectTable table_{&pool_};
+};
+
 void BenchmarkSliceTable(benchmark::State& state,
                          SliceTableForBenchmark& table,
                          std::initializer_list<Constraint> c) {
@@ -326,6 +351,14 @@ static void BM_QESliceTableTsAndTrackId(benchmark::State& state) {
 
 BENCHMARK(BM_QESliceTableTsAndTrackId)->ArgsProduct({{DB::V1, DB::V2}});
 
+static void BM_QEFilterOneElement(benchmark::State& state) {
+  SliceTableForBenchmark table(state);
+  BenchmarkSliceTable(state, table,
+                      {table.table_.id().eq(10), table.table_.dur().eq(100)});
+}
+
+BENCHMARK(BM_QEFilterOneElement)->ArgsProduct({{DB::V1, DB::V2}});
+
 static void BM_QEFilterWithArrangement(benchmark::State& state) {
   Table::kUseFilterV2 = state.range(0) == 1;
 
@@ -345,6 +378,76 @@ static void BM_QEFilterWithArrangement(benchmark::State& state) {
 }
 
 BENCHMARK(BM_QEFilterWithArrangement)->ArgsProduct({{DB::V1, DB::V2}});
+
+static void BM_QEDenseNullFilter(benchmark::State& state) {
+  Table::kUseFilterV2 = state.range(0) == 1;
+
+  HeapGraphObjectTableForBenchmark table(state);
+  Constraint c{table.table_.reference_set_id().index_in_table(), FilterOp::kGt,
+               SqlValue::Long(1000)};
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(table.table_.FilterToRowMap({c}));
+  }
+  state.counters["s/row"] =
+      benchmark::Counter(static_cast<double>(table.table_.row_count()),
+                         benchmark::Counter::kIsIterationInvariantRate |
+                             benchmark::Counter::kInvert);
+}
+BENCHMARK(BM_QEDenseNullFilter)->ArgsProduct({{DB::V1, DB::V2}});
+
+static void BM_QEDenseNullFilterIsNull(benchmark::State& state) {
+  Table::kUseFilterV2 = state.range(0) == 1;
+
+  HeapGraphObjectTableForBenchmark table(state);
+  Constraint c{table.table_.reference_set_id().index_in_table(),
+               FilterOp::kIsNull, SqlValue()};
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(table.table_.FilterToRowMap({c}));
+  }
+  state.counters["s/row"] =
+      benchmark::Counter(static_cast<double>(table.table_.row_count()),
+                         benchmark::Counter::kIsIterationInvariantRate |
+                             benchmark::Counter::kInvert);
+}
+BENCHMARK(BM_QEDenseNullFilterIsNull)->ArgsProduct({{DB::V1, DB::V2}});
+
+static void BM_QEIdColumnWithIntAsDouble(benchmark::State& state) {
+  SliceTableForBenchmark table(state);
+  Constraint c{table.table_.track_id().index_in_table(), FilterOp::kEq,
+               SqlValue::Double(100)};
+  BenchmarkSliceTable(state, table, {c});
+}
+
+BENCHMARK(BM_QEIdColumnWithIntAsDouble)->ArgsProduct({{DB::V1, DB::V2}});
+
+static void BM_QEIdColumnWithDouble(benchmark::State& state) {
+  SliceTableForBenchmark table(state);
+  Constraint c{table.table_.track_id().index_in_table(), FilterOp::kEq,
+               SqlValue::Double(100.5)};
+  BenchmarkSliceTable(state, table, {c});
+}
+
+BENCHMARK(BM_QEIdColumnWithDouble)->ArgsProduct({{DB::V1, DB::V2}});
+
+static void BM_QEFilterOrderedArrangement(benchmark::State& state) {
+  Table::kUseFilterV2 = state.range(0) == 1;
+
+  SliceTableForBenchmark table(state);
+  Order order{table.table_.dur().index_in_table(), false};
+  Table slice_sorted_with_duration = table.table_.Sort({order});
+
+  Constraint c{table.table_.dur().index_in_table(), FilterOp::kGt,
+               SqlValue::Long(10)};
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(slice_sorted_with_duration.FilterToRowMap({c}));
+  }
+  state.counters["s/row"] = benchmark::Counter(
+      static_cast<double>(slice_sorted_with_duration.row_count()),
+      benchmark::Counter::kIsIterationInvariantRate |
+          benchmark::Counter::kInvert);
+}
+
+BENCHMARK(BM_QEFilterOrderedArrangement)->ArgsProduct({{DB::V1, DB::V2}});
 
 }  // namespace
 }  // namespace trace_processor

@@ -15,10 +15,10 @@
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {TraceArrayBufferSource} from '../common/state';
+import {showModal} from '../widgets/modal';
 
 import {onClickCopy} from './clipboard';
 import {globals} from './globals';
-import {showModal} from './modal';
 import {isTraceLoaded} from './sidebar';
 
 export function isShareable() {
@@ -48,7 +48,7 @@ export function shareTrace() {
   if (!isShareable()) {
     const msg =
         [m('p',
-           'This trace was opened by an external site and as such cannot ' +
+          'This trace was opened by an external site and as such cannot ' +
                'be re-shared preserving the UI state.')];
     if (traceUrl) {
       msg.push(m('p', 'By using the URL below you can open this trace again.'));
@@ -66,7 +66,7 @@ export function shareTrace() {
   if (!isShareable() || !isTraceLoaded()) return;
 
   const result = confirm(
-      `Upload UI state and generate a permalink. ` +
+    `Upload UI state and generate a permalink. ` +
       `The trace will be accessible by anybody with the permalink.`);
   if (result) {
     globals.logging.logEvent('Trace Actions', 'Create permalink');

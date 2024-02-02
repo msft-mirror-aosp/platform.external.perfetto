@@ -15,17 +15,21 @@
 import {BigintMath as BIMath} from '../../base/bigint_math';
 import {clamp} from '../../base/math_utils';
 import {Duration, duration, time} from '../../base/time';
+import {uuidv4} from '../../base/uuid';
+import {ChromeSliceDetailsTab} from '../../frontend/chrome_slice_details_tab';
 import {
   NAMED_ROW,
   NamedSliceTrack,
   NamedSliceTrackTypes,
 } from '../../frontend/named_slice_track';
+import {SLICE_LAYOUT_FIT_CONTENT_DEFAULTS} from '../../frontend/slice_layout';
 import {
   SliceData,
-  SliceTrackBase,
-} from '../../frontend/slice_track_base';
+  SliceTrackLEGACY,
+} from '../../frontend/slice_track';
 import {NewTrackArgs} from '../../frontend/track';
 import {
+  BottomTabToSCSAdapter,
   EngineProxy,
   Plugin,
   PluginContext,
@@ -44,7 +48,7 @@ import {
 
 export const SLICE_TRACK_KIND = 'ChromeSliceTrack';
 
-export class ChromeSliceTrack extends SliceTrackBase {
+export class ChromeSliceTrack extends SliceTrackLEGACY {
   private maxDurNs: duration = 0n;
 
   constructor(
@@ -62,7 +66,7 @@ export class ChromeSliceTrack extends SliceTrackBase {
           SELECT max(iif(dur = -1, (SELECT end_ts FROM trace_bounds) - ts, dur))
           AS maxDur FROM ${tableName} WHERE track_id = ${this.trackId}`;
       const queryRes = await this.engine.query(query);
-      this.maxDurNs = queryRes.firstRow({maxDur: LONG_NULL}).maxDur || 0n;
+      this.maxDurNs = queryRes.firstRow({maxDur: LONG_NULL}).maxDur ?? 0n;
     }
 
     const query = `
@@ -143,7 +147,7 @@ export class ChromeSliceTrack extends SliceTrackBase {
         // it is less than or equal to one, incase the thread duration exceeds
         // the total duration.
         cpuTimeRatio = Math.min(
-            Math.round(BIMath.ratio(it.threadDur, it.dur) * 100) / 100, 1);
+          Math.round(BIMath.ratio(it.threadDur, it.dur) * 100) / 100, 1);
       }
       slices.cpuTimeRatio![row] = cpuTimeRatio;
     }
@@ -165,8 +169,12 @@ export interface ChromeSliceTrackTypes extends NamedSliceTrackTypes {
 }
 
 export class ChromeSliceTrackV2 extends NamedSliceTrack<ChromeSliceTrackTypes> {
-  constructor(args: NewTrackArgs, private trackId: number) {
+  constructor(args: NewTrackArgs, private trackId: number, maxDepth: number) {
     super(args);
+    this.sliceLayout = {
+      ...SLICE_LAYOUT_FIT_CONTENT_DEFAULTS,
+      depthGuess: maxDepth,
+    };
   }
 
   // This is used by the base class to call iter().
@@ -201,14 +209,7 @@ export class ChromeSliceTrackV2 extends NamedSliceTrack<ChromeSliceTrackTypes> {
 
   onUpdatedSlices(slices: ChromeSliceTrackTypes['slice'][]) {
     for (const slice of slices) {
-      if (slice === this.hoveredSlice) {
-        slice.color = {
-          ...slice.baseColor,
-          l: 30,
-        };
-      } else {
-        slice.color = slice.baseColor;
-      }
+      slice.isHighlighted = (slice === this.hoveredSlice);
     }
   }
 }
@@ -263,37 +264,53 @@ class ChromeSlicesPlugin implements Plugin {
         kind: 'Slices',
       });
 
-      ctx.registerStaticTrack({
+      ctx.registerTrack({
         uri: `perfetto.ChromeSlices#${trackId}`,
         displayName,
         trackIds: [trackId],
         kind: SLICE_TRACK_KIND,
-        track: ({trackKey}) => {
+        trackFactory: ({trackKey}) => {
           return new ChromeSliceTrack(
-              engine,
-              maxDepth,
-              trackKey,
-              trackId,
+            engine,
+            maxDepth,
+            trackKey,
+            trackId,
           );
         },
       });
 
       // trackIds can only be registered by one track at a time.
       // TODO(hjd): Move trackIds to only be on V2.
-      ctx.registerStaticTrack({
+      ctx.registerTrack({
         uri: `perfetto.ChromeSlices#${trackId}.v2`,
         displayName,
         trackIds: [trackId],
         kind: SLICE_TRACK_KIND,
-        track: ({trackKey}) => {
+        trackFactory: ({trackKey}) => {
           const newTrackArgs = {
             engine: ctx.engine,
             trackKey,
           };
-          return new ChromeSliceTrackV2(newTrackArgs, trackId);
+          return new ChromeSliceTrackV2(newTrackArgs, trackId, maxDepth);
         },
       });
     }
+
+    ctx.registerDetailsPanel(new BottomTabToSCSAdapter({
+      tabFactory: (sel) => {
+        if (sel.kind !== 'CHROME_SLICE') {
+          return undefined;
+        }
+        return new ChromeSliceDetailsTab({
+          config: {
+            table: sel.table ?? 'slice',
+            id: sel.id,
+          },
+          engine: ctx.engine,
+          uuid: uuidv4(),
+        });
+      },
+    }));
   }
 }
 

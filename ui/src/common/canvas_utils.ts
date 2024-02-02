@@ -38,13 +38,13 @@ export function cropText(str: string, charWidth: number, rectWidth: number) {
 }
 
 export function drawDoubleHeadedArrow(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    length: number,
-    showArrowHeads: boolean,
-    width = 2,
-    color = 'black') {
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  length: number,
+  showArrowHeads: boolean,
+  width = 2,
+  color = 'black') {
   ctx.beginPath();
   ctx.lineWidth = width;
   ctx.lineCap = 'round';
@@ -71,11 +71,15 @@ export function drawDoubleHeadedArrow(
 }
 
 export function drawIncompleteSlice(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    width: number,
-    height: number) {
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  showGradient: boolean = true) {
+  if (width <= 0 || height <= 0) {
+    return;
+  }
   ctx.beginPath();
   const triangleSize = height / 4;
   ctx.moveTo(x, y);
@@ -92,14 +96,16 @@ export function drawIncompleteSlice(
 
   const fillStyle = ctx.fillStyle;
   if (isString(fillStyle)) {
-    const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
-    gradient.addColorStop(0.66, fillStyle);
-    gradient.addColorStop(1, '#FFFFFF');
-    ctx.fillStyle = gradient;
+    if (showGradient) {
+      const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+      gradient.addColorStop(0.66, fillStyle);
+      gradient.addColorStop(1, '#FFFFFF');
+      ctx.fillStyle = gradient;
+    }
   } else {
     throw new Error(
-        `drawIncompleteSlice() expects fillStyle to be a simple color not ${
-            fillStyle}`);
+      `drawIncompleteSlice() expects fillStyle to be a simple color not ${
+        fillStyle}`);
   }
 
   ctx.fill();
@@ -107,11 +113,11 @@ export function drawIncompleteSlice(
 }
 
 export function drawTrackHoverTooltip(
-    ctx: CanvasRenderingContext2D,
-    pos: {x: number, y: number},
-    maxHeight: number,
-    text: string,
-    text2?: string) {
+  ctx: CanvasRenderingContext2D,
+  pos: {x: number, y: number},
+  maxHeight: number,
+  text: string,
+  text2?: string) {
   ctx.font = '10px Roboto Condensed';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
@@ -145,7 +151,7 @@ export function drawTrackHoverTooltip(
   y -= 10;
 
   // Ensure the box is on screen:
-  const endPx = globals.frontendLocalState.visibleTimeScale.pxSpan.end;
+  const endPx = globals.timeline.visibleTimeScale.pxSpan.end;
   if (x + width > endPx) {
     x -= x + width - endPx;
   }
@@ -162,7 +168,7 @@ export function drawTrackHoverTooltip(
 
   ctx.fillStyle = 'hsl(200, 50%, 40%)';
   ctx.fillText(
-      text, x + paddingPx, y + paddingPx + textMetrics.fontBoundingBoxAscent);
+    text, x + paddingPx, y + paddingPx + textMetrics.fontBoundingBoxAscent);
   if (text2 !== undefined) {
     const yOffsetPx = textMetrics.fontBoundingBoxAscent +
         textMetrics.fontBoundingBoxDescent + text2Metrics.fontBoundingBoxAscent;

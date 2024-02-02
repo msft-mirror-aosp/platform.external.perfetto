@@ -216,7 +216,7 @@ class ColumnSerializer:
       return None
     return f'''
       static_assert(
-        Column::IsFlagsAndTypeValid<ColumnType::{self.name}::stored_type>(
+        ColumnLegacy::IsFlagsAndTypeValid<ColumnType::{self.name}::stored_type>(
           ColumnFlag::{self.name}),
         "Column type and flag combination is not valid");
     '''
@@ -606,6 +606,7 @@ def serialize_header(ifdef_guard: str, tables: List[ParsedTable],
 #ifndef {ifdef_guard}
 #define {ifdef_guard}
 
+#include "src/trace_processor/db/typed_column.h"
 #include "src/trace_processor/tables/macros_internal.h"
 
 {include_paths_str}
@@ -633,11 +634,11 @@ def to_cpp_flags(raw_flag: ColumnFlag) -> str:
   assert raw_flag != ColumnFlag.NONE
   flags = []
   if ColumnFlag.SORTED in raw_flag:
-    flags.append('Column::Flag::kSorted')
+    flags.append('ColumnLegacy::Flag::kSorted')
   if ColumnFlag.HIDDEN in raw_flag:
-    flags.append('Column::Flag::kHidden')
+    flags.append('ColumnLegacy::Flag::kHidden')
   if ColumnFlag.DENSE in raw_flag:
-    flags.append('Column::Flag::kDense')
+    flags.append('ColumnLegacy::Flag::kDense')
   if ColumnFlag.SET_ID in raw_flag:
-    flags.append('Column::Flag::kSetId')
+    flags.append('ColumnLegacy::Flag::kSetId')
   return ' | '.join(flags)

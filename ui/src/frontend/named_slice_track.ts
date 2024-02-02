@@ -24,9 +24,12 @@ import {
   BaseSliceTrackTypes,
   OnSliceClickArgs,
   OnSliceOverArgs,
+  SLICE_FLAGS_INCOMPLETE,
+  SLICE_FLAGS_INSTANT,
 } from './base_slice_track';
 import {globals} from './globals';
 import {NewTrackArgs} from './track';
+import {renderDuration} from './widgets/duration';
 
 export const NAMED_ROW = {
   // Base columns (tsq, ts, dur, id, depth).
@@ -43,7 +46,7 @@ export interface NamedSliceTrackTypes extends BaseSliceTrackTypes {
 
 export abstract class NamedSliceTrack<
     T extends NamedSliceTrackTypes = NamedSliceTrackTypes> extends
-    BaseSliceTrack<T> {
+  BaseSliceTrack<T> {
   constructor(args: NewTrackArgs) {
     super(args);
   }
@@ -58,13 +61,21 @@ export abstract class NamedSliceTrack<
     const baseSlice = super.rowToSlice(row);
     // Ignore PIDs or numeric arguments when hashing.
     const name = row.name || '';
-    const baseColor = getColorForSlice(name, false);
-    return {...baseSlice, title: name, baseColor};
+    const colorScheme = getColorForSlice(name);
+    return {...baseSlice, title: name, colorScheme};
   }
 
   onSliceOver(args: OnSliceOverArgs<T['slice']>) {
-    const name = args.slice.title;
-    args.tooltip = [name];
+    const {title, dur, flags} = args.slice;
+    let duration;
+    if (flags & SLICE_FLAGS_INCOMPLETE) {
+      duration = 'Incomplete';
+    } else if (flags & SLICE_FLAGS_INSTANT) {
+      duration = 'Instant';
+    } else {
+      duration = renderDuration(dur);
+    }
+    args.tooltip = [`${title} - [${duration}]`];
   }
 
   onSliceClick(args: OnSliceClickArgs<T['slice']>) {

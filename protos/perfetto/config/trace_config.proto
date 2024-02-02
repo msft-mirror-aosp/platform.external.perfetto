@@ -26,7 +26,7 @@ import "protos/perfetto/config/data_source_config.proto";
 // It contains the general config for the logging buffer(s) and the configs for
 // all the data source being enabled.
 //
-// Next id: 38.
+// Next id: 39.
 message TraceConfig {
   message BufferConfig {
     optional uint32 size_kb = 1;
@@ -285,6 +285,13 @@ message TraceConfig {
   // by other UIDs.
   optional int32 bugreport_score = 30;
 
+  // When set, defines name of the file that will be saved under
+  // /data/misc/perfetto-traces/bugreport/ when using --save-all-for-bugreport.
+  // If omitted, traces will be named systrace.pftrace, systrace_1.pftrace, etc,
+  // starting from the highest `bugreport_score`.
+  // Introduced in v42 / Android V.
+  optional string bugreport_filename = 38;
+
   // Triggers allow producers to start or stop the tracing session when an event
   // occurs.
   //
@@ -446,10 +453,8 @@ message TraceConfig {
   }
   optional CompressionType compression_type = 24;
 
-  // Use the legacy codepath that compresses from perfetto_cmd.cc instead of
-  // using the new codepath that compresses from tracing_service_impl.cc. This
-  // will be removed in the future.
-  optional bool compress_from_cli = 37;
+  // DEPRECATED, was compress_from_cli.
+  reserved 37;
 
   // Android-only. Not for general use. If set, saves the trace into an
   // incident. This field is read by perfetto_cmd, rather than the tracing
@@ -575,6 +580,30 @@ message TraceConfig {
       // |atrace_post_tgid_starts_with|. The regex matching is only performed if
       // this check succeeds.
       SFP_ATRACE_MATCH_BREAK = 4;
+
+      // Tries to repeatedly search (i.e. find substrings of) the string field
+      // with |regex_pattern|. For each match, redacts any matching groups (i.e.
+      // replaced with a constant string). Once there are no further matches,
+      // filtering is terminated (i.e. no further rules are checked).
+      //
+      // Note that this is policy is a "search" policy not a "match" policy
+      // unlike the above policies:
+      //  * Match policies require matching the full string i.e. there is an
+      //    implicit leading `^` and trailing `$`.
+      //  * Search policies perform repeated partial matching of the string
+      //    e.g.
+      //      - String: `foo=aaa,bar=123,foo=bbb,baz=456`
+      //      - Pattern: `foo=(\d+)`
+      //      - Output: `foo=P6O,bar=123,foo=P6O,baz=456`
+      //    where P6O is the redaction string
+      //
+      // All of this is only performed after some pre-work where we try to parse
+      // the string field as an atrace tracepoint and check if the post-tgid
+      // field starts with |atrace_post_tgid_starts_with|.
+      //
+      // If there are no partial matches, the string is left unchanged and the
+      // next rule in chain is considered.
+      SFP_ATRACE_REPEATED_SEARCH_REDACT_GROUPS = 5;
     }
 
     // A rule specifies how strings should be filtered.

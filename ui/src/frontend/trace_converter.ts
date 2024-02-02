@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import {download} from '../base/clipboard';
+import {ErrorDetails} from '../base/logging';
 import {time} from '../base/time';
 import {Actions} from '../common/actions';
 import {
@@ -51,7 +52,7 @@ interface OpenTraceInLegacyArgs {
 
 interface ErrorArgs {
   kind: 'error';
-  error: string;
+  error: ErrorDetails;
 }
 
 
@@ -107,7 +108,7 @@ export function convertToJson(trace: Blob, truncate?: 'start'|'end') {
 }
 
 export function convertTraceToPprofAndDownload(
-    trace: Blob, pid: number, ts: time) {
+  trace: Blob, pid: number, ts: time) {
   makeWorkerAndPost({
     kind: 'ConvertTraceToPprof',
     trace,

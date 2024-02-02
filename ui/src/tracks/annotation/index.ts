@@ -56,20 +56,20 @@ class AnnotationPlugin implements Plugin {
       const id = it.id;
       const name = it.name;
 
-      ctx.registerStaticTrack({
+      ctx.registerTrack({
         uri: `perfetto.Annotation#${id}`,
         displayName: name,
         kind: SLICE_TRACK_KIND,
         tags: {
           metric: true,
         },
-        track: (({trackKey}) => {
+        trackFactory: (({trackKey}) => {
           return new ChromeSliceTrack(
-              engine,
-              0,
-              trackKey,
-              id,
-              'annotation',
+            engine,
+            0,
+            trackKey,
+            id,
+            'annotation',
           );
         }),
       });
@@ -109,14 +109,14 @@ class AnnotationPlugin implements Plugin {
         maximumValue,
       };
 
-      ctx.registerStaticTrack({
+      ctx.registerTrack({
         uri: `perfetto.Annotation#counter${id}`,
         displayName: name,
         kind: COUNTER_TRACK_KIND,
         tags: {
           metric: true,
         },
-        track: (trackCtx) => {
+        trackFactory: (trackCtx) => {
           return new CounterTrack(trackCtx, config, ctx.engine);
         },
       });

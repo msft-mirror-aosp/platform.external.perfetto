@@ -39,7 +39,7 @@ SELECT 1;
 
     table = res.table_views[0]
     self.assertEqual(table.name, 'foo_table')
-    self.assertEqual(table.desc, 'First line. Second line.')
+    self.assertEqual(table.desc, 'First line.\n Second line.')
     self.assertEqual(table.type, 'TABLE')
     self.assertEqual(
         table.cols, {
@@ -64,7 +64,7 @@ SELECT 1;
 
     fn = res.functions[0]
     self.assertEqual(fn.name, 'foo_fn')
-    self.assertEqual(fn.desc, 'First line. Second line.')
+    self.assertEqual(fn.desc, 'First line.\n Second line.')
     self.assertEqual(
         fn.args, {
             'utid': Arg('INT', 'Utid of thread.'),
@@ -110,6 +110,79 @@ CREATE TABLE bar_table AS
 SELECT 1;
     '''.strip())
     # Expecting an error: function prefix (bar) not matching module name (foo).
+    self.assertEqual(len(res.errors), 1)
+
+  # Checks that custom prefixes (cr for chrome/util) are allowed.
+  def test_custom_module_prefix(self):
+    res = parse_file(
+        'chrome/util/test.sql', f'''
+-- Comment
+CREATE PERFETTO TABLE cr_table(
+    -- Column.
+    x INT
+) AS
+SELECT 1;
+    '''.strip())
+    self.assertListEqual(res.errors, [])
+
+    fn = res.table_views[0]
+    self.assertEqual(fn.name, 'cr_table')
+    self.assertEqual(fn.desc, 'Comment')
+    self.assertEqual(fn.cols, {
+        'x': Arg('INT', 'Column.'),
+    })
+
+  # Checks that when custom prefixes (cr for chrome/util) are present,
+  # the full module name (chrome) is still accepted.
+  def test_custom_module_prefix_full_module_name(self):
+    res = parse_file(
+        'chrome/util/test.sql', f'''
+-- Comment
+CREATE PERFETTO TABLE chrome_table(
+    -- Column.
+    x INT
+) AS
+SELECT 1;
+    '''.strip())
+    self.assertListEqual(res.errors, [])
+
+    fn = res.table_views[0]
+    self.assertEqual(fn.name, 'chrome_table')
+    self.assertEqual(fn.desc, 'Comment')
+    self.assertEqual(fn.cols, {
+        'x': Arg('INT', 'Column.'),
+    })
+
+  # Checks that when custom prefixes (cr for chrome/util) are present,
+  # the incorrect prefixes (foo) are not accepted.
+  def test_custom_module_prefix_incorrect(self):
+    res = parse_file(
+        'chrome/util/test.sql', f'''
+-- Comment
+CREATE PERFETTO TABLE foo_table(
+    -- Column.
+    x INT
+) AS
+SELECT 1;
+    '''.strip())
+    # Expecting an error: table prefix (foo) is not allowed for a given path
+    # (allowed: chrome, cr).
+    self.assertEqual(len(res.errors), 1)
+
+  # Checks that when custom prefixes (cr for chrome/util) are present,
+  # they do not apply outside of the path scope.
+  def test_custom_module_prefix_does_not_apply_outside(self):
+    res = parse_file(
+        'foo/bar.sql', f'''
+-- Comment
+CREATE PERFETTO TABLE cr_table(
+    -- Column.
+    x INT
+) AS
+SELECT 1;
+    '''.strip())
+    # Expecting an error: table prefix (foo) is not allowed for a given path
+    # (allowed: foo).
     self.assertEqual(len(res.errors), 1)
 
   def test_common_does_not_include_module_name(self):
@@ -219,7 +292,7 @@ SELECT 1;
     self.assertListEqual(res.errors, [])
 
     fn = res.functions[0]
-    self.assertEqual(fn.desc, 'This is a very long description.')
+    self.assertEqual(fn.desc, 'This\n is\n\n a\n      very\n\n long\n\n description.')
 
   def test_multiline_arg_desc(self):
     res = parse_file(
@@ -244,7 +317,7 @@ SELECT 1;
     self.assertEqual(
         fn.args, {
             'utid':
-                Arg('INT', 'Uint spread across lines.'),
+                Arg('INT', 'Uint spread  across lines.'),
             'name':
                 Arg(
                     'STRING', 'String name which spans across multiple lines '
@@ -478,3 +551,56 @@ SELECT 1;
     })
     self.assertEqual(fn.return_type, 'BOOL')
     self.assertEqual(fn.return_desc, 'Exists.')
+
+  def test_macro(self):
+    res = parse_file(
+        'foo/bar.sql', f'''
+-- Macro
+CREATE OR REPLACE PERFETTO FUNCTION foo_fn()
+-- Exists.
+RETURNS BOOL
+AS
+SELECT 1;
+    '''.strip())
+    # Expecting an error: CREATE OR REPLACE is not allowed in stdlib.
+    self.assertEqual(len(res.errors), 1)
+
+  def test_create_or_replace_macro_smoke(self):
+    res = parse_file(
+        'foo/bar.sql', f'''
+-- Macro
+CREATE PERFETTO MACRO foo_macro(
+  -- x Arg.
+  x TableOrSubquery
+)
+-- Exists.
+RETURNS TableOrSubquery
+AS
+SELECT 1;
+    '''.strip())
+
+    macro = res.macros[0]
+    self.assertEqual(macro.name, 'foo_macro')
+    self.assertEqual(macro.desc, 'Macro')
+    self.assertEqual(macro.args, {
+        'x': Arg('TableOrSubquery', 'x Arg.'),
+    })
+    self.assertEqual(macro.return_type, 'TableOrSubquery')
+    self.assertEqual(macro.return_desc, 'Exists.')
+
+
+  def test_create_or_replace_macro_banned(self):
+    res = parse_file(
+        'foo/bar.sql', f'''
+-- Macro
+CREATE OR REPLACE PERFETTO MACRO foo_macro(
+  -- x Arg.
+  x TableOrSubquery
+)
+-- Exists.
+RETURNS TableOrSubquery
+AS
+SELECT 1;
+    '''.strip())
+    # Expecting an error: CREATE OR REPLACE is not allowed in stdlib.
+    self.assertEqual(len(res.errors), 1)

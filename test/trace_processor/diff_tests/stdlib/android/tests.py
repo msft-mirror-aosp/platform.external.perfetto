@@ -226,9 +226,30 @@ class AndroidStdlib(TestSuite):
         INCLUDE PERFETTO MODULE android.slices;
         SELECT ANDROID_STANDARDIZE_SLICE_NAME(slice.name) name
         FROM slice
-        ORDER BY name;
         """,
-        out=Path('android_slice_standardization.out'))
+        out=Csv("""
+        "name"
+        "Lock contention on thread list lock <...>"
+        "Lock contention on thread suspend count lock <...>"
+        "Lock contention on a monitor lock <...>"
+        "monitor contention with <...>"
+        "SuspendThreadByThreadId <...>"
+        "LoadApkAssetsFd <...>"
+        "relayoutWindow <...>"
+        "CoroutineContinuation"
+        "Choreographer#doFrame"
+        "DrawFrames"
+        "APK load"
+        "OpenDexFilesFromOat"
+        "Open oat file"
+        "CoroutineContinuation"
+        "Garbage Collector"
+        "Handler: android.view.View"
+        "Handler: android.os.AsyncTask"
+        "Handler: com.android.systemui.broadcast.ActionReceiver"
+        "Handler: com.android.keyguard.KeyguardUpdateMonitor"
+        "Handler: com.android.systemui.qs.TileServiceManager"
+        """))
 
   def test_monitor_contention_extraction(self):
     return DiffTestBlueprint(
@@ -481,24 +502,26 @@ class AndroidStdlib(TestSuite):
           client_oom_score,
           server_oom_score,
           client_ts,
-          server_ts
+          server_ts,
+          aidl_ts,
+          aidl_dur
         FROM android_async_binder_metrics_by_txn
         WHERE aidl_name IS NOT NULL
         ORDER BY client_ts
         LIMIT 10;
       """,
         out=Csv("""
-        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts"
-        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474
-        "AIDL::cpp::IMediaMetricsService::submitBuffer::cppServer","/system/bin/audioserver","media.metrics","audioserver",492,1262,1,-1000,-1000,25512325446,25512488255
-        "AIDL::cpp::IMediaMetricsService::submitBuffer::cppServer","/system/bin/audioserver","media.metrics","audioserver",492,1262,1,-1000,-1000,25512842465,25522410505
-        "AIDL::cpp::IDisplayEventConnection::stealReceiveChannel::cppServer","/vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu","/system/bin/surfaceflinger","binder:446_1",553,522,0,-1000,-1000,25847718645,25847734867
-        "AIDL::cpp::ITunnelModeEnabledListener::onTunnelModeEnabledChanged::cppServer","/system/bin/surfaceflinger","system_server","binder:496_2",522,1600,0,-1000,-900,25854181504,25854195485
-        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25855697394,25855710732
-        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25873210999,25873224961
-        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25951278287,25952242397
-        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,1575,0,-900,-1000,25965452828,25965590137
-        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,1575,0,-900,-1000,26046376252,26046544680
+        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts","aidl_ts","aidl_dur"
+        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474,22213598784,322601
+        "AIDL::cpp::IMediaMetricsService::submitBuffer::cppServer","/system/bin/audioserver","media.metrics","audioserver",492,1262,1,-1000,-1000,25512325446,25512488255,25512708792,9677878
+        "AIDL::cpp::IMediaMetricsService::submitBuffer::cppServer","/system/bin/audioserver","media.metrics","audioserver",492,1262,1,-1000,-1000,25512842465,25522410505,25522418582,58044
+        "AIDL::cpp::IDisplayEventConnection::stealReceiveChannel::cppServer","/vendor/bin/hw/android.hardware.graphics.composer3-service.ranchu","/system/bin/surfaceflinger","binder:446_1",553,522,0,-1000,-1000,25847718645,25847734867,25849056936,10493
+        "AIDL::cpp::ITunnelModeEnabledListener::onTunnelModeEnabledChanged::cppServer","/system/bin/surfaceflinger","system_server","binder:496_2",522,1600,0,-1000,-900,25854181504,25854195485,25854205007,214767
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25855697394,25855710732,25855721528,81461
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25873210999,25873224961,25873232951,3493
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,522,0,-900,-1000,25951278287,25952242397,25952255710,30672
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,1575,0,-900,-1000,25965452828,25965590137,25965596757,2631
+        "AIDL::cpp::IDisplayEventConnection::requestNextVsync::cppServer","system_server","/system/bin/surfaceflinger","android.anim",662,1575,0,-900,-1000,26046376252,26046544680,26046553099,53452
       """))
 
   def test_binder_txns(self):
@@ -517,24 +540,26 @@ class AndroidStdlib(TestSuite):
           client_oom_score,
           server_oom_score,
           client_ts,
-          server_ts
+          server_ts,
+          aidl_ts,
+          aidl_dur
         FROM android_binder_txns
         WHERE aidl_name IS NOT NULL
         ORDER BY client_ts
         LIMIT 10;
       """,
         out=Csv("""
-        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts"
-        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474
-        "AIDL::cpp::IInstalld::rmdex::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25230101202,25230125660
-        "AIDL::cpp::IInstalld::cleanupInvalidPackageDirs::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25243511980,25243544499
-        "AIDL::cpp::IInstalld::createAppDataBatched::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25244949065,25244971300
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25279371214,25279387389
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25279567724,25279592927
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280736368,25280756522
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280932813,25280946041
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281131360,25281145719
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281273755,25281315273
+        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts","aidl_ts","aidl_dur"
+        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474,22213598784,322601
+        "AIDL::cpp::IInstalld::rmdex::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25230101202,25230125660,25230231365,77249
+        "AIDL::cpp::IInstalld::cleanupInvalidPackageDirs::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25243511980,25243544499,25243566439,408943
+        "AIDL::cpp::IInstalld::createAppDataBatched::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25244949065,25244971300,25244976815,33221505
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25279371214,25279387389,25279400683,90089
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25279567724,25279592927,25280492716,147183
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280736368,25280756522,25280769543,109576
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280932813,25280946041,25280952957,107685
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281131360,25281145719,25281152341,84930
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281273755,25281315273,25281321909,83540
       """))
 
   def test_binder_outgoing_graph(self):
@@ -1005,3 +1030,62 @@ class AndroidStdlib(TestSuite):
          "bus_throughput Frequency",553000.000000,2000000,50.000000
          "bus_throughput Frequency",1014000.000000,2000000,50.000000
          """))
+
+  def test_app_process_starts(self):
+    return DiffTestBlueprint(
+        trace=DataPath('sched_wakeup_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.app_process_starts;
+        SELECT
+        process_name,
+        pid,
+        intent,
+        reason,
+        proc_start_ts,
+        proc_start_dur,
+        bind_app_ts,
+        bind_app_dur,
+        intent_ts,
+        intent_dur,
+        total_dur
+        FROM _android_app_process_starts
+        ORDER BY proc_start_ts
+      """,
+        out=Csv("""
+        "process_name","pid","intent","reason","proc_start_ts","proc_start_dur","bind_app_ts","bind_app_dur","intent_ts","intent_dur","total_dur"
+        "com.android.providers.media.module",3487,"com.android.providers.media.fuse.ExternalStorageServiceImpl","service",1737343157905,6527831,1737386174098,156129409,1737542356088,2114114,201312297
+        "com.android.externalstorage",3549," android.os.storage.action.VOLUME_STATE_CHANGED","broadcast",1739987238947,9277039,1740045665263,20602351,1740066288912,1480586,80530551
+      """))
+
+  def test_garbage_collection(self):
+    return DiffTestBlueprint(
+        trace=DataPath('sched_wakeup_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.garbage_collection;
+        SELECT
+        tid,
+        pid,
+        thread_name,
+        process_name,
+        gc_type,
+        is_mark_compact,
+        reclaimed_mb,
+        min_heap_mb,
+        max_heap_mb
+        gc_ts,
+        gc_dur,
+        gc_running_dur,
+        gc_runnable_dur,
+        gc_unint_io_dur,
+        gc_unint_non_io_dur,
+        gc_int_dur
+        FROM android_garbage_collection_events
+        ORDER BY tid, gc_ts
+      """,
+        out=Csv("""
+        "tid","pid","thread_name","process_name","gc_type","is_mark_compact","reclaimed_mb","min_heap_mb","gc_ts","gc_dur","gc_running_dur","gc_runnable_dur","gc_unint_io_dur","gc_unint_non_io_dur","gc_int_dur"
+        2013,2003,"HeapTaskDaemon","android.process.media","collector_transition",0,0.670000,2.153000,2.823000,326468170,80326441,11087787,0,0,10056086
+        3494,3487,"HeapTaskDaemon","com.android.providers.media.module","young",0,"[NULL]","[NULL]","[NULL]",213263593,55205035,10429437,0,0,1208604
+        3494,3487,"HeapTaskDaemon","com.android.providers.media.module","collector_transition",0,1.248000,2.201000,3.449000,169735717,65828710,20965673,0,0,0
+        3556,3549,"HeapTaskDaemon","com.android.externalstorage","collector_transition",0,0.450000,2.038000,2.488000,166379142,52906367,7881722,0,0,0
+      """))

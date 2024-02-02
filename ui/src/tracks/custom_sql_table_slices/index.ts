@@ -92,7 +92,9 @@ export abstract class CustomSqlTableSliceTrack<
         });
     await this.engine.query(sql);
     return DisposableCallback.from(() => {
-      this.engine.query(`DROP VIEW ${this.tableName}`);
+      if (this.engine.isAlive) {
+        this.engine.query(`DROP VIEW ${this.tableName}`);
+      }
     });
   }
 
@@ -134,12 +136,7 @@ export abstract class CustomSqlTableSliceTrack<
 }
 
 class CustomSqlTrackPlugin implements Plugin {
-  onActivate(ctx: PluginContext): void {
-    // noop to allow directory to compile.
-    if (ctx) {
-      return;
-    }
-  }
+  onActivate(_ctx: PluginContext): void {}
 }
 
 export const plugin: PluginDescriptor = {
