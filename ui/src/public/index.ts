@@ -131,9 +131,6 @@ export interface PluginContext {
   // Register command against this plugin context.
   registerCommand(command: Command): void;
 
-  // Retrieve a list of all commands.
-  commands: Command[];
-
   // Run a command, optionally passing some args.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runCommand(id: string, ...args: any[]): any;
@@ -218,8 +215,8 @@ export interface TrackDescriptor {
   // A unique identifier for this track.
   uri: string;
 
-  // A factory function returning the track object.
-  track: (ctx: TrackContext) => Track;
+  // A factory function returning a new track instance.
+  trackFactory: (ctx: TrackContext) => Track;
 
   // The track "kind", used by various subsystems e.g. aggregation controllers.
   // This is where "XXX_TRACK_KIND" values should be placed.
@@ -329,6 +326,7 @@ export interface TabDescriptor {
 
 export interface DetailsPanel {
   render(selection: Selection): m.Children;
+  isLoading?(): boolean;
 }
 
 // Similar to PluginContext but with additional methods to operate on the

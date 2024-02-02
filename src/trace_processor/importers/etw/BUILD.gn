@@ -12,26 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
+import("../../../../gn/test.gni")
 
-perfetto_sql_source_set("android") {
-  deps = [ "startup" ]
+source_set("full") {
   sources = [
-    "anrs.sql",
-    "app_process_starts.sql",
-    "battery.sql",
-    "battery_stats.sql",
-    "binder.sql",
-    "broadcasts.sql",
-    "dvfs.sql",
-    "garbage_collection.sql",
-    "io.sql",
-    "monitor_contention.sql",
-    "network_packets.sql",
-    "process_metadata.sql",
-    "screenshots.sql",
-    "slices.sql",
-    "statsd.sql",
-    "thread.sql",
+    "etw_module.cc",
+    "etw_module.h",
+    "etw_tokenizer.cc",
+    "etw_tokenizer.h",
+  ]
+  deps = [
+    "../../../../gn:default_deps",
+    "../../../../protos/perfetto/common:zero",
+    "../../../../protos/perfetto/trace:zero",
+    "../../../../protos/perfetto/trace/etw:zero",
+    "../../../../protos/perfetto/trace/interned_data:zero",
+    "../../../protozero",
+    "../../sorter",
+    "../../storage",
+    "../../types",
+    "../common",
+    "../common:parser_types",
+    "../i2c:full",
+    "../proto:minimal",
+    "../syscalls:full",
   ]
 }
