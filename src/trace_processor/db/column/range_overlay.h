@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,39 +14,33 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_PROCESSOR_DB_COLUMN_NULL_OVERLAY_H_
-#define SRC_TRACE_PROCESSOR_DB_COLUMN_NULL_OVERLAY_H_
+#ifndef SRC_TRACE_PROCESSOR_DB_COLUMN_RANGE_OVERLAY_H_
+#define SRC_TRACE_PROCESSOR_DB_COLUMN_RANGE_OVERLAY_H_
 
-#include <cstdint>
-#include <memory>
-#include <string>
-
-#include "perfetto/trace_processor/basic_types.h"
-#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_node.h"
 #include "src/trace_processor/db/column/types.h"
 
-namespace perfetto::trace_processor::column {
+namespace perfetto {
+namespace trace_processor {
+namespace column {
 
-// Overlay which introduces the layer of nullability. Specifically, spreads out
-// the storage with nulls using a BitVector.
-class NullOverlay : public DataNode {
+class RangeOverlay : public DataNode {
  public:
-  explicit NullOverlay(const BitVector* non_null);
+  explicit RangeOverlay(const Range);
 
   std::unique_ptr<Queryable> MakeQueryable(std::unique_ptr<Queryable>) override;
 
  private:
   class Queryable : public DataNode::Queryable {
    public:
-    Queryable(std::unique_ptr<DataNode::Queryable>, const BitVector* non_null);
+    Queryable(std::unique_ptr<DataNode::Queryable>, const Range);
 
     SearchValidationResult ValidateSearchConstraints(SqlValue,
                                                      FilterOp) const override;
 
     RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearch(FilterOp p, SqlValue, Indices) const override;
 
     Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
 
@@ -56,18 +50,21 @@ class NullOverlay : public DataNode {
 
     void Serialize(StorageProto*) const override;
 
-    uint32_t size() const override { return non_null_->size(); }
+    uint32_t size() const override { return range_.size(); }
 
-    std::string DebugString() const override { return "NullOverlay"; }
+    std::string DebugString() const override { return "RangeOverlay"; }
 
    private:
     std::unique_ptr<DataNode::Queryable> inner_ = nullptr;
-    const BitVector* non_null_ = nullptr;
+    const Range range_;
   };
 
-  const BitVector* non_null_ = nullptr;
+ private:
+  const Range range_;
 };
 
-}  // namespace perfetto::trace_processor::column
+}  // namespace column
+}  // namespace trace_processor
+}  // namespace perfetto
 
-#endif  // SRC_TRACE_PROCESSOR_DB_COLUMN_NULL_OVERLAY_H_
+#endif  // SRC_TRACE_PROCESSOR_DB_COLUMN_RANGE_OVERLAY_H_

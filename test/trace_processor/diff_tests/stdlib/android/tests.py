@@ -1088,4 +1088,120 @@ class AndroidStdlib(TestSuite):
         3494,3487,"HeapTaskDaemon","com.android.providers.media.module","young",0,"[NULL]","[NULL]","[NULL]",213263593,55205035,10429437,0,0,1208604
         3494,3487,"HeapTaskDaemon","com.android.providers.media.module","collector_transition",0,1.248000,2.201000,3.449000,169735717,65828710,20965673,0,0,0
         3556,3549,"HeapTaskDaemon","com.android.externalstorage","collector_transition",0,0.450000,2.038000,2.488000,166379142,52906367,7881722,0,0,0
+        """))
+
+  def test_input_events(self):
+    return DiffTestBlueprint(
+        trace=DataPath('post_boot_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.input;
+        SELECT
+        total_latency_dur,
+        handling_latency_dur,
+        dispatch_latency_dur,
+        tid,
+        thread_name,
+        pid,
+        process_name,
+        event_type,
+        event_seq,
+        event_channel,
+        dispatch_ts,
+        dispatch_dur,
+        receive_ts,
+        receive_dur
+        FROM android_input_events
+        ORDER BY dispatch_ts
+        LIMIT 10
+      """,
+        out=Csv("""
+        "total_latency_dur","handling_latency_dur","dispatch_latency_dur","tid","thread_name","pid","process_name","event_type","event_seq","event_channel","dispatch_ts","dispatch_dur","receive_ts","receive_dur"
+        377149054,77503,377032734,7493,"ndroid.systemui",7493,"com.android.systemui","0x3","0x1","4325794 NotificationShade (server)",578307771330,1292,578684804064,1412
+        1684318,772908,48433,7493,"ndroid.systemui",7493,"com.android.systemui","0x1","0x2","a0526ca NavigationBar0 (server)",581956322279,1299,581956370712,1806
+        22069988,12614508,804831,7493,"ndroid.systemui",7493,"com.android.systemui","0x1","0x3","4325794 NotificationShade (server)",581956391308,1212,581957196139,1362
+        1603522,645723,75328,7964,"droid.launcher3",7964,"com.android.launcher3","0x1","0x4","[Gesture Monitor] swipe-up (server)",581956445376,1232,581956520704,1708
+        1583707,644313,208973,7310,"android.ui",7288,"system_server","0x1","0x5","PointerEventDispatcher0 (server)",581956495788,1208,581956704761,1281
+        22622740,22582066,25729,7493,"ndroid.systemui",7493,"com.android.systemui","0x1","0x6","4325794 NotificationShade (server)",582019627670,1230,582019653399,1607
+        20228399,20116160,95263,7964,"droid.launcher3",7964,"com.android.launcher3","0x1","0x7","[Gesture Monitor] swipe-up (server)",582019685639,1309,582019780902,1942
+        459763,287436,27342,7310,"android.ui",7288,"system_server","0x1","0x8","PointerEventDispatcher0 (server)",582019737156,1192,582019764498,1664
+        9848456,9806401,22714,7493,"ndroid.systemui",7493,"com.android.systemui","0x1","0x9","4325794 NotificationShade (server)",582051061377,1227,582051084091,1596
+        5533919,5487703,25013,7964,"droid.launcher3",7964,"com.android.launcher3","0x1","0xa","[Gesture Monitor] swipe-up (server)",582051112236,1258,582051137249,1771
       """))
+
+  def test_job_scheduler_events(self):
+    return DiffTestBlueprint(
+        trace=DataPath('post_boot_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.job_scheduler;
+        SELECT job_id, uid, package_name, job_service_name, ts, dur FROM android_job_scheduler_events ORDER BY ts
+      """,
+        out=Csv("""
+        "job_id","uid","package_name","job_service_name","ts","dur"
+        237039804,1000,"android","com.android.server.notification.NotificationHistoryJobService$system",575488743679,10909825
+        201,10060,"com.android.dialer","com.android.voicemail.impl.StatusCheckJobService",579210443477,15650722
+        -300,10089,"com.android.providers.media.module","com.android.providers.media.MediaService",579448376938,1716731633
+        7,10085,"com.android.devicelockcontroller","androidx.work.impl.background.systemjob.SystemJobService",579645356805,148784109
+        2,10058,"com.android.imsserviceentitlement",".fcm.FcmRegistrationService",580025518616,47458225
+        1000,10071,"com.android.messaging",".datamodel.action.ActionServiceImpl",581680366145,327541238
+        1001,10071,"com.android.messaging",".datamodel.action.BackgroundWorkerService",581948976360,90502706
+        1000,10071,"com.android.messaging",".datamodel.action.ActionServiceImpl",582038224048,65747884
+        7,10088,"com.android.rkpdapp","androidx.work.impl.background.systemjob.SystemJobService",582582119592,103911382
+        7,10037,"com.android.statementservice","androidx.work.impl.background.systemjob.SystemJobService",583151483122,115767494
+        27950934,10022,"com.android.providers.calendar",".CalendarProviderJobService",587237955847,37434516
+        """))
+
+  def test_freezer_events(self):
+    return DiffTestBlueprint(
+        trace=DataPath('post_boot_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.freezer;
+        SELECT pid, ts, dur FROM android_freezer_events ORDER BY ts
+      """,
+        out=Csv("""
+        "pid","ts","dur"
+        8361,588092720937,576298685
+        """))
+
+  # TODO(zezeozue): temporarily disabled due to a performance regression.
+  # def test_service_bindings(self):
+  #   return DiffTestBlueprint(
+  #       trace=DataPath('post_boot_trace.atr'),
+  #       query="""
+  #       INCLUDE PERFETTO MODULE android.services;
+  #       SELECT
+  #       client_oom_score,
+  #       client_process,
+  #       client_thread,
+  #       client_pid,
+  #       client_tid,
+  #       client_ts,
+  #       client_dur,
+  #       server_oom_score,
+  #       server_process,
+  #       server_thread,
+  #       server_tid,
+  #       server_pid,
+  #       server_ts,
+  #       server_dur,
+  #       token,
+  #       act,
+  #       cmp,
+  #       flg,
+  #       bind_seq
+  #       FROM android_service_bindings
+  #       ORDER BY client_tid, client_ts
+  #       LIMIT 10
+  #     """,
+  #       out=Csv("""
+  #       "client_oom_score","client_process","client_thread","client_pid","client_tid","client_ts","client_dur","server_oom_score","server_process","server_thread","server_tid","server_pid","server_ts","server_dur","token","act","cmp","flg","bind_seq"
+  #       -900,"system_server","system_server",7288,7288,577830735575,0,0,"android.ext.services","binder:7732_3",7764,7732,577866081720,9755069,"android.os.BinderProxy@a0dc800","android.service.notification.NotificationAssistantService","android.ext.services/.notification.Assistant","[NULL]",21
+  #       -900,"system_server","eduling.default",7288,7366,579204777498,0,0,"com.android.dialer","binder:8075_2",8097,8075,579207718770,13090141,"android.os.BinderProxy@9a28fdf","[NULL]","com.android.dialer/com.android.voicemail.impl.StatusCheckJobService","0x4",29
+  #       -900,"system_server","eduling.default",7288,7366,580022869386,0,0,"com.android.imsserviceentitlement","binder:8647_1",8667,8647,580027477378,1982139,"android.os.BinderProxy@27f8e83","[NULL]","com.android.imsserviceentitlement/.fcm.FcmRegistrationService","0x4",35
+  #       -900,"system_server","StorageManagerS",7288,7397,587754918358,0,-700,"com.android.providers.media.module","binder:8294_1",8327,8294,587757305854,2691423,"android.os.BinderProxy@73b68b5","[NULL]","com.android.providers.media.module/com.android.providers.media.fuse.ExternalStorageServiceImpl","[NULL]",44
+  #       -800,"com.android.systemui","ndroid.systemui",7493,7493,572995972978,8071106,-800,"com.android.systemui","binder:7493_4",7682,7493,573131280194,17181314,"android.os.BinderProxy@1c2ac60","android.service.wallpaper.WallpaperService","com.android.systemui/.wallpapers.ImageWallpaper","[NULL]",14
+  #       -800,"com.android.systemui","ndroid.systemui",7493,7493,572995972978,8071106,-800,"com.android.systemui","binder:7493_4",7682,7493,577000518511,6977972,"android.os.BinderProxy@b18137","[NULL]","com.android.systemui/.keyguard.KeyguardService","0x100",15
+  #       -800,"com.android.networkstack.process","rkstack.process",7610,7610,571078334504,7552850,-800,"com.android.networkstack.process","binder:7610_1",7633,7610,571090652307,74610898,"android.os.BinderProxy@ee1090b","android.net.INetworkStackConnector","com.android.networkstack/com.android.server.NetworkStackService","[NULL]",2
+  #       -800,"com.android.networkstack.process","rkstack.process",7610,7610,571078334504,7552850,-800,"com.android.networkstack.process","binder:7610_1",7633,7610,571489537275,1570460,"android.os.BinderProxy@a0dc800","android.net.ITetheringConnector","com.android.networkstack.tethering/.TetheringService","[NULL]",3
+  #       0,"com.android.bluetooth","droid.bluetooth",7639,7639,571248973750,9874358,-700,"com.android.bluetooth","binder:7639_2",7672,7639,571871169647,6460322,"android.os.BinderProxy@7482132","android.bluetooth.IBluetooth","com.android.bluetooth/.btservice.AdapterService","[NULL]",4
+  #       -700,"com.android.bluetooth","droid.bluetooth",7639,7639,572342110044,4874276,-700,"com.android.bluetooth","binder:7639_2",7672,7639,572466393291,1404185,"android.os.BinderProxy@ce5a6fc","android.media.browse.MediaBrowserService","com.android.bluetooth/.avrcpcontroller.BluetoothMediaBrowserService","[NULL]",10
+  #     """))
