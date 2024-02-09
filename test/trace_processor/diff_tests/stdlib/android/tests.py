@@ -153,7 +153,7 @@ class AndroidStdlib(TestSuite):
           server_ts,
           server_dur,
           server_oom_score
-        FROM android_sync_binder_metrics_by_txn
+        FROM android_binder_txns
         WHERE binder_txn_id = 34382
         ORDER BY client_ts
         LIMIT 1;
@@ -505,8 +505,8 @@ class AndroidStdlib(TestSuite):
           server_ts,
           aidl_ts,
           aidl_dur
-        FROM android_async_binder_metrics_by_txn
-        WHERE aidl_name IS NOT NULL
+        FROM android_binder_txns
+        WHERE aidl_name IS NOT NULL AND is_sync = 0
         ORDER BY client_ts
         LIMIT 10;
       """,
@@ -542,24 +542,29 @@ class AndroidStdlib(TestSuite):
           client_ts,
           server_ts,
           aidl_ts,
-          aidl_dur
+          aidl_dur,
+          is_sync,
+          client_package_version_code,
+          server_package_version_code,
+          is_client_package_debuggable,
+          is_server_package_debuggable
         FROM android_binder_txns
         WHERE aidl_name IS NOT NULL
         ORDER BY client_ts
         LIMIT 10;
       """,
         out=Csv("""
-        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts","aidl_ts","aidl_dur"
-        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474,22213598784,322601
-        "AIDL::cpp::IInstalld::rmdex::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25230101202,25230125660,25230231365,77249
-        "AIDL::cpp::IInstalld::cleanupInvalidPackageDirs::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25243511980,25243544499,25243566439,408943
-        "AIDL::cpp::IInstalld::createAppDataBatched::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25244949065,25244971300,25244976815,33221505
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25279371214,25279387389,25279400683,90089
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25279567724,25279592927,25280492716,147183
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280736368,25280756522,25280769543,109576
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280932813,25280946041,25280952957,107685
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281131360,25281145719,25281152341,84930
-        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281273755,25281315273,25281321909,83540
+        "aidl_name","client_process","server_process","client_thread","client_tid","server_tid","is_main_thread","client_oom_score","server_oom_score","client_ts","server_ts","aidl_ts","aidl_dur","is_sync","client_package_version_code","server_package_version_code","is_client_package_debuggable","is_server_package_debuggable"
+        "AIDL::cpp::IClientCallback::onClients::cppServer","/system/bin/servicemanager","/system/bin/apexd","servicemanager",243,386,1,-1000,-1000,22213481492,22213517474,22213598784,322601,0,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::rmdex::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25230101202,25230125660,25230231365,77249,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::cleanupInvalidPackageDirs::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25243511980,25243544499,25243566439,408943,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::createAppDataBatched::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25244949065,25244971300,25244976815,33221505,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,565,1,-1000,-1000,25279371214,25279387389,25279400683,90089,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25279567724,25279592927,25280492716,147183,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280736368,25280756522,25280769543,109576,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25280932813,25280946041,25280952957,107685,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281131360,25281145719,25281152341,84930,1,"[NULL]","[NULL]","[NULL]","[NULL]"
+        "AIDL::cpp::IInstalld::prepareAppProfile::cppServer","system_server","/system/bin/installd","system_server",641,548,1,-1000,-1000,25281273755,25281315273,25281321909,83540,1,"[NULL]","[NULL]","[NULL]","[NULL]"
       """))
 
   def test_binder_outgoing_graph(self):
@@ -1162,46 +1167,45 @@ class AndroidStdlib(TestSuite):
         8361,588092720937,576298685
         """))
 
-  # TODO(zezeozue): temporarily disabled due to a performance regression.
-  # def test_service_bindings(self):
-  #   return DiffTestBlueprint(
-  #       trace=DataPath('post_boot_trace.atr'),
-  #       query="""
-  #       INCLUDE PERFETTO MODULE android.services;
-  #       SELECT
-  #       client_oom_score,
-  #       client_process,
-  #       client_thread,
-  #       client_pid,
-  #       client_tid,
-  #       client_ts,
-  #       client_dur,
-  #       server_oom_score,
-  #       server_process,
-  #       server_thread,
-  #       server_tid,
-  #       server_pid,
-  #       server_ts,
-  #       server_dur,
-  #       token,
-  #       act,
-  #       cmp,
-  #       flg,
-  #       bind_seq
-  #       FROM android_service_bindings
-  #       ORDER BY client_tid, client_ts
-  #       LIMIT 10
-  #     """,
-  #       out=Csv("""
-  #       "client_oom_score","client_process","client_thread","client_pid","client_tid","client_ts","client_dur","server_oom_score","server_process","server_thread","server_tid","server_pid","server_ts","server_dur","token","act","cmp","flg","bind_seq"
-  #       -900,"system_server","system_server",7288,7288,577830735575,0,0,"android.ext.services","binder:7732_3",7764,7732,577866081720,9755069,"android.os.BinderProxy@a0dc800","android.service.notification.NotificationAssistantService","android.ext.services/.notification.Assistant","[NULL]",21
-  #       -900,"system_server","eduling.default",7288,7366,579204777498,0,0,"com.android.dialer","binder:8075_2",8097,8075,579207718770,13090141,"android.os.BinderProxy@9a28fdf","[NULL]","com.android.dialer/com.android.voicemail.impl.StatusCheckJobService","0x4",29
-  #       -900,"system_server","eduling.default",7288,7366,580022869386,0,0,"com.android.imsserviceentitlement","binder:8647_1",8667,8647,580027477378,1982139,"android.os.BinderProxy@27f8e83","[NULL]","com.android.imsserviceentitlement/.fcm.FcmRegistrationService","0x4",35
-  #       -900,"system_server","StorageManagerS",7288,7397,587754918358,0,-700,"com.android.providers.media.module","binder:8294_1",8327,8294,587757305854,2691423,"android.os.BinderProxy@73b68b5","[NULL]","com.android.providers.media.module/com.android.providers.media.fuse.ExternalStorageServiceImpl","[NULL]",44
-  #       -800,"com.android.systemui","ndroid.systemui",7493,7493,572995972978,8071106,-800,"com.android.systemui","binder:7493_4",7682,7493,573131280194,17181314,"android.os.BinderProxy@1c2ac60","android.service.wallpaper.WallpaperService","com.android.systemui/.wallpapers.ImageWallpaper","[NULL]",14
-  #       -800,"com.android.systemui","ndroid.systemui",7493,7493,572995972978,8071106,-800,"com.android.systemui","binder:7493_4",7682,7493,577000518511,6977972,"android.os.BinderProxy@b18137","[NULL]","com.android.systemui/.keyguard.KeyguardService","0x100",15
-  #       -800,"com.android.networkstack.process","rkstack.process",7610,7610,571078334504,7552850,-800,"com.android.networkstack.process","binder:7610_1",7633,7610,571090652307,74610898,"android.os.BinderProxy@ee1090b","android.net.INetworkStackConnector","com.android.networkstack/com.android.server.NetworkStackService","[NULL]",2
-  #       -800,"com.android.networkstack.process","rkstack.process",7610,7610,571078334504,7552850,-800,"com.android.networkstack.process","binder:7610_1",7633,7610,571489537275,1570460,"android.os.BinderProxy@a0dc800","android.net.ITetheringConnector","com.android.networkstack.tethering/.TetheringService","[NULL]",3
-  #       0,"com.android.bluetooth","droid.bluetooth",7639,7639,571248973750,9874358,-700,"com.android.bluetooth","binder:7639_2",7672,7639,571871169647,6460322,"android.os.BinderProxy@7482132","android.bluetooth.IBluetooth","com.android.bluetooth/.btservice.AdapterService","[NULL]",4
-  #       -700,"com.android.bluetooth","droid.bluetooth",7639,7639,572342110044,4874276,-700,"com.android.bluetooth","binder:7639_2",7672,7639,572466393291,1404185,"android.os.BinderProxy@ce5a6fc","android.media.browse.MediaBrowserService","com.android.bluetooth/.avrcpcontroller.BluetoothMediaBrowserService","[NULL]",10
-  #     """))
+  def test_service_bindings(self):
+    return DiffTestBlueprint(
+        trace=DataPath('post_boot_trace.atr'),
+        query="""
+        INCLUDE PERFETTO MODULE android.services;
+        SELECT
+        client_oom_score,
+        client_process,
+        client_thread,
+        client_pid,
+        client_tid,
+        client_ts,
+        client_dur,
+        server_oom_score,
+        server_process,
+        server_thread,
+        server_tid,
+        server_pid,
+        server_ts,
+        server_dur,
+        token,
+        act,
+        cmp,
+        flg,
+        bind_seq
+        FROM android_service_bindings
+        ORDER BY client_tid, client_ts
+        LIMIT 10
+      """,
+        out=Csv("""
+        "client_oom_score","client_process","client_thread","client_pid","client_tid","client_ts","client_dur","server_oom_score","server_process","server_thread","server_tid","server_pid","server_ts","server_dur","token","act","cmp","flg","bind_seq"
+        -900,"system_server","system_server",7288,7288,577830735575,0,0,"android.ext.services","binder:7732_3",7764,7732,577866081720,9755069,"android.os.BinderProxy@a0dc800","android.service.notification.NotificationAssistantService","android.ext.services/.notification.Assistant","[NULL]",21
+        -900,"system_server","eduling.default",7288,7366,579204777498,0,0,"com.android.dialer","binder:8075_2",8097,8075,579207718770,13090141,"android.os.BinderProxy@9a28fdf","[NULL]","com.android.dialer/com.android.voicemail.impl.StatusCheckJobService","0x4",29
+        -900,"system_server","eduling.default",7288,7366,580022869386,0,0,"com.android.imsserviceentitlement","binder:8647_1",8667,8647,580027477378,1982139,"android.os.BinderProxy@27f8e83","[NULL]","com.android.imsserviceentitlement/.fcm.FcmRegistrationService","0x4",35
+        -900,"system_server","StorageManagerS",7288,7397,587754918358,0,-700,"com.android.providers.media.module","binder:8294_1",8327,8294,587757305854,2691423,"android.os.BinderProxy@73b68b5","[NULL]","com.android.providers.media.module/com.android.providers.media.fuse.ExternalStorageServiceImpl","[NULL]",44
+        -800,"com.android.systemui","ndroid.systemui",7493,7493,572995972978,8071106,-800,"com.android.systemui","binder:7493_4",7682,7493,573131280194,17181314,"android.os.BinderProxy@1c2ac60","android.service.wallpaper.WallpaperService","com.android.systemui/.wallpapers.ImageWallpaper","[NULL]",14
+        -800,"com.android.systemui","ndroid.systemui",7493,7493,572995972978,8071106,-800,"com.android.systemui","binder:7493_4",7682,7493,577000518511,6977972,"android.os.BinderProxy@b18137","[NULL]","com.android.systemui/.keyguard.KeyguardService","0x100",15
+        -800,"com.android.networkstack.process","rkstack.process",7610,7610,571078334504,7552850,-800,"com.android.networkstack.process","binder:7610_1",7633,7610,571090652307,74610898,"android.os.BinderProxy@ee1090b","android.net.INetworkStackConnector","com.android.networkstack/com.android.server.NetworkStackService","[NULL]",2
+        -800,"com.android.networkstack.process","rkstack.process",7610,7610,571078334504,7552850,-800,"com.android.networkstack.process","binder:7610_1",7633,7610,571489537275,1570460,"android.os.BinderProxy@a0dc800","android.net.ITetheringConnector","com.android.networkstack.tethering/.TetheringService","[NULL]",3
+        0,"com.android.bluetooth","droid.bluetooth",7639,7639,571248973750,9874358,-700,"com.android.bluetooth","binder:7639_2",7672,7639,571871169647,6460322,"android.os.BinderProxy@7482132","android.bluetooth.IBluetooth","com.android.bluetooth/.btservice.AdapterService","[NULL]",4
+        -700,"com.android.bluetooth","droid.bluetooth",7639,7639,572342110044,4874276,-700,"com.android.bluetooth","binder:7639_2",7672,7639,572466393291,1404185,"android.os.BinderProxy@ce5a6fc","android.media.browse.MediaBrowserService","com.android.bluetooth/.avrcpcontroller.BluetoothMediaBrowserService","[NULL]",10
+      """))
