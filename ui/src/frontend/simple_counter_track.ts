@@ -1,4 +1,4 @@
-// Copyright (C) 2023 The Android Open Source Project
+// Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,33 +13,30 @@
 // limitations under the License.
 
 import m from 'mithril';
+import {EngineProxy, TrackContext} from '../public';
+import {BaseCounterTrack} from './base_counter_track';
+import {CounterColumns, SqlDataSource} from './debug_tracks';
+import {Disposable, DisposableCallback} from '../base/disposable';
 
-import {Actions} from '../../common/actions';
-import {BaseCounterTrack} from '../../frontend/base_counter_track';
-import {globals} from '../../frontend/globals';
-import {TrackButton} from '../../frontend/track_panel';
-import {TrackContext} from '../../public';
-import {EngineProxy} from '../../trace_processor/engine';
-import {CounterDebugTrackConfig} from '../../frontend/debug_tracks';
-import {Disposable, DisposableCallback} from '../../base/disposable';
-import {uuidv4Sql} from '../../base/uuid';
+export interface SimpleCounterTrackConfig {
+  data: SqlDataSource;
+  columns: CounterColumns;
+}
 
-
-export class DebugCounterTrack extends BaseCounterTrack {
-  private config: CounterDebugTrackConfig;
+export class SimpleCounterTrack extends BaseCounterTrack {
+  private config: SimpleCounterTrackConfig;
   private sqlTableName: string;
 
-  constructor(engine: EngineProxy, ctx: TrackContext) {
+  constructor(
+    engine: EngineProxy,
+    ctx: TrackContext,
+    config: SimpleCounterTrackConfig) {
     super({
       engine,
       trackKey: ctx.trackKey,
     });
-
-    // TODO(stevegolton): Validate params before type asserting.
-    // TODO(stevegolton): Avoid just pushing this config up for some base
-    // class to use. Be more explicit.
-    this.config = ctx.params as CounterDebugTrackConfig;
-    this.sqlTableName = `__debug_counter_${uuidv4Sql(this.trackKey)}`;
+    this.config = config;
+    this.sqlTableName = `__simple_counter_${this.trackKey}`;
   }
 
   async onInit(): Promise<Disposable> {
@@ -52,14 +49,6 @@ export class DebugCounterTrack extends BaseCounterTrack {
   getTrackShellButtons(): m.Children {
     return [
       this.getCounterContextMenu(),
-      this.config.closeable && m(TrackButton, {
-        action: () => {
-          globals.dispatch(Actions.removeTracks({trackKeys: [this.trackKey]}));
-        },
-        i: 'close',
-        tooltip: 'Close',
-        showButton: true,
-      }),
     ];
   }
 
