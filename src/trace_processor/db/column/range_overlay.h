@@ -27,9 +27,9 @@
 
 namespace perfetto::trace_processor::column {
 
-class RangeOverlay : public DataLayer {
+class RangeOverlay final : public DataLayer {
  public:
-  explicit RangeOverlay(Range);
+  explicit RangeOverlay(const Range*);
 
   std::unique_ptr<DataLayerChain> MakeChain(
       std::unique_ptr<DataLayerChain>) override;
@@ -37,16 +37,20 @@ class RangeOverlay : public DataLayer {
  private:
   class ChainImpl : public DataLayerChain {
    public:
-    ChainImpl(std::unique_ptr<DataLayerChain>, Range);
+    ChainImpl(std::unique_ptr<DataLayerChain>, const Range*);
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp p, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp p,
+                                          SqlValue,
+                                          Indices) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
     void StableSort(uint32_t* rows, uint32_t rows_size) const override;
 
@@ -54,16 +58,16 @@ class RangeOverlay : public DataLayer {
 
     void Serialize(StorageProto*) const override;
 
-    uint32_t size() const override { return range_.size(); }
+    uint32_t size() const override { return range_->size(); }
 
     std::string DebugString() const override { return "RangeOverlay"; }
 
    private:
     std::unique_ptr<DataLayerChain> inner_;
-    const Range range_;
+    const Range* range_;
   };
 
-  const Range range_;
+  const Range* range_;
 };
 
 }  // namespace perfetto::trace_processor::column

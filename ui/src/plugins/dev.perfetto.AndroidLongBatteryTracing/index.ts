@@ -1057,7 +1057,7 @@ class AndroidLongBatteryTracing implements Plugin {
     query('Device State: Top app', 'battery_stats.top');
 
     this.addSliceTrack(
-      ctx, 'Long wakelocks', `SELECT
+      ctx, 'Device State: Long wakelocks', `SELECT
             ts - 60000000000 as ts,
             dur + 60000000000 as dur,
             str_value AS name,
@@ -1225,7 +1225,7 @@ class AndroidLongBatteryTracing implements Plugin {
 
     const e = ctx.engine;
     const groupName = 'Wakeups';
-    await e.query(`INCLUDE PERFETTO MODULE android.suspend_resume;`);
+    await e.query(`INCLUDE PERFETTO MODULE android.suspend;`);
     await e.query(WAKEUPS);
     const result = await e.query(`select
           item,

@@ -34,7 +34,7 @@ namespace perfetto::trace_processor::column {
 
 using Range = Range;
 
-RangeOverlay::RangeOverlay(const Range range) : range_(range) {}
+RangeOverlay::RangeOverlay(const Range* range) : range_(range) {}
 
 std::unique_ptr<DataLayerChain> RangeOverlay::MakeChain(
     std::unique_ptr<DataLayerChain> inner) {
@@ -42,41 +42,46 @@ std::unique_ptr<DataLayerChain> RangeOverlay::MakeChain(
 }
 
 RangeOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
-                                   const Range range)
+                                   const Range* range)
     : inner_(std::move(inner)), range_(range) {
-  PERFETTO_CHECK(range.end <= inner_->size());
+  PERFETTO_CHECK(range->end <= inner_->size());
 }
 
 SearchValidationResult RangeOverlay::ChainImpl::ValidateSearchConstraints(
-    SqlValue sql_val,
-    FilterOp op) const {
-  return inner_->ValidateSearchConstraints(sql_val, op);
+    FilterOp op,
+    SqlValue sql_val) const {
+  return inner_->ValidateSearchConstraints(op, sql_val);
 }
 
-RangeOrBitVector RangeOverlay::ChainImpl::Search(FilterOp op,
-                                                 SqlValue sql_val,
-                                                 Range search_range) const {
-  PERFETTO_CHECK(search_range.size() <= range_.size());
+RangeOrBitVector RangeOverlay::ChainImpl::SearchValidated(
+    FilterOp op,
+    SqlValue sql_val,
+    Range search_range) const {
+  PERFETTO_DCHECK(search_range.size() <= range_->size());
   PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::Search");
 
-  Range inner_search_range(search_range.start + range_.start,
-                           search_range.end + range_.start);
-  auto inner_res = inner_->Search(op, sql_val, inner_search_range);
+  Range inner_search_range(search_range.start + range_->start,
+                           search_range.end + range_->start);
+  auto inner_res = inner_->SearchValidated(op, sql_val, inner_search_range);
   if (inner_res.IsRange()) {
     Range inner_res_range = std::move(inner_res).TakeIfRange();
-    return RangeOrBitVector(Range(inner_res_range.start - range_.start,
-                                  inner_res_range.end - range_.start));
+    return RangeOrBitVector(Range(inner_res_range.start - range_->start,
+                                  inner_res_range.end - range_->start));
   }
 
   BitVector inner_res_bv = std::move(inner_res).TakeIfBitVector();
-  PERFETTO_CHECK(inner_res_bv.size() == inner_search_range.end);
-  PERFETTO_CHECK(inner_res_bv.CountSetBits(inner_search_range.start) == 0);
+  if (range_->start == 0 && inner_res_bv.size() == range_->end) {
+    return RangeOrBitVector{std::move(inner_res_bv)};
+  }
+
+  PERFETTO_DCHECK(inner_res_bv.size() == inner_search_range.end);
+  PERFETTO_DCHECK(inner_res_bv.CountSetBits(inner_search_range.start) == 0);
 
   BitVector::Builder builder(search_range.end, search_range.start);
   uint32_t cur_val = search_range.start;
   uint32_t front_elements = builder.BitsUntilWordBoundaryOrFull();
   for (uint32_t i = 0; i < front_elements; ++i, ++cur_val) {
-    builder.Append(inner_res_bv.IsSet(cur_val + range_.start));
+    builder.Append(inner_res_bv.IsSet(cur_val + range_->start));
   }
 
   // Fast path: we compare as many groups of 64 elements as we can.
@@ -86,7 +91,7 @@ RangeOrBitVector RangeOverlay::ChainImpl::Search(FilterOp op,
     uint64_t word = 0;
     // This part should be optimised by SIMD and is expected to be fast.
     for (uint32_t k = 0; k < BitVector::kBitsInWord; ++k, ++cur_val) {
-      bool comp_result = inner_res_bv.IsSet(cur_val + range_.start);
+      bool comp_result = inner_res_bv.IsSet(cur_val + range_->start);
       word |= static_cast<uint64_t>(comp_result) << k;
     }
     builder.AppendWord(word);
@@ -95,36 +100,38 @@ RangeOrBitVector RangeOverlay::ChainImpl::Search(FilterOp op,
   // Slow path: we compare <64 elements and append to fill the Builder.
   uint32_t back_elements = builder.BitsUntilFull();
   for (uint32_t i = 0; i < back_elements; ++i, ++cur_val) {
-    builder.Append(inner_res_bv.IsSet(cur_val + range_.start));
+    builder.Append(inner_res_bv.IsSet(cur_val + range_->start));
   }
   return RangeOrBitVector(std::move(builder).Build());
 }
 
-RangeOrBitVector RangeOverlay::ChainImpl::IndexSearch(FilterOp op,
-                                                      SqlValue sql_val,
-                                                      Indices indices) const {
+RangeOrBitVector RangeOverlay::ChainImpl::IndexSearchValidated(
+    FilterOp op,
+    SqlValue sql_val,
+    Indices indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::IndexSearch");
 
   std::vector<uint32_t> storage_iv(indices.size);
   // Should be SIMD optimized.
   for (uint32_t i = 0; i < indices.size; ++i) {
-    storage_iv[i] = indices.data[i] + range_.start;
+    storage_iv[i] = indices.data[i] + range_->start;
   }
-  return inner_->IndexSearch(
+  return inner_->IndexSearchValidated(
       op, sql_val, Indices{storage_iv.data(), indices.size, indices.state});
 }
 
-Range RangeOverlay::ChainImpl::OrderedIndexSearch(FilterOp op,
-                                                  SqlValue sql_val,
-                                                  Indices indices) const {
+Range RangeOverlay::ChainImpl::OrderedIndexSearchValidated(
+    FilterOp op,
+    SqlValue sql_val,
+    Indices indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::IndexSearch");
 
   std::vector<uint32_t> storage_iv(indices.size);
   // Should be SIMD optimized.
   for (uint32_t i = 0; i < indices.size; ++i) {
-    storage_iv[i] = indices.data[i] + range_.start;
+    storage_iv[i] = indices.data[i] + range_->start;
   }
-  return inner_->OrderedIndexSearch(
+  return inner_->OrderedIndexSearchValidated(
       op, sql_val, Indices{storage_iv.data(), indices.size, indices.state});
 }
 
