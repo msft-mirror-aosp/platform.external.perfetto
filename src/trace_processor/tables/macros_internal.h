@@ -19,21 +19,23 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "perfetto/base/logging.h"
+#include "src/trace_processor/containers/bit_vector.h"
+#include "perfetto/trace_processor/ref_counted.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column_storage.h"
 #include "src/trace_processor/db/column_storage_overlay.h"
 #include "src/trace_processor/db/table.h"
 
-namespace perfetto {
-namespace trace_processor {
-namespace macros_internal {
+namespace perfetto::trace_processor::macros_internal {
 
 // We define this class to allow the table macro below to compile without
 // needing templates; in reality none of the methods will be called because the
@@ -42,7 +44,7 @@ class RootParentTable : public Table {
  public:
   struct Row {
    public:
-    Row(std::nullptr_t = nullptr) {}
+    explicit Row(std::nullptr_t = nullptr) {}
 
     const char* type() const { return type_; }
 
@@ -57,9 +59,9 @@ class RootParentTable : public Table {
     uint32_t id;
   };
   struct RowNumber {
-    uint32_t row_number() { PERFETTO_FATAL("Should not be called"); }
+    static uint32_t row_number() { PERFETTO_FATAL("Should not be called"); }
   };
-  IdAndRow Insert(const Row&) { PERFETTO_FATAL("Should not be called"); }
+  static IdAndRow Insert(const Row&) { PERFETTO_FATAL("Should not be called"); }
 
  private:
   explicit RootParentTable(std::nullptr_t);
@@ -82,7 +84,7 @@ class MacroTable : public Table {
   // Constructors for tables created by the regular constructor.
   explicit MacroTable(StringPool* pool,
                       std::vector<ColumnLegacy> columns,
-                      const MacroTable* parent = nullptr)
+                      const MacroTable* parent)
       : Table(pool, 0u, std::move(columns), EmptyOverlaysFromParent(parent)),
         allow_inserts_(true),
         parent_(parent) {}
@@ -96,7 +98,8 @@ class MacroTable : public Table {
               parent_overlay.size(),
               std::move(columns),
               SelectedOverlaysFromParent(parent, parent_overlay)),
-        allow_inserts_(false) {}
+        allow_inserts_(false),
+        parent_(&parent) {}
 
   ~MacroTable() override;
 
@@ -149,8 +152,13 @@ class MacroTable : public Table {
  private:
   static std::vector<ColumnStorageOverlay> EmptyOverlaysFromParent(
       const MacroTable* parent) {
-    return std::vector<ColumnStorageOverlay>(
-        parent ? parent->overlays().size() + 1 : 1);
+    std::vector<ColumnStorageOverlay> overlays(
+        parent ? parent->overlays().size() : 0);
+    for (auto& overlay : overlays) {
+      overlay = ColumnStorageOverlay(BitVector());
+    }
+    overlays.emplace_back();
+    return overlays;
   }
   static std::vector<ColumnStorageOverlay> SelectedOverlaysFromParent(
       const macros_internal::MacroTable& parent,
@@ -260,8 +268,6 @@ class AbstractConstRowReference {
   uint32_t row_number_ = 0;
 };
 
-}  // namespace macros_internal
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor::macros_internal
 
 #endif  // SRC_TRACE_PROCESSOR_TABLES_MACROS_INTERNAL_H_

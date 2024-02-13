@@ -21,7 +21,6 @@
 #include <utility>
 #include <vector>
 
-#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/small_vector.h"
 #include "perfetto/trace_processor/basic_types.h"
@@ -65,16 +64,6 @@ void QueryExecutor::FilterColumn(const Constraint& c,
       c.op != FilterOp::kIsNotNull) {
     rm->Clear();
     return;
-  }
-
-  switch (chain.ValidateSearchConstraints(c.value, c.op)) {
-    case SearchValidationResult::kAllData:
-      return;
-    case SearchValidationResult::kNoData:
-      rm->Clear();
-      return;
-    case SearchValidationResult::kOk:
-      break;
   }
 
   uint32_t rm_size = rm->size();
@@ -202,8 +191,7 @@ RowMap QueryExecutor::FilterLegacy(const Table* table,
           chain = data_layers.back()->MakeChain();
           break;
         case ColumnType::kId:
-          data_layers.emplace_back(
-              std::make_unique<column::IdStorage>(column_size));
+          data_layers.emplace_back(std::make_unique<column::IdStorage>());
           chain = data_layers.back()->MakeChain();
           break;
         case ColumnType::kString:
@@ -303,7 +291,7 @@ RowMap QueryExecutor::FilterLegacy(const Table* table,
     if (col.overlay().row_map().IsRange() &&
         col.overlay().size() != column_size) {
       data_layers.emplace_back(std::make_unique<column::RangeOverlay>(
-          *col.overlay().row_map().GetIfIRange()));
+          col.overlay().row_map().GetIfIRange()));
       chain = data_layers.back()->MakeChain(std::move(chain));
     }
     uint32_t pre_count = rm.size();
@@ -317,16 +305,6 @@ void QueryExecutor::BoundedColumnFilterForTesting(
     const Constraint& c,
     const column::DataLayerChain& col,
     RowMap* rm) {
-  switch (col.ValidateSearchConstraints(c.value, c.op)) {
-    case SearchValidationResult::kAllData:
-      return;
-    case SearchValidationResult::kNoData:
-      rm->Clear();
-      return;
-    case SearchValidationResult::kOk:
-      break;
-  }
-
   LinearSearch(c, col, rm);
 }
 
@@ -334,16 +312,6 @@ void QueryExecutor::IndexedColumnFilterForTesting(
     const Constraint& c,
     const column::DataLayerChain& col,
     RowMap* rm) {
-  switch (col.ValidateSearchConstraints(c.value, c.op)) {
-    case SearchValidationResult::kAllData:
-      return;
-    case SearchValidationResult::kNoData:
-      rm->Clear();
-      return;
-    case SearchValidationResult::kOk:
-      break;
-  }
-
   IndexSearch(c, col, rm);
 }
 

@@ -177,6 +177,26 @@ const coreCommands: Plugin = {
     });
 
     ctx.registerCommand({
+      id: 'dev.perfetto.CoreCommands#ExpandAllGroups',
+      name: 'Expand all groups',
+      callback: () => {
+        ctx.timeline.expandGroupsByPredicate((_) => {
+          return true;
+        });
+      },
+    });
+
+    ctx.registerCommand({
+      id: 'dev.perfetto.CoreCommands#CollapseAllGroups',
+      name: 'Collapse all groups',
+      callback: () => {
+        ctx.timeline.collapseGroupsByPredicate((_) => {
+          return true;
+        });
+      },
+    });
+
+    ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#PanToTimestamp',
       name: 'Pan To Timestamp',
       callback: (tsRaw: unknown) => {
@@ -213,6 +233,14 @@ const coreCommands: Plugin = {
           {ts: 'ts', dur: 'dur', name: 'name'},
           [],
         );
+      },
+    });
+
+    ctx.registerCommand({
+      id: 'dev.perfetto.CoreCommands#ShowCurrentSelectionTab',
+      name: 'Show Current Selection Tab',
+      callback: () => {
+        ctx.tabs.showTab('current_selection');
       },
     });
   },
