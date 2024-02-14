@@ -46,9 +46,9 @@
 #include "src/trace_processor/sqlite/sqlite_utils.h"
 #include "src/trace_processor/tp_metatrace.h"
 #include "src/trace_processor/util/regex.h"
+#include "src/trace_processor/util/status_macros.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "src/trace_processor/util/status_macros.h"
 
 namespace perfetto::trace_processor {
 
@@ -116,6 +116,8 @@ SqlValue SqliteValueToSqlValue(sqlite3_value* sqlite_val) {
     case SQLITE_NULL:
       value.type = SqlValue::kNull;
       break;
+    default:
+      PERFETTO_FATAL("Unexpected sqlite3_value type");
   }
   return value;
 }
@@ -405,10 +407,11 @@ base::Status DbSqliteTable::ValidateTableFunctionArguments(
     if (!col.is_hidden) {
       continue;
     }
-    auto it = std::find_if(qc.constraints().begin(), qc.constraints().end(),
-                           [i](const QueryConstraints::Constraint& c) {
-                             return i == static_cast<uint32_t>(c.column);
-                           });
+    auto pred = [i](const QueryConstraints::Constraint& c) {
+      return i == static_cast<uint32_t>(c.column);
+    };
+    auto it =
+        std::find_if(qc.constraints().begin(), qc.constraints().end(), pred);
     if (it == qc.constraints().end()) {
       return base::ErrStatus("Failed to find constraint on column '%u'", i);
     }
@@ -416,12 +419,8 @@ base::Status DbSqliteTable::ValidateTableFunctionArguments(
       return base::ErrStatus(
           "Only equality constraints supported on column '%u'", i);
     }
-    auto count = std::count_if(qc.constraints().begin(), qc.constraints().end(),
-                               [i](const QueryConstraints::Constraint& c) {
-                                 return i == static_cast<uint32_t>(c.column);
-                               });
-    PERFETTO_CHECK(count > 0);
-    if (count > 1) {
+    auto count = std::count_if(it + 1, qc.constraints().end(), pred);
+    if (count > 0) {
       return base::ErrStatus("Found multiple constraints on column '%u'", i);
     }
   }
@@ -429,7 +428,7 @@ base::Status DbSqliteTable::ValidateTableFunctionArguments(
 }
 
 std::unique_ptr<SqliteTable::BaseCursor> DbSqliteTable::CreateCursor() {
-  return std::unique_ptr<Cursor>(new Cursor(this, context_->cache));
+  return std::make_unique<Cursor>(this, context_->cache);
 }
 
 DbSqliteTable::Cursor::Cursor(DbSqliteTable* sqlite_table, QueryCache* cache)
@@ -502,7 +501,7 @@ base::Status DbSqliteTable::Cursor::Filter(const QueryConstraints& qc,
   uint32_t constraints_pos = 0;
   for (size_t i = 0; i < qc.constraints().size(); ++i) {
     const auto& cs = qc.constraints()[i];
-    uint32_t col = static_cast<uint32_t>(cs.column);
+    auto col = static_cast<uint32_t>(cs.column);
 
     // If we get a std::nullopt FilterOp, that means we should allow SQLite
     // to handle the constraint.
@@ -529,7 +528,7 @@ base::Status DbSqliteTable::Cursor::Filter(const QueryConstraints& qc,
   orders_.resize(qc.order_by().size());
   for (size_t i = 0; i < qc.order_by().size(); ++i) {
     const auto& ob = qc.order_by()[i];
-    uint32_t col = static_cast<uint32_t>(ob.iColumn);
+    auto col = static_cast<uint32_t>(ob.iColumn);
     orders_[i] = Order{col, static_cast<bool>(ob.desc)};
   }
 
@@ -675,36 +674,6 @@ base::Status DbSqliteTable::Cursor::Filter(const QueryConstraints& qc,
     iterator_ = SourceTable()->ApplyAndIterateRows(std::move(filter_map));
     eof_ = !*iterator_;
   }
-  return base::OkStatus();
-}
-
-base::Status DbSqliteTable::Cursor::Next() {
-  if (mode_ == Mode::kSingleRow) {
-    eof_ = true;
-  } else {
-    eof_ = !++*iterator_;
-  }
-  return base::OkStatus();
-}
-
-bool DbSqliteTable::Cursor::Eof() {
-  return eof_;
-}
-
-base::Status DbSqliteTable::Cursor::Column(sqlite3_context* ctx, int raw_col) {
-  auto column = static_cast<uint32_t>(raw_col);
-  SqlValue value = mode_ == Mode::kSingleRow
-                       ? SourceTable()->columns()[column].Get(*single_row_)
-                       : iterator_->Get(column);
-  // We can say kSqliteStatic for strings  because all strings are expected to
-  // come from the string pool and thus will be valid for the lifetime
-  // of trace processor.
-  // Similarily for bytes we can also use kSqliteStatic because for our iterator
-  // will hold onto the pointer as long as we don't call Next() but that only
-  // happens with Next() is called on the Cursor itself at which point
-  // SQLite no longer cares about the bytes pointer.
-  sqlite_utils::ReportSqlValue(ctx, value, sqlite_utils::kSqliteStatic,
-                               sqlite_utils::kSqliteStatic);
   return base::OkStatus();
 }
 
