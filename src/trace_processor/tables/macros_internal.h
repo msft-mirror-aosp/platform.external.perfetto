@@ -19,18 +19,20 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <initializer_list>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
-#include "src/trace_processor/containers/bit_vector.h"
 #include "perfetto/trace_processor/ref_counted.h"
+#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/selector_overlay.h"
 #include "src/trace_processor/db/column_storage.h"
 #include "src/trace_processor/db/column_storage_overlay.h"
 #include "src/trace_processor/db/table.h"
@@ -82,9 +84,9 @@ class MacroTable : public Table {
 
  protected:
   // Constructors for tables created by the regular constructor.
-  explicit MacroTable(StringPool* pool,
-                      std::vector<ColumnLegacy> columns,
-                      const MacroTable* parent)
+  PERFETTO_NO_INLINE explicit MacroTable(StringPool* pool,
+                                         std::vector<ColumnLegacy> columns,
+                                         const MacroTable* parent)
       : Table(pool, 0u, std::move(columns), EmptyOverlaysFromParent(parent)),
         allow_inserts_(true),
         parent_(parent) {}
@@ -103,17 +105,17 @@ class MacroTable : public Table {
 
   ~MacroTable() override;
 
-  void UpdateOverlaysAfterParentInsert() {
+  PERFETTO_NO_INLINE void UpdateOverlaysAfterParentInsert() {
     CopyLastInsertFrom(parent_->overlays());
   }
 
-  void UpdateSelfOverlayAfterInsert() {
+  PERFETTO_NO_INLINE void UpdateSelfOverlayAfterInsert() {
     IncrementRowCountAndAddToLastOverlay();
   }
 
-  static std::vector<ColumnLegacy> CopyColumnsFromParentOrAddRootColumns(
-      MacroTable* self,
-      const MacroTable* parent) {
+  PERFETTO_NO_INLINE static std::vector<ColumnLegacy>
+  CopyColumnsFromParentOrAddRootColumns(MacroTable* self,
+                                        const MacroTable* parent) {
     std::vector<ColumnLegacy> columns;
     if (parent) {
       for (const ColumnLegacy& col : parent->columns()) {
@@ -124,6 +126,20 @@ class MacroTable : public Table {
       columns.emplace_back("type", &self->type_, ColumnLegacy::kNonNull, 1, 0);
     }
     return columns;
+  }
+
+  PERFETTO_NO_INLINE void OnConstructionCompletedRegularConstructor(
+      std::initializer_list<RefPtr<column::DataLayer>> storage_layers,
+      std::initializer_list<RefPtr<column::DataLayer>> null_layers) {
+    std::vector<RefPtr<column::DataLayer>> overlay_layers(
+        OverlayCount(parent_) + 1);
+    for (uint32_t i = 0; i < overlay_layers.size() - 1; ++i) {
+      PERFETTO_CHECK(overlays()[i].row_map().IsBitVector());
+      overlay_layers[i].reset(new column::SelectorOverlay(
+          overlays()[i].row_map().GetIfBitVector()));
+    }
+    Table::OnConstructionCompleted(storage_layers, null_layers,
+                                   std::move(overlay_layers));
   }
 
   static uint32_t OverlayCount(const MacroTable* parent) {
@@ -150,8 +166,8 @@ class MacroTable : public Table {
   ColumnStorage<StringPool::Id> type_;
 
  private:
-  static std::vector<ColumnStorageOverlay> EmptyOverlaysFromParent(
-      const MacroTable* parent) {
+  PERFETTO_NO_INLINE static std::vector<ColumnStorageOverlay>
+  EmptyOverlaysFromParent(const MacroTable* parent) {
     std::vector<ColumnStorageOverlay> overlays(
         parent ? parent->overlays().size() : 0);
     for (auto& overlay : overlays) {
@@ -160,9 +176,9 @@ class MacroTable : public Table {
     overlays.emplace_back();
     return overlays;
   }
-  static std::vector<ColumnStorageOverlay> SelectedOverlaysFromParent(
-      const macros_internal::MacroTable& parent,
-      const RowMap& rm) {
+  PERFETTO_NO_INLINE static std::vector<ColumnStorageOverlay>
+  SelectedOverlaysFromParent(const macros_internal::MacroTable& parent,
+                             const RowMap& rm) {
     std::vector<ColumnStorageOverlay> overlays;
     for (const auto& overlay : parent.overlays()) {
       overlays.emplace_back(overlay.SelectRows(rm));
