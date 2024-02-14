@@ -23,6 +23,7 @@
 -- It also does another type of merging: it merges together temporally adjacent
 -- identical values.
 
+--TODO(simonmacm) remove when not referenced internally
 DROP VIEW IF EXISTS {{table_name}}_span;
 CREATE PERFETTO VIEW {{table_name}}_span AS
 SELECT

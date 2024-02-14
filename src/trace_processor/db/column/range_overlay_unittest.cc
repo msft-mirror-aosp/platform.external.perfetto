@@ -16,63 +16,84 @@
 
 #include "src/trace_processor/db/column/range_overlay.h"
 
+#include <cstdint>
+#include <vector>
+
+#include "perfetto/trace_processor/basic_types.h"
+#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/fake_storage.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "test/gtest_and_gmock.h"
 
-namespace perfetto {
-namespace trace_processor {
-namespace column {
+namespace perfetto::trace_processor::column {
 namespace {
 
 using testing::ElementsAre;
 using testing::IsEmpty;
 using Range = Range;
 
-TEST(RangeOverlay, SearchAll) {
-  RangeOverlay storage(Range(3, 8));
-  auto fake = FakeStorage::SearchAll(10);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+TEST(SelectorOverlay, SearchSingle) {
+  Range range(3, 8);
+  RangeOverlay storage(&range);
+  auto fake = FakeStorage::SearchSubset(
+      8, BitVector{false, false, false, true, false, false, false, false});
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0u), Range(1, 4));
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(0u), 0),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(0u), 1),
+            SingleSearchResult::kNoMatch);
+}
+
+TEST(RangeOverlay, SearchAll) {
+  Range range(3, 8);
+  RangeOverlay storage(&range);
+  auto fake = FakeStorage::SearchAll(10);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(1, 4));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1u, 2u, 3u));
 }
 
 TEST(RangeOverlay, SearchNone) {
-  RangeOverlay storage(Range(3, 8));
+  Range range(3, 8);
+  RangeOverlay storage(&range);
   auto fake = FakeStorage::SearchNone(10);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0u), Range(1, 4));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(1, 4));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), IsEmpty());
 }
 
 TEST(RangeOverlay, SearchLimited) {
   auto fake = FakeStorage::SearchSubset(10, std::vector<uint32_t>{4});
-  RangeOverlay storage(Range(3, 5));
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  Range range(3, 5);
+  RangeOverlay storage(&range);
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0u), Range(0, 2));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(0, 2));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1u));
 }
 
 TEST(RangeOverlay, SearchBitVector) {
   auto fake = FakeStorage::SearchSubset(8, BitVector({0, 1, 0, 1, 0, 1, 0, 0}));
-  RangeOverlay storage(Range(3, 6));
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  Range range(3, 6);
+  RangeOverlay storage(&range);
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0u), Range(0, 3));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(0, 3));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0, 2));
 }
 
 TEST(RangeOverlay, IndexSearch) {
   auto fake = FakeStorage::SearchSubset(8, BitVector({0, 1, 0, 1, 0, 1, 0, 0}));
-  RangeOverlay storage(Range(3, 5));
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  Range range(3, 5);
+  RangeOverlay storage(&range);
+  auto chain = storage.MakeChain(fake->MakeChain());
 
   std::vector<uint32_t> table_idx{1u, 0u, 3u};
-  RangeOrBitVector res = queryable->IndexSearch(
+  RangeOrBitVector res = chain->IndexSearch(
       FilterOp::kGe, SqlValue::Long(0u),
       Indices{table_idx.data(), static_cast<uint32_t>(table_idx.size()),
               Indices::State::kNonmonotonic});
@@ -80,6 +101,4 @@ TEST(RangeOverlay, IndexSearch) {
 }
 
 }  // namespace
-}  // namespace column
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor::column

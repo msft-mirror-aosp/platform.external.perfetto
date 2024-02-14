@@ -39,27 +39,27 @@ using testing::IsEmpty;
 
 TEST(DenseNullOverlay, NoFilteringSearch) {
   std::vector<uint32_t> data{0, 1, 0, 1, 0};
-  auto numeric =
-      std::make_unique<NumericStorage<uint32_t>>(&data, ColumnType::kUint32);
+  auto numeric = std::make_unique<NumericStorage<uint32_t>>(
+      &data, ColumnType::kUint32, false);
 
   BitVector bv{0, 1, 0, 1, 0};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(numeric->MakeQueryable());
+  auto chain = storage.MakeChain(numeric->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1, 3));
 }
 
 TEST(DenseNullOverlay, RestrictInputSearch) {
   std::vector<uint32_t> data{0, 1, 0, 1, 0};
-  auto numeric =
-      std::make_unique<NumericStorage<uint32_t>>(&data, ColumnType::kUint32);
+  auto numeric = std::make_unique<NumericStorage<uint32_t>>(
+      &data, ColumnType::kUint32, false);
 
   BitVector bv{0, 1, 0, 1, 0};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(numeric->MakeQueryable());
+  auto chain = storage.MakeChain(numeric->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0), Range(1, 3));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0), Range(1, 3));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1));
 }
 
@@ -68,9 +68,9 @@ TEST(DenseNullOverlay, RangeFilterSearch) {
 
   BitVector bv{0, 1, 0, 1, 0};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1));
 }
 
@@ -79,9 +79,9 @@ TEST(DenseNullOverlay, BitvectorFilterSearch) {
 
   BitVector bv{0, 1, 0, 1, 0};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
+  auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0), Range(0, 5));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1));
 }
 
@@ -90,23 +90,23 @@ TEST(DenseNullOverlay, IsNullSearch) {
 
   BitVector bv{1, 0, 0, 1, 1};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  auto chain = storage.MakeChain(fake->MakeChain());
 
-  auto res = queryable->Search(FilterOp::kIsNull, SqlValue(), Range(0, 5));
+  auto res = chain->Search(FilterOp::kIsNull, SqlValue(), Range(0, 5));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0, 1, 2, 4));
 }
 
 TEST(DenseNullOverlay, IndexSearch) {
   std::vector<uint32_t> data{1, 0, 0, 1, 1, 1};
-  auto numeric =
-      std::make_unique<NumericStorage<uint32_t>>(&data, ColumnType::kUint32);
+  auto numeric = std::make_unique<NumericStorage<uint32_t>>(
+      &data, ColumnType::kUint32, false);
 
   BitVector bv{1, 0, 0, 1, 1, 1};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(numeric->MakeQueryable());
+  auto chain = storage.MakeChain(numeric->MakeChain());
 
   std::vector<uint32_t> index({5, 2, 3, 4, 1});
-  auto res = queryable->IndexSearch(
+  auto res = chain->IndexSearch(
       FilterOp::kGe, SqlValue::Long(0),
       Indices{index.data(), static_cast<uint32_t>(index.size()),
               Indices::State::kNonmonotonic});
@@ -118,10 +118,10 @@ TEST(DenseNullOverlay, IsNullIndexSearch) {
 
   BitVector bv{0, 1, 0, 1, 1, 1};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  auto chain = storage.MakeChain(fake->MakeChain());
 
   std::vector<uint32_t> index({5, 2, 3, 4, 1});
-  auto res = queryable->IndexSearch(
+  auto res = chain->IndexSearch(
       FilterOp::kIsNull, SqlValue(),
       Indices{index.data(), static_cast<uint32_t>(index.size()),
               Indices::State::kMonotonic});
@@ -133,45 +133,74 @@ TEST(DenseNullOverlay, OrderedIndexSearch) {
 
   BitVector bv{0, 1, 0, 1, 0, 1};
   DenseNullOverlay storage(&bv);
-  auto queryable = storage.MakeQueryable(fake->MakeQueryable());
+  auto chain = storage.MakeChain(fake->MakeChain());
 
   std::vector<uint32_t> indices_vec({0, 2, 4, 1, 3, 5});
   Indices indices{indices_vec.data(), 6, Indices::State::kNonmonotonic};
 
-  Range res =
-      queryable->OrderedIndexSearch(FilterOp::kIsNull, SqlValue(), indices);
+  Range res = chain->OrderedIndexSearch(FilterOp::kIsNull, SqlValue(), indices);
   ASSERT_EQ(res.start, 0u);
   ASSERT_EQ(res.end, 3u);
 
-  res =
-      queryable->OrderedIndexSearch(FilterOp::kIsNotNull, SqlValue(), indices);
+  res = chain->OrderedIndexSearch(FilterOp::kIsNotNull, SqlValue(), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 6u);
 
-  res =
-      queryable->OrderedIndexSearch(FilterOp::kEq, SqlValue::Long(3), indices);
+  res = chain->OrderedIndexSearch(FilterOp::kEq, SqlValue::Long(3), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 6u);
 
-  res =
-      queryable->OrderedIndexSearch(FilterOp::kGt, SqlValue::Long(3), indices);
+  res = chain->OrderedIndexSearch(FilterOp::kGt, SqlValue::Long(3), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 6u);
 
-  res =
-      queryable->OrderedIndexSearch(FilterOp::kGe, SqlValue::Long(3), indices);
+  res = chain->OrderedIndexSearch(FilterOp::kGe, SqlValue::Long(3), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 6u);
 
-  res =
-      queryable->OrderedIndexSearch(FilterOp::kLt, SqlValue::Long(3), indices);
+  res = chain->OrderedIndexSearch(FilterOp::kLt, SqlValue::Long(3), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 6u);
 
-  res =
-      queryable->OrderedIndexSearch(FilterOp::kLe, SqlValue::Long(3), indices);
+  res = chain->OrderedIndexSearch(FilterOp::kLe, SqlValue::Long(3), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 6u);
+}
+
+TEST(DenseNullOverlay, SingleSearch) {
+  BitVector bv{0, 1, 0, 1, 1, 1};
+  DenseNullOverlay storage(&bv);
+  auto fake = FakeStorage::SearchSubset(5, std::vector<uint32_t>{1, 2});
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 1),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 2),
+            SingleSearchResult::kNoMatch);
+}
+
+TEST(DenseNullOverlay, SingleSearchIsNull) {
+  BitVector bv{0, 1, 0, 1, 1, 1};
+  DenseNullOverlay storage(&bv);
+  auto fake = FakeStorage::SearchNone(5);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNull, SqlValue(), 0),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNull, SqlValue(), 1),
+            SingleSearchResult::kNoMatch);
+}
+
+TEST(DenseNullOverlay, SingleSearchIsNotNull) {
+  BitVector bv{0, 1, 0, 1, 1, 1};
+  DenseNullOverlay storage(&bv);
+  auto fake = FakeStorage::SearchAll(5);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNotNull, SqlValue(), 0),
+            SingleSearchResult::kNoMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNotNull, SqlValue(), 1),
+            SingleSearchResult::kMatch);
 }
 
 }  // namespace

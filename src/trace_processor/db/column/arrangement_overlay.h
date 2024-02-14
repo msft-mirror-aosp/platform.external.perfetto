@@ -24,7 +24,7 @@
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
@@ -32,29 +32,39 @@ namespace perfetto::trace_processor::column {
 // Storage responsible for rearranging the elements of another Storage. It deals
 // with duplicates, permutations and selection; for selection only, it's more
 // efficient to use `SelectorOverlay`.
-class ArrangementOverlay : public DataNode {
+class ArrangementOverlay final : public DataLayer {
  public:
   ArrangementOverlay(const std::vector<uint32_t>* arrangement,
-                     bool does_arrangement_order_storage);
+                     Indices::State arrangement_state);
 
-  std::unique_ptr<Queryable> MakeQueryable(std::unique_ptr<Queryable>) override;
+  std::unique_ptr<DataLayerChain> MakeChain(
+      std::unique_ptr<DataLayerChain>,
+      ChainCreationArgs = ChainCreationArgs()) override;
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    Queryable(std::unique_ptr<DataNode::Queryable> inner,
+    ChainImpl(std::unique_ptr<DataLayerChain> inner,
               const std::vector<uint32_t>* arrangement,
               Indices::State arrangement_state,
               bool does_arrangement_order_storage);
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override {
+    RangeOrBitVector IndexSearchValidated(FilterOp,
+                                          SqlValue,
+                                          Indices) const override;
+
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override {
       PERFETTO_FATAL(
           "OrderedIndexSearch can't be called on ArrangementOverlay");
     }
@@ -72,16 +82,15 @@ class ArrangementOverlay : public DataNode {
     std::string DebugString() const override { return "ArrangementOverlay"; }
 
    private:
-    std::unique_ptr<DataNode::Queryable> inner_;
+    std::unique_ptr<DataLayerChain> inner_;
     const std::vector<uint32_t>* arrangement_;
     const Indices::State arrangement_state_;
     const bool does_arrangement_order_storage_;
   };
 
-  std::unique_ptr<DataNode::Queryable> inner_;
+  std::unique_ptr<DataLayerChain> inner_;
   const std::vector<uint32_t>* arrangement_;
   const Indices::State arrangement_state_;
-  const bool does_arrangement_order_storage_;
 };
 
 }  // namespace perfetto::trace_processor::column

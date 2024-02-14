@@ -23,33 +23,41 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
 // Storage for SetId columns.
-class SetIdStorage final : public DataNode {
+class SetIdStorage final : public DataLayer {
  public:
   using SetId = uint32_t;
 
   explicit SetIdStorage(const std::vector<uint32_t>*);
 
-  std::unique_ptr<Queryable> MakeQueryable() override;
+  std::unique_ptr<DataLayerChain> MakeChain() override;
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    explicit Queryable(const std::vector<uint32_t>*);
+    explicit ChainImpl(const std::vector<uint32_t>*);
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp,
+                                          SqlValue,
+                                          Indices) const override;
+
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
     void StableSort(uint32_t*, uint32_t) const override;
 

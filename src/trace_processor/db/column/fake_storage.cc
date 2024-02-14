@@ -25,7 +25,7 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
@@ -33,12 +33,12 @@ namespace perfetto::trace_processor::column {
 FakeStorage::FakeStorage(uint32_t size, SearchStrategy strategy)
     : size_(size), strategy_(strategy) {}
 
-std::unique_ptr<DataNode::Queryable> FakeStorage::MakeQueryable() {
-  return std::make_unique<Queryable>(size_, strategy_, range_,
+std::unique_ptr<DataLayerChain> FakeStorage::MakeChain() {
+  return std::make_unique<ChainImpl>(size_, strategy_, range_,
                                      bit_vector_.Copy());
 }
 
-FakeStorage::Queryable::Queryable(uint32_t size,
+FakeStorage::ChainImpl::ChainImpl(uint32_t size,
                                   SearchStrategy strategy,
                                   Range range,
                                   BitVector bv)
@@ -47,15 +47,33 @@ FakeStorage::Queryable::Queryable(uint32_t size,
       range_(range),
       bit_vector_(std::move(bv)) {}
 
-SearchValidationResult FakeStorage::Queryable::ValidateSearchConstraints(
-    SqlValue,
-    FilterOp) const {
+SingleSearchResult FakeStorage::ChainImpl::SingleSearch(FilterOp,
+                                                        SqlValue,
+                                                        uint32_t i) const {
+  switch (strategy_) {
+    case kAll:
+      return SingleSearchResult::kMatch;
+    case kNone:
+      return SingleSearchResult::kNoMatch;
+    case kBitVector:
+      return bit_vector_.IsSet(i) ? SingleSearchResult::kMatch
+                                  : SingleSearchResult::kNoMatch;
+    case kRange:
+      return range_.Contains(i) ? SingleSearchResult::kMatch
+                                : SingleSearchResult::kNoMatch;
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
+SearchValidationResult FakeStorage::ChainImpl::ValidateSearchConstraints(
+    FilterOp,
+    SqlValue) const {
   return SearchValidationResult::kOk;
 }
 
-RangeOrBitVector FakeStorage::Queryable::Search(FilterOp,
-                                                SqlValue,
-                                                Range in) const {
+RangeOrBitVector FakeStorage::ChainImpl::SearchValidated(FilterOp,
+                                                         SqlValue,
+                                                         Range in) const {
   switch (strategy_) {
     case kAll:
       return RangeOrBitVector(in);
@@ -73,9 +91,10 @@ RangeOrBitVector FakeStorage::Queryable::Search(FilterOp,
   PERFETTO_FATAL("For GCC");
 }
 
-RangeOrBitVector FakeStorage::Queryable::IndexSearch(FilterOp,
-                                                     SqlValue,
-                                                     Indices indices) const {
+RangeOrBitVector FakeStorage::ChainImpl::IndexSearchValidated(
+    FilterOp,
+    SqlValue,
+    Indices indices) const {
   switch (strategy_) {
     case kAll:
       return RangeOrBitVector(Range(0, indices.size));
@@ -96,9 +115,10 @@ RangeOrBitVector FakeStorage::Queryable::IndexSearch(FilterOp,
   PERFETTO_FATAL("For GCC");
 }
 
-Range FakeStorage::Queryable::OrderedIndexSearch(FilterOp,
-                                                 SqlValue,
-                                                 Indices indices) const {
+Range FakeStorage::ChainImpl::OrderedIndexSearchValidated(
+    FilterOp,
+    SqlValue,
+    Indices indices) const {
   if (strategy_ == kAll) {
     return {0, indices.size};
   }
@@ -132,17 +152,17 @@ Range FakeStorage::Queryable::OrderedIndexSearch(FilterOp,
           static_cast<uint32_t>(std::distance(indices.data, first_non_set))};
 }
 
-void FakeStorage::Queryable::StableSort(uint32_t*, uint32_t) const {
+void FakeStorage::ChainImpl::StableSort(uint32_t*, uint32_t) const {
   // TODO(b/307482437): Implement.
   PERFETTO_FATAL("Not implemented");
 }
 
-void FakeStorage::Queryable::Sort(uint32_t*, uint32_t) const {
+void FakeStorage::ChainImpl::Sort(uint32_t*, uint32_t) const {
   // TODO(b/307482437): Implement.
   PERFETTO_FATAL("Not implemented");
 }
 
-void FakeStorage::Queryable::Serialize(StorageProto*) const {
+void FakeStorage::ChainImpl::Serialize(StorageProto*) const {
   // FakeStorage doesn't really make sense to serialize.
   PERFETTO_FATAL("Not implemented");
 }

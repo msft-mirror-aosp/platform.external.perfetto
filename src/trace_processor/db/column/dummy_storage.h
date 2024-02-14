@@ -21,30 +21,38 @@
 #include <string>
 
 #include "perfetto/trace_processor/basic_types.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
 // Dummy storage. Used for columns that are not supposed to have operations done
 // on them.
-class DummyStorage final : public DataNode {
+class DummyStorage final : public DataLayer {
  public:
-  std::unique_ptr<DataNode::Queryable> MakeQueryable() override;
+  std::unique_ptr<DataLayerChain> MakeChain() override;
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    Queryable() = default;
+    ChainImpl() = default;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp,
+                                          SqlValue,
+                                          Indices) const override;
+
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
     void StableSort(uint32_t*, uint32_t) const override;
 

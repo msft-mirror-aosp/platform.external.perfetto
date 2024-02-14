@@ -17,32 +17,45 @@
 #ifndef SRC_TRACE_PROCESSOR_DB_COLUMN_RANGE_OVERLAY_H_
 #define SRC_TRACE_PROCESSOR_DB_COLUMN_RANGE_OVERLAY_H_
 
-#include "src/trace_processor/db/column/data_node.h"
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include "perfetto/trace_processor/basic_types.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
-namespace perfetto {
-namespace trace_processor {
-namespace column {
+namespace perfetto::trace_processor::column {
 
-class RangeOverlay : public DataNode {
+class RangeOverlay final : public DataLayer {
  public:
-  explicit RangeOverlay(const Range);
+  explicit RangeOverlay(const Range*);
 
-  std::unique_ptr<Queryable> MakeQueryable(std::unique_ptr<Queryable>) override;
+  std::unique_ptr<DataLayerChain> MakeChain(
+      std::unique_ptr<DataLayerChain>,
+      ChainCreationArgs = ChainCreationArgs()) override;
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    Queryable(std::unique_ptr<DataNode::Queryable>, const Range);
+    ChainImpl(std::unique_ptr<DataLayerChain>, const Range*);
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp p, SqlValue, Indices) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp p,
+                                          SqlValue,
+                                          Indices) const override;
+
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
     void StableSort(uint32_t* rows, uint32_t rows_size) const override;
 
@@ -50,21 +63,18 @@ class RangeOverlay : public DataNode {
 
     void Serialize(StorageProto*) const override;
 
-    uint32_t size() const override { return range_.size(); }
+    uint32_t size() const override { return range_->size(); }
 
     std::string DebugString() const override { return "RangeOverlay"; }
 
    private:
-    std::unique_ptr<DataNode::Queryable> inner_ = nullptr;
-    const Range range_;
+    std::unique_ptr<DataLayerChain> inner_;
+    const Range* range_;
   };
 
- private:
-  const Range range_;
+  const Range* range_;
 };
 
-}  // namespace column
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor::column
 
 #endif  // SRC_TRACE_PROCESSOR_DB_COLUMN_RANGE_OVERLAY_H_
