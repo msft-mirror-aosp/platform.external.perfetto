@@ -14,7 +14,14 @@
 
 import protobuf from 'protobufjs/minimal';
 
-import {perfetto} from '../gen/protos';
+import {
+  DisableTracingResponse,
+  EnableTracingResponse,
+  FreeBuffersResponse,
+  GetTraceStatsResponse,
+  IPCFrame,
+  ReadBuffersResponse,
+} from '../protos';
 
 import {AdbBaseConsumerPort, AdbConnectionState} from './adb_base_controller';
 import {Adb, AdbStream} from './adb_interfaces';
@@ -38,10 +45,9 @@ const TRACE_PACKET_PROTO_ID = 1;
 const TRACE_PACKET_PROTO_TAG =
     (TRACE_PACKET_PROTO_ID << 3) | PROTO_LEN_DELIMITED_WIRE_TYPE;
 
-declare type Frame = perfetto.protos.IPCFrame;
-declare type IMethodInfo =
-    perfetto.protos.IPCFrame.BindServiceReply.IMethodInfo;
-declare type ISlice = perfetto.protos.ReadBuffersResponse.ISlice;
+declare type Frame = IPCFrame;
+declare type IMethodInfo = IPCFrame.BindServiceReply.IMethodInfo;
+declare type ISlice = ReadBuffersResponse.ISlice;
 
 interface Command {
   method: string;
@@ -115,10 +121,10 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
       console.error(`Method ${method} not supported by the target`);
       return;
     }
-    const frame = new perfetto.protos.IPCFrame({
+    const frame = new IPCFrame({
       requestId,
-      msgInvokeMethod: new perfetto.protos.IPCFrame.InvokeMethod(
-          {serviceId: this.serviceId, methodId, argsProto}),
+      msgInvokeMethod: new IPCFrame.InvokeMethod(
+        {serviceId: this.serviceId, methodId, argsProto}),
     });
     this.requestMethods.set(requestId, method);
     this.sendFrame(frame);
@@ -127,8 +133,7 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
   }
 
   static generateFrameBufferToSend(frame: Frame): Uint8Array {
-    const frameProto: Uint8Array =
-        perfetto.protos.IPCFrame.encode(frame).finish();
+    const frameProto: Uint8Array = IPCFrame.encode(frame).finish();
     const frameLen = frameProto.length;
     const buf = new Uint8Array(WIRE_PROTOCOL_HEADER_SIZE + frameLen);
     const dv = new DataView(buf.buffer);
@@ -165,7 +170,7 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
     const buf = new ArrayBuffer(frameBuffer.byteLength);
     const arr = new Uint8Array(buf);
     arr.set(frameBuffer);
-    const frame = perfetto.protos.IPCFrame.decode(arr);
+    const frame = IPCFrame.decode(arr);
     this.handleIncomingFrame(frame);
   }
 
@@ -205,6 +210,7 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
     }
 
     // Parse all complete messages in incomingBuffer and newData.
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     while (this.canParseFullMessage(newData)) {
       // All the message is in the newData buffer.
       if (this.incomingBufferLen === 0) {
@@ -215,9 +221,9 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
         const bytesToCompleteMessage =
             this.frameToParseLen - this.incomingBufferLen;
         this.appendToIncomingBuffer(
-            newData.subarray(0, bytesToCompleteMessage));
+          newData.subarray(0, bytesToCompleteMessage));
         this.parseMessage(
-            this.incomingBuffer.subarray(0, this.frameToParseLen));
+          this.incomingBuffer.subarray(0, this.frameToParseLen));
         this.incomingBufferLen = 0;
         // Remove the data just parsed.
         newData = newData.subarray(bytesToCompleteMessage);
@@ -234,7 +240,7 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
   }
 
   decodeResponse(
-      requestId: number, responseProto: Uint8Array, hasMore = false) {
+    requestId: number, responseProto: Uint8Array, hasMore = false) {
     const method = this.requestMethods.get(requestId);
     if (!method) {
       console.error(`Unknown request id: ${requestId}`);
@@ -290,17 +296,16 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
 
   sendReadBufferResponse() {
     this.sendMessage(this.generateChunkReadResponse(
-        this.traceProtoWriter.finish(), /* last */ true));
+      this.traceProtoWriter.finish(), /* last */ true));
     this.traceProtoWriter = protobuf.Writer.create();
   }
 
   bind() {
     console.assert(this.socket !== undefined);
     const requestId = this.requestId++;
-    const frame = new perfetto.protos.IPCFrame({
+    const frame = new IPCFrame({
       requestId,
-      msgBindService: new perfetto.protos.IPCFrame.BindService(
-          {serviceName: 'ConsumerPort'}),
+      msgBindService: new IPCFrame.BindService({serviceName: 'ConsumerPort'}),
     });
     return new Promise<void>((resolve, _) => {
       this.resolveBindingPromise = resolve;
@@ -310,8 +315,7 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
 
   findMethodId(method: string): number|undefined {
     const methodObject = this.availableMethods.find((m) => m.name === method);
-    if (methodObject && methodObject.id) return methodObject.id;
-    return undefined;
+    return methodObject?.id ?? undefined;
   }
 
   static async hasSocketAccess(device: USBDevice, adb: Adb): Promise<boolean> {
@@ -325,46 +329,47 @@ export class AdbSocketConsumerPort extends AdbBaseConsumerPort {
     }
   }
 
-  handleIncomingFrame(frame: perfetto.protos.IPCFrame) {
+  handleIncomingFrame(frame: IPCFrame) {
     const requestId = frame.requestId;
     switch (frame.msg) {
-      case 'msgBindServiceReply': {
-        const msgBindServiceReply = frame.msgBindServiceReply;
-        if (msgBindServiceReply && msgBindServiceReply.methods &&
+    case 'msgBindServiceReply': {
+      const msgBindServiceReply = frame.msgBindServiceReply;
+      if (msgBindServiceReply && msgBindServiceReply.methods &&
+            /* eslint-disable @typescript-eslint/strict-boolean-expressions */
             msgBindServiceReply.serviceId) {
-          console.assert(msgBindServiceReply.success);
-          this.availableMethods = msgBindServiceReply.methods;
-          this.serviceId = msgBindServiceReply.serviceId;
-          this.resolveBindingPromise();
-          this.resolveBindingPromise = () => {};
-        }
-        return;
+        /* eslint-enable */
+        console.assert(msgBindServiceReply.success);
+        this.availableMethods = msgBindServiceReply.methods;
+        this.serviceId = msgBindServiceReply.serviceId;
+        this.resolveBindingPromise();
+        this.resolveBindingPromise = () => {};
       }
-      case 'msgInvokeMethodReply': {
-        const msgInvokeMethodReply = frame.msgInvokeMethodReply;
-        if (msgInvokeMethodReply && msgInvokeMethodReply.replyProto) {
-          if (!msgInvokeMethodReply.success) {
-            console.error(
-                'Unsuccessful method invocation: ', msgInvokeMethodReply);
-            return;
-          }
-          this.decodeResponse(
-              requestId,
-              msgInvokeMethodReply.replyProto,
-              msgInvokeMethodReply.hasMore === true);
+      return;
+    }
+    case 'msgInvokeMethodReply': {
+      const msgInvokeMethodReply = frame.msgInvokeMethodReply;
+      if (msgInvokeMethodReply && msgInvokeMethodReply.replyProto) {
+        if (!msgInvokeMethodReply.success) {
+          console.error(
+            'Unsuccessful method invocation: ', msgInvokeMethodReply);
+          return;
         }
-        return;
+        this.decodeResponse(
+          requestId,
+          msgInvokeMethodReply.replyProto,
+          msgInvokeMethodReply.hasMore === true);
       }
-      default:
-        console.error(`not recognized frame message: ${frame.msg}`);
+      return;
+    }
+    default:
+      console.error(`not recognized frame message: ${frame.msg}`);
     }
   }
 }
 
-const decoders =
-    new Map<string, Function>()
-        .set('EnableTracing', perfetto.protos.EnableTracingResponse.decode)
-        .set('FreeBuffers', perfetto.protos.FreeBuffersResponse.decode)
-        .set('ReadBuffers', perfetto.protos.ReadBuffersResponse.decode)
-        .set('DisableTracing', perfetto.protos.DisableTracingResponse.decode)
-        .set('GetTraceStats', perfetto.protos.GetTraceStatsResponse.decode);
+const decoders = new Map<string, Function>()
+  .set('EnableTracing', EnableTracingResponse.decode)
+  .set('FreeBuffers', FreeBuffersResponse.decode)
+  .set('ReadBuffers', ReadBuffersResponse.decode)
+  .set('DisableTracing', DisableTracingResponse.decode)
+  .set('GetTraceStats', GetTraceStatsResponse.decode);

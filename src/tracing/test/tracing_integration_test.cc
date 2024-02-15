@@ -32,7 +32,7 @@
 #include "perfetto/tracing/core/trace_config.h"
 #include "src/base/test/test_task_runner.h"
 #include "src/ipc/test/test_socket.h"
-#include "src/tracing/core/tracing_service_impl.h"
+#include "src/tracing/service/tracing_service_impl.h"
 #include "test/gtest_and_gmock.h"
 
 #include "protos/perfetto/config/trace_config.gen.h"
@@ -73,7 +73,7 @@ class MockProducer : public Producer {
   MOCK_METHOD(void, OnTracingSetup, (), (override));
   MOCK_METHOD(void,
               Flush,
-              (FlushRequestID, const DataSourceInstanceID*, size_t),
+              (FlushRequestID, const DataSourceInstanceID*, size_t, FlushFlags),
               (override));
   MOCK_METHOD(void,
               ClearIncrementalState,
@@ -525,20 +525,23 @@ TEST_F(TracingIntegrationTestWithSMBScrapingProducer, ScrapeOnFlush) {
   // Ask the service to flush, but don't flush our trace writer. This should
   // cause our uncommitted SMB chunk to be scraped.
   auto on_flush_complete = task_runner_->CreateCheckpoint("on_flush_complete");
-  consumer_endpoint_->Flush(5000, [on_flush_complete](bool success) {
-    EXPECT_TRUE(success);
-    on_flush_complete();
-  });
-  EXPECT_CALL(producer_, Flush(_, _, _))
+  FlushFlags flush_flags(FlushFlags::Initiator::kConsumerSdk,
+                         FlushFlags::Reason::kExplicit);
+  consumer_endpoint_->Flush(
+      5000,
+      [on_flush_complete](bool success) {
+        EXPECT_TRUE(success);
+        on_flush_complete();
+      },
+      flush_flags);
+  EXPECT_CALL(producer_, Flush(_, _, _, flush_flags))
       .WillOnce(Invoke([this](FlushRequestID flush_req_id,
-                              const DataSourceInstanceID*, size_t) {
+                              const DataSourceInstanceID*, size_t, FlushFlags) {
         producer_endpoint_->NotifyFlushComplete(flush_req_id);
       }));
   task_runner_->RunUntilCheckpoint("on_flush_complete");
 
-  // Read the log buffer. We should only see the first two written trace
-  // packets, because the service can't be sure the last one was written
-  // completely by the trace writer.
+  // Read the log buffer. We should see all the packets.
   consumer_endpoint_->ReadBuffers();
 
   size_t num_test_pack_rx = 0;
@@ -559,7 +562,7 @@ TEST_F(TracingIntegrationTestWithSMBScrapingProducer, ScrapeOnFlush) {
               all_packets_rx();
           }));
   task_runner_->RunUntilCheckpoint("all_packets_rx");
-  ASSERT_EQ(2u, num_test_pack_rx);
+  ASSERT_EQ(3u, num_test_pack_rx);
 
   // Disable tracing.
   consumer_endpoint_->DisableTracing();

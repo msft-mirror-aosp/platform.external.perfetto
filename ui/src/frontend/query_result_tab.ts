@@ -17,11 +17,15 @@ import {v4 as uuidv4} from 'uuid';
 
 import {assertExists} from '../base/logging';
 import {QueryResponse, runQuery} from '../common/queries';
-import {QueryError} from '../common/query_result';
+import {raf} from '../core/raf_scheduler';
+import {QueryError} from '../trace_processor/query_result';
 import {
   AddDebugTrackMenu,
   uuidToViewName,
 } from '../tracks/debug/add_debug_track_menu';
+import {Button} from '../widgets/button';
+import {PopupMenu2} from '../widgets/menu';
+import {PopupPosition} from '../widgets/popup';
 
 import {
   addTab,
@@ -30,22 +34,12 @@ import {
   closeTab,
   NewBottomTabArgs,
 } from './bottom_tab';
-import {globals} from './globals';
 import {QueryTable} from './query_table';
-import {Button} from './widgets/button';
-import {Popup, PopupPosition} from './widgets/popup';
-
-
-export function runQueryInNewTab(query: string, title: string, tag?: string) {
-  return addTab({
-    kind: QueryResultTab.kind,
-    tag,
-    config: {
-      query,
-      title,
-    },
-  });
-}
+import {TABS_V2_FLAG} from '../core/feature_flags';
+import {globals} from './globals';
+import {Actions} from '../common/actions';
+import {BottomTabToTabAdapter} from '../public/utils';
+import {EngineProxy} from '../public';
 
 interface QueryResultTabConfig {
   readonly query: string;
@@ -55,23 +49,59 @@ interface QueryResultTabConfig {
   readonly prefetchedResponse?: QueryResponse;
 }
 
+// External interface for adding a new query results tab
+// Automatically decided whether to add v1 or v2 tab
+export function addQueryResultsTab(
+  config: QueryResultTabConfig, tag?: string): void {
+  if (TABS_V2_FLAG.get()) {
+    const queryResultsTab = new QueryResultTab({
+      config,
+      engine: getEngine(),
+      uuid: uuidv4(),
+    });
+
+    const uri = 'queryResults#' + (tag ?? uuidv4());
+
+    globals.tabManager.registerTab({
+      uri,
+      content: new BottomTabToTabAdapter(queryResultsTab),
+      isEphemeral: true,
+    });
+
+    globals.dispatch(Actions.showTab({uri}));
+  } else {
+    return addTab({
+      kind: QueryResultTab.kind,
+      tag,
+      config,
+    });
+  }
+}
+
+// TODO(stevegolton): Find a way to make this more elegant.
+function getEngine(): EngineProxy {
+  const engConfig = globals.getCurrentEngine();
+  const engineId = assertExists(engConfig).id;
+  return assertExists(globals.engines.get(engineId)).getProxy('QueryResult');
+}
+
 export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
-  static readonly kind = 'org.perfetto.QueryResultTab';
+  static readonly kind = 'dev.perfetto.QueryResultTab';
 
   queryResponse?: QueryResponse;
   sqlViewName?: string;
 
-  static create(args: NewBottomTabArgs): QueryResultTab {
+  static create(args: NewBottomTabArgs<QueryResultTabConfig>): QueryResultTab {
     return new QueryResultTab(args);
   }
 
-  constructor(args: NewBottomTabArgs) {
+  constructor(args: NewBottomTabArgs<QueryResultTabConfig>) {
     super(args);
 
     this.initTrack(args);
   }
 
-  async initTrack(args: NewBottomTabArgs) {
+  async initTrack(args: NewBottomTabArgs<QueryResultTabConfig>) {
     let uuid = '';
     if (this.config.prefetchedResponse !== undefined) {
       this.queryResponse = this.config.prefetchedResponse;
@@ -79,7 +109,7 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     } else {
       const result = await runQuery(this.config.query, this.engine);
       this.queryResponse = result;
-      globals.rafScheduler.scheduleFullRedraw();
+      raf.scheduleFullRedraw();
       if (result.error !== undefined) {
         return;
       }
@@ -90,7 +120,7 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     if (uuid !== '') {
       this.sqlViewName = await this.createViewForDebugTrack(uuid);
       if (this.sqlViewName) {
-        globals.rafScheduler.scheduleFullRedraw();
+        raf.scheduleFullRedraw();
       }
     }
   }
@@ -105,20 +135,23 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     return m(QueryTable, {
       query: this.config.query,
       resp: this.queryResponse,
+      fillParent: true,
       onClose: () => closeTab(this.uuid),
       contextButtons: [
         this.sqlViewName === undefined ?
-            null :
-            m(Popup,
-              {
-                trigger: m(Button, {label: 'Show debug track', minimal: true}),
-                position: PopupPosition.Top,
-              },
-              m(AddDebugTrackMenu, {
-                sqlViewName: this.sqlViewName,
+          null :
+          m(PopupMenu2,
+            {
+              trigger: m(Button, {label: 'Show debug track', minimal: true}),
+              popupPosition: PopupPosition.Top,
+            },
+            m(AddDebugTrackMenu, {
+              dataSource: {
+                sqlSource: `select * from ${this.sqlViewName}`,
                 columns: assertExists(this.queryResponse).columns,
-                engine: this.engine,
-              })),
+              },
+              engine: this.engine,
+            })),
       ],
     });
   }
@@ -127,17 +160,18 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     return this.queryResponse === undefined;
   }
 
-  renderTabCanvas() {}
-
   async createViewForDebugTrack(uuid: string): Promise<string> {
     const viewId = uuidToViewName(uuid);
     // Assuming that the query results come from a SELECT query, try creating a
     // view to allow us to reuse it for further queries.
-    // TODO(altimin): This should get the actual query that was used to
-    // generate the results from the SQL query iterator.
+    const hasValidQueryResponse =
+        this.queryResponse && this.queryResponse.error === undefined;
+    const sqlQuery = hasValidQueryResponse ?
+        this.queryResponse!.lastStatementSql :
+      this.config.query;
     try {
-      const createViewResult = await this.engine.query(
-          `create view ${viewId} as ${this.config.query}`);
+      const createViewResult =
+          await this.engine.query(`create view ${viewId} as ${sqlQuery}`);
       if (createViewResult.error()) {
         // If it failed, do nothing.
         return '';

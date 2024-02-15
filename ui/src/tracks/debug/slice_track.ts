@@ -14,128 +14,119 @@
 
 import m from 'mithril';
 
-import {Actions, DEBUG_SLICE_TRACK_KIND} from '../../common/actions';
-import {EngineProxy} from '../../common/engine';
-import {Selection} from '../../common/state';
-import {OnSliceClickArgs} from '../../frontend/base_slice_track';
+import {Actions} from '../../common/actions';
 import {globals} from '../../frontend/globals';
+import {NamedSliceTrackTypes} from '../../frontend/named_slice_track';
+import {TrackButton} from '../../frontend/track_panel';
+import {TrackContext} from '../../public';
+import {EngineProxy} from '../../trace_processor/engine';
 import {
-  NamedSliceTrack,
-  NamedSliceTrackTypes,
-} from '../../frontend/named_slice_track';
-import {NewTrackArgs} from '../../frontend/track';
-import {TrackButton, TrackButtonAttrs} from '../../frontend/track_panel';
-import {ARG_PREFIX} from './add_debug_track_menu';
+  CustomSqlDetailsPanelConfig,
+  CustomSqlTableDefConfig,
+  CustomSqlTableSliceTrack,
+} from '../custom_sql_table_slices';
 
-// Names of the columns of the underlying view to be used as ts / dur / name.
-export interface SliceColumns {
-  ts: string;
-  dur: string;
-  name: string;
-}
+import {DebugSliceDetailsTab} from './details_tab';
+import {ARG_PREFIX, SliceColumns, SqlDataSource} from '../../frontend/debug_tracks';
+import {DisposableCallback} from '../../base/disposable';
+import {uuidv4Sql} from '../../base/uuid';
 
 export interface DebugTrackV2Config {
-  sqlTableName: string;
+  data: SqlDataSource;
   columns: SliceColumns;
+  closeable: boolean;
+  argColumns: string[];
 }
 
-interface DebugTrackV2Types extends NamedSliceTrackTypes {
-  config: DebugTrackV2Config;
-}
+export class DebugTrackV2 extends
+  CustomSqlTableSliceTrack<NamedSliceTrackTypes> {
+  private config: DebugTrackV2Config;
+  private sqlTableName: string;
 
-export class DebugTrackV2 extends NamedSliceTrack<DebugTrackV2Types> {
-  static readonly kind = DEBUG_SLICE_TRACK_KIND;
+  constructor(engine: EngineProxy, ctx: TrackContext) {
+    super({
+      engine,
+      trackKey: ctx.trackKey,
+    });
 
-  static create(args: NewTrackArgs) {
-    return new DebugTrackV2(args);
+    // TODO(stevegolton): Validate params before type asserting.
+    // TODO(stevegolton): Avoid just pushing this config up for some base
+    // class to use. Be more explicit.
+    this.config = ctx.params as DebugTrackV2Config;
+    this.sqlTableName = `__debug_slice_${uuidv4Sql(ctx.trackKey)}`;
   }
 
-  constructor(args: NewTrackArgs) {
-    super(args);
+  async getSqlDataSource(): Promise<CustomSqlTableDefConfig> {
+    await this.createTrackTable(
+      this.config.data,
+      this.config.columns,
+      this.config.argColumns,
+    );
+    return {
+      sqlTableName: this.sqlTableName,
+      dispose: new DisposableCallback(() => this.destroyTrackTable()),
+    };
   }
 
-  async initSqlTable(tableName: string): Promise<void> {
-    await this.engine.query(`
-      create view ${tableName} as
-      select
-        id,
-        ts,
-        dur,
-        name,
-        depth
-      from ${this.config.sqlTableName}
-    `);
+  getDetailsPanel(): CustomSqlDetailsPanelConfig {
+    return {
+      kind: DebugSliceDetailsTab.kind,
+      config: {
+        sqlTableName: this.sqlTableName,
+        title: 'Debug Slice',
+      },
+    };
   }
 
-  isSelectionHandled(selection: Selection) {
-    if (selection.kind !== 'DEBUG_SLICE') {
-      return false;
-    }
-    return selection.sqlTableName === this.config.sqlTableName;
-  }
-
-  onSliceClick(args: OnSliceClickArgs<DebugTrackV2Types['slice']>) {
-    globals.dispatch(Actions.selectDebugSlice({
-      id: args.slice.id,
-      sqlTableName: this.config.sqlTableName,
-      start: args.slice.start,
-      duration: args.slice.duration,
-      trackId: this.trackId,
-    }));
-  }
-
-  getTrackShellButtons(): Array<m.Vnode<TrackButtonAttrs>> {
-    return [m(TrackButton, {
+  getTrackShellButtons(): m.Children {
+    return this.config.closeable ? m(TrackButton, {
       action: () => {
-        globals.dispatch(Actions.removeDebugTrack({trackId: this.trackId}));
+        globals.dispatch(Actions.removeTracks({trackKeys: [this.trackKey]}));
       },
       i: 'close',
       tooltip: 'Close',
       showButton: true,
-    })];
+    }) :
+      [];
   }
-}
 
-let debugTrackCount = 0;
-
-export async function addDebugTrack(
-    engine: EngineProxy,
-    sqlViewName: string,
-    trackName: string,
+  private async createTrackTable(
+    data: SqlDataSource,
     sliceColumns: SliceColumns,
-    argColumns: string[]) {
-  // QueryResultTab has successfully created a view corresponding to |uuid|.
-  // To prepare displaying it as a track, we materialize it and compute depths.
-  const debugTrackId = ++debugTrackCount;
-  const sqlTableName = `materialized_${debugTrackId}_${sqlViewName}`;
-  // TODO(altimin): Support removing this table when the track is closed.
-  await engine.query(`
-      create table ${sqlTableName} as
-      with prepared_data as (
+    argColumns: string[]): Promise<void> {
+    // If the view has clashing names (e.g. "name" coming from joining two
+    // different tables, we will see names like "name_1", "name_2", but they
+    // won't be addressable from the SQL. So we explicitly name them through a
+    // list of columns passed to CTE.
+    const dataColumns =
+      data.columns !== undefined ? `(${data.columns.join(', ')})` : '';
+
+    // TODO(altimin): Support removing this table when the track is closed.
+    const dur = sliceColumns.dur === '0' ? 0 : sliceColumns.dur;
+    await this.engine.query(`
+      create table ${this.sqlTableName} as
+      with data${dataColumns} as (
+        ${data.sqlSource}
+      ),
+      prepared_data as (
         select
           row_number() over () as id,
           ${sliceColumns.ts} as ts,
-          cast(${sliceColumns.dur} as int) as dur,
+          ifnull(cast(${dur} as int), -1) as dur,
           printf('%s', ${sliceColumns.name}) as name
           ${argColumns.length > 0 ? ',' : ''}
-          ${argColumns.map((c) => `${c} as ${ARG_PREFIX}${c}`).join(',')}
-        from ${sqlViewName}
+          ${argColumns.map((c) => `${c} as ${ARG_PREFIX}${c}`).join(',\n')}
+        from data
       )
       select
-        *,
-        internal_layout(ts, dur) over (
-          order by ${sliceColumns.ts}
-          rows between unbounded preceding and current row
-        ) as depth
+        *
       from prepared_data
       order by ts;`);
+  }
 
-  globals.dispatch(Actions.addDebugTrack({
-    engineId: engine.engineId,
-    name: trackName.trim() || `Debug Track ${debugTrackId}`,
-    config: {
-      sqlTableName,
-      columns: sliceColumns,
-    },
-  }));
+  private async destroyTrackTable() {
+    if (this.engine.isAlive) {
+      await this.engine.query(`DROP TABLE IF EXISTS ${this.sqlTableName}`);
+    }
+  }
 }

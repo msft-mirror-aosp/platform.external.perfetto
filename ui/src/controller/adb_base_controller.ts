@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {extractDurationFromTraceConfig} from '../base/trace_config_utils';
-import {extractTraceConfig} from '../base/trace_config_utils';
+import {exists} from '../base/utils';
 import {isAdbTarget} from '../common/state';
+import {
+  extractDurationFromTraceConfig,
+  extractTraceConfig,
+} from '../core/trace_config_utils';
 import {globals} from '../frontend/globals';
 
 import {Adb} from './adb_interfaces';
@@ -75,7 +78,7 @@ export abstract class AdbBaseConsumerPort extends RpcConsumerPort {
           this.state = AdbConnectionState.READY_TO_CONNECT;
           const target = globals.state.recordingTarget;
           throw Error(`Device with serial ${
-              isAdbTarget(target) ? target.serial : 'n/a'} not found.`);
+            isAdbTarget(target) ? target.serial : 'n/a'} not found.`);
         }
 
         this.sendStatus(`Please allow USB debugging on device.
@@ -115,7 +118,7 @@ export abstract class AdbBaseConsumerPort extends RpcConsumerPort {
     if (!traceConfigProto) return;
     const duration = extractDurationFromTraceConfig(traceConfigProto);
     this.sendStatus(`Recording in progress${
-        duration ? ' for ' + duration.toString() + ' ms' : ''}...`);
+      exists(duration) ? ' for ' + duration.toString() + ' ms' : ''}...`);
   }
 
   abstract invoke(method: string, argsProto: Uint8Array): void;

@@ -24,57 +24,13 @@
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
+#include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column_storage.h"
 #include "src/trace_processor/db/column_storage_overlay.h"
 #include "src/trace_processor/db/compare.h"
 #include "src/trace_processor/db/typed_column_internal.h"
 
-namespace perfetto {
-namespace trace_processor {
-
-// Represents the possible filter operations on a column.
-enum class FilterOp {
-  kEq,
-  kNe,
-  kGt,
-  kLt,
-  kGe,
-  kLe,
-  kIsNull,
-  kIsNotNull,
-  kGlob,
-};
-
-// Represents a constraint on a column.
-struct Constraint {
-  uint32_t col_idx;
-  FilterOp op;
-  SqlValue value;
-};
-
-// Represents an order by operation on a column.
-struct Order {
-  uint32_t col_idx;
-  bool desc;
-};
-
-// The enum type of the column.
-// Public only to stop GCC complaining about templates being defined in a
-// non-namespace scope (see ColumnTypeHelper below).
-enum class ColumnType {
-  // Standard primitive types.
-  kInt32,
-  kUint32,
-  kInt64,
-  kDouble,
-  kString,
-
-  // Types generated on the fly.
-  kId,
-
-  // Types which don't have any data backing them.
-  kDummy,
-};
+namespace perfetto::trace_processor {
 
 // Helper class for converting a type to a ColumnType.
 template <typename T>
@@ -105,7 +61,7 @@ struct ColumnTypeHelper<std::optional<T>> : public ColumnTypeHelper<T> {};
 class Table;
 
 // Represents a named, strongly typed list of data.
-class Column {
+class ColumnLegacy {
  public:
   // Flags which indicate properties of the data in the column. These features
   // are used to speed up column methods like filtering/sorting.
@@ -177,7 +133,7 @@ class Column {
     using pointer = uint32_t*;
     using reference = uint32_t&;
 
-    Iterator(const Column* col, uint32_t row) : col_(col), row_(row) {}
+    Iterator(const ColumnLegacy* col, uint32_t row) : col_(col), row_(row) {}
 
     Iterator(const Iterator&) = default;
     Iterator& operator=(const Iterator&) = default;
@@ -210,7 +166,7 @@ class Column {
     uint32_t row() const { return row_; }
 
    private:
-    const Column* col_ = nullptr;
+    const ColumnLegacy* col_ = nullptr;
     uint32_t row_ = 0;
   };
 
@@ -219,44 +175,41 @@ class Column {
 
   // Flags which should *not* be inherited implicitly when a column is
   // assocaited to another table.
-  static constexpr uint32_t kNoCrossTableInheritFlags = Column::Flag::kSetId;
+  static constexpr uint32_t kNoCrossTableInheritFlags =
+      ColumnLegacy::Flag::kSetId;
 
   template <typename T>
-  Column(const char* name,
-         ColumnStorage<T>* storage,
-         /* Flag */ uint32_t flags,
-         Table* table,
-         uint32_t col_idx_in_table,
-         uint32_t row_map_idx)
-      : Column(name,
-               ColumnTypeHelper<stored_type<T>>::ToColumnType(),
-               flags,
-               table,
-               col_idx_in_table,
-               row_map_idx,
-               storage) {}
+  ColumnLegacy(const char* name,
+               ColumnStorage<T>* storage,
+               /* Flag */ uint32_t flags,
+               uint32_t col_idx_in_table,
+               uint32_t row_map_idx)
+      : ColumnLegacy(name,
+                     ColumnTypeHelper<stored_type<T>>::ToColumnType(),
+                     flags,
+                     col_idx_in_table,
+                     row_map_idx,
+                     storage) {}
 
   // Create a Column backed by the same data as |column| but is associated to a
   // different table and, optionally, having a different name.
-  Column(const Column& column,
-         Table* table,
-         uint32_t col_idx_in_table,
-         uint32_t row_map_idx,
-         const char* name = nullptr);
+  ColumnLegacy(const ColumnLegacy& column,
+               uint32_t col_idx_in_table,
+               uint32_t row_map_idx,
+               const char* name = nullptr);
 
   // Columns are movable but not copyable.
-  Column(Column&&) noexcept = default;
-  Column& operator=(Column&&) = default;
+  ColumnLegacy(ColumnLegacy&&) noexcept = default;
+  ColumnLegacy& operator=(ColumnLegacy&&) = default;
 
   // Creates a Column which does not have any data backing it.
-  static Column DummyColumn(const char* name,
-                            Table* table,
-                            uint32_t col_idx_in_table);
+  static ColumnLegacy DummyColumn(const char* name, uint32_t col_idx_in_table);
 
   // Creates a Column which returns the index as the value of the row.
-  static Column IdColumn(Table* table,
-                         uint32_t col_idx_in_table,
-                         uint32_t row_map_idx);
+  static ColumnLegacy IdColumn(uint32_t col_idx_in_table,
+                               uint32_t row_map_idx,
+                               const char* name = "id",
+                               uint32_t flags = kIdFlags);
 
   // Gets the value of the Column at the given |row|.
   SqlValue Get(uint32_t row) const { return GetAtIdx(overlay().Get(row)); }
@@ -396,6 +349,9 @@ class Column {
   // Public for testing.
   bool IsDummy() const { return type_ == ColumnType::kDummy; }
 
+  // Returns true if this column is a hidden column.
+  bool IsHidden() const { return (flags_ & Flag::kHidden) != 0; }
+
   // Returns the index of the RowMap in the containing table.
   uint32_t overlay_index() const { return overlay_index_; }
 
@@ -427,6 +383,13 @@ class Column {
   Constraint is_null() const {
     return Constraint{index_in_table_, FilterOp::kIsNull, SqlValue()};
   }
+  Constraint glob_value(SqlValue value) const {
+    return Constraint{index_in_table_, FilterOp::kGlob, value};
+  }
+
+  Constraint regex_value(SqlValue value) const {
+    return Constraint{index_in_table_, FilterOp::kRegex, value};
+  }
 
   // Returns an Order for each Order type for this Column.
   Order ascending() const { return Order{index_in_table_, false}; }
@@ -457,6 +420,8 @@ class Column {
     return *static_cast<ColumnStorage<stored_type<T>>*>(storage_);
   }
 
+  const ColumnStorageBase& storage_base() const { return *storage_; }
+
  protected:
   // Returns the backing sparse vector cast to contain data of type T.
   // Should only be called when |type_| == ToColumnType<T>().
@@ -466,9 +431,6 @@ class Column {
     PERFETTO_DCHECK(tc_internal::TypeHandler<T>::is_optional == IsNullable());
     return static_cast<ColumnStorage<stored_type<T>>*>(storage_);
   }
-
-  // Returns true if this column is a hidden column.
-  bool IsHidden() const { return (flags_ & Flag::kHidden) != 0; }
 
   const StringPool& string_pool() const { return *string_pool_; }
 
@@ -491,16 +453,15 @@ class Column {
   friend class View;
 
   // Base constructor for this class which all other constructors call into.
-  Column(const char* name,
-         ColumnType type,
-         uint32_t flags,
-         Table* table,
-         uint32_t col_idx_in_table,
-         uint32_t overlay_index,
-         ColumnStorageBase* nullable_vector);
+  ColumnLegacy(const char* name,
+               ColumnType type,
+               uint32_t flags,
+               uint32_t col_idx_in_table,
+               uint32_t overlay_index,
+               ColumnStorageBase* nullable_vector);
 
-  Column(const Column&) = delete;
-  Column& operator=(const Column&) = delete;
+  ColumnLegacy(const ColumnLegacy&) = delete;
+  ColumnLegacy& operator=(const ColumnLegacy&) = delete;
 
   // Gets the value of the Column at the given |idx|.
   SqlValue GetAtIdx(uint32_t idx) const {
@@ -579,6 +540,7 @@ class Column {
       case FilterOp::kIsNull:
       case FilterOp::kIsNotNull:
       case FilterOp::kGlob:
+      case FilterOp::kRegex:
         break;
     }
     return false;
@@ -704,6 +666,39 @@ class Column {
     return string_pool_->Get(storage<StringPool::Id>().Get(idx));
   }
 
+  void BindToTable(Table* table, StringPool* string_pool) {
+    PERFETTO_DCHECK(!table_);
+    table_ = table;
+    string_pool_ = string_pool;
+
+    // Check that the dense-ness of the column and the nullable vector match.
+    if (IsNullable() && !IsDummy()) {
+      bool is_storage_dense;
+      switch (type_) {
+        case ColumnType::kInt32:
+          is_storage_dense = storage<std::optional<int32_t>>().IsDense();
+          break;
+        case ColumnType::kUint32:
+          is_storage_dense = storage<std::optional<uint32_t>>().IsDense();
+          break;
+        case ColumnType::kInt64:
+          is_storage_dense = storage<std::optional<int64_t>>().IsDense();
+          break;
+        case ColumnType::kDouble:
+          is_storage_dense = storage<std::optional<double>>().IsDense();
+          break;
+        case ColumnType::kString:
+          PERFETTO_FATAL("String column should not be nullable");
+        case ColumnType::kId:
+          PERFETTO_FATAL("Id column should not be nullable");
+        case ColumnType::kDummy:
+          PERFETTO_FATAL("Dummy column excluded above");
+      }
+      PERFETTO_DCHECK(is_storage_dense == IsDense());
+    }
+    PERFETTO_DCHECK(IsFlagsAndTypeValid(flags_, type_));
+  }
+
   // type_ is used to cast nullable_vector_ to the correct type.
   ColumnType type_ = ColumnType::kInt64;
   ColumnStorageBase* storage_ = nullptr;
@@ -716,7 +711,6 @@ class Column {
   const StringPool* string_pool_ = nullptr;
 };
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor
 
 #endif  // SRC_TRACE_PROCESSOR_DB_COLUMN_H_

@@ -16,7 +16,7 @@
 
 -- Expose all clock snapshots as instant events.
 DROP VIEW IF EXISTS trace_metadata_event;
-CREATE VIEW trace_metadata_event AS
+CREATE PERFETTO VIEW trace_metadata_event AS
 SELECT
   'slice' AS track_type,
   'Clock Snapshots' AS track_name,
@@ -27,9 +27,9 @@ FROM clock_snapshot
 GROUP BY ts;
 
 DROP VIEW IF EXISTS trace_metadata_output;
-CREATE VIEW trace_metadata_output AS
+CREATE PERFETTO VIEW trace_metadata_output AS
 SELECT TraceMetadata(
-  'trace_duration_ns', CAST((SELECT end_ts - start_ts FROM trace_bounds) AS INT),
+  'trace_duration_ns', CAST(trace_dur() AS INT),
   'trace_uuid', (SELECT str_value FROM metadata WHERE name = 'trace_uuid'),
   'android_build_fingerprint', (
     SELECT str_value FROM metadata WHERE name = 'android_build_fingerprint'
@@ -57,5 +57,9 @@ SELECT TraceMetadata(
   ),
   'sched_duration_ns', (
     SELECT MAX(ts) - MIN(ts) FROM sched
+  ),
+  'tracing_started_ns', (
+    SELECT int_value FROM metadata
+    WHERE name='tracing_started_ns'
   )
 );

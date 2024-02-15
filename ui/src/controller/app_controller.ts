@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {RECORDING_V2_FLAG} from '../common/feature_flags';
+import {RECORDING_V2_FLAG} from '../core/feature_flags';
 import {globals} from '../frontend/globals';
 
 import {Child, Controller, ControllerInitializerAny} from './controller';
@@ -44,7 +44,7 @@ export class AppController extends Controller<'main'> {
         [Child('permalink', PermalinkController, {})];
     if (!RECORDING_V2_FLAG.get()) {
       childControllers.push(Child(
-          'record', RecordController, {extensionPort: this.extensionPort}));
+        'record', RecordController, {extensionPort: this.extensionPort}));
     }
     if (globals.state.engine !== undefined) {
       const engineCfg = globals.state.engine;

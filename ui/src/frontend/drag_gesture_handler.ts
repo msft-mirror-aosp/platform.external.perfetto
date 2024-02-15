@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export class DragGestureHandler {
+import {Disposable} from '../base/disposable';
+
+export class DragGestureHandler implements Disposable {
   private readonly boundOnMouseDown = this.onMouseDown.bind(this);
   private readonly boundOnMouseMove = this.onMouseMove.bind(this);
   private readonly boundOnMouseUp = this.onMouseUp.bind(this);
@@ -41,12 +43,12 @@ export class DragGestureHandler {
   private startDragGesture(e: MouseEvent) {
     this.clientRect = this.element.getBoundingClientRect();
     this.onDragStarted(
-        e.clientX - this.clientRect.left, e.clientY - this.clientRect.top);
+      e.clientX - this.clientRect.left, e.clientY - this.clientRect.top);
   }
 
   private onMouseMove(e: MouseEvent) {
     if (e.buttons === 0) {
-      return this.onMouseUp(e);
+      return this.onMouseUp();
     }
     if (this.pendingMouseDownEvent &&
         (Math.abs(e.clientX - this.pendingMouseDownEvent.clientX) > 1 ||
@@ -56,11 +58,11 @@ export class DragGestureHandler {
     }
     if (!this.pendingMouseDownEvent) {
       this.onDrag(
-          e.clientX - this.clientRect!.left, e.clientY - this.clientRect!.top);
+        e.clientX - this.clientRect!.left, e.clientY - this.clientRect!.top);
     }
   }
 
-  private onMouseUp(_e: MouseEvent) {
+  private onMouseUp() {
     this._isDragging = false;
     document.body.removeEventListener('mousemove', this.boundOnMouseMove);
     document.body.removeEventListener('mouseup', this.boundOnMouseUp);
@@ -71,5 +73,14 @@ export class DragGestureHandler {
 
   get isDragging() {
     return this._isDragging;
+  }
+
+  dispose() {
+    if (this._isDragging) {
+      this.onMouseUp();
+    }
+    document.body.removeEventListener('mousedown', this.boundOnMouseDown);
+    document.body.removeEventListener('mousemove', this.boundOnMouseMove);
+    document.body.removeEventListener('mouseup', this.boundOnMouseUp);
   }
 }

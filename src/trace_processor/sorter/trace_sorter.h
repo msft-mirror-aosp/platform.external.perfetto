@@ -95,12 +95,21 @@ class TraceSorter {
               SortingMode);
   ~TraceSorter();
 
+  inline void PushTraceBlobView(int64_t timestamp, TraceBlobView tbv) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(std::move(tbv));
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kTraceBlobView, id);
+  }
+
+  inline void PushTracePacket(int64_t timestamp, TracePacketData data) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(std::move(data));
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kTracePacket, id);
+  }
+
   inline void PushTracePacket(int64_t timestamp,
                               RefPtr<PacketSequenceStateGeneration> state,
                               TraceBlobView tbv) {
-    TraceTokenBuffer::Id id =
-        token_buffer_.Append(TracePacketData{std::move(tbv), std::move(state)});
-    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kTracePacket, id);
+    PushTracePacket(timestamp,
+                    TracePacketData{std::move(tbv), std::move(state)});
   }
 
   inline void PushJsonValue(int64_t timestamp, std::string json_value) {
@@ -125,6 +134,17 @@ class TraceSorter {
                                    TrackEventData track_event) {
     TraceTokenBuffer::Id id = token_buffer_.Append(std::move(track_event));
     AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kTrackEvent, id);
+  }
+
+  inline void PushEtwEvent(uint32_t cpu,
+                           int64_t timestamp,
+                           TraceBlobView tbv,
+                           RefPtr<PacketSequenceStateGeneration> state) {
+    TraceTokenBuffer::Id id =
+        token_buffer_.Append(TracePacketData{std::move(tbv), std::move(state)});
+    auto* queue = GetQueue(cpu + 1);
+    queue->Append(timestamp, TimestampedEvent::Type::kEtwEvent, id);
+    UpdateAppendMaxTs(queue);
   }
 
   inline void PushFtraceEvent(uint32_t cpu,
@@ -196,6 +216,7 @@ class TraceSorter {
   struct TimestampedEvent {
     enum class Type : uint8_t {
       kFtraceEvent,
+      kTraceBlobView,
       kTracePacket,
       kInlineSchedSwitch,
       kInlineSchedWaking,
@@ -203,7 +224,8 @@ class TraceSorter {
       kFuchsiaRecord,
       kTrackEvent,
       kSystraceLine,
-      kMax = kSystraceLine,
+      kEtwEvent,
+      kMax = kEtwEvent,
     };
 
     // Number of bits required to store the max element in |Type|.
@@ -317,6 +339,7 @@ class TraceSorter {
 
   void ParseTracePacket(const TimestampedEvent&);
   void ParseFtracePacket(uint32_t cpu, const TimestampedEvent&);
+  void ParseEtwPacket(uint32_t cpu, const TimestampedEvent&);
 
   void MaybeExtractEvent(size_t queue_idx, const TimestampedEvent&);
   void ExtractAndDiscardTokenizedObject(const TimestampedEvent& event);

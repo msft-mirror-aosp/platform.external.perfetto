@@ -15,21 +15,27 @@
 import {hex} from 'color-convert';
 import m from 'mithril';
 
+import {currentTargetOffset} from '../base/dom_utils';
+import {Icons} from '../base/semantic_icons';
+import {time} from '../base/time';
 import {Actions} from '../common/actions';
-import {TrackState} from '../common/state';
+import {TrackCacheEntry} from '../common/track_cache';
+import {raf} from '../core/raf_scheduler';
+import {SliceRect, Track, TrackTags} from '../public';
 
+import {checkerboard} from './checkerboard';
 import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
-import {PerfettoMouseEvent} from './events';
 import {globals} from './globals';
 import {drawGridLines} from './gridline_helper';
-import {BLANK_CHECKBOX, CHECKBOX, PIN} from './icons';
-import {Panel, PanelSize} from './panel';
+import {PanelSize} from './panel';
+import {Panel} from './panel_container';
 import {verticalScrollToTrack} from './scroll_helper';
-import {SliceRect, Track} from './track';
-import {trackRegistry} from './track_registry';
 import {
   drawVerticalLineAtTime,
 } from './vertical_line_helper';
+import {classNames} from '../base/classnames';
+import {Button} from '../widgets/button';
+import {Popup} from '../widgets/popup';
 
 function getTitleSize(title: string): string|undefined {
   const length = title.length;
@@ -62,20 +68,67 @@ function isSelected(id: string) {
   return selectedArea.tracks.includes(id);
 }
 
+interface TrackChipAttrs {
+  text: string;
+}
+
+class TrackChip implements m.ClassComponent<TrackChipAttrs> {
+  view({attrs}: m.CVnode<TrackChipAttrs>) {
+    return m('span.chip', attrs.text);
+  }
+}
+
+export function renderChips(tags?: TrackTags) {
+  return [
+    tags?.metric && m(TrackChip, {text: 'metric'}),
+    tags?.debuggable && m(TrackChip, {text: 'debuggable'}),
+  ];
+}
+
+export interface CrashButtonAttrs {
+  error: Error;
+}
+
+export class CrashButton implements m.ClassComponent<CrashButtonAttrs> {
+  view({attrs}: m.Vnode<CrashButtonAttrs>): m.Children {
+    return m(
+      Popup,
+      {
+        trigger: m(Button, {
+          icon: Icons.Crashed,
+          minimal: true,
+        }),
+      },
+      this.renderErrorMessage(attrs.error),
+    );
+  }
+
+  private renderErrorMessage(error: Error): m.Children {
+    return m('',
+      'This track has crashed',
+      m(Button, {
+        label: 'Re-raise exception',
+        className: Popup.DISMISS_POPUP_GROUP_CLASS,
+        onclick: () => {
+          throw error;
+        }},
+      ),
+    );
+  }
+}
+
 interface TrackShellAttrs {
-  track: Track;
-  trackState: TrackState;
+  trackKey: string;
+  title: string;
+  buttons: m.Children;
+  tags?: TrackTags;
+  button?: string;
 }
 
 class TrackShell implements m.ClassComponent<TrackShellAttrs> {
   // Set to true when we click down and drag the
   private dragging = false;
   private dropping: 'before'|'after'|undefined = undefined;
-  private attrs?: TrackShellAttrs;
-
-  oninit(vnode: m.Vnode<TrackShellAttrs>) {
-    this.attrs = vnode.attrs;
-  }
 
   view({attrs}: m.CVnode<TrackShellAttrs>) {
     // The shell should be highlighted if the current search result is inside
@@ -83,8 +136,8 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     let highlightClass = '';
     const searchIndex = globals.state.searchIndex;
     if (searchIndex !== -1) {
-      const trackId = globals.currentSearchResults.trackIds[searchIndex];
-      if (trackId === attrs.trackState.id) {
+      const trackKey = globals.currentSearchResults.trackKeys[searchIndex];
+      if (trackKey === attrs.trackKey) {
         highlightClass = 'flash';
       }
     }
@@ -92,70 +145,68 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     const dragClass = this.dragging ? `drag` : '';
     const dropClass = this.dropping ? `drop-${this.dropping}` : '';
     return m(
-        `.track-shell[draggable=true]`,
+      `.track-shell[draggable=true]`,
+      {
+        class: `${highlightClass} ${dragClass} ${dropClass}`,
+        ondragstart: (e: DragEvent) => this.ondragstart(e, attrs.trackKey),
+        ondragend: this.ondragend.bind(this),
+        ondragover: this.ondragover.bind(this),
+        ondragleave: this.ondragleave.bind(this),
+        ondrop: (e: DragEvent) => this.ondrop(e, attrs.trackKey),
+      },
+      m(
+        'h1',
         {
-          class: `${highlightClass} ${dragClass} ${dropClass}`,
-          ondragstart: this.ondragstart.bind(this),
-          ondragend: this.ondragend.bind(this),
-          ondragover: this.ondragover.bind(this),
-          ondragleave: this.ondragleave.bind(this),
-          ondrop: this.ondrop.bind(this),
+          title: attrs.title,
+          style: {
+            'font-size': getTitleSize(attrs.title),
+          },
         },
-        m(
-            'h1',
-            {
-              title: attrs.trackState.name,
-              style: {
-                'font-size': getTitleSize(attrs.trackState.name),
-              },
-            },
-            attrs.trackState.name,
-            ('namespace' in attrs.trackState.config) &&
-                m('span.chip', 'metric'),
-            ),
-        m('.track-buttons',
-          attrs.track.getTrackShellButtons(),
-          attrs.track.getContextMenu(),
-          m(TrackButton, {
-            action: () => {
-              globals.dispatch(
-                  Actions.toggleTrackPinned({trackId: attrs.trackState.id}));
-            },
-            i: PIN,
-            filledIcon: isPinned(attrs.trackState.id),
-            tooltip: isPinned(attrs.trackState.id) ? 'Unpin' : 'Pin to top',
-            showButton: isPinned(attrs.trackState.id),
-            fullHeight: true,
-          }),
-          globals.state.currentSelection !== null &&
+        attrs.title,
+        renderChips(attrs.tags),
+      ),
+      m('.track-buttons',
+        attrs.buttons,
+        m(TrackButton, {
+          action: () => {
+            globals.dispatch(
+              Actions.toggleTrackPinned({trackKey: attrs.trackKey}));
+          },
+          i: Icons.Pin,
+          filledIcon: isPinned(attrs.trackKey),
+          tooltip: isPinned(attrs.trackKey) ? 'Unpin' : 'Pin to top',
+          showButton: isPinned(attrs.trackKey),
+          fullHeight: true,
+        }),
+        globals.state.currentSelection !== null &&
                   globals.state.currentSelection.kind === 'AREA' ?
-              m(TrackButton, {
-                action: (e: PerfettoMouseEvent) => {
-                  globals.dispatch(Actions.toggleTrackSelection(
-                      {id: attrs.trackState.id, isTrackGroup: false}));
-                  e.stopPropagation();
-                },
-                i: isSelected(attrs.trackState.id) ? CHECKBOX : BLANK_CHECKBOX,
-                tooltip: isSelected(attrs.trackState.id) ?
-                    'Remove track' :
-                    'Add track to selection',
-                showButton: true,
-              }) :
-              ''));
+          m(TrackButton, {
+            action: (e: MouseEvent) => {
+              globals.dispatch(Actions.toggleTrackSelection(
+                {id: attrs.trackKey, isTrackGroup: false}));
+              e.stopPropagation();
+            },
+            i: isSelected(attrs.trackKey) ? Icons.Checkbox :
+              Icons.BlankCheckbox,
+            tooltip: isSelected(attrs.trackKey) ? 'Remove track' :
+              'Add track to selection',
+            showButton: true,
+          }) :
+          ''));
   }
 
-  ondragstart(e: DragEvent) {
+  ondragstart(e: DragEvent, trackKey: string) {
     const dataTransfer = e.dataTransfer;
     if (dataTransfer === null) return;
     this.dragging = true;
-    globals.rafScheduler.scheduleFullRedraw();
-    dataTransfer.setData('perfetto/track', `${this.attrs!.trackState.id}`);
+    raf.scheduleFullRedraw();
+    dataTransfer.setData('perfetto/track', `${trackKey}`);
     dataTransfer.setDragImage(new Image(), 0, 0);
   }
 
   ondragend() {
     this.dragging = false;
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
   ondragover(e: DragEvent) {
@@ -174,27 +225,30 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     } else if (e.offsetY > e.target.scrollHeight / 3 * 2) {
       this.dropping = 'after';
     }
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
   ondragleave() {
     this.dropping = undefined;
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
-  ondrop(e: DragEvent) {
+  ondrop(e: DragEvent, trackKey: string) {
     if (this.dropping === undefined) return;
     const dataTransfer = e.dataTransfer;
     if (dataTransfer === null) return;
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
     const srcId = dataTransfer.getData('perfetto/track');
-    const dstId = this.attrs!.trackState.id;
+    const dstId = trackKey;
     globals.dispatch(Actions.moveTrack({srcId, op: this.dropping, dstId}));
     this.dropping = undefined;
   }
 }
 
-export interface TrackContentAttrs { track: Track; }
+export interface TrackContentAttrs {
+  track: Track;
+  hasError?: boolean;
+}
 export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
   private mouseDownX?: number;
   private mouseDownY?: number;
@@ -203,86 +257,124 @@ export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
   view(node: m.CVnode<TrackContentAttrs>) {
     const attrs = node.attrs;
     return m(
-        '.track-content',
-        {
-          onmousemove: (e: PerfettoMouseEvent) => {
-            attrs.track.onMouseMove(
-                {x: e.layerX - TRACK_SHELL_WIDTH, y: e.layerY});
-            globals.rafScheduler.scheduleRedraw();
-          },
-          onmouseout: () => {
-            attrs.track.onMouseOut();
-            globals.rafScheduler.scheduleRedraw();
-          },
-          onmousedown: (e: PerfettoMouseEvent) => {
-            this.mouseDownX = e.layerX;
-            this.mouseDownY = e.layerY;
-          },
-          onmouseup: (e: PerfettoMouseEvent) => {
-            if (this.mouseDownX === undefined ||
-                this.mouseDownY === undefined) {
-              return;
-            }
-            if (Math.abs(e.layerX - this.mouseDownX) > 1 ||
-                Math.abs(e.layerY - this.mouseDownY) > 1) {
-              this.selectionOccurred = true;
-            }
-            this.mouseDownX = undefined;
-            this.mouseDownY = undefined;
-          },
-          onclick: (e: PerfettoMouseEvent) => {
-            // This click event occurs after any selection mouse up/drag events
-            // so we have to look if the mouse moved during this click to know
-            // if a selection occurred.
-            if (this.selectionOccurred) {
-              this.selectionOccurred = false;
-              return;
-            }
-            // Returns true if something was selected, so stop propagation.
-            if (attrs.track.onMouseClick(
-                    {x: e.layerX - TRACK_SHELL_WIDTH, y: e.layerY})) {
-              e.stopPropagation();
-            }
-            globals.rafScheduler.scheduleRedraw();
-          },
+      '.track-content',
+      {
+        className: classNames(attrs.hasError && 'pf-track-content-error'),
+        onmousemove: (e: MouseEvent) => {
+          attrs.track.onMouseMove?.(currentTargetOffset(e));
+          raf.scheduleRedraw();
         },
-        node.children);
+        onmouseout: () => {
+          attrs.track.onMouseOut?.();
+          raf.scheduleRedraw();
+        },
+        onmousedown: (e: MouseEvent) => {
+          const {x, y} = currentTargetOffset(e);
+          this.mouseDownX = x;
+          this.mouseDownY = y;
+        },
+        onmouseup: (e: MouseEvent) => {
+          if (this.mouseDownX === undefined ||
+                this.mouseDownY === undefined) {
+            return;
+          }
+          const {x, y} = currentTargetOffset(e);
+          if (Math.abs(x - this.mouseDownX) > 1 ||
+                Math.abs(y - this.mouseDownY) > 1) {
+            this.selectionOccurred = true;
+          }
+          this.mouseDownX = undefined;
+          this.mouseDownY = undefined;
+        },
+        onclick: (e: MouseEvent) => {
+          // This click event occurs after any selection mouse up/drag events
+          // so we have to look if the mouse moved during this click to know
+          // if a selection occurred.
+          if (this.selectionOccurred) {
+            this.selectionOccurred = false;
+            return;
+          }
+          // Returns true if something was selected, so stop propagation.
+          if (attrs.track.onMouseClick?.(currentTargetOffset(e))) {
+            e.stopPropagation();
+          }
+          raf.scheduleRedraw();
+        },
+      },
+      node.children);
   }
 }
 
 interface TrackComponentAttrs {
-  trackState: TrackState;
-  track: Track;
+  trackKey: string;
+  heightPx?: number;
+  title: string;
+  buttons?: m.Children;
+  tags?: TrackTags;
+  track?: Track;
+  error?: Error | undefined;
+
+  // Issues a scrollTo() on this DOM element at creation time. Default: false.
+  revealOnCreate?: boolean;
 }
+
 class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
   view({attrs}: m.CVnode<TrackComponentAttrs>) {
     // TODO(hjd): The min height below must match the track_shell_title
     // max height in common.scss so we should read it from CSS to avoid
     // them going out of sync.
+    const TRACK_HEIGHT_MIN_PX = 18;
+    const TRACK_HEIGHT_DEFAULT_PX = 24;
+    const trackHeightRaw = attrs.heightPx ?? TRACK_HEIGHT_DEFAULT_PX;
+    const trackHeight = Math.max(trackHeightRaw, TRACK_HEIGHT_MIN_PX);
+
     return m(
-        '.track',
-        {
-          style: {
-            height: `${Math.max(18, attrs.track.getHeight())}px`,
-          },
-          id: 'track_' + attrs.trackState.id,
+      '.track',
+      {
+        style: {
+          // Note: Sub-pixel track heights can mess with sticky elements.
+          // Round up to the nearest integer number of pixels.
+          height: `${Math.ceil(trackHeight)}px`,
         },
-        [
-          m(TrackShell, {track: attrs.track, trackState: attrs.trackState}),
-          m(TrackContent, {track: attrs.track}),
-        ]);
+        id: 'track_' + attrs.trackKey,
+      },
+      [
+        m(TrackShell, {
+          buttons: [
+            attrs.error && m(CrashButton, {error: attrs.error}),
+            attrs.buttons,
+          ],
+          title: attrs.title,
+          trackKey: attrs.trackKey,
+          tags: attrs.tags,
+        }),
+        attrs.track && m(TrackContent, {
+          track: attrs.track,
+          hasError: Boolean(attrs.error),
+        }),
+      ]);
   }
 
-  oncreate({attrs}: m.CVnode<TrackComponentAttrs>) {
-    if (globals.frontendLocalState.scrollToTrackId === attrs.trackState.id) {
-      verticalScrollToTrack(attrs.trackState.id);
-      globals.frontendLocalState.scrollToTrackId = undefined;
+  oncreate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
+    const {attrs} = vnode;
+    if (globals.scrollToTrackKey === attrs.trackKey) {
+      verticalScrollToTrack(attrs.trackKey);
+      globals.scrollToTrackKey = undefined;
     }
+    this.onupdate(vnode);
+
+    if (attrs.revealOnCreate) {
+      vnode.dom.scrollIntoView();
+    }
+  }
+
+  onupdate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
+    vnode.attrs.track?.onFullRedraw?.();
   }
 }
 
 export interface TrackButtonAttrs {
-  action: (e: PerfettoMouseEvent) => void;
+  action: (e: MouseEvent) => void;
   i: string;
   tooltip: string;
   showButton: boolean;
@@ -292,91 +384,92 @@ export interface TrackButtonAttrs {
 export class TrackButton implements m.ClassComponent<TrackButtonAttrs> {
   view({attrs}: m.CVnode<TrackButtonAttrs>) {
     return m(
-        'i.track-button',
-        {
-          class: [
-            (attrs.showButton ? 'show' : ''),
-            (attrs.fullHeight ? 'full-height' : ''),
-            (attrs.filledIcon ? 'material-icons-filled' : 'material-icons'),
-          ].filter(Boolean)
-                     .join(' '),
-          onclick: attrs.action,
-          title: attrs.tooltip,
-        },
-        attrs.i);
+      'i.track-button',
+      {
+        class: [
+          (attrs.showButton ? 'show' : ''),
+          (attrs.fullHeight ? 'full-height' : ''),
+          (attrs.filledIcon ? 'material-icons-filled' : 'material-icons'),
+        ].filter(Boolean)
+          .join(' '),
+        onclick: attrs.action,
+        title: attrs.tooltip,
+      },
+      attrs.i);
   }
 }
 
 interface TrackPanelAttrs {
-  id: string;
-  selectable: boolean;
+  key: string;
+  trackKey: string;
+  title: string;
+  tags?: TrackTags;
+  trackFSM?: TrackCacheEntry;
+  revealOnCreate?: boolean;
 }
 
-export class TrackPanel extends Panel<TrackPanelAttrs> {
-  // TODO(hjd): It would be nicer if these could not be undefined here.
-  // We should implement a NullTrack which can be used if the trackState
-  // has disappeared.
-  private track: Track|undefined;
-  private trackState: TrackState|undefined;
+export class TrackPanel implements Panel {
+  readonly kind = 'panel';
+  readonly selectable = true;
 
-  constructor(vnode: m.CVnode<TrackPanelAttrs>) {
-    super();
-    const trackId = vnode.attrs.id;
-    const trackState = globals.state.tracks[trackId];
-    if (trackState === undefined) {
-      return;
-    }
-    const engine = globals.engines.get(trackState.engineId);
-    if (engine === undefined) {
-      return;
-    }
-    const trackCreator = trackRegistry.get(trackState.kind);
-    this.track = trackCreator.create({trackId, engine});
-    this.trackState = trackState;
+  constructor(private readonly attrs: TrackPanelAttrs) {}
+
+  get key(): string {
+    return this.attrs.key;
   }
 
-  view() {
-    if (this.track === undefined || this.trackState === undefined) {
-      return m('div', 'No such track');
-    }
-    return m(TrackComponent, {trackState: this.trackState, track: this.track});
+  get trackKey(): string {
+    return this.attrs.trackKey;
   }
 
-  oncreate() {
-    if (this.track !== undefined) {
-      this.track.onFullRedraw();
-    }
-  }
+  get mithril(): m.Children {
+    const attrs = this.attrs;
 
-  onupdate() {
-    if (this.track !== undefined) {
-      this.track.onFullRedraw();
-    }
-  }
-
-  onremove() {
-    if (this.track !== undefined) {
-      this.track.onDestroy();
-      this.track = undefined;
+    if (attrs.trackFSM) {
+      if (attrs.trackFSM.getError()) {
+        return m(TrackComponent, {
+          title: attrs.title,
+          trackKey: attrs.trackKey,
+          error: attrs.trackFSM.getError(),
+          track: attrs.trackFSM.track,
+        });
+      }
+      return m(TrackComponent, {
+        key: attrs.key,
+        trackKey: attrs.trackKey,
+        title: attrs.title,
+        heightPx: attrs.trackFSM.track.getHeight(),
+        buttons: attrs.trackFSM.track.getTrackShellButtons?.(),
+        tags: attrs.tags,
+        track: attrs.trackFSM.track,
+        error: attrs.trackFSM.getError(),
+        revealOnCreate: attrs.revealOnCreate,
+      });
+    } else {
+      return m(TrackComponent, {
+        key: attrs.key,
+        trackKey: attrs.trackKey,
+        title: attrs.title,
+        revealOnCreate: attrs.revealOnCreate,
+      });
     }
   }
 
   highlightIfTrackSelected(ctx: CanvasRenderingContext2D, size: PanelSize) {
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     const selection = globals.state.currentSelection;
-    const trackState = this.trackState;
-    if (!selection || selection.kind !== 'AREA' || trackState === undefined) {
+    if (!selection || selection.kind !== 'AREA') {
       return;
     }
     const selectedArea = globals.state.areas[selection.areaId];
     const selectedAreaDuration = selectedArea.end - selectedArea.start;
-    if (selectedArea.tracks.includes(trackState.id)) {
+    if (selectedArea.tracks.includes(this.attrs.trackKey)) {
       ctx.fillStyle = SELECTION_FILL_COLOR;
       ctx.fillRect(
-          visibleTimeScale.tpTimeToPx(selectedArea.start) + TRACK_SHELL_WIDTH,
-          0,
-          visibleTimeScale.durationToPx(selectedAreaDuration),
-          size.height);
+        visibleTimeScale.timeToPx(selectedArea.start) + TRACK_SHELL_WIDTH,
+        0,
+        visibleTimeScale.durationToPx(selectedAreaDuration),
+        size.height);
     }
   }
 
@@ -384,46 +477,54 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
     ctx.save();
 
     drawGridLines(
-        ctx,
-        size.width,
-        size.height);
+      ctx,
+      size.width,
+      size.height);
+
+    const track = this.attrs.trackFSM;
 
     ctx.translate(TRACK_SHELL_WIDTH, 0);
-    if (this.track !== undefined) {
-      this.track.render(ctx);
+    if (track !== undefined) {
+      const trackSize = {...size, width: size.width - TRACK_SHELL_WIDTH};
+      if (!track.getError()) {
+        track.update();
+        track.track.render(ctx, trackSize);
+      }
+    } else {
+      checkerboard(ctx, size.height, 0, size.width - TRACK_SHELL_WIDTH);
     }
     ctx.restore();
 
     this.highlightIfTrackSelected(ctx, size);
 
-    const {visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     // Draw vertical line when hovering on the notes panel.
     if (globals.state.hoveredNoteTimestamp !== -1n) {
       drawVerticalLineAtTime(
-          ctx,
-          visibleTimeScale,
-          globals.state.hoveredNoteTimestamp,
-          size.height,
-          `#aaa`);
+        ctx,
+        visibleTimeScale,
+        globals.state.hoveredNoteTimestamp,
+        size.height,
+        `#aaa`);
     }
     if (globals.state.hoverCursorTimestamp !== -1n) {
       drawVerticalLineAtTime(
-          ctx,
-          visibleTimeScale,
-          globals.state.hoverCursorTimestamp,
-          size.height,
-          `#344596`);
+        ctx,
+        visibleTimeScale,
+        globals.state.hoverCursorTimestamp,
+        size.height,
+        `#344596`);
     }
 
     if (globals.state.currentSelection !== null) {
       if (globals.state.currentSelection.kind === 'SLICE' &&
           globals.sliceDetails.wakeupTs !== undefined) {
         drawVerticalLineAtTime(
-            ctx,
-            visibleTimeScale,
-            globals.sliceDetails.wakeupTs,
-            size.height,
-            `black`);
+          ctx,
+          visibleTimeScale,
+          globals.sliceDetails.wakeupTs,
+          size.height,
+          `black`);
       }
     }
     // All marked areas should have semi-transparent vertical lines
@@ -433,31 +534,30 @@ export class TrackPanel extends Panel<TrackPanelAttrs> {
         const transparentNoteColor =
             'rgba(' + hex.rgb(note.color.substr(1)).toString() + ', 0.65)';
         drawVerticalLineAtTime(
-            ctx,
-            visibleTimeScale,
-            globals.state.areas[note.areaId].start,
-            size.height,
-            transparentNoteColor,
-            1);
+          ctx,
+          visibleTimeScale,
+          globals.state.areas[note.areaId].start,
+          size.height,
+          transparentNoteColor,
+          1);
         drawVerticalLineAtTime(
-            ctx,
-            visibleTimeScale,
-            globals.state.areas[note.areaId].end,
-            size.height,
-            transparentNoteColor,
-            1);
+          ctx,
+          visibleTimeScale,
+          globals.state.areas[note.areaId].end,
+          size.height,
+          transparentNoteColor,
+          1);
       } else if (note.noteType === 'DEFAULT') {
         drawVerticalLineAtTime(
-            ctx, visibleTimeScale, note.timestamp, size.height, note.color);
+          ctx, visibleTimeScale, note.timestamp, size.height, note.color);
       }
     }
   }
 
-  getSliceRect(tStart: number, tDur: number, depth: number): SliceRect
-      |undefined {
-    if (this.track === undefined) {
+  getSliceRect(tStart: time, tDur: time, depth: number): SliceRect|undefined {
+    if (this.attrs.trackFSM === undefined) {
       return undefined;
     }
-    return this.track.getSliceRect(tStart, tDur, depth);
+    return this.attrs.trackFSM.track.getSliceRect?.(tStart, tDur, depth);
   }
 }

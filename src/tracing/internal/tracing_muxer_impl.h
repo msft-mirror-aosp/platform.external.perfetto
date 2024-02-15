@@ -114,6 +114,7 @@ class TracingMuxerImpl : public TracingMuxer {
     DataSourceFactory factory{};
     bool supports_multiple_instances = false;
     bool requires_callbacks_under_lock = false;
+    bool no_flush = false;
     DataSourceStaticState* static_state = nullptr;
   };
 
@@ -125,6 +126,7 @@ class TracingMuxerImpl : public TracingMuxer {
   bool RegisterDataSource(const DataSourceDescriptor&,
                           DataSourceFactory,
                           DataSourceParams,
+                          bool no_flush,
                           DataSourceStaticState*) override;
   void UpdateDataSourceDescriptor(const DataSourceDescriptor&,
                                   const DataSourceStaticState*) override;
@@ -209,7 +211,8 @@ class TracingMuxerImpl : public TracingMuxer {
    public:
     ProducerImpl(TracingMuxerImpl*,
                  TracingBackendId,
-                 uint32_t shmem_batch_commits_duration_ms);
+                 uint32_t shmem_batch_commits_duration_ms,
+                 bool shmem_direct_patching_enabled);
     ~ProducerImpl() override;
 
     void Initialize(std::unique_ptr<ProducerEndpoint> endpoint);
@@ -228,7 +231,10 @@ class TracingMuxerImpl : public TracingMuxer {
     void StartDataSource(DataSourceInstanceID,
                          const DataSourceConfig&) override;
     void StopDataSource(DataSourceInstanceID) override;
-    void Flush(FlushRequestID, const DataSourceInstanceID*, size_t) override;
+    void Flush(FlushRequestID,
+               const DataSourceInstanceID*,
+               size_t,
+               FlushFlags) override;
     void ClearIncrementalState(const DataSourceInstanceID*, size_t) override;
 
     bool SweepDeadServices();
@@ -247,6 +253,7 @@ class TracingMuxerImpl : public TracingMuxer {
     bool producer_provided_smb_failed_ = false;
 
     const uint32_t shmem_batch_commits_duration_ms_ = 0;
+    const bool shmem_direct_patching_enabled_ = false;
 
     // Set of data sources that have been actually registered on this producer.
     // This can be a subset of the global |data_sources_|, because data sources
@@ -502,8 +509,6 @@ class TracingMuxerImpl : public TracingMuxer {
       uint32_t backend_connection_id,
       DataSourceInstanceID,
       const DataSourceConfig&,
-      uint64_t config_hash,
-      uint64_t startup_config_hash,
       TracingSessionGlobalID startup_session_id);
   void StartDataSourceImpl(const FindDataSourceRes&);
   void StopDataSource_AsyncBeginImpl(const FindDataSourceRes&);
@@ -513,7 +518,8 @@ class TracingMuxerImpl : public TracingMuxer {
                                const FindDataSourceRes&);
   bool FlushDataSource_AsyncBegin(TracingBackendId,
                                   DataSourceInstanceID,
-                                  FlushRequestID);
+                                  FlushRequestID,
+                                  FlushFlags);
   void FlushDataSource_AsyncEnd(TracingBackendId,
                                 uint32_t backend_connection_id,
                                 DataSourceInstanceID,

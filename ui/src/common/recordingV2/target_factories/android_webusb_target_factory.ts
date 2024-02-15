@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {getErrorMessage} from '../../../base/errors';
 import {assertExists} from '../../../base/logging';
-import {getErrorMessage} from '../../errors';
-import {RECORDING_V2_FLAG} from '../../feature_flags';
+import {RECORDING_V2_FLAG} from '../../../core/feature_flags';
 import {AdbKeyManager} from '../auth/adb_key_manager';
 import {RecordingError} from '../recording_error_handling';
 import {
@@ -45,7 +45,7 @@ export class AndroidWebusbTargetFactory implements TargetFactory {
   onTargetChange: OnTargetChangeCallback = () => {};
   private recordingProblems: string[] = [];
   private targets: Map<string, AndroidWebusbTarget> =
-      new Map<string, AndroidWebusbTarget>();
+    new Map<string, AndroidWebusbTarget>();
   // AdbKeyManager should only be instantiated once, so we can use the same key
   // for all devices.
   private keyManager: AdbKeyManager = new AdbKeyManager();
@@ -90,21 +90,28 @@ export class AndroidWebusbTargetFactory implements TargetFactory {
   }
 
   private async init() {
-    for (const device of await this.usb.getDevices()) {
+    let devices: USBDevice[] = [];
+    try {
+      devices = await this.usb.getDevices();
+    } catch (_) {
+      return;  // WebUSB not available or disallowed in iframe.
+    }
+
+    for (const device of devices) {
       if (this.checkDeviceValidity(device).isValid) {
         this.targets.set(
-            assertExists(device.serialNumber),
-            new AndroidWebusbTarget(
-                device, this.keyManager, this.onTargetChange));
+          assertExists(device.serialNumber),
+          new AndroidWebusbTarget(
+            device, this.keyManager, this.onTargetChange));
       }
     }
 
     this.usb.addEventListener('connect', (ev: USBConnectionEvent) => {
       if (this.checkDeviceValidity(ev.device).isValid) {
         this.targets.set(
-            assertExists(ev.device.serialNumber),
-            new AndroidWebusbTarget(
-                ev.device, this.keyManager, this.onTargetChange));
+          assertExists(ev.device.serialNumber),
+          new AndroidWebusbTarget(
+            ev.device, this.keyManager, this.onTargetChange));
         this.onTargetChange();
       }
     });
@@ -114,7 +121,7 @@ export class AndroidWebusbTargetFactory implements TargetFactory {
       // is invalid we would not have connected in the first place.
       const serialNumber = assertExists(ev.device.serialNumber);
       await assertExists(this.targets.get(serialNumber))
-          .disconnect(`Device with serial ${serialNumber} was disconnected.`);
+        .disconnect(`Device with serial ${serialNumber} was disconnected.`);
       this.targets.delete(serialNumber);
       this.onTargetChange();
     });
@@ -124,12 +131,12 @@ export class AndroidWebusbTargetFactory implements TargetFactory {
     const deviceValidity: DeviceValidity = {isValid: true, issues: []};
     if (!device.serialNumber) {
       deviceValidity.issues.push(
-          createDeviceErrorMessage(device, SERIAL_NUMBER_ISSUE));
+        createDeviceErrorMessage(device, SERIAL_NUMBER_ISSUE));
       deviceValidity.isValid = false;
     }
     if (!findInterfaceAndEndpoint(device)) {
       deviceValidity.issues.push(
-          createDeviceErrorMessage(device, ADB_INTERFACE_ISSUE));
+        createDeviceErrorMessage(device, ADB_INTERFACE_ISSUE));
       deviceValidity.isValid = false;
     }
     this.recordingProblems.push(...deviceValidity.issues);
@@ -140,6 +147,7 @@ export class AndroidWebusbTargetFactory implements TargetFactory {
 // We only want to instantiate this class if:
 // 1. The browser implements the USB functionality.
 // 2. Recording V2 is enabled.
+// eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
 if (navigator.usb && RECORDING_V2_FLAG.get()) {
   targetFactoryRegistry.register(new AndroidWebusbTargetFactory(navigator.usb));
 }

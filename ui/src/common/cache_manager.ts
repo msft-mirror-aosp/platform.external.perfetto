@@ -18,7 +18,6 @@
  * containing it is discarded by Chrome (e.g. because the tab was not used for
  * a long time) or when the user accidentally hits reload.
  */
-import {ignoreCacheUnactionableErrors} from './errors';
 import {TraceArrayBufferSource, TraceSource} from './state';
 
 const TRACE_CACHE_NAME = 'cached_traces';
@@ -43,9 +42,11 @@ async function cacheDelete(key: Request): Promise<boolean> {
   try {
     const cache = await getCache();
     if (cache === undefined) return false;  // Cache storage not supported.
-    return cache.delete(key);
-  } catch (e) {
-    return ignoreCacheUnactionableErrors(e, false);
+    return await cache.delete(key);
+  } catch (_) {
+    // TODO(288483453): Reinstate:
+    // return ignoreCacheUnactionableErrors(e, false);
+    return false;
   }
 }
 
@@ -53,9 +54,10 @@ async function cachePut(key: string, value: Response): Promise<void> {
   try {
     const cache = await getCache();
     if (cache === undefined) return;  // Cache storage not supported.
-    cache.put(key, value);
-  } catch (e) {
-    ignoreCacheUnactionableErrors(e, undefined);
+    await cache.put(key, value);
+  } catch (_) {
+    // TODO(288483453): Reinstate:
+    // ignoreCacheUnactionableErrors(e, undefined);
   }
 }
 
@@ -63,9 +65,11 @@ async function cacheMatch(key: Request|string): Promise<Response|undefined> {
   try {
     const cache = await getCache();
     if (cache === undefined) return undefined;  // Cache storage not supported.
-    return cache.match(key);
-  } catch (e) {
-    return ignoreCacheUnactionableErrors(e, undefined);
+    return await cache.match(key);
+  } catch (_) {
+    // TODO(288483453): Reinstate:
+    // ignoreCacheUnactionableErrors(e, undefined);
+    return undefined;
   }
 }
 
@@ -73,14 +77,16 @@ async function cacheKeys(): Promise<readonly Request[]> {
   try {
     const cache = await getCache();
     if (cache === undefined) return [];  // Cache storage not supported.
-    return cache.keys();
+    return await cache.keys();
   } catch (e) {
-    return ignoreCacheUnactionableErrors(e, []);
+    // TODO(288483453): Reinstate:
+    // return ignoreCacheUnactionableErrors(e, []);
+    return [];
   }
 }
 
 export async function cacheTrace(
-    traceSource: TraceSource, traceUuid: string): Promise<boolean> {
+  traceSource: TraceSource, traceUuid: string): Promise<boolean> {
   let trace;
   let title = '';
   let fileName = '';
@@ -88,25 +94,25 @@ export async function cacheTrace(
   let contentLength = 0;
   let localOnly = false;
   switch (traceSource.type) {
-    case 'ARRAY_BUFFER':
-      trace = traceSource.buffer;
-      title = traceSource.title;
-      fileName = traceSource.fileName || '';
-      url = traceSource.url || '';
-      contentLength = traceSource.buffer.byteLength;
-      localOnly = traceSource.localOnly || false;
-      break;
-    case 'FILE':
-      trace = await traceSource.file.arrayBuffer();
-      title = traceSource.file.name;
-      contentLength = traceSource.file.size;
-      break;
-    default:
-      return false;
+  case 'ARRAY_BUFFER':
+    trace = traceSource.buffer;
+    title = traceSource.title;
+    fileName = traceSource.fileName || '';
+    url = traceSource.url || '';
+    contentLength = traceSource.buffer.byteLength;
+    localOnly = traceSource.localOnly || false;
+    break;
+  case 'FILE':
+    trace = await traceSource.file.arrayBuffer();
+    title = traceSource.file.name;
+    contentLength = traceSource.file.size;
+    break;
+  default:
+    return false;
   }
 
   const headers = new Headers([
-    ['x-trace-title', title],
+    ['x-trace-title', encodeURI(title)],
     ['x-trace-url', url],
     ['x-trace-filename', fileName],
     ['x-trace-local-only', `${localOnly}`],
@@ -116,12 +122,12 @@ export async function cacheTrace(
       'expires',
       // Expires in a week from now (now = upload time)
       (new Date((new Date()).getTime() + (1000 * 60 * 60 * 24 * 7)))
-          .toUTCString(),
+        .toUTCString(),
     ],
   ]);
   await deleteStaleEntries();
   await cachePut(
-      `/_${TRACE_CACHE_NAME}/${traceUuid}`, new Response(trace, {headers}));
+    `/_${TRACE_CACHE_NAME}/${traceUuid}`, new Response(trace, {headers}));
   return true;
 }
 
@@ -134,7 +140,7 @@ export async function tryGetTrace(traceUuid: string):
   return {
     type: 'ARRAY_BUFFER',
     buffer: await response.arrayBuffer(),
-    title: response.headers.get('x-trace-title') || '',
+    title: decodeURI(response.headers.get('x-trace-title') || ''),
     fileName: response.headers.get('x-trace-filename') || undefined,
     url: response.headers.get('x-trace-url') || undefined,
     uuid: traceUuid,
@@ -174,7 +180,7 @@ async function deleteStaleEntries() {
   // delete them from cache.
   const oldTraces =
       storedTraces.sort((a, b) => b.date.getTime() - a.date.getTime())
-          .slice(TRACE_CACHE_SIZE);
+        .slice(TRACE_CACHE_SIZE);
   for (const oldTrace of oldTraces) {
     deletions.push(cacheDelete(oldTrace.key));
   }

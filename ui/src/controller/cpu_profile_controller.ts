@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Engine} from '../common/engine';
-import {NUM, STR} from '../common/query_result';
 import {CallsiteInfo, CpuProfileSampleSelection} from '../common/state';
 import {CpuProfileDetails, globals} from '../frontend/globals';
 import {publishCpuProfileDetails} from '../frontend/publish';
+import {Engine} from '../trace_processor/engine';
+import {NUM, STR} from '../trace_processor/query_result';
 
 import {Controller} from './controller';
 
@@ -54,27 +54,29 @@ export class CpuProfileController extends Controller<'main'> {
     this.lastSelectedSample = this.copyCpuProfileSample(selection);
 
     this.getSampleData(selectedSample.id)
-        .then((sampleData) => {
-          if (sampleData !== undefined && selectedSample &&
+      .then((sampleData) => {
+        /* eslint-disable @typescript-eslint/strict-boolean-expressions */
+        if (sampleData !== undefined && selectedSample &&
+              /* eslint-enable */
               this.lastSelectedSample &&
               this.lastSelectedSample.id === selectedSample.id) {
-            const cpuProfileDetails: CpuProfileDetails = {
-              id: selectedSample.id,
-              ts: selectedSample.ts,
-              utid: selectedSample.utid,
-              stack: sampleData,
-            };
+          const cpuProfileDetails: CpuProfileDetails = {
+            id: selectedSample.id,
+            ts: selectedSample.ts,
+            utid: selectedSample.utid,
+            stack: sampleData,
+          };
 
-            publishCpuProfileDetails(cpuProfileDetails);
-          }
-        })
-        .finally(() => {
-          this.requestingData = false;
-          if (this.queuedRunRequest) {
-            this.queuedRunRequest = false;
-            this.run();
-          }
-        });
+          publishCpuProfileDetails(cpuProfileDetails);
+        }
+      })
+      .finally(() => {
+        this.requestingData = false;
+        if (this.queuedRunRequest) {
+          this.queuedRunRequest = false;
+          this.run();
+        }
+      });
   }
 
   private copyCpuProfileSample(cpuProfileSample: CpuProfileSampleSelection):

@@ -92,7 +92,7 @@ tools/ninja -C out/android \
 
 Follow these instructions if you are an AOSP contributor.
 
-The source code lives in [`external/perfetto` in the AOSP tree](https://cs.android.com/android/platform/superproject/+/master:external/perfetto/).
+The source code lives in [`external/perfetto` in the AOSP tree](https://cs.android.com/android/platform/superproject/+/main:external/perfetto/).
 
 Follow the instructions on https://source.android.com/setup/build/building .
 
@@ -504,6 +504,13 @@ In `.vscode/settings.json`:
     "--completion-style=detailed",
     "--header-insertion=never"
   ],
+  "eslint.workingDirectories": [
+    "./ui",
+  ],
+  "eslint.format.enable": true,
+  "[typescript]": {
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+  }
 }
 ```
 

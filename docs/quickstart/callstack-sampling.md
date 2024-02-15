@@ -3,7 +3,7 @@
 ## Prerequisites
 
 *   [ADB](https://developer.android.com/studio/command-line/adb) installed.
-*   A device running Android R+.
+*   A device running Android T+.
 *   Either a debuggable (`userdebug`/`eng`) Android image, or the apps to be
     profiled need to be
     [marked as profileable or debuggable](https://developer.android.com/guide/topics/manifest/profileable-element)
@@ -94,7 +94,7 @@ set ANDROID_SERIAL=SER123456
 ```
 
 Download the
-[`cpu_profile`](https://raw.githubusercontent.com/google/perfetto/master/tools/cpu_profile)
+[`cpu_profile`](https://raw.githubusercontent.com/google/perfetto/main/tools/cpu_profile)
 script. Then, start profiling. For example, to profile the processes
 `com.android.foo` and `com.android.bar`, use:
 
@@ -130,4 +130,6 @@ the call-stack at that point on the timeline.
 
 `cpu_profile` will also write separate profiles for each process that it
 profiled in the output directory, and those can be visualized using
-[`pprof`](https://github.com/google/pprof).
+[`pprof`](https://github.com/google/pprof). You can merge them into one
+by passing all of them to pprof, e.g.
+`pprof /tmp/perf_profile-240105114948clvad/*`.

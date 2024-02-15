@@ -13,35 +13,32 @@
 // limitations under the License.
 
 import {assertTrue} from '../base/logging';
-import {Arg, Args} from '../common/arg_types';
-import {Engine} from '../common/engine';
-import {
-  LONG,
-  NUM,
-  NUM_NULL,
-  STR,
-  STR_NULL,
-} from '../common/query_result';
+import {Time, time} from '../base/time';
+import {Args, ArgValue} from '../common/arg_types';
 import {ChromeSliceSelection} from '../common/state';
 import {
-  tpDurationFromSql,
-  TPTime,
-  tpTimeFromSql,
-} from '../common/time';
-import {
   CounterDetails,
+  globals,
   SliceDetails,
   ThreadStateDetails,
 } from '../frontend/globals';
-import {globals} from '../frontend/globals';
 import {
   publishCounterDetails,
   publishSliceDetails,
   publishThreadStateDetails,
 } from '../frontend/publish';
+import {Engine} from '../trace_processor/engine';
+import {
+  durationFromSql,
+  LONG,
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+  timeFromSql,
+} from '../trace_processor/query_result';
 import {SLICE_TRACK_KIND} from '../tracks/chrome_slices';
 
-import {parseArgs} from './args_parser';
 import {Controller} from './controller';
 
 export interface SelectionControllerArgs {
@@ -91,13 +88,12 @@ export class SelectionController extends Controller<'main'> {
 
     if (selection.kind === 'COUNTER') {
       this.counterDetails(selection.leftTs, selection.rightTs, selection.id)
-          .then((results) => {
-            if (results !== undefined && selection &&
-                selection.kind === selectedKind &&
+        .then((results) => {
+          if (results !== undefined && selection.kind === selectedKind &&
                 selection.id === selectedId) {
-              publishCounterDetails(results);
-            }
-          });
+            publishCounterDetails(results);
+          }
+        });
     } else if (selection.kind === 'SLICE') {
       this.sliceDetails(selectedId as number);
     } else if (selection.kind === 'THREAD_STATE') {
@@ -141,7 +137,7 @@ export class SelectionController extends Controller<'main'> {
 
     const promisedDetails = this.args.engine.query(`
       SELECT *, ABS_TIME_STR(ts) as absTime FROM ${leafTable} WHERE id = ${
-        selectedId};
+  selectedId};
     `);
 
     const [details, args] = await Promise.all([promisedDetails, promisedArgs]);
@@ -182,39 +178,40 @@ export class SelectionController extends Controller<'main'> {
     for (const k of details.columns()) {
       const v = rowIter.get(k);
       switch (k) {
-        case 'id':
-          break;
-        case 'ts':
-          ts = tpTimeFromSql(v);
-          break;
-        case 'thread_ts':
-          threadTs = tpTimeFromSql(v);
-          break;
-        case 'absTime':
-          if (v) absTime = `${v}`;
-          break;
-        case 'name':
-          name = `${v}`;
-          break;
-        case 'dur':
-          dur = tpDurationFromSql(v);
-          break;
-        case 'thread_dur':
-          threadDur = tpDurationFromSql(v);
-          break;
-        case 'category':
-        case 'cat':
-          category = `${v}`;
-          break;
-        case 'track_id':
-          trackId = Number(v);
-          break;
-        default:
-          if (!ignoredColumns.includes(k)) args.set(k, `${v}`);
+      case 'id':
+        break;
+      case 'ts':
+        ts = timeFromSql(v);
+        break;
+      case 'thread_ts':
+        threadTs = timeFromSql(v);
+        break;
+      case 'absTime':
+        /* eslint-disable @typescript-eslint/strict-boolean-expressions */
+        if (v) absTime = `${v}`;
+        /* eslint-enable */
+        break;
+      case 'name':
+        name = `${v}`;
+        break;
+      case 'dur':
+        dur = durationFromSql(v);
+        break;
+      case 'thread_dur':
+        threadDur = durationFromSql(v);
+        break;
+      case 'category':
+      case 'cat':
+        category = `${v}`;
+        break;
+      case 'track_id':
+        trackId = Number(v);
+        break;
+      default:
+        if (!ignoredColumns.includes(k)) args.set(k, `${v}`);
       }
     }
 
-    const argsTree = parseArgs(args);
     const selected: SliceDetails = {
       id: selectedId,
       ts,
@@ -225,7 +222,6 @@ export class SelectionController extends Controller<'main'> {
       name,
       category,
       args,
-      argsTree,
     };
 
     if (trackId !== undefined) {
@@ -251,8 +247,8 @@ export class SelectionController extends Controller<'main'> {
             FROM ${columnInfo.leafTrackTable}
             WHERE id = ${trackId};
         `)).firstRow({
-             utid: NUM,
-           }).utid;
+          utid: NUM,
+        }).utid;
         Object.assign(selected, await this.computeThreadDetails(utid));
       } else if (hasUpid) {
         const upid = (await this.args.engine.query(`
@@ -260,8 +256,8 @@ export class SelectionController extends Controller<'main'> {
             FROM ${columnInfo.leafTrackTable}
             WHERE id = ${trackId};
         `)).firstRow({
-             upid: NUM,
-           }).upid;
+          upid: NUM,
+        }).upid;
         Object.assign(selected, await this.computeProcessDetails(upid));
       }
     }
@@ -273,7 +269,7 @@ export class SelectionController extends Controller<'main'> {
   }
 
   async getArgs(argId: number): Promise<Args> {
-    const args = new Map<string, Arg>();
+    const args = new Map<string, ArgValue>();
     const query = `
       select
         key AS name,
@@ -291,9 +287,12 @@ export class SelectionController extends Controller<'main'> {
       const value = it.value || 'NULL';
       if (name === 'destination slice id' && !isNaN(Number(value))) {
         const destTrackId = await this.getDestTrackId(value);
-        args.set(
-            'Destination Slice',
-            {kind: 'SLICE', trackId: destTrackId, sliceId: Number(value)});
+        args.set('Destination Slice', {
+          kind: 'SLICE',
+          trackId: destTrackId,
+          sliceId: Number(value),
+          rawValue: value,
+        });
       } else {
         args.set(name, value);
       }
@@ -305,18 +304,21 @@ export class SelectionController extends Controller<'main'> {
     const trackIdQuery = `select track_id as trackId from slice
     where slice_id = ${sliceId}`;
     const result = await this.args.engine.query(trackIdQuery);
-    const trackIdTp = result.firstRow({trackId: NUM}).trackId;
+    const trackId = result.firstRow({trackId: NUM}).trackId;
     // TODO(hjd): If we had a consistent mapping from TP track_id
     // UI track id for slice tracks this would be unnecessary.
-    let trackId = '';
+    let trackKey = '';
     for (const track of Object.values(globals.state.tracks)) {
-      if (track.kind === SLICE_TRACK_KIND &&
-          (track.config as {trackId: number}).trackId === Number(trackIdTp)) {
-        trackId = track.id;
-        break;
+      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
+      if (trackInfo?.kind === SLICE_TRACK_KIND) {
+        const trackIds = trackInfo?.trackIds;
+        if (trackIds && trackIds.length > 0 && trackIds[0] === trackId) {
+          trackKey = track.key;
+          break;
+        }
       }
     }
-    return trackId;
+    return trackKey;
   }
 
   // TODO(altimin): We currently rely on the ThreadStateDetails for supporting
@@ -339,7 +341,7 @@ export class SelectionController extends Controller<'main'> {
         dur: LONG,
       });
       const selected: ThreadStateDetails = {
-        ts: row.ts,
+        ts: Time.fromRaw(row.ts),
         dur: row.dur,
       };
       publishThreadStateDetails(selected);
@@ -370,12 +372,13 @@ export class SelectionController extends Controller<'main'> {
         cpu: NUM,
         threadStateId: NUM_NULL,
       });
-      const ts = row.ts;
+      const ts = Time.fromRaw(row.ts);
       const dur = row.dur;
       const priority = row.priority;
       const endState = row.endState;
       const utid = row.utid;
       const cpu = row.cpu;
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       const threadStateId = row.threadStateId || undefined;
       const selected: SliceDetails = {
         ts,
@@ -390,19 +393,19 @@ export class SelectionController extends Controller<'main'> {
       Object.assign(selected, await this.computeThreadDetails(utid));
 
       this.schedulingDetails(ts, utid)
-          .then((wakeResult) => {
-            Object.assign(selected, wakeResult);
-          })
-          .finally(() => {
-            publishSliceDetails(selected);
-          });
+        .then((wakeResult) => {
+          Object.assign(selected, wakeResult);
+        })
+        .finally(() => {
+          publishSliceDetails(selected);
+        });
     }
   }
 
-  async counterDetails(ts: TPTime, rightTs: TPTime, id: number):
+  async counterDetails(ts: time, rightTs: time, id: number):
       Promise<CounterDetails> {
     const counter = await this.args.engine.query(
-        `SELECT value, track_id as trackId FROM counter WHERE id = ${id}`);
+      `SELECT value, track_id as trackId FROM counter WHERE id = ${id}`);
     const row = counter.iter({
       value: NUM,
       trackId: NUM,
@@ -419,12 +422,12 @@ export class SelectionController extends Controller<'main'> {
     const endTs = rightTs !== -1n ? rightTs : globals.state.traceTime.end;
     const delta = value - previousValue;
     const duration = endTs - ts;
-    const uiTrackId = globals.state.uiTrackIdByTraceTrackId[trackId];
-    const name = uiTrackId ? globals.state.tracks[uiTrackId].name : undefined;
+    const trackKey = globals.state.trackKeyByTrackId[trackId];
+    const name = trackKey ? globals.state.tracks[trackKey].name : undefined;
     return {startTime: ts, value, delta, duration, name};
   }
 
-  async schedulingDetails(ts: TPTime, utid: number|Long) {
+  async schedulingDetails(ts: time, utid: number) {
     // Find the ts of the first wakeup before the current slice.
     const wakeResult = await this.args.engine.query(`
       select ts, waker_utid as wakerUtid
@@ -489,9 +492,10 @@ export class SelectionController extends Controller<'main'> {
       tid: threadInfo.tid,
       threadName: threadInfo.name || undefined,
     };
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (threadInfo.upid) {
       return Object.assign(
-          {}, threadDetails, await this.computeProcessDetails(threadInfo.upid));
+        {}, threadDetails, await this.computeProcessDetails(threadInfo.upid));
     }
     return threadDetails;
   }

@@ -221,7 +221,9 @@ void ConsumerIPCClientImpl::FreeBuffers() {
   consumer_port_.FreeBuffers(req, std::move(async_response));
 }
 
-void ConsumerIPCClientImpl::Flush(uint32_t timeout_ms, FlushCallback callback) {
+void ConsumerIPCClientImpl::Flush(uint32_t timeout_ms,
+                                  FlushCallback callback,
+                                  FlushFlags flush_flags) {
   if (!connected_) {
     PERFETTO_DLOG("Cannot Flush(), not connected to tracing service");
     return callback(/*success=*/false);
@@ -229,6 +231,7 @@ void ConsumerIPCClientImpl::Flush(uint32_t timeout_ms, FlushCallback callback) {
 
   protos::gen::FlushRequest req;
   req.set_timeout_ms(static_cast<uint32_t>(timeout_ms));
+  req.set_flags(flush_flags.flags());
   ipc::Deferred<protos::gen::FlushResponse> async_response;
   async_response.Bind(
       [callback](ipc::AsyncResult<protos::gen::FlushResponse> response) {
@@ -353,6 +356,7 @@ void ConsumerIPCClientImpl::ObserveEvents(uint32_t enabled_event_types) {
 }
 
 void ConsumerIPCClientImpl::QueryServiceState(
+    QueryServiceStateArgs args,
     QueryServiceStateCallback callback) {
   if (!connected_) {
     PERFETTO_DLOG(
@@ -363,6 +367,7 @@ void ConsumerIPCClientImpl::QueryServiceState(
   auto it = pending_query_svc_reqs_.insert(pending_query_svc_reqs_.end(),
                                            {std::move(callback), {}});
   protos::gen::QueryServiceStateRequest req;
+  req.set_sessions_only(args.sessions_only);
   ipc::Deferred<protos::gen::QueryServiceStateResponse> async_response;
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
   async_response.Bind(
@@ -459,7 +464,8 @@ void ConsumerIPCClientImpl::SaveTraceForBugreport(
   consumer_port_.SaveTraceForBugreport(req, std::move(async_response));
 }
 
-void ConsumerIPCClientImpl::CloneSession(TracingSessionID tsid) {
+void ConsumerIPCClientImpl::CloneSession(TracingSessionID tsid,
+                                         CloneSessionArgs args) {
   if (!connected_) {
     PERFETTO_DLOG("Cannot CloneSession(), not connected to tracing service");
     return;
@@ -467,6 +473,8 @@ void ConsumerIPCClientImpl::CloneSession(TracingSessionID tsid) {
 
   protos::gen::CloneSessionRequest req;
   req.set_session_id(tsid);
+  req.set_skip_trace_filter(args.skip_trace_filter);
+  req.set_for_bugreport(args.for_bugreport);
   ipc::Deferred<protos::gen::CloneSessionResponse> async_response;
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
 

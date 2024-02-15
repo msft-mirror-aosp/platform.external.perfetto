@@ -15,8 +15,9 @@
 
 import m from 'mithril';
 
-import {EngineProxy} from '../common/engine';
 import {QueryResponse, runQuery} from '../common/queries';
+import {raf} from '../core/raf_scheduler';
+import {EngineProxy} from '../trace_processor/engine';
 
 import {globals} from './globals';
 import {createPage} from './pages';
@@ -54,7 +55,7 @@ class StatsSection implements m.ClassComponent<StatsSectionAttrs> {
               order by name, idx`;
     runQuery(query, engine).then((resp: QueryResponse) => {
       this.queryResponse = resp;
-      globals.rafScheduler.scheduleFullRedraw();
+      raf.scheduleFullRedraw();
     });
   }
 
@@ -68,28 +69,29 @@ class StatsSection implements m.ClassComponent<StatsSectionAttrs> {
     const tableRows = [];
     for (const row of resp.rows) {
       const help = [];
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (row.description) {
         help.push(m('i.material-icons.contextual-help', 'help_outline'));
       }
       const idx = row.idx !== '' ? `[${row.idx}]` : '';
       tableRows.push(m(
-          'tr',
-          m('td.name', {title: row.description}, `${row.name}${idx}`, help),
-          m('td', `${row.value}`),
-          m('td', `${row.severity} (${row.source})`),
-          ));
+        'tr',
+        m('td.name', {title: row.description}, `${row.name}${idx}`, help),
+        m('td', `${row.value}`),
+        m('td', `${row.severity} (${row.source})`),
+      ));
     }
 
     return m(
-        `section${attrs.cssClass}`,
-        m('h2', attrs.title),
-        m('h3', attrs.subTitle),
-        m(
-            'table',
-            m('thead',
-              m('tr', m('td', 'Name'), m('td', 'Value'), m('td', 'Type'))),
-            m('tbody', tableRows),
-            ),
+      `section${attrs.cssClass}`,
+      m('h2', attrs.title),
+      m('h3', attrs.subTitle),
+      m(
+        'table',
+        m('thead',
+          m('tr', m('td', 'Name'), m('td', 'Value'), m('td', 'Type'))),
+        m('tbody', tableRows),
+      ),
     );
   }
 }
@@ -98,10 +100,10 @@ class MetricErrors implements m.ClassComponent {
   view() {
     if (!globals.metricError) return;
     return m(
-        `section.errors`,
-        m('h2', `Metric Errors`),
-        m('h3', `One or more metrics were not computed successfully:`),
-        m('div.metric-error', globals.metricError));
+      `section.errors`,
+      m('h2', `Metric Errors`),
+      m('h3', `One or more metrics were not computed successfully:`),
+      m('div.metric-error', globals.metricError));
   }
 }
 
@@ -132,7 +134,7 @@ class TraceMetadata implements m.ClassComponent {
           order by priority desc, name`;
     runQuery(query, engine).then((resp: QueryResponse) => {
       this.queryResponse = resp;
-      globals.rafScheduler.scheduleFullRedraw();
+      raf.scheduleFullRedraw();
     });
   }
 
@@ -146,20 +148,20 @@ class TraceMetadata implements m.ClassComponent {
     const tableRows = [];
     for (const row of resp.rows) {
       tableRows.push(m(
-          'tr',
-          m('td.name', `${row.name}`),
-          m('td', `${row.value}`),
-          ));
+        'tr',
+        m('td.name', `${row.name}`),
+        m('td', `${row.value}`),
+      ));
     }
 
     return m(
-        'section',
-        m('h2', 'System info and metadata'),
-        m(
-            'table',
-            m('thead', m('tr', m('td', 'Name'), m('td', 'Value'))),
-            m('tbody', tableRows),
-            ),
+      'section',
+      m('h2', 'System info and metadata'),
+      m(
+        'table',
+        m('thead', m('tr', m('td', 'Name'), m('td', 'Value'))),
+        m('tbody', tableRows),
+      ),
     );
   }
 }
@@ -191,7 +193,7 @@ class AndroidGameInterventionList implements m.ClassComponent {
                 from android_game_intervention_list`;
     runQuery(query, engine).then((resp: QueryResponse) => {
       this.queryResponse = resp;
-      globals.rafScheduler.scheduleFullRedraw();
+      raf.scheduleFullRedraw();
     });
   }
 
@@ -207,29 +209,32 @@ class AndroidGameInterventionList implements m.ClassComponent {
     let perfInterventions = '';
     let batteryInterventions = '';
     for (const row of resp.rows) {
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (row.standard_mode_supported) {
         standardInterventions =
             `angle=${row.standard_mode_use_angle},downscale=${
-                row.standard_mode_downscale},fps=${row.standard_mode_fps}`;
+              row.standard_mode_downscale},fps=${row.standard_mode_fps}`;
       } else {
         standardInterventions = 'Not supported';
       }
 
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (row.perf_mode_supported) {
         perfInterventions = `angle=${row.perf_mode_use_angle},downscale=${
-            row.perf_mode_downscale},fps=${row.perf_mode_fps}`;
+          row.perf_mode_downscale},fps=${row.perf_mode_fps}`;
       } else {
         perfInterventions = 'Not supported';
       }
 
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (row.battery_mode_supported) {
         batteryInterventions = `angle=${row.battery_mode_use_angle},downscale=${
-            row.battery_mode_downscale},fps=${row.battery_mode_fps}`;
+          row.battery_mode_downscale},fps=${row.battery_mode_fps}`;
       } else {
         batteryInterventions = 'Not supported';
       }
       // Game mode numbers are defined in
-      // https://cs.android.com/android/platform/superproject/+/master:frameworks/base/core/java/android/app/GameManager.java;l=68
+      // https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/app/GameManager.java;l=68
       if (row.current_mode === 1) {
         row.current_mode = 'Standard';
       } else if (row.current_mode === 2) {
@@ -238,31 +243,31 @@ class AndroidGameInterventionList implements m.ClassComponent {
         row.current_mode = 'Battery';
       }
       tableRows.push(m(
-          'tr',
-          m('td.name', `${row.package_name}`),
-          m('td', `${row.current_mode}`),
-          m('td', standardInterventions),
-          m('td', perfInterventions),
-          m('td', batteryInterventions),
-          ));
+        'tr',
+        m('td.name', `${row.package_name}`),
+        m('td', `${row.current_mode}`),
+        m('td', standardInterventions),
+        m('td', perfInterventions),
+        m('td', batteryInterventions),
+      ));
     }
 
     return m(
-        'section',
-        m('h2', 'Game Intervention List'),
-        m(
-            'table',
-            m('thead',
-              m(
-                  'tr',
-                  m('td', 'Name'),
-                  m('td', 'Current mode'),
-                  m('td', 'Standard mode interventions'),
-                  m('td', 'Performance mode interventions'),
-                  m('td', 'Battery mode interventions'),
-                  )),
-            m('tbody', tableRows),
-            ),
+      'section',
+      m('h2', 'Game Intervention List'),
+      m(
+        'table',
+        m('thead',
+          m(
+            'tr',
+            m('td', 'Name'),
+            m('td', 'Current mode'),
+            m('td', 'Standard mode interventions'),
+            m('td', 'Performance mode interventions'),
+            m('td', 'Battery mode interventions'),
+          )),
+        m('tbody', tableRows),
+      ),
     );
   }
 }
@@ -279,7 +284,7 @@ class PackageList implements m.ClassComponent {
                 profileable_from_shell from package_list`;
     runQuery(query, engine).then((resp: QueryResponse) => {
       this.queryResponse = resp;
-      globals.rafScheduler.scheduleFullRedraw();
+      raf.scheduleFullRedraw();
     });
   }
 
@@ -293,27 +298,29 @@ class PackageList implements m.ClassComponent {
     const tableRows = [];
     for (const row of resp.rows) {
       tableRows.push(m(
-          'tr',
-          m('td.name', `${row.package_name}`),
-          m('td', `${row.version_code}`),
-          m('td',
-            `${row.debuggable ? 'debuggable' : ''} ${
-                row.profileable_from_shell ? 'profileable' : ''}`),
-          ));
+        'tr',
+        m('td.name', `${row.package_name}`),
+        m('td', `${row.version_code}`),
+        /* eslint-disable @typescript-eslint/strict-boolean-expressions */
+        m('td',
+          `${row.debuggable ? 'debuggable' : ''} ${
+            row.profileable_from_shell ? 'profileable' : ''}`),
+        /* eslint-enable */
+      ));
     }
 
     return m(
-        'section',
-        m('h2', 'Package list'),
-        m(
-            'table',
-            m('thead',
-              m('tr',
-                m('td', 'Name'),
-                m('td', 'Version code'),
-                m('td', 'Flags'))),
-            m('tbody', tableRows),
-            ),
+      'section',
+      m('h2', 'Package list'),
+      m(
+        'table',
+        m('thead',
+          m('tr',
+            m('td', 'Name'),
+            m('td', 'Version code'),
+            m('td', 'Flags'))),
+        m('tbody', tableRows),
+      ),
     );
   }
 }
@@ -321,41 +328,41 @@ class PackageList implements m.ClassComponent {
 export const TraceInfoPage = createPage({
   view() {
     return m(
-        '.trace-info-page',
-        m(MetricErrors),
-        m(StatsSection, {
-          queryId: 'info_errors',
-          title: 'Import errors',
-          cssClass: '.errors',
-          subTitle:
+      '.trace-info-page',
+      m(MetricErrors),
+      m(StatsSection, {
+        queryId: 'info_errors',
+        title: 'Import errors',
+        cssClass: '.errors',
+        subTitle:
               `The following errors have been encountered while importing the
                trace. These errors are usually non-fatal but indicate that one
                or more tracks might be missing or showing erroneous data.`,
-          sqlConstraints: `severity = 'error' and value > 0`,
+        sqlConstraints: `severity = 'error' and value > 0`,
 
-        }),
-        m(StatsSection, {
-          queryId: 'info_data_losses',
-          title: 'Data losses',
-          cssClass: '.errors',
-          subTitle:
+      }),
+      m(StatsSection, {
+        queryId: 'info_data_losses',
+        title: 'Data losses',
+        cssClass: '.errors',
+        subTitle:
               `These counters are collected at trace recording time. The trace
                data for one or more data sources was dropped and hence some
                track contents will be incomplete.`,
-          sqlConstraints: `severity = 'data_loss' and value > 0`,
-        }),
-        m(TraceMetadata),
-        m(PackageList),
-        m(AndroidGameInterventionList),
-        m(StatsSection, {
-          queryId: 'info_all',
-          title: 'Debugging stats',
-          cssClass: '',
-          subTitle: `Debugging statistics such as trace buffer usage and metrics
+        sqlConstraints: `severity = 'data_loss' and value > 0`,
+      }),
+      m(TraceMetadata),
+      m(PackageList),
+      m(AndroidGameInterventionList),
+      m(StatsSection, {
+        queryId: 'info_all',
+        title: 'Debugging stats',
+        cssClass: '',
+        subTitle: `Debugging statistics such as trace buffer usage and metrics
                      coming from the TraceProcessor importer stages.`,
-          sqlConstraints: '',
+        sqlConstraints: '',
 
-        }),
+      }),
     );
   },
 });

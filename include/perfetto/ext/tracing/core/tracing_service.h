@@ -30,6 +30,7 @@
 #include "perfetto/ext/tracing/core/shared_memory.h"
 #include "perfetto/ext/tracing/core/trace_packet.h"
 #include "perfetto/tracing/buffer_exhausted_policy.h"
+#include "perfetto/tracing/core/flush_flags.h"
 #include "perfetto/tracing/core/forward_decls.h"
 
 namespace perfetto {
@@ -42,6 +43,7 @@ class Consumer;
 class Producer;
 class SharedMemoryArbiter;
 class TraceWriter;
+class ClientIdentity;
 
 // TODO: for the moment this assumes that all the calls happen on the same
 // thread/sequence. Not sure this will be the case long term in Chrome.
@@ -192,8 +194,16 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
   // existing tracing session. Will invoke Consumer::OnSessionCloned().
   // If TracingSessionID == kBugreportSessionId (0xff...ff) the session with the
   // highest bugreport score is cloned (if any exists).
-  // TODO(primiano): make pure virtual after various 3way patches.
-  virtual void CloneSession(TracingSessionID);
+  struct CloneSessionArgs {
+    // If set, the trace filter will not have effect on the cloned session.
+    // Used for bugreports.
+    bool skip_trace_filter = false;
+
+    // If set, affects the generation of the FlushFlags::CloneTarget to be set
+    // to kBugreport when requesting the flush to the producers.
+    bool for_bugreport = false;
+  };
+  virtual void CloneSession(TracingSessionID, CloneSessionArgs) = 0;
 
   // Requests all data sources to flush their data immediately and invokes the
   // passed callback once all of them have acked the flush (in which case
@@ -203,7 +213,15 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
   // if that one is not set (or is set to 0), kDefaultFlushTimeoutMs (5s) is
   // used.
   using FlushCallback = std::function<void(bool /*success*/)>;
-  virtual void Flush(uint32_t timeout_ms, FlushCallback) = 0;
+  virtual void Flush(uint32_t timeout_ms,
+                     FlushCallback callback,
+                     FlushFlags) = 0;
+
+  // This is required for legacy out-of-repo clients like arctraceservice which
+  // use the 2-version parameter.
+  inline void Flush(uint32_t timeout_ms, FlushCallback callback) {
+    Flush(timeout_ms, std::move(callback), FlushFlags());
+  }
 
   // Tracing data will be delivered invoking Consumer::OnTraceData().
   virtual void ReadBuffers() = 0;
@@ -229,9 +247,14 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
 
   // Used to obtain the list of connected data sources and other info about
   // the tracing service.
+  struct QueryServiceStateArgs {
+    // If set, only the TracingServiceState.tracing_sessions is filled.
+    bool sessions_only = false;
+  };
   using QueryServiceStateCallback =
       std::function<void(bool success, const TracingServiceState&)>;
-  virtual void QueryServiceState(QueryServiceStateCallback) = 0;
+  virtual void QueryServiceState(QueryServiceStateArgs,
+                                 QueryServiceStateCallback) = 0;
 
   // Used for feature detection. Makes sense only when the consumer and the
   // service talk over IPC and can be from different versions.
@@ -347,8 +370,7 @@ class PERFETTO_EXPORT_COMPONENT TracingService {
   // connected.
   virtual std::unique_ptr<ProducerEndpoint> ConnectProducer(
       Producer*,
-      uid_t uid,
-      pid_t pid,
+      const ClientIdentity& client_identity,
       const std::string& name,
       size_t shared_memory_size_hint_bytes = 0,
       bool in_process = false,

@@ -18,24 +18,16 @@
 #define SRC_TRACE_PROCESSOR_SQLITE_SQLITE_TABLE_H_
 
 #include <sqlite3.h>
-
-#include <functional>
-#include <limits>
 #include <memory>
-#include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "perfetto/base/status.h"
-#include "perfetto/ext/base/flat_hash_map.h"
-#include "perfetto/ext/base/status_or.h"
-#include "perfetto/ext/base/utils.h"
 #include "perfetto/trace_processor/basic_types.h"
-#include "src/trace_processor/db/table.h"
 #include "src/trace_processor/sqlite/query_constraints.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 class SqliteEngine;
 class TypedSqliteTableBase;
@@ -104,14 +96,14 @@ class SqliteTable : public sqlite3_vtab {
                         FilterHistory);
 
     // Called to forward the cursor to the next row in the table.
-    base::Status Next();
+    void Next();
 
     // Called to check if the cursor has reached eof. Column will be called iff
     // this method returns true.
     bool Eof();
 
     // Used to extract the value from the column at index |N|.
-    base::Status Column(sqlite3_context* context, int N);
+    void Column(sqlite3_context* context, int N);
 
     SqliteTable* table() const { return table_; }
 
@@ -231,13 +223,12 @@ class SqliteTable : public sqlite3_vtab {
 
   // This name of the table. For tables created using CREATE VIRTUAL TABLE, this
   // will be the name of the table specified by the query. For automatically
-  // created tables, this will be the same as the module name passed to
-  // RegisterTable.
+  // created tables, this will be the same as the module name registered.
   std::string name_;
 
-  // The module name is the name passed to RegisterTable. This is differs from
-  // the table name (|name_|) where the table was created using CREATE VIRTUAL
-  // TABLE.
+  // The module name is the name that will be registered. This is
+  // differs from the table name (|name_|) where the table was created using
+  // CREATE VIRTUAL TABLE.
   std::string module_name_;
 
   Schema schema_;
@@ -252,6 +243,7 @@ class TypedSqliteTableBase : public SqliteTable {
   struct BaseModuleArg {
     sqlite3_module module;
     SqliteEngine* engine;
+    TableType table_type;
   };
 
   ~TypedSqliteTableBase() override;
@@ -290,7 +282,7 @@ class TypedSqliteTableBase : public SqliteTable {
 template <typename SubTable, typename Context>
 class TypedSqliteTable : public TypedSqliteTableBase {
  public:
-  struct ModuleArg : BaseModuleArg {
+  struct ModuleArg : public BaseModuleArg {
     Context context;
   };
 
@@ -301,6 +293,7 @@ class TypedSqliteTable : public TypedSqliteTableBase {
     auto arg = std::make_unique<ModuleArg>();
     arg->module = CreateModule(table_type, updatable);
     arg->engine = engine;
+    arg->table_type = table_type;
     arg->context = std::move(ctx);
     return arg;
   }
@@ -323,7 +316,7 @@ class TypedSqliteTable : public TypedSqliteTableBase {
         module.xDisconnect = &xDestroy;
         break;
       case TableType::kExplicitCreate:
-        // xConnect and xDestroy will be called when the table is CREATE-ed and
+        // xCreate and xDestroy will be called when the table is CREATE-ed and
         // DROP-ed respectively.
         module.xCreate = &xCreate;
         module.xDestroy = &xDestroy;
@@ -355,8 +348,8 @@ class TypedSqliteTable : public TypedSqliteTableBase {
                      sqlite3_vtab** tab,
                      char** pzErr) {
     auto* xdesc = static_cast<ModuleArg*>(arg);
-    std::unique_ptr<SubTable> table(
-        new SubTable(xdb, std::move(xdesc->context)));
+    std::unique_ptr<SubTable> table(new SubTable(xdb, &*xdesc->context));
+    SubTable* table_ptr = table.get();
     base::Status status = table->InitInternal(xdesc->engine, argc, argv);
     if (!status.ok()) {
       *pzErr = sqlite3_mprintf("%s", status.c_message());
@@ -367,6 +360,7 @@ class TypedSqliteTable : public TypedSqliteTableBase {
       *pzErr = sqlite3_mprintf("%s", status.c_message());
       return SQLITE_ERROR;
     }
+    xdesc->engine->OnSqliteTableCreated(table_ptr->name(), xdesc->table_type);
     return SQLITE_OK;
   }
   static int xClose(sqlite3_vtab_cursor* c) {
@@ -395,16 +389,33 @@ class TypedSqliteTable : public TypedSqliteTableBase {
   }
   static int xNext(sqlite3_vtab_cursor* c) {
     auto* cursor = static_cast<typename SubTable::Cursor*>(c);
-    auto* table = static_cast<SubTable*>(cursor->table());
-    return table->SetStatusAndReturn(cursor->Next());
+    using NextType = decltype(&SubTable::Cursor::Next);
+    using ReturnType =
+        std::invoke_result_t<NextType, typename SubTable::Cursor*>;
+    if constexpr (std::is_same_v<ReturnType, void>) {
+      cursor->Next();
+      return SQLITE_OK;
+    } else {
+      auto* table = static_cast<SubTable*>(cursor->table());
+      return table->SetStatusAndReturn(cursor->Next());
+    }
   }
   static int xEof(sqlite3_vtab_cursor* c) {
     return static_cast<int>(static_cast<typename SubTable::Cursor*>(c)->Eof());
   }
   static int xColumn(sqlite3_vtab_cursor* c, sqlite3_context* a, int b) {
     auto* cursor = static_cast<typename SubTable::Cursor*>(c);
-    auto* table = static_cast<SubTable*>(cursor->table());
-    return table->SetStatusAndReturn(cursor->Column(a, b));
+    using ColumnType = decltype(&SubTable::Cursor::Column);
+    using ReturnType =
+        std::invoke_result_t<ColumnType, typename SubTable::Cursor*,
+                             sqlite3_context*, int>;
+    if constexpr (std::is_same_v<ReturnType, void>) {
+      cursor->Column(a, b);
+      return SQLITE_OK;
+    } else {
+      auto* table = static_cast<SubTable*>(cursor->table());
+      return table->SetStatusAndReturn(cursor->Column(a, b));
+    }
   }
   static int xRowid(sqlite3_vtab_cursor*, sqlite3_int64*) {
     return SQLITE_ERROR;
@@ -418,7 +429,6 @@ class TypedSqliteTable : public TypedSqliteTableBase {
   }
 };
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor
 
 #endif  // SRC_TRACE_PROCESSOR_SQLITE_SQLITE_TABLE_H_

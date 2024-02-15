@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {EngineProxy} from './engine';
-import {STR} from './query_result';
+import {EngineProxy} from '../trace_processor/engine';
+import {STR} from '../trace_processor/query_result';
 
 const CACHED_SCHEMAS = new WeakMap<EngineProxy, DatabaseSchema>();
 
@@ -40,7 +40,7 @@ interface ColumnInfo {
 }
 
 async function getColumns(
-    engine: EngineProxy, table: string): Promise<ColumnInfo[]> {
+  engine: EngineProxy, table: string): Promise<ColumnInfo[]> {
   const result = await engine.query(`PRAGMA table_info(${table});`);
   const it = result.iter({
     name: STR,

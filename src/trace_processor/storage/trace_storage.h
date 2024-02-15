@@ -17,24 +17,28 @@
 #ifndef SRC_TRACE_PROCESSOR_STORAGE_TRACE_STORAGE_H_
 #define SRC_TRACE_PROCESSOR_STORAGE_TRACE_STORAGE_H_
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <functional>
+#include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/time.h"
-#include "perfetto/ext/base/hash.h"
 #include "perfetto/ext/base/string_view.h"
-#include "perfetto/ext/base/utils.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/status.h"
+#include "src/trace_processor/containers/null_term_string_view.h"
+#include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
-#include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/tables/android_tables_py.h"
 #include "src/trace_processor/tables/counter_tables_py.h"
@@ -42,11 +46,13 @@
 #include "src/trace_processor/tables/memory_tables_py.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
 #include "src/trace_processor/tables/profiler_tables_py.h"
+#include "src/trace_processor/tables/sched_tables_py.h"
 #include "src/trace_processor/tables/slice_tables_py.h"
 #include "src/trace_processor/tables/trace_proto_tables_py.h"
 #include "src/trace_processor/tables/track_tables_py.h"
+#include "src/trace_processor/tables/v8_tables_py.h"
+#include "src/trace_processor/tables/winscope_tables_py.h"
 #include "src/trace_processor/types/variadic.h"
-#include "src/trace_processor/views/slice_views.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -87,7 +93,7 @@ using MetadataId = tables::MetadataTable::Id;
 
 using RawId = tables::RawTable::Id;
 
-using FlamegraphId = tables::ExperimentalFlamegraphNodesTable::Id;
+using FlamegraphId = tables::ExperimentalFlamegraphTable::Id;
 
 using VulkanAllocId = tables::VulkanMemoryAllocationsTable::Id;
 
@@ -117,7 +123,7 @@ const std::vector<NullTermStringView>& GetRefTypeStringMap();
 // names for a given CPU).
 class TraceStorage {
  public:
-  TraceStorage(const Config& = Config());
+  explicit TraceStorage(const Config& = Config());
 
   virtual ~TraceStorage();
 
@@ -457,6 +463,13 @@ class TraceStorage {
   const tables::SliceTable& slice_table() const { return slice_table_; }
   tables::SliceTable* mutable_slice_table() { return &slice_table_; }
 
+  const tables::SpuriousSchedWakeupTable& spurious_sched_wakeup_table() const {
+    return spurious_sched_wakeup_table_;
+  }
+  tables::SpuriousSchedWakeupTable* mutable_spurious_sched_wakeup_table() {
+    return &spurious_sched_wakeup_table_;
+  }
+
   const tables::FlowTable& flow_table() const { return flow_table_; }
   tables::FlowTable* mutable_flow_table() { return &flow_table_; }
 
@@ -638,6 +651,18 @@ class TraceStorage {
   }
   tables::GpuTrackTable* mutable_gpu_track_table() { return &gpu_track_table_; }
 
+  const tables::UidTrackTable& uid_track_table() const {
+    return uid_track_table_;
+  }
+  tables::UidTrackTable* mutable_uid_track_table() { return &uid_track_table_; }
+
+  const tables::GpuWorkPeriodTrackTable& gpu_work_period_track_table() const {
+    return gpu_work_period_track_table_;
+  }
+  tables::GpuWorkPeriodTrackTable* mutable_gpu_work_period_track_table() {
+    return &gpu_work_period_track_table_;
+  }
+
   const tables::VulkanMemoryAllocationsTable& vulkan_memory_allocations_table()
       const {
     return vulkan_memory_allocations_table_;
@@ -704,6 +729,79 @@ class TraceStorage {
     return &actual_frame_timeline_slice_table_;
   }
 
+  const tables::V8IsolateTable& v8_isolate_table() const {
+    return v8_isolate_table_;
+  }
+  tables::V8IsolateTable* mutable_v8_isolate_table() {
+    return &v8_isolate_table_;
+  }
+  const tables::V8JsScriptTable& v8_js_script_table() const {
+    return v8_js_script_table_;
+  }
+  tables::V8JsScriptTable* mutable_v8_js_script_table() {
+    return &v8_js_script_table_;
+  }
+  const tables::V8WasmScriptTable& v8_wasm_script_table() const {
+    return v8_wasm_script_table_;
+  }
+  tables::V8WasmScriptTable* mutable_v8_wasm_script_table() {
+    return &v8_wasm_script_table_;
+  }
+  const tables::V8JsFunctionTable& v8_js_function_table() const {
+    return v8_js_function_table_;
+  }
+  tables::V8JsFunctionTable* mutable_v8_js_function_table() {
+    return &v8_js_function_table_;
+  }
+
+  const tables::SurfaceFlingerLayersSnapshotTable&
+  surfaceflinger_layers_snapshot_table() const {
+    return surfaceflinger_layers_snapshot_table_;
+  }
+  tables::SurfaceFlingerLayersSnapshotTable*
+  mutable_surfaceflinger_layers_snapshot_table() {
+    return &surfaceflinger_layers_snapshot_table_;
+  }
+
+  const tables::SurfaceFlingerLayerTable& surfaceflinger_layer_table() const {
+    return surfaceflinger_layer_table_;
+  }
+  tables::SurfaceFlingerLayerTable* mutable_surfaceflinger_layer_table() {
+    return &surfaceflinger_layer_table_;
+  }
+
+  const tables::SurfaceFlingerTransactionsTable&
+  surfaceflinger_transactions_table() const {
+    return surfaceflinger_transactions_table_;
+  }
+  tables::SurfaceFlingerTransactionsTable*
+  mutable_surfaceflinger_transactions_table() {
+    return &surfaceflinger_transactions_table_;
+  }
+
+  const tables::WindowManagerShellTransitionsTable&
+  window_manager_shell_transitions_table() const {
+    return window_manager_shell_transitions_table_;
+  }
+  tables::WindowManagerShellTransitionsTable*
+  mutable_window_manager_shell_transitions_table() {
+    return &window_manager_shell_transitions_table_;
+  }
+
+  const tables::WindowManagerShellTransitionHandlersTable&
+  window_manager_shell_transition_handlers_table() const {
+    return window_manager_shell_transition_handlers_table_;
+  }
+  tables::WindowManagerShellTransitionHandlersTable*
+  mutable_window_manager_shell_transition_handlers_table() {
+    return &window_manager_shell_transition_handlers_table_;
+  }
+
+  const tables::ProtoLogTable& protolog_table() const {
+    return protolog_table_;
+  }
+  tables::ProtoLogTable* mutable_protolog_table() { return &protolog_table_; }
+
   const tables::ExperimentalProtoPathTable& experimental_proto_path_table()
       const {
     return experimental_proto_path_table_;
@@ -730,10 +828,6 @@ class TraceStorage {
     return &experimental_missing_chrome_processes_table_;
   }
 
-  const views::ThreadSliceView& thread_slice_view() const {
-    return thread_slice_view_;
-  }
-
   const StringPool& string_pool() const { return string_pool_; }
   StringPool* mutable_string_pool() { return &string_pool_; }
 
@@ -746,10 +840,10 @@ class TraceStorage {
 
   util::Status ExtractArg(uint32_t arg_set_id,
                           const char* key,
-                          std::optional<Variadic>* result) {
+                          std::optional<Variadic>* result) const {
     const auto& args = arg_table();
-    RowMap filtered = args.FilterToRowMap(
-        {args.arg_set_id().eq(arg_set_id), args.key().eq(key)});
+    RowMap filtered = args.QueryToRowMap(
+        {args.arg_set_id().eq(arg_set_id), args.key().eq(key)}, {});
     if (filtered.empty()) {
       *result = std::nullopt;
       return util::OkStatus();
@@ -844,6 +938,9 @@ class TraceStorage {
   tables::ThreadStateTable thread_state_table_{&string_pool_};
   tables::CpuTrackTable cpu_track_table_{&string_pool_, &track_table_};
   tables::GpuTrackTable gpu_track_table_{&string_pool_, &track_table_};
+  tables::UidTrackTable uid_track_table_{&string_pool_, &track_table_};
+  tables::GpuWorkPeriodTrackTable gpu_work_period_track_table_{
+      &string_pool_, &uid_track_table_};
   tables::ProcessTrackTable process_track_table_{&string_pool_, &track_table_};
   tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
 
@@ -887,6 +984,8 @@ class TraceStorage {
 
   // Slices from CPU scheduling data.
   tables::SchedSliceTable sched_slice_table_{&string_pool_};
+
+  tables::SpuriousSchedWakeupTable spurious_sched_wakeup_table_{&string_pool_};
 
   // Additional attributes for virtual track slices (sub-type of
   // NestableSlices).
@@ -953,6 +1052,24 @@ class TraceStorage {
   tables::ActualFrameTimelineSliceTable actual_frame_timeline_slice_table_{
       &string_pool_, &slice_table_};
 
+  // V8 tables
+  tables::V8IsolateTable v8_isolate_table_{&string_pool_};
+  tables::V8JsScriptTable v8_js_script_table_{&string_pool_};
+  tables::V8WasmScriptTable v8_wasm_script_table_{&string_pool_};
+  tables::V8JsFunctionTable v8_js_function_table_{&string_pool_};
+
+  // Winscope tables
+  tables::SurfaceFlingerLayersSnapshotTable
+      surfaceflinger_layers_snapshot_table_{&string_pool_};
+  tables::SurfaceFlingerLayerTable surfaceflinger_layer_table_{&string_pool_};
+  tables::SurfaceFlingerTransactionsTable surfaceflinger_transactions_table_{
+      &string_pool_};
+  tables::WindowManagerShellTransitionsTable
+      window_manager_shell_transitions_table_{&string_pool_};
+  tables::WindowManagerShellTransitionHandlersTable
+      window_manager_shell_transition_handlers_table_{&string_pool_};
+  tables::ProtoLogTable protolog_table_{&string_pool_};
+
   tables::ExperimentalProtoPathTable experimental_proto_path_table_{
       &string_pool_};
   tables::ExperimentalProtoContentTable experimental_proto_content_table_{
@@ -960,9 +1077,6 @@ class TraceStorage {
 
   tables::ExpMissingChromeProcTable
       experimental_missing_chrome_processes_table_{&string_pool_};
-
-  views::ThreadSliceView thread_slice_view_{&slice_table_, &thread_track_table_,
-                                            &thread_table_};
 
   // The below array allow us to map between enums and their string
   // representations.

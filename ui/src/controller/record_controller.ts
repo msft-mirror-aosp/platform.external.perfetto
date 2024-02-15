@@ -14,13 +14,10 @@
 
 import {Message, Method, rpc, RPCImplCallback} from 'protobufjs';
 
+import {isString} from '../base/object_utils';
 import {base64Encode} from '../base/string_utils';
 import {Actions} from '../common/actions';
 import {TRACE_SUFFIX} from '../common/constants';
-import {
-  ConsumerPort,
-  TraceConfig,
-} from '../common/protos';
 import {genTraceConfig} from '../common/recordingV2/recording_config_utils';
 import {TargetInfo} from '../common/recordingV2/recording_interfaces_v2';
 import {
@@ -31,6 +28,10 @@ import {
 } from '../common/state';
 import {globals} from '../frontend/globals';
 import {publishBufferUsage, publishTrackData} from '../frontend/publish';
+import {
+  ConsumerPort,
+  TraceConfig,
+} from '../protos';
 
 import {AdbOverWebUsb} from './adb';
 import {AdbConsumerPort} from './adb_shell_controller';
@@ -52,7 +53,7 @@ import {Consumer, RpcConsumerPort} from './record_controller_interfaces';
 type RPCImplMethod = (Method|rpc.ServiceMethod<Message<{}>, Message<{}>>);
 
 export function genConfigProto(
-    uiCfg: RecordConfig, target: RecordingTarget): Uint8Array {
+  uiCfg: RecordConfig, target: RecordingTarget): Uint8Array {
   return TraceConfig.encode(convertToRecordingV2Input(uiCfg, target)).finish();
 }
 
@@ -61,38 +62,38 @@ export function genConfigProto(
 // diverge.
 // TODO(octaviant) delete this once we switch to RecordingV2.
 function convertToRecordingV2Input(
-    uiCfg: RecordConfig, target: RecordingTarget): TraceConfig {
+  uiCfg: RecordConfig, target: RecordingTarget): TraceConfig {
   let targetType: 'ANDROID'|'CHROME'|'CHROME_OS'|'LINUX';
   let androidApiLevel!: number;
   switch (target.os) {
-    case 'L':
-      targetType = 'LINUX';
-      break;
-    case 'C':
-      targetType = 'CHROME';
-      break;
-    case 'CrOS':
-      targetType = 'CHROME_OS';
-      break;
-    case 'S':
-      androidApiLevel = 31;
-      targetType = 'ANDROID';
-      break;
-    case 'R':
-      androidApiLevel = 30;
-      targetType = 'ANDROID';
-      break;
-    case 'Q':
-      androidApiLevel = 29;
-      targetType = 'ANDROID';
-      break;
-    case 'P':
-      androidApiLevel = 28;
-      targetType = 'ANDROID';
-      break;
-    default:
-      androidApiLevel = 26;
-      targetType = 'ANDROID';
+  case 'L':
+    targetType = 'LINUX';
+    break;
+  case 'C':
+    targetType = 'CHROME';
+    break;
+  case 'CrOS':
+    targetType = 'CHROME_OS';
+    break;
+  case 'S':
+    androidApiLevel = 31;
+    targetType = 'ANDROID';
+    break;
+  case 'R':
+    androidApiLevel = 30;
+    targetType = 'ANDROID';
+    break;
+  case 'Q':
+    androidApiLevel = 29;
+    targetType = 'ANDROID';
+    break;
+  case 'P':
+    androidApiLevel = 28;
+    targetType = 'ANDROID';
+    break;
+  default:
+    androidApiLevel = 26;
+    targetType = 'ANDROID';
   }
 
   let targetInfo: TargetInfo;
@@ -129,7 +130,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
         value.startsWith('STAT_') || value.startsWith('LID_') ||
         value.startsWith('BATTERY_COUNTER_') || value === 'DISCARD' ||
         value === 'RING_BUFFER' || value === 'BACKGROUND' ||
-        value === 'USER_INITIATED';
+        value === 'USER_INITIATED' || value.startsWith('PERF_CLOCK_');
   }
   // Since javascript doesn't have 64 bit numbers when converting protos to
   // json the proto library encodes them as strings. This is lossy since
@@ -144,6 +145,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
       'samplingIntervalBytes',
       'shmemSizeBytes',
       'timestampUnitMultiplier',
+      'frequency',
     ].includes(key);
   }
   function* message(msg: {}, indent: number): IterableIterator<string> {
@@ -152,7 +154,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
       const isNested = typeof value === 'object' && !isRepeated;
       for (const entry of (isRepeated ? value as Array<{}> : [value])) {
         yield ' '.repeat(indent) + `${snakeCase(key)}${isNested ? '' : ':'} `;
-        if (typeof entry === 'string') {
+        if (isString(entry)) {
           if (isEnum(entry) || is64BitNumber(key)) {
             yield entry;
           } else {
@@ -168,7 +170,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
           yield ' '.repeat(indent) + '}';
         } else {
           throw new Error(`Record proto entry "${entry}" with unexpected type ${
-              typeof entry}`);
+            typeof entry}`);
         }
         yield '\n';
       }
@@ -305,7 +307,7 @@ export class RecordController extends Controller<'main'> implements Consumer {
     globals.dispatch(Actions.setRecordingStatus({status: undefined}));
     if (globals.state.recordingCancelled) {
       globals.dispatch(
-          Actions.setLastRecordingError({error: 'Recording cancelled.'}));
+        Actions.setLastRecordingError({error: 'Recording cancelled.'}));
       this.traceBuffer = [];
       return;
     }
@@ -347,7 +349,7 @@ export class RecordController extends Controller<'main'> implements Consumer {
     // TODO(octaviant): b/204998302
     console.error('Error in record controller: ', message);
     globals.dispatch(
-        Actions.setLastRecordingError({error: message.substr(0, 150)}));
+      Actions.setLastRecordingError({error: message.substr(0, 150)}));
     globals.dispatch(Actions.stopRecording({}));
   }
 
@@ -385,13 +387,15 @@ export class RecordController extends Controller<'main'> implements Consumer {
             const socketAccess = await this.hasSocketAccess(target);
 
             controller = socketAccess ?
-                new AdbSocketConsumerPort(this.adb, this) :
-                new AdbConsumerPort(this.adb, this);
+              new AdbSocketConsumerPort(this.adb, this) :
+              new AdbConsumerPort(this.adb, this);
           } else {
             throw Error(`No device connected`);
           }
 
+          /* eslint-disable @typescript-eslint/strict-boolean-expressions */
           if (!controller) throw Error(`Unknown target: ${target}`);
+          /* eslint-enable */
           resolve(controller);
         });
 
@@ -412,8 +416,8 @@ export class RecordController extends Controller<'main'> implements Consumer {
   }
 
   private async rpcImpl(
-      method: RPCImplMethod, requestData: Uint8Array,
-      _callback: RPCImplCallback) {
+    method: RPCImplMethod, requestData: Uint8Array,
+    _callback: RPCImplCallback) {
     try {
       const state = globals.state;
       // TODO(hjd): This is a bit weird. We implicitly send each RPC message to

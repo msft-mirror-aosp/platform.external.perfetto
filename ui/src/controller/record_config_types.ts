@@ -22,7 +22,7 @@ import {
   record,
   runValidator,
   ValidatedType,
-} from './validators';
+} from '../base/validators';
 
 const recordModes = ['STOP_WHEN_FULL', 'RING_BUFFER', 'LONG_TRACE'] as const;
 export const recordConfigValidator = record({
@@ -39,6 +39,7 @@ export const recordConfigValidator = record({
 
   gpuFreq: bool(),
   gpuMemTotal: bool(),
+  gpuWorkPeriod: bool(),
 
   ftrace: bool(),
   atrace: bool(),
@@ -103,11 +104,18 @@ export const recordConfigValidator = record({
   uiRendering: bool(),
   inputEvents: bool(),
   navigationAndLoading: bool(),
+  audio: bool(),
+  video: bool(),
 
   symbolizeKsyms: bool(),
+
+  // Enabling stack sampling
+  tracePerf: bool(),
+  timebaseFrequency: num(100),
+  targetCmdLine: arrayOf(str()),
 });
 export const namedRecordConfigValidator = record(
-    {title: requiredStr, key: requiredStr, config: recordConfigValidator});
+  {title: requiredStr, key: requiredStr, config: recordConfigValidator});
 export type NamedRecordConfig =
     ValidatedType<typeof namedRecordConfigValidator>;
 export type RecordConfig = ValidatedType<typeof recordConfigValidator>;

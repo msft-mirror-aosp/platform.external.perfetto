@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Time} from '../base/time';
 import {createEmptyRecordConfig} from '../controller/record_config_types';
+import {featureFlags} from '../core/feature_flags';
 import {
   Aggregation,
 } from '../frontend/pivot_table_types';
@@ -20,8 +22,8 @@ import {
   autosaveConfigStore,
   recordTargetStore,
 } from '../frontend/record_config';
+import {SqlTables} from '../frontend/sql_table/well_known_tables';
 
-import {featureFlags} from './feature_flags';
 import {
   defaultTraceTime,
   NonSerializableState,
@@ -38,7 +40,7 @@ const AUTOLOAD_STARTED_CONFIG_FLAG = featureFlags.register({
 });
 
 export function keyedMap<T>(
-    keyFn: (key: T) => string, ...values: T[]): Map<string, T> {
+  keyFn: (key: T) => string, ...values: T[]): Map<string, T> {
   const result = new Map<string, T>();
 
   for (const value of values) {
@@ -59,16 +61,21 @@ export function createEmptyNonSerializableState(): NonSerializableState {
   return {
     pivotTable: {
       queryResult: null,
-      selectedPivots: [{kind: 'regular', table: 'slice', column: 'name'}],
+      selectedPivots:
+          [{kind: 'regular', table: SqlTables.slice.name, column: 'name'}],
       selectedAggregations: [
         {
           aggregationFunction: 'SUM',
-          column: {kind: 'regular', table: 'slice', column: 'dur'},
+          column: {kind: 'regular', table: SqlTables.slice.name, column: 'dur'},
           sortDirection: 'DESC',
         },
         {
           aggregationFunction: 'SUM',
-          column: {kind: 'regular', table: 'slice', column: 'thread_dur'},
+          column: {
+            kind: 'regular',
+            table: SqlTables.slice.name,
+            column: 'thread_dur',
+          },
         },
         COUNT_AGGREGATION,
       ],
@@ -86,23 +93,20 @@ export function createEmptyState(): State {
     newEngineMode: 'USE_HTTP_RPC_IF_AVAILABLE',
     traceTime: {...defaultTraceTime},
     tracks: {},
-    uiTrackIdByTraceTrackId: {},
+    trackKeyByTrackId: {},
     utidToThreadSortKey: {},
     aggregatePreferences: {},
     trackGroups: {},
-    visibleTracks: [],
     pinnedTracks: [],
     scrollingTracks: [],
     areas: {},
     queries: {},
-    metrics: {},
     permalink: {},
     notes: {},
-    visualisedArgs: [],
 
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get() ?
-        autosaveConfigStore.get() :
-        createEmptyRecordConfig(),
+      autosaveConfigStore.get() :
+      createEmptyRecordConfig(),
     displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
 
@@ -142,12 +146,17 @@ export function createEmptyState(): State {
     sidebarVisible: true,
     hoveredUtid: -1,
     hoveredPid: -1,
-    hoverCursorTimestamp: -1n,
-    hoveredNoteTimestamp: -1n,
+    hoverCursorTimestamp: Time.INVALID,
+    hoveredNoteTimestamp: Time.INVALID,
     highlightedSliceId: -1,
     focusedFlowIdLeft: -1,
     focusedFlowIdRight: -1,
     searchIndex: -1,
+
+    tabs: {
+      currentTab: 'current_selection',
+      openTabs: [],
+    },
 
     recordingInProgress: false,
     recordingCancelled: false,
@@ -167,5 +176,8 @@ export function createEmptyState(): State {
       textEntry: '',
       hideNonMatching: true,
     },
+
+    // Somewhere to store plugins' persistent state.
+    plugins: {},
   };
 }

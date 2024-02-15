@@ -13,7 +13,9 @@
 // limitations under the License.
 
 
+import {isString} from '../../base/object_utils';
 import {base64Encode} from '../../base/string_utils';
+import {exists} from '../../base/utils';
 import {RecordConfig} from '../../controller/record_config_types';
 import {
   AndroidLogConfig,
@@ -29,14 +31,21 @@ import {
   MeminfoCounters,
   NativeContinuousDumpConfig,
   NetworkPacketTraceConfig,
+  PerfEventConfig,
+  PerfEvents,
   ProcessStatsConfig,
   SysStatsConfig,
   TraceConfig,
   TrackEventConfig,
   VmstatCounters,
-} from '../protos';
+} from '../../protos';
 
 import {TargetInfo} from './recording_interfaces_v2';
+
+import PerfClock = PerfEvents.PerfClock;
+import Timebase = PerfEvents.Timebase;
+import CallstackSampling = PerfEventConfig.CallstackSampling;
+import Scope = PerfEventConfig.Scope;
 
 export interface ConfigProtoEncoded {
   configProtoText?: string;
@@ -77,11 +86,18 @@ export class RecordingConfigUtils {
   }
 }
 
+function enableSchedBlockedReason(androidApiLevel?: number): boolean {
+  return androidApiLevel !== undefined && androidApiLevel >= 31;
+}
+
+function enableCompactSched(androidApiLevel?: number): boolean {
+  return androidApiLevel !== undefined && androidApiLevel >= 31;
+}
+
 export function genTraceConfig(
-    uiCfg: RecordConfig, targetInfo: TargetInfo): TraceConfig {
-  const androidApiLevel = (targetInfo.targetType === 'ANDROID') ?
-      targetInfo.androidApiLevel :
-      undefined;
+  uiCfg: RecordConfig, targetInfo: TargetInfo): TraceConfig {
+  const isAndroid = targetInfo.targetType === 'ANDROID';
+  const androidApiLevel = isAndroid ? targetInfo.androidApiLevel : undefined;
   const protoCfg = new TraceConfig();
   protoCfg.durationMs = uiCfg.durationMs;
 
@@ -96,8 +112,8 @@ export function genTraceConfig(
 
   protoCfg.buffers.push(new BufferConfig());
   protoCfg.buffers.push(new BufferConfig());
-  protoCfg.buffers[1].sizeKb = slowBufSizeKb;
   protoCfg.buffers[0].sizeKb = fastBufSizeKb;
+  protoCfg.buffers[1].sizeKb = slowBufSizeKb;
 
   if (uiCfg.mode === 'STOP_WHEN_FULL') {
     protoCfg.buffers[0].fillPolicy = BufferConfig.FillPolicy.DISCARD;
@@ -125,18 +141,28 @@ export function genTraceConfig(
   const chromeCategories = new Set<string>();
   uiCfg.chromeCategoriesSelected.forEach((it) => chromeCategories.add(it));
   uiCfg.chromeHighOverheadCategoriesSelected.forEach(
-      (it) => chromeCategories.add(it));
+    (it) => chromeCategories.add(it));
 
   let procThreadAssociationPolling = false;
   let procThreadAssociationFtrace = false;
   let trackInitialOomScore = false;
 
+  if (isAndroid) {
+    const ds = new TraceConfig.DataSource();
+    ds.config = new DataSourceConfig();
+    ds.config.targetBuffer = 1;
+    ds.config.name = 'android.packages_list';
+    protoCfg.dataSources.push(ds);
+  }
+
+  let ftrace = false;
+  let symbolizeKsyms = false;
   if (uiCfg.cpuSched) {
     procThreadAssociationPolling = true;
     procThreadAssociationFtrace = true;
-    uiCfg.ftrace = true;
-    if (androidApiLevel && androidApiLevel >= 31) {
-      uiCfg.symbolizeKsyms = true;
+    ftrace = true;
+    if (enableSchedBlockedReason(androidApiLevel)) {
+      symbolizeKsyms = true;
     }
     ftraceEvents.add('sched/sched_switch');
     ftraceEvents.add('power/suspend_resume');
@@ -170,6 +196,10 @@ export function genTraceConfig(
       ds.config.name = 'android.gpu.memory';
       protoCfg.dataSources.push(ds);
     }
+  }
+
+  if (uiCfg.gpuWorkPeriod) {
+    ftraceEvents.add('power/gpu_work_period');
   }
 
   if (uiCfg.cpuSyscall) {
@@ -239,6 +269,7 @@ export function genTraceConfig(
     if (sysStatsCfg === undefined) sysStatsCfg = new SysStatsConfig();
     sysStatsCfg.meminfoPeriodMs = uiCfg.meminfoPeriodMs;
     sysStatsCfg.meminfoCounters = uiCfg.meminfoCounters.map((name) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return MeminfoCounters[name as any as number] as any as number;
     });
   }
@@ -247,6 +278,7 @@ export function genTraceConfig(
     if (sysStatsCfg === undefined) sysStatsCfg = new SysStatsConfig();
     sysStatsCfg.vmstatPeriodMs = uiCfg.vmstatPeriodMs;
     sysStatsCfg.vmstatCounters = uiCfg.vmstatCounters.map((name) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return VmstatCounters[name as any as number] as any as number;
     });
   }
@@ -343,6 +375,7 @@ export function genTraceConfig(
     ds.config.name = 'android.log';
     ds.config.androidLogConfig = new AndroidLogConfig();
     ds.config.androidLogConfig.logIds = uiCfg.androidLogBuffers.map((name) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return AndroidLogId[name as any as number] as any as number;
     });
 
@@ -442,6 +475,75 @@ export function genTraceConfig(
     chromeCategories.add('netlog');
     chromeCategories.add('navigation');
     chromeCategories.add('browser');
+  }
+
+  if (uiCfg.audio) {
+    function addCategoryAndDisabledByDefault(category: string) {
+      chromeCategories.add(category);
+      chromeCategories.add('disabled-by-default-' + category);
+    }
+
+    addCategoryAndDisabledByDefault('audio');
+    addCategoryAndDisabledByDefault('webaudio');
+    addCategoryAndDisabledByDefault('webaudio.audionode');
+    addCategoryAndDisabledByDefault('webrtc');
+    addCategoryAndDisabledByDefault('audio-worklet');
+    addCategoryAndDisabledByDefault('mediastream');
+    addCategoryAndDisabledByDefault('v8.gc');
+    addCategoryAndDisabledByDefault('toplevel');
+    addCategoryAndDisabledByDefault('toplevel.flow');
+    addCategoryAndDisabledByDefault('wakeup.flow');
+    addCategoryAndDisabledByDefault('cpu_profiler');
+    addCategoryAndDisabledByDefault('scheduler');
+    addCategoryAndDisabledByDefault('p2p');
+    addCategoryAndDisabledByDefault('net');
+    chromeCategories.add('base');
+  }
+
+  if (uiCfg.video) {
+    chromeCategories.add('base');
+    chromeCategories.add('gpu');
+    chromeCategories.add('gpu.capture');
+    chromeCategories.add('media');
+    chromeCategories.add('toplevel');
+    chromeCategories.add('toplevel.flow');
+    chromeCategories.add('scheduler');
+    chromeCategories.add('wakeup.flow');
+    chromeCategories.add('webrtc');
+    chromeCategories.add('disabled-by-default-video_and_image_capture');
+    chromeCategories.add('disabled-by-default-webrtc');
+  }
+
+  // linux.perf stack sampling
+  if (uiCfg.tracePerf) {
+    const ds = new TraceConfig.DataSource();
+    ds.config = new DataSourceConfig();
+    ds.config.name = 'linux.perf';
+
+    const perfEventConfig = new PerfEventConfig();
+    perfEventConfig.timebase = new Timebase();
+    perfEventConfig.timebase.frequency = uiCfg.timebaseFrequency;
+    // TODO: The timestampClock needs to be changed to MONOTONIC once we start
+    // offering a choice of counter to record on through the recording UI, as
+    // not all clocks are compatible with hardware counters).
+    perfEventConfig.timebase.timestampClock = PerfClock.PERF_CLOCK_BOOTTIME;
+
+    const callstackSampling = new CallstackSampling();
+    if (uiCfg.targetCmdLine.length > 0) {
+      const scope = new Scope();
+      for (const cmdLine of uiCfg.targetCmdLine) {
+        if (cmdLine == '') {
+          continue;
+        }
+        scope.targetCmdline?.push(cmdLine.trim());
+      }
+      callstackSampling.scope = scope;
+    }
+
+    perfEventConfig.callstackSampling = callstackSampling;
+
+    ds.config.perfEventConfig = perfEventConfig;
+    protoCfg.dataSources.push(ds);
   }
 
   if (chromeCategories.size !== 0) {
@@ -554,7 +656,7 @@ export function genTraceConfig(
     protoCfg.dataSources.push(ds);
   }
 
-  if (uiCfg.ftrace || uiCfg.atrace || ftraceEvents.size > 0 ||
+  if (uiCfg.ftrace || ftrace || uiCfg.atrace || ftraceEvents.size > 0 ||
       atraceCats.size > 0 || atraceApps.size > 0) {
     const ds = new TraceConfig.DataSource();
     ds.config = new DataSourceConfig();
@@ -562,14 +664,14 @@ export function genTraceConfig(
     ds.config.ftraceConfig = new FtraceConfig();
     // Override the advanced ftrace parameters only if the user has ticked the
     // "Advanced ftrace config" tab.
-    if (uiCfg.ftrace) {
+    if (uiCfg.ftrace || ftrace) {
       if (uiCfg.ftraceBufferSizeKb) {
         ds.config.ftraceConfig.bufferSizeKb = uiCfg.ftraceBufferSizeKb;
       }
       if (uiCfg.ftraceDrainPeriodMs) {
         ds.config.ftraceConfig.drainPeriodMs = uiCfg.ftraceDrainPeriodMs;
       }
-      if (uiCfg.symbolizeKsyms) {
+      if (uiCfg.symbolizeKsyms || symbolizeKsyms) {
         ds.config.ftraceConfig.symbolizeKsyms = true;
         ftraceEvents.add('sched/sched_blocked_reason');
       }
@@ -594,7 +696,7 @@ export function genTraceConfig(
     }
 
     let ftraceEventsArray: string[] = [];
-    if (androidApiLevel && androidApiLevel === 28) {
+    if (exists(androidApiLevel) && androidApiLevel === 28) {
       for (const ftraceEvent of ftraceEvents) {
         // On P, we don't support groups so strip all group names from ftrace
         // events.
@@ -618,7 +720,7 @@ export function genTraceConfig(
     ds.config.ftraceConfig.atraceCategories = Array.from(atraceCats);
     ds.config.ftraceConfig.atraceApps = Array.from(atraceApps);
 
-    if (androidApiLevel && androidApiLevel >= 31) {
+    if (enableCompactSched(androidApiLevel)) {
       const compact = new FtraceConfig.CompactSchedConfig();
       compact.enabled = true;
       ds.config.ftraceConfig.compactSched = compact;
@@ -644,7 +746,7 @@ function toPbtxt(configBuffer: Uint8Array): string {
     return value.startsWith('MEMINFO_') || value.startsWith('VMSTAT_') ||
         value.startsWith('STAT_') || value.startsWith('LID_') ||
         value.startsWith('BATTERY_COUNTER_') || value === 'DISCARD' ||
-        value === 'RING_BUFFER';
+        value === 'RING_BUFFER' || value.startsWith('PERF_CLOCK_');
   }
   // Since javascript doesn't have 64 bit numbers when converting protos to
   // json the proto library encodes them as strings. This is lossy since
@@ -658,6 +760,7 @@ function toPbtxt(configBuffer: Uint8Array): string {
       'samplingIntervalBytes',
       'shmemSizeBytes',
       'pid',
+      'frequency',
     ].includes(key);
   }
   function* message(msg: {}, indent: number): IterableIterator<string> {
@@ -666,7 +769,7 @@ function toPbtxt(configBuffer: Uint8Array): string {
       const isNested = typeof value === 'object' && !isRepeated;
       for (const entry of (isRepeated ? value as Array<{}>: [value])) {
         yield ' '.repeat(indent) + `${snakeCase(key)}${isNested ? '' : ':'} `;
-        if (typeof entry === 'string') {
+        if (isString(entry)) {
           if (isEnum(entry) || is64BitNumber(key)) {
             yield entry;
           } else {
@@ -682,7 +785,7 @@ function toPbtxt(configBuffer: Uint8Array): string {
           yield ' '.repeat(indent) + '}';
         } else {
           throw new Error(`Record proto entry "${entry}" with unexpected type ${
-              typeof entry}`);
+            typeof entry}`);
         }
         yield '\n';
       }

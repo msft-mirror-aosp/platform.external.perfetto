@@ -16,7 +16,6 @@
 import m from 'mithril';
 
 import {Actions} from '../common/actions';
-import {featureFlags} from '../common/feature_flags';
 import {
   AdbRecordingTarget,
   getDefaultRecordingTargets,
@@ -36,6 +35,8 @@ import {
   createEmptyRecordConfig,
   RecordConfig,
 } from '../controller/record_config_types';
+import {featureFlags} from '../core/feature_flags';
+import {raf} from '../core/raf_scheduler';
 
 import {globals} from './globals';
 import {createPage, PageAttrs} from './pages';
@@ -52,6 +53,7 @@ import {AndroidSettings} from './recording/android_settings';
 import {ChromeSettings} from './recording/chrome_settings';
 import {CpuSettings} from './recording/cpu_settings';
 import {GpuSettings} from './recording/gpu_settings';
+import {LinuxPerfSettings} from './recording/linux_perf_settings';
 import {MemorySettings} from './recording/memory_settings';
 import {PowerSettings} from './recording/power_settings';
 import {RecordingSectionAttrs} from './recording/recording_sections';
@@ -74,19 +76,20 @@ export const RECORDING_SECTIONS = [
   'memory',
   'android',
   'chrome',
+  'tracePerf',
   'advanced',
 ];
 
 function RecordHeader() {
   return m(
-      '.record-header',
-      m('.top-part',
-        m('.target-and-status',
-          RecordingPlatformSelection(),
-          RecordingStatusLabel(),
-          ErrorLabel()),
-        recordingButtons()),
-      RecordingNotes());
+    '.record-header',
+    m('.top-part',
+      m('.target-and-status',
+        RecordingPlatformSelection(),
+        RecordingStatusLabel(),
+        ErrorLabel()),
+      recordingButtons()),
+    RecordingNotes());
 }
 
 function RecordingPlatformSelection() {
@@ -104,38 +107,38 @@ function RecordingPlatformSelection() {
   }
 
   const selectedIndex = isAdbTarget(recordingTarget) ?
-      targets.findIndex((node) => node.attrs.value === recordingTarget.serial) :
-      targets.findIndex((node) => node.attrs.value === recordingTarget.os);
+    targets.findIndex((node) => node.attrs.value === recordingTarget.serial) :
+    targets.findIndex((node) => node.attrs.value === recordingTarget.os);
 
   return m(
-      '.target',
-      m(
-          'label',
-          'Target platform:',
-          m('select',
-            {
-              selectedIndex,
-              onchange: (e: Event) => {
-                onTargetChange((e.target as HTMLSelectElement).value);
-              },
-              onupdate: (select) => {
-                // Work around mithril bug
-                // (https://github.com/MithrilJS/mithril.js/issues/2107): We may
-                // update the select's options while also changing the
-                // selectedIndex at the same time. The update of selectedIndex
-                // may be applied before the new options are added to the select
-                // element. Because the new selectedIndex may be outside of the
-                // select's options at that time, we have to reselect the
-                // correct index here after any new children were added.
-                (select.dom as HTMLSelectElement).selectedIndex = selectedIndex;
-              },
-            },
-            ...targets),
-          ),
-      m('.chip',
-        {onclick: addAndroidDevice},
-        m('button', 'Add ADB Device'),
-        m('i.material-icons', 'add')));
+    '.target',
+    m(
+      'label',
+      'Target platform:',
+      m('select',
+        {
+          selectedIndex,
+          onchange: (e: Event) => {
+            onTargetChange((e.target as HTMLSelectElement).value);
+          },
+          onupdate: (select) => {
+            // Work around mithril bug
+            // (https://github.com/MithrilJS/mithril.js/issues/2107): We may
+            // update the select's options while also changing the
+            // selectedIndex at the same time. The update of selectedIndex
+            // may be applied before the new options are added to the select
+            // element. Because the new selectedIndex may be outside of the
+            // select's options at that time, we have to reselect the
+            // correct index here after any new children were added.
+            (select.dom as HTMLSelectElement).selectedIndex = selectedIndex;
+          },
+        },
+        ...targets),
+    ),
+    m('.chip',
+      {onclick: addAndroidDevice},
+      m('button', 'Add ADB Device'),
+      m('i.material-icons', 'add')));
 }
 
 // |target| can be the TargetOs or the android serial.
@@ -151,50 +154,50 @@ function onTargetChange(target: string) {
 
   globals.dispatch(Actions.setRecordingTarget({target: recordingTarget}));
   recordTargetStore.save(target);
-  globals.rafScheduler.scheduleFullRedraw();
+  raf.scheduleFullRedraw();
 }
 
 function Instructions(cssClass: string) {
   return m(
-      `.record-section.instructions${cssClass}`,
-      m('header', 'Recording command'),
-      PERSIST_CONFIG_FLAG.get() ?
-          m('button.permalinkconfig',
-            {
-              onclick: () => {
-                globals.dispatch(
-                    Actions.createPermalink({isRecordingConfig: true}));
-              },
-            },
-            'Share recording settings') :
-          null,
-      RecordingSnippet(),
-      BufferUsageProgressBar(),
-      m('.buttons', StopCancelButtons()),
-      recordingLog());
+    `.record-section.instructions${cssClass}`,
+    m('header', 'Recording command'),
+    PERSIST_CONFIG_FLAG.get() ?
+      m('button.permalinkconfig',
+        {
+          onclick: () => {
+            globals.dispatch(
+              Actions.createPermalink({isRecordingConfig: true}));
+          },
+        },
+        'Share recording settings') :
+      null,
+    RecordingSnippet(),
+    BufferUsageProgressBar(),
+    m('.buttons', StopCancelButtons()),
+    recordingLog());
 }
 
 export function loadedConfigEqual(
-    cfg1: LoadedConfig, cfg2: LoadedConfig): boolean {
+  cfg1: LoadedConfig, cfg2: LoadedConfig): boolean {
   return cfg1.type === 'NAMED' && cfg2.type === 'NAMED' ?
-      cfg1.name === cfg2.name :
-      cfg1.type === cfg2.type;
+    cfg1.name === cfg2.name :
+    cfg1.type === cfg2.type;
 }
 
 export function loadConfigButton(
-    config: RecordConfig, configType: LoadedConfig): m.Vnode {
+  config: RecordConfig, configType: LoadedConfig): m.Vnode {
   return m(
-      'button',
-      {
-        class: 'config-button',
-        title: 'Apply configuration settings',
-        disabled: loadedConfigEqual(configType, globals.state.lastLoadedConfig),
-        onclick: () => {
-          globals.dispatch(Actions.setRecordConfig({config, configType}));
-          globals.rafScheduler.scheduleFullRedraw();
-        },
+    'button',
+    {
+      class: 'config-button',
+      title: 'Apply configuration settings',
+      disabled: loadedConfigEqual(configType, globals.state.lastLoadedConfig),
+      onclick: () => {
+        globals.dispatch(Actions.setRecordConfig({config, configType}));
+        raf.scheduleFullRedraw();
       },
-      m('i.material-icons', 'file_upload'));
+    },
+    m('i.material-icons', 'file_upload'));
 }
 
 export function displayRecordConfigs() {
@@ -216,13 +219,13 @@ export function displayRecordConfigs() {
           title: 'Overwrite configuration with current settings',
           onclick: () => {
             if (confirm(`Overwrite config "${
-                    item.title}" with current settings?`)) {
+              item.title}" with current settings?`)) {
               recordConfigStore.overwrite(globals.state.recordConfig, item.key);
               globals.dispatch(Actions.setRecordConfig({
                 config: item.config,
                 configType: {type: 'NAMED', name: item.title},
               }));
-              globals.rafScheduler.scheduleFullRedraw();
+              raf.scheduleFullRedraw();
             }
           },
         },
@@ -233,7 +236,7 @@ export function displayRecordConfigs() {
           title: 'Remove configuration',
           onclick: () => {
             recordConfigStore.delete(item.key);
-            globals.rafScheduler.scheduleFullRedraw();
+            raf.scheduleFullRedraw();
           },
         },
         m('i.material-icons', 'delete')),
@@ -249,11 +252,11 @@ export function displayRecordConfigs() {
 
     if (errorItems.length > 0) {
       configs.push(
-          m('.parsing-errors',
-            'One or more errors have been found while loading configuration "' +
+        m('.parsing-errors',
+          'One or more errors have been found while loading configuration "' +
                 item.title + '". Loading is possible, but make sure to check ' +
                 'the settings afterwards.',
-            m('ul', errorItems)));
+          m('ul', errorItems)));
     }
   }
   return configs;
@@ -275,64 +278,64 @@ export const ConfigTitleState = {
 export function Configurations(cssClass: string) {
   const canSave = recordConfigStore.canSave(ConfigTitleState.getTitle());
   return m(
-      `.record-section${cssClass}`,
-      m('header', 'Save and load configurations'),
-      m('.input-config',
-        [
-          m('input', {
-            value: ConfigTitleState.title,
-            placeholder: 'Title for config',
-            oninput() {
-              ConfigTitleState.setTitle(this.value);
-              globals.rafScheduler.scheduleFullRedraw();
+    `.record-section${cssClass}`,
+    m('header', 'Save and load configurations'),
+    m('.input-config',
+      [
+        m('input', {
+          value: ConfigTitleState.title,
+          placeholder: 'Title for config',
+          oninput() {
+            ConfigTitleState.setTitle(this.value);
+            raf.scheduleFullRedraw();
+          },
+        }),
+        m('button',
+          {
+            class: 'config-button',
+            disabled: !canSave,
+            title: canSave ? 'Save current config' :
+              'Duplicate name, saving disabled',
+            onclick: () => {
+              recordConfigStore.save(
+                globals.state.recordConfig, ConfigTitleState.getTitle());
+              raf.scheduleFullRedraw();
+              ConfigTitleState.clearTitle();
             },
-          }),
-          m('button',
-            {
-              class: 'config-button',
-              disabled: !canSave,
-              title: canSave ? 'Save current config' :
-                               'Duplicate name, saving disabled',
-              onclick: () => {
-                recordConfigStore.save(
-                    globals.state.recordConfig, ConfigTitleState.getTitle());
-                globals.rafScheduler.scheduleFullRedraw();
-                ConfigTitleState.clearTitle();
-              },
-            },
-            m('i.material-icons', 'save')),
-          m('button',
-            {
-              class: 'config-button',
-              title: 'Clear current configuration',
-              onclick: () => {
-                if (confirm(
-                        'Current configuration will be cleared. ' +
+          },
+          m('i.material-icons', 'save')),
+        m('button',
+          {
+            class: 'config-button',
+            title: 'Clear current configuration',
+            onclick: () => {
+              if (confirm(
+                'Current configuration will be cleared. ' +
                         'Are you sure?')) {
-                  globals.dispatch(Actions.setRecordConfig({
-                    config: createEmptyRecordConfig(),
-                    configType: {type: 'NONE'},
-                  }));
-                  globals.rafScheduler.scheduleFullRedraw();
-                }
-              },
+                globals.dispatch(Actions.setRecordConfig({
+                  config: createEmptyRecordConfig(),
+                  configType: {type: 'NONE'},
+                }));
+                raf.scheduleFullRedraw();
+              }
             },
-            m('i.material-icons', 'delete_forever')),
-        ]),
-      displayRecordConfigs());
+          },
+          m('i.material-icons', 'delete_forever')),
+      ]),
+    displayRecordConfigs());
 }
 
 function BufferUsageProgressBar() {
   if (!globals.state.recordingInProgress) return [];
 
-  const bufferUsage = globals.bufferUsage ? globals.bufferUsage : 0.0;
+  const bufferUsage = globals.bufferUsage ?? 0.0;
   // Buffer usage is not available yet on Android.
   if (bufferUsage === 0) return [];
 
   return m(
-      'label',
-      'Buffer usage: ',
-      m('progress', {max: 100, value: bufferUsage * 100}));
+    'label',
+    'Buffer usage: ',
+    m('progress', {max: 100, value: bufferUsage * 100}));
 }
 
 function RecordingNotes() {
@@ -341,8 +344,8 @@ function RecordingNotes() {
   const linuxUrl = 'https://perfetto.dev/docs/quickstart/linux-tracing';
   const cmdlineUrl =
       'https://perfetto.dev/docs/quickstart/android-tracing#perfetto-cmdline';
-  const extensionURL = `https://chrome.google.com/webstore/detail/
-      perfetto-ui/lfmkphfpdbjijhpomgecfikhfohaoine`;
+  const extensionURL =
+      `https://chrome.google.com/webstore/detail/perfetto-ui/lfmkphfpdbjijhpomgecfikhfohaoine`;
 
   const notes: m.Children = [];
 
@@ -383,12 +386,12 @@ function RecordingNotes() {
         ` to get started with tracing on Linux.`);
 
   const msgLongTraces = m(
-      '.note',
-      `Recording in long trace mode through the UI is not supported. Please copy
+    '.note',
+    `Recording in long trace mode through the UI is not supported. Please copy
     the command and `,
-      m('a',
-        {href: cmdlineUrl, target: '_blank'},
-        `collect the trace using ADB.`));
+    m('a',
+      {href: cmdlineUrl, target: '_blank'},
+      `collect the trace using ADB.`));
 
   const msgZeroProbes =
       m('.note',
@@ -403,24 +406,24 @@ function RecordingNotes() {
     notes.push(msgRecordingNotSupported);
   }
   switch (globals.state.recordingTarget.os) {
-    case 'Q':
-      break;
-    case 'P':
-      notes.push(m('.note', msgFeatNotSupported, msgSideload));
-      break;
-    case 'O':
-      notes.push(m('.note', msgPerfettoNotSupported, msgSideload));
-      break;
-    case 'L':
-      notes.push(msgLinux);
-      break;
-    case 'C':
-      if (!globals.state.extensionInstalled) notes.push(msgChrome);
-      break;
-    case 'CrOS':
-      if (!globals.state.extensionInstalled) notes.push(msgChrome);
-      break;
-    default:
+  case 'Q':
+    break;
+  case 'P':
+    notes.push(m('.note', msgFeatNotSupported, msgSideload));
+    break;
+  case 'O':
+    notes.push(m('.note', msgPerfettoNotSupported, msgSideload));
+    break;
+  case 'L':
+    notes.push(msgLinux);
+    break;
+  case 'C':
+    if (!globals.state.extensionInstalled) notes.push(msgChrome);
+    break;
+  case 'CrOS':
+    if (!globals.state.extensionInstalled) notes.push(msgChrome);
+    break;
+  default:
   }
   if (globals.state.recordConfig.mode === 'LONG_TRACE') {
     notes.unshift(msgLongTraces);
@@ -436,11 +439,11 @@ function RecordingSnippet() {
   if (isChromeTarget(target)) {
     return globals.state.extensionInstalled &&
             !globals.state.recordingInProgress ?
-        m('div',
-          m('label',
-            `To trace Chrome from the Perfetto UI you just have to press
+      m('div',
+        m('label',
+          `To trace Chrome from the Perfetto UI you just have to press
          'Start Recording'.`)) :
-        [];
+      [];
   }
   return m(CodeSnippet, {text: getRecordCommand(target)});
 }
@@ -520,7 +523,7 @@ function StopCancelButtons() {
 
 function onStartRecordingPressed() {
   location.href = '#!/record/instructions';
-  globals.rafScheduler.scheduleFullRedraw();
+  raf.scheduleFullRedraw();
   autosaveConfigStore.save(globals.state.recordConfig);
 
   const target = globals.state.recordingTarget;
@@ -573,8 +576,20 @@ async function addAndroidDevice() {
   await updateAvailableAdbDevices(device.serialNumber);
 }
 
+// We really should be getting the API version from the adb target, but
+// currently its too complicated to do that (== most likely, we need to finish
+// recordingV2 migration). For now, add an escape hatch to use Android S as a
+// default, given that the main features we want are gated by API level 31 and S
+// is old enough to be the default most of the time.
+const USE_ANDROID_S_AS_DEFAULT_FLAG = featureFlags.register({
+  id: 'recordingPageUseSAsDefault',
+  name: 'Use Android S as a default recording target',
+  description: 'Use Android S as a default recording target instead of Q',
+  defaultValue: false,
+});
+
 export async function updateAvailableAdbDevices(
-    preferredDeviceSerial?: string) {
+  preferredDeviceSerial?: string) {
   const devices = await new AdbOverWebUsb().getPairedDevices();
 
   let recordingTarget: AdbRecordingTarget|undefined = undefined;
@@ -586,8 +601,11 @@ export async function updateAvailableAdbDevices(
       // assume it is 'Q'. This can create problems with devices with an old
       // version of perfetto. The os detection should be done after the adb
       // connection, from adb_record_controller
-      availableAdbDevices.push(
-          {name: d.productName, serial: d.serialNumber, os: 'Q'});
+      availableAdbDevices.push({
+        name: d.productName,
+        serial: d.serialNumber,
+        os: USE_ANDROID_S_AS_DEFAULT_FLAG.get() ? 'S' : 'Q',
+      });
       if (preferredDeviceSerial && preferredDeviceSerial === d.serialNumber) {
         recordingTarget = availableAdbDevices[availableAdbDevices.length - 1];
       }
@@ -595,22 +613,22 @@ export async function updateAvailableAdbDevices(
   });
 
   globals.dispatch(
-      Actions.setAvailableAdbDevices({devices: availableAdbDevices}));
+    Actions.setAvailableAdbDevices({devices: availableAdbDevices}));
   selectAndroidDeviceIfAvailable(availableAdbDevices, recordingTarget);
-  globals.rafScheduler.scheduleFullRedraw();
+  raf.scheduleFullRedraw();
   return availableAdbDevices;
 }
 
 function selectAndroidDeviceIfAvailable(
-    availableAdbDevices: AdbRecordingTarget[],
-    recordingTarget?: RecordingTarget) {
+  availableAdbDevices: AdbRecordingTarget[],
+  recordingTarget?: RecordingTarget) {
   if (!recordingTarget) {
     recordingTarget = globals.state.recordingTarget;
   }
   const deviceConnected = isAdbTarget(recordingTarget);
   const connectedDeviceDisconnected = deviceConnected &&
       availableAdbDevices.find(
-          (e) => e.serial ===
+        (e) => e.serial ===
               (recordingTarget as AdbRecordingTarget).serial) === undefined;
 
   if (availableAdbDevices.length) {
@@ -630,7 +648,7 @@ function selectAndroidDeviceIfAvailable(
   // target to the default one.
   if (connectedDeviceDisconnected) {
     globals.dispatch(
-        Actions.setRecordingTarget({target: getDefaultRecordingTargets()[0]}));
+      Actions.setRecordingTarget({target: getDefaultRecordingTargets()[0]}));
   }
 }
 
@@ -678,6 +696,12 @@ function recordMenu(routePage: string) {
           m('i.material-icons', 'settings'),
           m('.title', 'Advanced settings'),
           m('.sub', 'Complicated stuff for wizards')));
+  const tracePerfProbe =
+      m('a[href="#!/record/tracePerf"]',
+        m(`li${routePage === 'tracePerf' ? '.active' : ''}`,
+          m('i.material-icons', 'full_stacked_bar_chart'),
+          m('.title', 'Stack Samples'),
+          m('.sub', 'Lightweight stack polling')));
   const recInProgress = globals.state.recordingInProgress;
 
   const probes = [];
@@ -687,47 +711,48 @@ function recordMenu(routePage: string) {
     probes.push(chromeProbe);
   } else {
     probes.push(
-        cpuProbe,
-        gpuProbe,
-        powerProbe,
-        memoryProbe,
-        androidProbe,
-        chromeProbe,
-        advancedProbe);
+      cpuProbe,
+      gpuProbe,
+      powerProbe,
+      memoryProbe,
+      androidProbe,
+      chromeProbe,
+      tracePerfProbe,
+      advancedProbe);
   }
 
   return m(
-      '.record-menu',
-      {
-        class: recInProgress ? 'disabled' : '',
-        onclick: () => globals.rafScheduler.scheduleFullRedraw(),
-      },
-      m('header', 'Trace config'),
-      m('ul',
-        m('a[href="#!/record/buffers"]',
-          m(`li${routePage === 'buffers' ? '.active' : ''}`,
-            m('i.material-icons', 'tune'),
-            m('.title', 'Recording settings'),
-            m('.sub', 'Buffer mode, size and duration'))),
-        m('a[href="#!/record/instructions"]',
-          m(`li${routePage === 'instructions' ? '.active' : ''}`,
-            m('i.material-icons-filled.rec', 'fiber_manual_record'),
-            m('.title', 'Recording command'),
-            m('.sub', 'Manually record trace'))),
-        PERSIST_CONFIG_FLAG.get() ?
-            m('a[href="#!/record/config"]',
-              {
-                onclick: () => {
-                  recordConfigStore.reloadFromLocalStorage();
-                },
-              },
-              m(`li${routePage === 'config' ? '.active' : ''}`,
-                m('i.material-icons', 'save'),
-                m('.title', 'Saved configs'),
-                m('.sub', 'Manage local configs'))) :
-            null),
-      m('header', 'Probes'),
-      m('ul', probes));
+    '.record-menu',
+    {
+      class: recInProgress ? 'disabled' : '',
+      onclick: () => raf.scheduleFullRedraw(),
+    },
+    m('header', 'Trace config'),
+    m('ul',
+      m('a[href="#!/record/buffers"]',
+        m(`li${routePage === 'buffers' ? '.active' : ''}`,
+          m('i.material-icons', 'tune'),
+          m('.title', 'Recording settings'),
+          m('.sub', 'Buffer mode, size and duration'))),
+      m('a[href="#!/record/instructions"]',
+        m(`li${routePage === 'instructions' ? '.active' : ''}`,
+          m('i.material-icons-filled.rec', 'fiber_manual_record'),
+          m('.title', 'Recording command'),
+          m('.sub', 'Manually record trace'))),
+      PERSIST_CONFIG_FLAG.get() ?
+        m('a[href="#!/record/config"]',
+          {
+            onclick: () => {
+              recordConfigStore.reloadFromLocalStorage();
+            },
+          },
+          m(`li${routePage === 'config' ? '.active' : ''}`,
+            m('i.material-icons', 'save'),
+            m('.title', 'Saved configs'),
+            m('.sub', 'Manage local configs'))) :
+        null),
+    m('header', 'Probes'),
+    m('ul', probes));
 }
 
 export function maybeGetActiveCss(routePage: string, section: string): string {
@@ -758,6 +783,7 @@ export const RecordPage = createPage({
       ['memory', MemorySettings],
       ['android', AndroidSettings],
       ['chrome', ChromeSettings],
+      ['tracePerf', LinuxPerfSettings],
       ['advanced', AdvancedSettings],
     ]);
     for (const [section, component] of settingsSections.entries()) {
@@ -767,11 +793,15 @@ export const RecordPage = createPage({
       } as RecordingSectionAttrs));
     }
 
+    if (isChromeTarget(globals.state.recordingTarget)) {
+      globals.dispatch(Actions.setFetchChromeCategories({fetch: true}));
+    }
+
     return m(
-        '.record-page',
-        globals.state.recordingInProgress ? m('.hider') : [],
-        m('.record-container',
-          RecordHeader(),
-          m('.record-container-content', recordMenu(routePage), pages)));
+      '.record-page',
+      globals.state.recordingInProgress ? m('.hider') : [],
+      m('.record-container',
+        RecordHeader(),
+        m('.record-container-content', recordMenu(routePage), pages)));
   },
 });

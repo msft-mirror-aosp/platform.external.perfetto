@@ -15,6 +15,10 @@
 import m from 'mithril';
 
 import {Actions} from '../common/actions';
+import {Button} from '../widgets/button';
+import {Select} from '../widgets/select';
+import {TextInput} from '../widgets/text_input';
+
 import {globals} from './globals';
 
 export const LOG_PRIORITIES =
@@ -47,33 +51,28 @@ class LogPriorityWidget implements m.ClassComponent<LogPriorityWidgetAttrs> {
     for (let i = IGNORED_STATES; i < attrs.options.length; i++) {
       const selected = i === attrs.selectedIndex;
       optionComponents.push(
-          m('option', {value: i, selected}, attrs.options[i]));
+        m('option', {value: i, selected}, attrs.options[i]));
     }
     return m(
-        'select',
-        {
-          onchange: (e: InputEvent) => {
-            const selectionValue = (e.target as HTMLSelectElement).value;
-            attrs.onSelect(Number(selectionValue));
-          },
+      Select,
+      {
+        onchange: (e: Event) => {
+          const selectionValue = (e.target as HTMLSelectElement).value;
+          attrs.onSelect(Number(selectionValue));
         },
-        optionComponents,
+      },
+      optionComponents,
     );
   }
 }
 
 class LogTagChip implements m.ClassComponent<LogTagChipAttrs> {
   view({attrs}: m.CVnode<LogTagChipAttrs>) {
-    return m(
-        '.chip',
-        m('.chip-text', attrs.name),
-        m('button.chip-button',
-          {
-            onclick: () => {
-              attrs.removeTag(attrs.name);
-            },
-          },
-          '×'));
+    return m(Button, {
+      label: attrs.name,
+      rightIcon: 'close',
+      onclick: () => attrs.removeTag(attrs.name),
+    });
   }
 }
 
@@ -84,13 +83,14 @@ class LogTagsWidget implements m.ClassComponent<LogTagsWidgetAttrs> {
 
   view(vnode: m.Vnode<LogTagsWidgetAttrs>) {
     const tags = vnode.attrs.tags;
-    return m(
-        '.tag-container',
-        m('.chips', tags.map((tag) => m(LogTagChip, {
-                               name: tag,
-                               removeTag: this.removeTag.bind(this),
-                             }))),
-        m(`input.chip-input[placeholder='Add new tag']`, {
+    return [
+      tags.map((tag) => m(LogTagChip, {
+        name: tag,
+        removeTag: this.removeTag.bind(this),
+      })),
+      m(TextInput,
+        {
+          placeholder: 'Filter by tag...',
           onkeydown: (e: KeyboardEvent) => {
             // This is to avoid zooming on 'w'(and other unexpected effects
             // of key presses in this input field).
@@ -101,7 +101,7 @@ class LogTagsWidget implements m.ClassComponent<LogTagsWidgetAttrs> {
             if (e.key === 'Backspace' && tags.length > 0 &&
                 htmlElement.value === '') {
               globals.dispatch(
-                  Actions.removeLogTag({tag: tags[tags.length - 1]}));
+                Actions.removeLogTag({tag: tags[tags.length - 1]}));
               return;
             }
 
@@ -112,31 +112,27 @@ class LogTagsWidget implements m.ClassComponent<LogTagsWidgetAttrs> {
               return;
             }
             globals.dispatch(
-                Actions.addLogTag({tag: htmlElement.value.trim()}));
+              Actions.addLogTag({tag: htmlElement.value.trim()}));
             htmlElement.value = '';
           },
-        }));
+        }),
+    ];
   }
 }
 
 class LogTextWidget implements m.ClassComponent {
   view() {
     return m(
-        '.tag-container', m(`input.chip-input[placeholder='Search log text']`, {
-          onkeydown: (e: KeyboardEvent) => {
-            // This is to avoid zooming on 'w'(and other unexpected effects
-            // of key presses in this input field).
-            e.stopPropagation();
-          },
-
-          onkeyup: (e: KeyboardEvent) => {
-            // We want to use the value of the input field after it has been
-            // updated with the latest key (onkeyup).
-            const htmlElement = e.target as HTMLInputElement;
-            globals.dispatch(
-                Actions.updateLogFilterText({textEntry: htmlElement.value}));
-          },
-        }));
+      TextInput, {
+        placeholder: 'Search logs...',
+        onkeyup: (e: KeyboardEvent) => {
+          // We want to use the value of the input field after it has been
+          // updated with the latest key (onkeyup).
+          const htmlElement = e.target as HTMLInputElement;
+          globals.dispatch(
+            Actions.updateLogFilterText({textEntry: htmlElement.value}));
+        },
+      });
   }
 }
 
@@ -144,36 +140,33 @@ class FilterByTextWidget implements m.ClassComponent<FilterByTextWidgetAttrs> {
   view({attrs}: m.Vnode<FilterByTextWidgetAttrs>) {
     const icon = attrs.hideNonMatching ? 'unfold_less' : 'unfold_more';
     const tooltip = attrs.hideNonMatching ? 'Expand all and view highlighted' :
-                                            'Collapse all';
-    return m(
-        '.filter-widget',
-        m('.tooltip', tooltip),
-        m('i.material-icons',
-          {
-            onclick: () => {
-              globals.dispatch(Actions.toggleCollapseByTextEntry({}));
-            },
-          },
-          icon));
+      'Collapse all';
+    return m(Button, {
+      icon,
+      title: tooltip,
+      disabled: globals.state.logFilteringCriteria.textEntry === '',
+      minimal: true,
+      onclick: () => globals.dispatch(Actions.toggleCollapseByTextEntry({})),
+    });
   }
 }
 
 export class LogsFilters implements m.ClassComponent {
   view(_: m.CVnode<{}>) {
-    return m(
-        '.log-filters',
-        m('.log-label', 'Log Level'),
-        m(LogPriorityWidget, {
-          options: LOG_PRIORITIES,
-          selectedIndex: globals.state.logFilteringCriteria.minimumLevel,
-          onSelect: (minimumLevel) => {
-            globals.dispatch(Actions.setMinimumLogLevel({minimumLevel}));
-          },
-        }),
-        m(LogTagsWidget, {tags: globals.state.logFilteringCriteria.tags}),
-        m(LogTextWidget),
-        m(FilterByTextWidget, {
-          hideNonMatching: globals.state.logFilteringCriteria.hideNonMatching,
-        }));
+    return [
+      m('.log-label', 'Log Level'),
+      m(LogPriorityWidget, {
+        options: LOG_PRIORITIES,
+        selectedIndex: globals.state.logFilteringCriteria.minimumLevel,
+        onSelect: (minimumLevel) => {
+          globals.dispatch(Actions.setMinimumLogLevel({minimumLevel}));
+        },
+      }),
+      m(LogTagsWidget, {tags: globals.state.logFilteringCriteria.tags}),
+      m(LogTextWidget),
+      m(FilterByTextWidget, {
+        hideNonMatching: globals.state.logFilteringCriteria.hideNonMatching,
+      }),
+    ];
   }
 }

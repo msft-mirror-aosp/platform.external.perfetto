@@ -177,6 +177,10 @@ void TraceSorter::SortAndExtractEventsUntilAllocId(
 void TraceSorter::ParseTracePacket(const TimestampedEvent& event) {
   TraceTokenBuffer::Id id = GetTokenBufferId(event);
   switch (static_cast<TimestampedEvent::Type>(event.event_type)) {
+    case TimestampedEvent::Type::kTraceBlobView:
+      parser_->ParseTraceBlobView(event.ts,
+                                  token_buffer_.Extract<TraceBlobView>(id));
+      return;
     case TimestampedEvent::Type::kTracePacket:
       parser_->ParseTracePacket(event.ts,
                                 token_buffer_.Extract<TracePacketData>(id));
@@ -200,6 +204,26 @@ void TraceSorter::ParseTracePacket(const TimestampedEvent& event) {
     case TimestampedEvent::Type::kInlineSchedSwitch:
     case TimestampedEvent::Type::kInlineSchedWaking:
     case TimestampedEvent::Type::kFtraceEvent:
+    case TimestampedEvent::Type::kEtwEvent:
+      PERFETTO_FATAL("Invalid event type");
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
+void TraceSorter::ParseEtwPacket(uint32_t /*cpu*/,
+                                 const TimestampedEvent& event) {
+  switch (static_cast<TimestampedEvent::Type>(event.event_type)) {
+    case TimestampedEvent::Type::kEtwEvent:
+      return;
+    case TimestampedEvent::Type::kInlineSchedSwitch:
+    case TimestampedEvent::Type::kInlineSchedWaking:
+    case TimestampedEvent::Type::kFtraceEvent:
+    case TimestampedEvent::Type::kTrackEvent:
+    case TimestampedEvent::Type::kSystraceLine:
+    case TimestampedEvent::Type::kTracePacket:
+    case TimestampedEvent::Type::kTraceBlobView:
+    case TimestampedEvent::Type::kJsonValue:
+    case TimestampedEvent::Type::kFuchsiaRecord:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -221,9 +245,11 @@ void TraceSorter::ParseFtracePacket(uint32_t cpu,
       parser_->ParseFtraceEvent(cpu, event.ts,
                                 token_buffer_.Extract<TracePacketData>(id));
       return;
+    case TimestampedEvent::Type::kEtwEvent:
     case TimestampedEvent::Type::kTrackEvent:
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
+    case TimestampedEvent::Type::kTraceBlobView:
     case TimestampedEvent::Type::kJsonValue:
     case TimestampedEvent::Type::kFuchsiaRecord:
       PERFETTO_FATAL("Invalid event type");
@@ -235,6 +261,9 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
     const TimestampedEvent& event) {
   TraceTokenBuffer::Id id = GetTokenBufferId(event);
   switch (static_cast<TimestampedEvent::Type>(event.event_type)) {
+    case TimestampedEvent::Type::kTraceBlobView:
+      base::ignore_result(token_buffer_.Extract<TraceBlobView>(id));
+      return;
     case TimestampedEvent::Type::kTracePacket:
       base::ignore_result(token_buffer_.Extract<TracePacketData>(id));
       return;
@@ -257,6 +286,9 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
       base::ignore_result(token_buffer_.Extract<InlineSchedWaking>(id));
       return;
     case TimestampedEvent::Type::kFtraceEvent:
+      base::ignore_result(token_buffer_.Extract<TracePacketData>(id));
+      return;
+    case TimestampedEvent::Type::kEtwEvent:
       base::ignore_result(token_buffer_.Extract<TracePacketData>(id));
       return;
   }
@@ -283,7 +315,13 @@ void TraceSorter::MaybeExtractEvent(size_t queue_idx,
   } else {
     // Ftrace queues start at offset 1. So queues_[1] = cpu[0] and so on.
     uint32_t cpu = static_cast<uint32_t>(queue_idx - 1);
-    ParseFtracePacket(cpu, event);
+    auto event_type = static_cast<TimestampedEvent::Type>(event.event_type);
+
+    if (event_type == TimestampedEvent::Type::kEtwEvent) {
+      ParseEtwPacket(static_cast<uint32_t>(cpu), event);
+    } else {
+      ParseFtracePacket(cpu, event);
+    }
   }
 }
 

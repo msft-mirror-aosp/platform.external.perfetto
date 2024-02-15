@@ -187,6 +187,20 @@ util::Status SystraceLineParser::ParseLine(const SystraceLine& line) {
     }
     BinderTracker::GetOrCreate(context_)->TransactionReceived(line.ts, line.pid,
                                                               id.value());
+  } else if (line.event_name == "binder_command") {
+    auto id = base::StringToUInt32(args["cmd"], 0);
+    if (!id.has_value()) {
+      return util::Status("Could not convert cmd ");
+    }
+    BinderTracker::GetOrCreate(context_)->CommandToKernel(line.ts, line.pid,
+                                                          id.value());
+  } else if (line.event_name == "binder_return") {
+    auto id = base::StringToUInt32(args["cmd"], 0);
+    if (!id.has_value()) {
+      return util::Status("Could not convert cmd");
+    }
+    BinderTracker::GetOrCreate(context_)->ReturnFromKernel(line.ts, line.pid,
+                                                           id.value());
   } else if (line.event_name == "binder_lock") {
     BinderTracker::GetOrCreate(context_)->Lock(line.ts, line.pid);
   } else if (line.event_name == "binder_locked") {
@@ -260,8 +274,10 @@ util::Status SystraceLineParser::ParseLine(const SystraceLine& line) {
     if (!io_wait.has_value()) {
       return util::Status("sched_blocked_reason: could not parse io_wait");
     }
+    StringId blocked_function =
+        context_->storage->InternString(base::StringView(args["caller"]));
     ThreadStateTracker::GetOrCreate(context_)->PushBlockedReason(
-        wakee_utid, static_cast<bool>(*io_wait), std::nullopt);
+        wakee_utid, static_cast<bool>(*io_wait), blocked_function);
   } else if (line.event_name == "rss_stat") {
     // Format: rss_stat: size=8437760 member=1 curr=1 mm_id=2824390453
     auto size = base::StringToInt64(args["size"]);

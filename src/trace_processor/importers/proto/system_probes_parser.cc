@@ -20,6 +20,7 @@
 
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/traced/sys_stats_counters.h"
 #include "perfetto/protozero/proto_decoder.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
@@ -163,6 +164,22 @@ SystemProbesParser::SystemProbesParser(TraceProcessorContext* context)
       context->storage->InternString("mem.smaps.pss.file");
   proc_stats_process_names_[ProcessStats::Process::kSmrPssShmemKbFieldNumber] =
       context->storage->InternString("mem.smaps.pss.shmem");
+
+  using PsiResource = protos::pbzero::SysStats::PsiSample::PsiResource;
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_UNSPECIFIED] =
+      context->storage->InternString("psi.resource.unspecified");
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_CPU_SOME] =
+      context->storage->InternString("psi.cpu.some");
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_CPU_FULL] =
+      context->storage->InternString("psi.cpu.full");
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_IO_SOME] =
+      context->storage->InternString("psi.io.some");
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_IO_FULL] =
+      context->storage->InternString("psi.io.full");
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_MEMORY_SOME] =
+      context->storage->InternString("psi.mem.some");
+  sys_stats_psi_resource_names_[PsiResource::PSI_RESOURCE_MEMORY_FULL] =
+      context->storage->InternString("psi.mem.full");
 }
 
 void SystemProbesParser::ParseDiskStats(int64_t ts, ConstBytes blob) {
@@ -312,7 +329,7 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     track = context_->track_tracker->InternCpuCounterTrack(
         cpu_times_user_nice_ns_id_, ct.cpu_id());
     context_->event_tracker->PushCounter(
-        ts, static_cast<double>(ct.user_ice_ns()), track);
+        ts, static_cast<double>(ct.user_nice_ns()), track);
 
     track = context_->track_tracker->InternCpuCounterTrack(
         cpu_times_system_mode_ns_id_, ct.cpu_id());
@@ -402,6 +419,25 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
   for (auto it = sys_stats.disk_stat(); it; ++it) {
     ParseDiskStats(ts, *it);
   }
+
+  for (auto it = sys_stats.psi(); it; ++it) {
+    protos::pbzero::SysStats::PsiSample::Decoder psi(*it);
+
+    auto resource = static_cast<size_t>(psi.resource());
+    if (PERFETTO_UNLIKELY(resource >= sys_stats_psi_resource_names_.size())) {
+      PERFETTO_ELOG("PsiResource type %zu is not recognized.", resource);
+      context_->storage->IncrementStats(stats::psi_unknown_resource);
+      continue;
+    }
+
+    // TODO(b/315152880): Consider moving psi entries for cpu/io/memory into
+    // groups specific to that resource (e.g., `Group::kMemory`).
+    TrackId track = context_->track_tracker->InternGlobalCounterTrack(
+        TrackTracker::Group::kDeviceState,
+        sys_stats_psi_resource_names_[resource]);
+    context_->event_tracker->PushCounter(
+        ts, static_cast<double>(psi.total_ns()), track);
+  }
 }
 
 void SystemProbesParser::ParseProcessTree(ConstBytes blob) {
@@ -422,28 +458,61 @@ void SystemProbesParser::ParseProcessTree(ConstBytes blob) {
       context_->process_tracker->UpdateNamespacedProcess(pid, std::move(nspid));
     }
 
-    auto raw_cmdline = proc.cmdline();
+    protozero::RepeatedFieldIterator<protozero::ConstChars> raw_cmdline =
+        proc.cmdline();
     base::StringView argv0 = raw_cmdline ? *raw_cmdline : base::StringView();
-    // Chrome child process overwrites /proc/self/cmdline and replaces all
-    // '\0' with ' '. This makes argv0 contain the full command line. Extract
-    // the actual argv0 if it's Chrome.
-    static const char kChromeBinary[] = "/chrome ";
-    auto pos = argv0.find(kChromeBinary);
-    if (pos != base::StringView::npos) {
-      argv0 = argv0.substr(0, pos + strlen(kChromeBinary) - 1);
+    base::StringView joined_cmdline{};
+
+    // Special case: workqueue kernel threads (kworker). Worker threads are
+    // organised in pools, which can process work from different workqueues.
+    // When we read their thread name via procfs, the kernel takes a dedicated
+    // codepath that appends the name of the current/last workqueue that the
+    // worker processed. This is highly transient and therefore misleading to
+    // users if we keep using this name for the kernel thread.
+    // Example:
+    //   kworker/45:2-mm_percpu_wq
+    //   ^           ^
+    //   [worker id ][last queue ]
+    //
+    // Instead, use a truncated version of the process name that identifies just
+    // the worker itself. For the above example, this would be "kworker/45:2".
+    //
+    // https://github.com/torvalds/linux/blob/6d280f4d760e3bcb4a8df302afebf085b65ec982/kernel/workqueue.c#L5336
+    uint32_t kThreaddPid = 2;
+    if (ppid == kThreaddPid && argv0.StartsWith("kworker/")) {
+      size_t delim_loc = std::min(argv0.find('+', 8), argv0.find('-', 8));
+      if (delim_loc != base::StringView::npos) {
+        argv0 = argv0.substr(0, delim_loc);
+        joined_cmdline = argv0;
+      }
+    }
+
+    // Special case: some processes rewrite their cmdline with spaces as a
+    // separator instead of a NUL byte. Assume that's the case if there's only a
+    // single cmdline element. This will be wrong for binaries that have spaces
+    // in their path and are invoked without additional arguments, but those are
+    // very rare. The full cmdline will still be correct either way.
+    if (bool(++proc.cmdline()) == false) {
+      size_t delim_pos = argv0.find(' ');
+      if (delim_pos != base::StringView::npos) {
+        argv0 = argv0.substr(0, delim_pos);
+      }
     }
 
     std::string cmdline_str;
-    for (auto cmdline_it = raw_cmdline; cmdline_it;) {
-      auto cmdline_part = *cmdline_it;
-      cmdline_str.append(cmdline_part.data, cmdline_part.size);
+    if (joined_cmdline.empty()) {
+      for (auto cmdline_it = raw_cmdline; cmdline_it;) {
+        auto cmdline_part = *cmdline_it;
+        cmdline_str.append(cmdline_part.data, cmdline_part.size);
 
-      if (++cmdline_it)
-        cmdline_str.append(" ");
+        if (++cmdline_it)
+          cmdline_str.append(" ");
+      }
+      joined_cmdline = base::StringView(cmdline_str);
     }
-    base::StringView cmdline = base::StringView(cmdline_str);
     UniquePid upid = context_->process_tracker->SetProcessMetadata(
-        pid, ppid, argv0, cmdline);
+        pid, ppid, argv0, joined_cmdline);
+
     if (proc.has_uid()) {
       context_->process_tracker->SetProcessUid(
           upid, static_cast<uint32_t>(proc.uid()));
@@ -573,7 +642,7 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
     base::StringView machine = utsname.machine();
     SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(context_);
     Architecture arch = SyscallTable::ArchFromString(machine);
-    if (arch != kUnknown) {
+    if (arch != Architecture::kUnknown) {
       syscall_tracker->SetArchitecture(arch);
     } else {
       PERFETTO_ELOG("Unknown architecture %s. Syscall traces will not work.",
@@ -601,6 +670,12 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
                           Variadic::String(release_id));
     metadata->SetMetadata(metadata::system_machine,
                           Variadic::String(machine_id));
+  }
+
+  if (packet.has_timezone_off_mins()) {
+    context_->metadata_tracker->SetMetadata(
+        metadata::timezone_off_mins,
+        Variadic::Integer(packet.timezone_off_mins()));
   }
 
   if (packet.has_android_build_fingerprint()) {

@@ -147,6 +147,19 @@ def typed_column_type(table: Table, col: ParsedColumn) -> str:
   return f'TypedColumn<{parsed.cpp_type_with_optionality()}>'
 
 
+def data_layer_type(table: Table, col: ParsedColumn) -> str:
+  """Returns the DataLayer C++ type for a given column."""
+
+  parsed = parse_type(table, col.column.type)
+  if col.is_implicit_id:
+    return 'column::IdStorage'
+  if parsed.cpp_type == 'StringPool::Id':
+    return 'column::StringStorage'
+  if ColumnFlag.SET_ID in col.column.flags:
+    return 'column::SetIdStorage'
+  return f'column::NumericStorage<ColumnType::{col.column.name}::non_optional_stored_type>'
+
+
 def find_table_deps(table: Table) -> List[Table]:
   """Finds all the other table class names this table depends on.
 
@@ -185,7 +198,7 @@ def _create_implicit_columns_for_root(table: Table) -> List[ParsedColumn]:
       ParsedColumn(
           Column('id', CppSelfTableId(), ColumnFlag.SORTED),
           _to_column_doc(id_doc) if id_doc else ColumnDoc(
-              doc=f'Unique idenitifier for this {sql_name}.'),
+              doc=f'Unique identifier for this {sql_name}.'),
           is_implicit_id=True),
       ParsedColumn(
           Column('type', CppString(), ColumnFlag.NONE),

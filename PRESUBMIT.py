@@ -51,6 +51,7 @@ def CheckChange(input, output):
             '.*/Makefile$',
             '/perfetto_build_flags.h$',
             "infra/luci/.*",
+            "^ui/.*\.[jt]s$",  # TS/JS handled by eslint
         ])
 
   results = []
@@ -64,8 +65,9 @@ def CheckChange(input, output):
       output,
       80,
       source_file_filter=long_line_sources)
+  # TS/JS handled by eslint
   results += RunAndReportIfLong(
-      input.canned_checks.CheckPatchFormatted, input, output, check_js=True)
+      input.canned_checks.CheckPatchFormatted, input, output, check_js=False)
   results += RunAndReportIfLong(input.canned_checks.CheckGNFormatted, input,
                                 output)
   results += RunAndReportIfLong(CheckIncludeGuards, input, output)
@@ -77,10 +79,13 @@ def CheckChange(input, output):
   results += RunAndReportIfLong(CheckMergedTraceConfigProto, input, output)
   results += RunAndReportIfLong(CheckProtoEventList, input, output)
   results += RunAndReportIfLong(CheckBannedCpp, input, output)
+  results += RunAndReportIfLong(CheckBadCppPatterns, input, output)
   results += RunAndReportIfLong(CheckSqlModules, input, output)
   results += RunAndReportIfLong(CheckSqlMetrics, input, output)
   results += RunAndReportIfLong(CheckTestData, input, output)
   results += RunAndReportIfLong(CheckAmalgamatedPythonTools, input, output)
+  results += RunAndReportIfLong(CheckChromeStdlib, input, output)
+  results += RunAndReportIfLong(CheckAbsolutePathsInGn, input, output)
   return results
 
 
@@ -93,6 +98,10 @@ def CheckChangeOnCommit(input_api, output_api):
 
 
 def CheckBuild(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/gen_bazel'
 
   # If no GN files were modified, bail out.
@@ -111,12 +120,21 @@ def CheckBuild(input_api, output_api):
 
 
 def CheckAndroidBlueprint(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/gen_android_bp'
 
   # If no GN files were modified, bail out.
   def build_file_filter(x):
     return input_api.FilterSourceFile(
-        x, files_to_check=('.*BUILD[.]gn$', '.*[.]gni$', tool))
+        x,
+        files_to_check=('.*BUILD[.]gn$', '.*[.]gni$', tool),
+        # Do not require Android.bp to be regenerated for chrome
+        # stdlib changes.
+        files_to_skip=(
+            'src/trace_processor/perfetto_sql/stdlib/chrome/BUILD.gn'))
 
   if not input_api.AffectedSourceFiles(build_file_filter):
     return []
@@ -129,6 +147,10 @@ def CheckAndroidBlueprint(input_api, output_api):
 
 
 def CheckIncludeGuards(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/fix_include_guards'
 
   def file_filter(x):
@@ -192,7 +214,30 @@ def CheckBannedCpp(input_api, output_api):
   return errors
 
 
+def CheckBadCppPatterns(input_api, output_api):
+  bad_patterns = [
+      (r'.*/tracing_service_impl[.]cc$', r'\btrigger_config\(\)',
+       'Use GetTriggerMode(session->config) rather than .trigger_config()'),
+  ]
+  errors = []
+  for file_regex, code_regex, message in bad_patterns:
+    filt = lambda x: input_api.FilterSourceFile(x, files_to_check=[file_regex])
+    for f in input_api.AffectedSourceFiles(filt):
+      for line_number, line in f.ChangedContents():
+        if input_api.re.search(r'^\s*//', line):
+          continue  # Skip comments
+        if input_api.re.search(code_regex, line):
+          errors.append(
+              output_api.PresubmitError('{}:{} {}'.format(
+                  f.LocalPath(), line_number, message)))
+  return errors
+
+
 def CheckIncludeViolations(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/check_include_violations'
 
   def file_filter(x):
@@ -207,6 +252,10 @@ def CheckIncludeViolations(input_api, output_api):
 
 
 def CheckBinaryDescriptors(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/gen_binary_descriptors'
 
   def file_filter(x):
@@ -224,6 +273,10 @@ def CheckBinaryDescriptors(input_api, output_api):
 
 
 def CheckMergedTraceConfigProto(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/gen_merged_protos'
 
   def build_file_filter(x):
@@ -257,6 +310,10 @@ def CheckProtoEventList(input_api, output_api):
 
 
 def CheckProtoComments(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/check_proto_comments'
 
   def file_filter(x):
@@ -271,11 +328,18 @@ def CheckProtoComments(input_api, output_api):
 
 
 def CheckSqlModules(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/check_sql_modules.py'
 
   def file_filter(x):
     return input_api.FilterSourceFile(
-        x, files_to_check=['src/trace_processor/stdlib/.*[.]sql$', tool])
+        x,
+        files_to_check=[
+            'src/trace_processor/perfetto_sql/stdlib/.*[.]sql$', tool
+        ])
 
   if not input_api.AffectedSourceFiles(file_filter):
     return []
@@ -285,6 +349,10 @@ def CheckSqlModules(input_api, output_api):
 
 
 def CheckSqlMetrics(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/check_sql_metrics.py'
 
   def file_filter(x):
@@ -299,6 +367,10 @@ def CheckSqlMetrics(input_api, output_api):
 
 
 def CheckTestData(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/test_data'
   if subprocess.call([tool, 'status', '--quiet']):
     return [
@@ -312,7 +384,42 @@ def CheckTestData(input_api, output_api):
   return []
 
 
+def CheckChromeStdlib(input_api, output_api):
+  stdlib_paths = ("src/trace_processor/perfetto_sql/stdlib/chrome/",
+                  "test/data/chrome/",
+                  "test/trace_processor/diff_tests/stdlib/chrome/")
+
+  def chrome_stdlib_file_filter(x):
+    return input_api.FilterSourceFile(x, files_to_check=stdlib_paths)
+
+  # Only check chrome stdlib files
+  if not any(input_api.AffectedFiles(file_filter=chrome_stdlib_file_filter)):
+    return []
+
+  # Always allow Copybara service to make changes to chrome stdlib
+  if input_api.change.COPYBARA_IMPORT:
+    return []
+
+  if input_api.change.CHROME_STDLIB_MANUAL_ROLL:
+    return []
+
+  message = (
+      'Files under {0} and {1} '
+      'are rolled from the Chromium repository by a '
+      'Copybara service.\nYou should not modify these in '
+      'the Perfetto repository, please make your changes '
+      'in Chromium instead.\n'
+      'If you want to do a manual roll, you must specify '
+      'CHROME_STDLIB_MANUAL_ROLL=<reason> in the CL description.').format(
+          *stdlib_paths)
+  return [output_api.PresubmitError(message)]
+
+
 def CheckAmalgamatedPythonTools(input_api, output_api):
+  # The script invocation doesn't work on Windows.
+  if input_api.is_windows:
+    return []
+
   tool = 'tools/gen_amalgamated_python_tools'
 
   # If no GN files were modified, bail out.
@@ -328,3 +435,29 @@ def CheckAmalgamatedPythonTools(input_api, output_api):
             ' to update them.')
     ]
   return []
+
+
+def CheckAbsolutePathsInGn(input_api, output_api):
+
+  def file_filter(x):
+    return input_api.FilterSourceFile(
+        x,
+        files_to_check=[r'.*\.gni?$'],
+        files_to_skip=['^.gn$', '^gn/.*', '^buildtools/.*'])
+
+  error_lines = []
+  for f in input_api.AffectedSourceFiles(file_filter):
+    for line_number, line in f.ChangedContents():
+      if input_api.re.search(r'(^\s*[#])|([#]\s*nogncheck)', line):
+        continue  # Skip comments and '# nogncheck' lines
+      if input_api.re.search(r'"//[^"]', line):
+        error_lines.append('  %s:%s: %s' %
+                           (f.LocalPath(), line_number, line.strip()))
+
+  if len(error_lines) == 0:
+    return []
+  return [
+      output_api.PresubmitError(
+          'Use relative paths in GN rather than absolute:\n' +
+          '\n'.join(error_lines))
+  ]
