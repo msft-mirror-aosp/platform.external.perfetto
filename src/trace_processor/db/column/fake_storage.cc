@@ -47,6 +47,24 @@ FakeStorage::ChainImpl::ChainImpl(uint32_t size,
       range_(range),
       bit_vector_(std::move(bv)) {}
 
+SingleSearchResult FakeStorage::ChainImpl::SingleSearch(FilterOp,
+                                                        SqlValue,
+                                                        uint32_t i) const {
+  switch (strategy_) {
+    case kAll:
+      return SingleSearchResult::kMatch;
+    case kNone:
+      return SingleSearchResult::kNoMatch;
+    case kBitVector:
+      return bit_vector_.IsSet(i) ? SingleSearchResult::kMatch
+                                  : SingleSearchResult::kNoMatch;
+    case kRange:
+      return range_.Contains(i) ? SingleSearchResult::kMatch
+                                : SingleSearchResult::kNoMatch;
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
 SearchValidationResult FakeStorage::ChainImpl::ValidateSearchConstraints(
     FilterOp,
     SqlValue) const {
@@ -134,13 +152,9 @@ Range FakeStorage::ChainImpl::OrderedIndexSearchValidated(
           static_cast<uint32_t>(std::distance(indices.data, first_non_set))};
 }
 
-void FakeStorage::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void FakeStorage::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
+void FakeStorage::ChainImpl::StableSort(SortToken*,
+                                        SortToken*,
+                                        SortDirection) const {
   PERFETTO_FATAL("Not implemented");
 }
 

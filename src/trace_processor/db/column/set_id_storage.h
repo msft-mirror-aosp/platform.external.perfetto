@@ -42,6 +42,10 @@ class SetIdStorage final : public DataLayer {
    public:
     explicit ChainImpl(const std::vector<uint32_t>*);
 
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
+
     SearchValidationResult ValidateSearchConstraints(FilterOp,
                                                      SqlValue) const override;
 
@@ -55,9 +59,9 @@ class SetIdStorage final : public DataLayer {
                                       SqlValue,
                                       Indices) const override;
 
-    void StableSort(uint32_t*, uint32_t) const override;
-
-    void Sort(uint32_t*, uint32_t) const override;
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection direction) const override;
 
     void Serialize(StorageProto*) const override;
 

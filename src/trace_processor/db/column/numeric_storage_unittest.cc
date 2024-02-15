@@ -24,13 +24,13 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/row_map.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "src/trace_processor/db/compare.h"
 #include "test/gtest_and_gmock.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 inline bool operator==(const Range& a, const Range& b) {
   return std::tie(a.start, a.end) == std::tie(b.start, b.end);
@@ -150,30 +150,40 @@ TEST(NumericStorage, InvalidValueBoundsInt32) {
             SearchValidationResult::kNoData);
 }
 
-TEST(NumericStorage, StableSortTrivial) {
-  std::vector<uint32_t> data_vec{0, 1, 2, 0, 1, 2, 0, 1, 2};
-  std::vector<uint32_t> out = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-
-  NumericStorage<uint32_t> storage(&data_vec, ColumnType::kUint32, false);
+TEST(NumericStorage, SingleSearch) {
+  std::vector<int32_t> data_vec{0, 1, 2, 3, 0, -1, -2, -3};
+  NumericStorage<int32_t> storage(&data_vec, ColumnType::kInt32, false);
   auto chain = storage.MakeChain();
-  RowMap rm(0, 9);
-  chain->StableSort(out.data(), 9);
 
-  std::vector<uint32_t> stable_out{0, 3, 6, 1, 4, 7, 2, 5, 8};
-  ASSERT_EQ(out, stable_out);
-}
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(1), 1),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(1), 5),
+            SingleSearchResult::kNoMatch);
 
-TEST(NumericStorage, StableSort) {
-  std::vector<uint32_t> data_vec{0, 1, 2, 0, 1, 2, 0, 1, 2};
-  std::vector<uint32_t> out = {1, 7, 4, 0, 6, 3, 2, 5, 8};
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kNe, SqlValue::Long(1), 0),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kNe, SqlValue::Long(-2), 6),
+            SingleSearchResult::kNoMatch);
 
-  NumericStorage<uint32_t> storage(&data_vec, ColumnType::kUint32, false);
-  auto chain = storage.MakeChain();
-  RowMap rm(0, 9);
-  chain->StableSort(out.data(), 9);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLt, SqlValue::Long(3), 2),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLt, SqlValue::Long(-2), 5),
+            SingleSearchResult::kNoMatch);
 
-  std::vector<uint32_t> stable_out{0, 6, 3, 1, 7, 4, 2, 5, 8};
-  ASSERT_EQ(out, stable_out);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLe, SqlValue::Long(4), 4),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLe, SqlValue::Long(0), 3),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGt, SqlValue::Long(0), 3),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGt, SqlValue::Long(0), 5),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0), 0),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0), 5),
+            SingleSearchResult::kNoMatch);
 }
 
 TEST(NumericStorage, Search) {
@@ -666,7 +676,37 @@ TEST(NumericStorage, DoubleColumnWithNegIntThatCantBeRepresentedAsDouble) {
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0));
 }
 
+TEST(NumericStorage, StableSort) {
+  std::vector<int64_t> data{
+      -1, -100, 2, 100, 2,
+  };
+  NumericStorage<int64_t> storage(&data, ColumnType::kInt64, false);
+  auto chain = storage.MakeChain();
+  auto make_tokens = []() {
+    return std::vector{
+        column::DataLayerChain::SortToken{0, 0},
+        column::DataLayerChain::SortToken{1, 1},
+        column::DataLayerChain::SortToken{2, 2},
+        column::DataLayerChain::SortToken{3, 3},
+        column::DataLayerChain::SortToken{4, 4},
+    };
+  };
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kAscending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(1, 0, 2, 4, 3));
+  }
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kDescending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(3, 2, 4, 0, 1));
+  }
+}
+
 }  // namespace
 }  // namespace column
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

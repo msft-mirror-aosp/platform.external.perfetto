@@ -43,6 +43,10 @@ class NullOverlay final : public DataLayer {
    public:
     ChainImpl(std::unique_ptr<DataLayerChain>, const BitVector* non_null);
 
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
+
     SearchValidationResult ValidateSearchConstraints(FilterOp,
                                                      SqlValue) const override;
 
@@ -56,9 +60,9 @@ class NullOverlay final : public DataLayer {
                                       SqlValue,
                                       Indices) const override;
 
-    void StableSort(uint32_t* rows, uint32_t rows_size) const override;
-
-    void Sort(uint32_t* rows, uint32_t rows_size) const override;
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection) const override;
 
     void Serialize(StorageProto*) const override;
 
