@@ -22,6 +22,8 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
+#include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/numeric_storage.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "test/gtest_and_gmock.h"
@@ -41,6 +43,42 @@ namespace {
 
 using testing::ElementsAre;
 using testing::IsEmpty;
+
+TEST(SetIdStorage, SearchSingle) {
+  std::vector<uint32_t> storage_data{0, 0, 2, 2, 4, 4, 6, 6};
+  SetIdStorage storage(&storage_data);
+  auto chain = storage.MakeChain();
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(4), 4),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(4), 3),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kNe, SqlValue::Long(4), 3),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kNe, SqlValue::Long(4), 4),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(4), 4),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(4), 1),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGt, SqlValue::Long(4), 6),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGt, SqlValue::Long(4), 4),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLe, SqlValue::Long(4), 4),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLe, SqlValue::Long(4), 6),
+            SingleSearchResult::kNoMatch);
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLt, SqlValue::Long(4), 3),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kLt, SqlValue::Long(4), 4),
+            SingleSearchResult::kNoMatch);
+}
 
 TEST(SetIdStorage, InvalidSearchConstraints) {
   std::vector<uint32_t> storage_data{0, 0, 0, 3, 3, 3, 6, 6, 6, 9, 9, 9};
@@ -324,6 +362,35 @@ TEST(SetIdStorage, SearchWithIdAsDouble) {
 
   res = chain->Search(FilterOp::kGt, val, range).TakeIfRange();
   ASSERT_EQ(res, Range(9, 10));
+}
+
+TEST(SetIdStorage, StableSort) {
+  std::vector<uint32_t> storage_data{0, 0, 0, 3, 3};
+  SetIdStorage storage(&storage_data);
+  auto chain = storage.MakeChain();
+  auto make_tokens = []() {
+    return std::vector{
+        column::DataLayerChain::SortToken{3, 3},
+        column::DataLayerChain::SortToken{2, 2},
+        column::DataLayerChain::SortToken{1, 1},
+        column::DataLayerChain::SortToken{0, 0},
+        column::DataLayerChain::SortToken{4, 4},
+    };
+  };
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kAscending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(2, 1, 0, 3, 4));
+  }
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kDescending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(3, 4, 2, 1, 0));
+  }
 }
 
 }  // namespace

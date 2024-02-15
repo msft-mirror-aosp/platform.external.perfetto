@@ -22,7 +22,9 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/fake_storage.h"
+#include "src/trace_processor/db/column/numeric_storage.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "test/gtest_and_gmock.h"
@@ -32,6 +34,44 @@ namespace {
 
 using testing::ElementsAre;
 using testing::IsEmpty;
+
+TEST(NullOverlay, SingleSearch) {
+  BitVector bv{0, 1, 0, 1, 1, 1};
+  auto fake = FakeStorage::SearchSubset(4, std::vector<uint32_t>{1, 2});
+  NullOverlay storage(&bv);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 3),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 1),
+            SingleSearchResult::kNoMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 2),
+            SingleSearchResult::kNoMatch);
+}
+
+TEST(NullOverlay, SingleSearchIsNull) {
+  BitVector bv{0, 1, 0, 1, 1, 1};
+  auto fake = FakeStorage::SearchNone(4);
+  NullOverlay storage(&bv);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNull, SqlValue(), 0),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNull, SqlValue(), 1),
+            SingleSearchResult::kNoMatch);
+}
+
+TEST(NullOverlay, SingleSearchIsNotNull) {
+  BitVector bv{0, 1, 0, 1, 1, 1};
+  auto fake = FakeStorage::SearchAll(4);
+  NullOverlay storage(&bv);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNotNull, SqlValue(), 1),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kIsNotNull, SqlValue(), 0),
+            SingleSearchResult::kNoMatch);
+}
 
 TEST(NullOverlay, SearchInputInsideBoundary) {
   BitVector bv{0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0};
@@ -204,6 +244,41 @@ TEST(NullOverlay, OrderedIndexSearch) {
   res = chain->OrderedIndexSearch(FilterOp::kLe, SqlValue::Long(3), indices);
   ASSERT_EQ(res.start, 3u);
   ASSERT_EQ(res.end, 5u);
+}
+
+TEST(NullOverlay, StableSort) {
+  std::vector<uint32_t> numeric_data{3, 1, 0, 2, 4};
+  NumericStorage<uint32_t> numeric(&numeric_data, ColumnType::kUint32, false);
+
+  BitVector null{0, 1, 0, 1, 1, 1, 1};
+  NullOverlay overlay(&null);
+  auto chain = overlay.MakeChain(numeric.MakeChain());
+
+  auto make_tokens = []() {
+    return std::vector{
+        column::DataLayerChain::SortToken{0, 0},
+        column::DataLayerChain::SortToken{1, 1},
+        column::DataLayerChain::SortToken{2, 2},
+        column::DataLayerChain::SortToken{3, 3},
+        column::DataLayerChain::SortToken{4, 4},
+        column::DataLayerChain::SortToken{5, 5},
+        column::DataLayerChain::SortToken{6, 6},
+    };
+  };
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kAscending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(0, 2, 4, 3, 5, 1, 6));
+  }
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kDescending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(6, 1, 5, 3, 4, 0, 2));
+  }
 }
 
 }  // namespace

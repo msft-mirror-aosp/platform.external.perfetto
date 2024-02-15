@@ -45,6 +45,10 @@ class StringStorage final : public DataLayer {
               const std::vector<StringPool::Id>* data,
               bool is_sorted);
 
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
+
     SearchValidationResult ValidateSearchConstraints(FilterOp,
                                                      SqlValue) const override;
 
@@ -58,9 +62,9 @@ class StringStorage final : public DataLayer {
                                       SqlValue,
                                       Indices) const override;
 
-    void StableSort(uint32_t* rows, uint32_t rows_size) const override;
-
-    void Sort(uint32_t* rows, uint32_t rows_size) const override;
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection direction) const override;
 
     void Serialize(StorageProto*) const override;
 

@@ -47,6 +47,12 @@ SelectorOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                       const BitVector* selector)
     : inner_(std::move(inner)), selector_(selector) {}
 
+SingleSearchResult SelectorOverlay::ChainImpl::SingleSearch(FilterOp op,
+                                                            SqlValue sql_val,
+                                                            uint32_t i) const {
+  return inner_->SingleSearch(op, sql_val, selector_->IndexOfNthSet(i));
+}
+
 SearchValidationResult SelectorOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue sql_val) const {
@@ -127,14 +133,13 @@ Range SelectorOverlay::ChainImpl::OrderedIndexSearchValidated(
               indices.state});
 }
 
-void SelectorOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void SelectorOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void SelectorOverlay::ChainImpl::StableSort(SortToken* start,
+                                            SortToken* end,
+                                            SortDirection direction) const {
+  for (SortToken* it = start; it != end; ++it) {
+    it->index = selector_->IndexOfNthSet(it->index);
+  }
+  inner_->StableSort(start, end, direction);
 }
 
 void SelectorOverlay::ChainImpl::Serialize(StorageProto* storage) const {

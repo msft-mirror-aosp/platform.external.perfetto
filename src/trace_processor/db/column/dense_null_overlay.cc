@@ -47,13 +47,35 @@ DenseNullOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                        const BitVector* non_null)
     : inner_(std::move(inner)), non_null_(non_null) {}
 
+SingleSearchResult DenseNullOverlay::ChainImpl::SingleSearch(
+    FilterOp op,
+    SqlValue sql_val,
+    uint32_t index) const {
+  switch (op) {
+    case FilterOp::kIsNull:
+      return non_null_->IsSet(index) ? inner_->SingleSearch(op, sql_val, index)
+                                     : SingleSearchResult::kMatch;
+    case FilterOp::kIsNotNull:
+    case FilterOp::kEq:
+    case FilterOp::kGe:
+    case FilterOp::kGt:
+    case FilterOp::kLt:
+    case FilterOp::kLe:
+    case FilterOp::kNe:
+    case FilterOp::kGlob:
+    case FilterOp::kRegex:
+      return non_null_->IsSet(index) ? inner_->SingleSearch(op, sql_val, index)
+                                     : SingleSearchResult::kNoMatch;
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
 SearchValidationResult DenseNullOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue sql_val) const {
   if (op == FilterOp::kIsNull) {
     return SearchValidationResult::kOk;
   }
-
   return inner_->ValidateSearchConstraints(op, sql_val);
 }
 
@@ -213,14 +235,16 @@ Range DenseNullOverlay::ChainImpl::OrderedIndexSearchValidated(
           inner_range.end + non_null_offset};
 }
 
-void DenseNullOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void DenseNullOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void DenseNullOverlay::ChainImpl::StableSort(SortToken* start,
+                                             SortToken* end,
+                                             SortDirection direction) const {
+  SortToken* it = std::stable_partition(
+      start, end,
+      [this](const SortToken& idx) { return !non_null_->IsSet(idx.index); });
+  inner_->StableSort(it, end, direction);
+  if (direction == SortDirection::kDescending) {
+    std::rotate(start, it, end);
+  }
 }
 
 void DenseNullOverlay::ChainImpl::Serialize(StorageProto* storage) const {
