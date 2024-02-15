@@ -50,10 +50,6 @@ class NumericStorageBase : public DataLayer {
                                       SqlValue,
                                       Indices) const override;
 
-    void StableSort(uint32_t*, uint32_t) const override;
-
-    void Sort(uint32_t*, uint32_t) const override;
-
     void Serialize(StorageProto*) const override;
 
     std::string DebugString() const override { return "NumericStorage"; }
@@ -97,9 +93,10 @@ class NumericStorage final : public NumericStorageBase {
                                     bool is_sorted)
       : NumericStorageBase(type, is_sorted), vector_(vec) {}
 
-  std::unique_ptr<DataLayerChain> MakeChain() override {
-    return std::make_unique<ChainImpl>(vector_, storage_type_, is_sorted_);
-  }
+  // The implementation of this function is given by
+  // make_chain.cc/make_chain_minimal.cc depending on whether this is a minimal
+  // or full build of trace processor.
+  std::unique_ptr<DataLayerChain> MakeChain() override;
 
  private:
   class ChainImpl : public NumericStorageBase::ChainImpl {
@@ -128,6 +125,26 @@ class NumericStorage final : public NumericStorageBase {
       }
     }
 
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection direction) const override {
+      const T* base = vector_->data();
+      switch (direction) {
+        case SortDirection::kAscending:
+          std::stable_sort(start, end,
+                           [base](const SortToken& a, const SortToken& b) {
+                             return base[a.index] < base[b.index];
+                           });
+          break;
+        case SortDirection::kDescending:
+          std::stable_sort(start, end,
+                           [base](const SortToken& a, const SortToken& b) {
+                             return base[a.index] > base[b.index];
+                           });
+          break;
+      }
+    }
+
     uint32_t size() const override {
       return static_cast<uint32_t>(vector_->size());
     }
@@ -138,6 +155,22 @@ class NumericStorage final : public NumericStorageBase {
 
   const std::vector<T>* vector_;
 };
+
+// Define external templates to reduce binary size bloat.
+extern template class NumericStorage<double>;
+extern template class NumericStorage<uint32_t>;
+extern template class NumericStorage<int32_t>;
+extern template class NumericStorage<int64_t>;
+
+// Define external templates to allow splitting minimal vs full targets.
+extern template std::unique_ptr<DataLayerChain>
+NumericStorage<double>::MakeChain();
+extern template std::unique_ptr<DataLayerChain>
+NumericStorage<uint32_t>::MakeChain();
+extern template std::unique_ptr<DataLayerChain>
+NumericStorage<int32_t>::MakeChain();
+extern template std::unique_ptr<DataLayerChain>
+NumericStorage<int64_t>::MakeChain();
 
 }  // namespace perfetto::trace_processor::column
 

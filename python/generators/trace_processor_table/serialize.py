@@ -121,8 +121,8 @@ class ColumnSerializer:
     if self.is_ancestor:
       return None
     return f'''
-    columns.emplace_back("{self.name}", &self->{self.name}_, ColumnFlag::{self.name},
-                         static_cast<uint32_t>(columns.size()), olay_idx);
+    AddColumnToVector(columns, "{self.name}", &self->{self.name}_, ColumnFlag::{self.name},
+                      static_cast<uint32_t>(columns.size()), olay_idx);
     '''
 
   def shrink_to_fit(self) -> Optional[str]:
@@ -294,6 +294,8 @@ class ColumnSerializer:
       return f''
     if not self.is_optional or self.is_string:
       return f''
+    if ColumnFlag.DENSE in self.flags:
+      return f'''{self.name}_null_layer_(new column::DenseNullOverlay({self.name}_.bv()))'''
     return f'''{self.name}_null_layer_(new column::NullOverlay({self.name}_.bv()))'''
 
 
@@ -559,6 +561,9 @@ class TableSerializer(object):
     storage_layer_init = self.foreach_col(
         ColumnSerializer.storage_layer_init, delimiter=',\n        ')
     storage_layer_sep = '\n,' if storage_layer_init else ''
+    null_layer_init = self.foreach_col(
+        ColumnSerializer.null_layer_init, delimiter=',\n        ')
+    null_layer_sep = '\n,' if null_layer_init else ''
     params = self.foreach_col(
         ColumnSerializer.extend_parent_param, delimiter='\n, ')
     storage_layer_create = self.foreach_col(
@@ -576,7 +581,8 @@ class TableSerializer(object):
           parent,
           parent_overlay),
           const_parent_(&parent){storage_layer_sep}
-        {storage_layer_init} {{
+        {storage_layer_init}{null_layer_sep}
+        {null_layer_init} {{
     {self.foreach_col(ColumnSerializer.static_assert_flags)}
     {self.foreach_col(ColumnSerializer.extend_nullable_vector)}
 
@@ -749,6 +755,7 @@ def serialize_header(ifdef_guard: str, tables: List[ParsedTable],
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column/arrangement_overlay.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/dense_null_overlay.h"
 #include "src/trace_processor/db/column/numeric_storage.h"
 #include "src/trace_processor/db/column/id_storage.h"
 #include "src/trace_processor/db/column/null_overlay.h"

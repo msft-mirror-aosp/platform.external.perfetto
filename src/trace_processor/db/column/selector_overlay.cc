@@ -37,12 +37,6 @@ namespace perfetto::trace_processor::column {
 SelectorOverlay::SelectorOverlay(const BitVector* selector)
     : selector_(selector) {}
 
-std::unique_ptr<DataLayerChain> SelectorOverlay::MakeChain(
-    std::unique_ptr<DataLayerChain> inner,
-    ChainCreationArgs) {
-  return std::make_unique<ChainImpl>(std::move(inner), selector_);
-}
-
 SelectorOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                       const BitVector* selector)
     : inner_(std::move(inner)), selector_(selector) {}
@@ -133,14 +127,13 @@ Range SelectorOverlay::ChainImpl::OrderedIndexSearchValidated(
               indices.state});
 }
 
-void SelectorOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void SelectorOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void SelectorOverlay::ChainImpl::StableSort(SortToken* start,
+                                            SortToken* end,
+                                            SortDirection direction) const {
+  for (SortToken* it = start; it != end; ++it) {
+    it->index = selector_->IndexOfNthSet(it->index);
+  }
+  inner_->StableSort(start, end, direction);
 }
 
 void SelectorOverlay::ChainImpl::Serialize(StorageProto* storage) const {

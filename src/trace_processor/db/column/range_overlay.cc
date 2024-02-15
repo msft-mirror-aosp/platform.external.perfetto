@@ -36,12 +36,6 @@ using Range = Range;
 
 RangeOverlay::RangeOverlay(const Range* range) : range_(range) {}
 
-std::unique_ptr<DataLayerChain> RangeOverlay::MakeChain(
-    std::unique_ptr<DataLayerChain> inner,
-    ChainCreationArgs) {
-  return std::make_unique<ChainImpl>(std::move(inner), range_);
-}
-
 RangeOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                    const Range* range)
     : inner_(std::move(inner)), range_(range) {
@@ -143,14 +137,13 @@ Range RangeOverlay::ChainImpl::OrderedIndexSearchValidated(
       op, sql_val, Indices{storage_iv.data(), indices.size, indices.state});
 }
 
-void RangeOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void RangeOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void RangeOverlay::ChainImpl::StableSort(SortToken* start,
+                                         SortToken* end,
+                                         SortDirection direction) const {
+  for (SortToken* it = start; it != end; ++it) {
+    it->index += range_->start;
+  }
+  inner_->StableSort(start, end, direction);
 }
 
 void RangeOverlay::ChainImpl::Serialize(StorageProto*) const {

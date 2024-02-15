@@ -80,12 +80,6 @@ BitVector ReconcileStorageResult(FilterOp op,
 
 NullOverlay::NullOverlay(const BitVector* non_null) : non_null_(non_null) {}
 
-std::unique_ptr<DataLayerChain> NullOverlay::MakeChain(
-    std::unique_ptr<DataLayerChain> inner,
-    ChainCreationArgs) {
-  return std::make_unique<ChainImpl>(std::move(inner), non_null_);
-}
-
 SingleSearchResult NullOverlay::ChainImpl::SingleSearch(FilterOp op,
                                                         SqlValue sql_val,
                                                         uint32_t index) const {
@@ -259,14 +253,19 @@ Range NullOverlay::ChainImpl::OrderedIndexSearchValidated(
           inner_range.end + non_null_offset};
 }
 
-void NullOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void NullOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void NullOverlay::ChainImpl::StableSort(SortToken* start,
+                                        SortToken* end,
+                                        SortDirection direction) const {
+  SortToken* middle = std::stable_partition(
+      start, end,
+      [this](const SortToken& idx) { return !non_null_->IsSet(idx.index); });
+  for (SortToken* it = middle; it != end; ++it) {
+    it->index = non_null_->CountSetBits(it->index);
+  }
+  inner_->StableSort(middle, end, direction);
+  if (direction == SortDirection::kDescending) {
+    std::rotate(start, middle, end);
+  }
 }
 
 void NullOverlay::ChainImpl::Serialize(StorageProto* storage) const {

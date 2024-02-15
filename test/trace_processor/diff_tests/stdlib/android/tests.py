@@ -317,8 +317,8 @@ class AndroidStdlib(TestSuite):
       LIMIT 1;
       """,
         out=Csv("""
-        "parent_id","blocking_method","blocked_method","short_blocking_method","short_blocked_method","blocking_src","blocked_src","waiter_count","blocked_utid","blocked_thread_name","blocking_utid","blocking_thread_name","blocking_tid","upid","process_name","id","ts","dur","track_id","is_blocked_thread_main","blocked_thread_tid","is_blocking_thread_main","blocking_thread_tid","binder_reply_id","binder_reply_ts","binder_reply_tid","pid","child_id"
-        949,"void com.android.server.am.ActivityManagerService$AppDeathRecipient.binderDied()","int com.android.server.am.ActivityManagerService.getMemoryTrimLevel()","com.android.server.am.ActivityManagerService$AppDeathRecipient.binderDied","com.android.server.am.ActivityManagerService.getMemoryTrimLevel","ActivityManagerService.java:1478","ActivityManagerService.java:9183",1,250,"system_server",656,"binder:642_12",2720,250,"system_server",956,1737123891932,17577143,1215,1,642,0,2720,"[NULL]","[NULL]","[NULL]",642,"[NULL]"
+        "parent_id","blocking_method","blocked_method","short_blocking_method","short_blocked_method","blocking_src","blocked_src","waiter_count","blocked_utid","blocked_thread_name","blocking_utid","blocking_thread_name","blocking_tid","upid","process_name","id","ts","dur","monotonic_dur","track_id","is_blocked_thread_main","blocked_thread_tid","is_blocking_thread_main","blocking_thread_tid","binder_reply_id","binder_reply_ts","binder_reply_tid","pid","child_id"
+        949,"void com.android.server.am.ActivityManagerService$AppDeathRecipient.binderDied()","int com.android.server.am.ActivityManagerService.getMemoryTrimLevel()","com.android.server.am.ActivityManagerService$AppDeathRecipient.binderDied","com.android.server.am.ActivityManagerService.getMemoryTrimLevel","ActivityManagerService.java:1478","ActivityManagerService.java:9183",1,250,"system_server",656,"binder:642_12",2720,250,"system_server",956,1737123891932,17577143,17577143,1215,1,642,0,2720,"[NULL]","[NULL]","[NULL]",642,"[NULL]"
       """))
 
   def test_monitor_contention_graph(self):
@@ -923,7 +923,7 @@ class AndroidStdlib(TestSuite):
          "name","ts","value","dur"
          "domain@1 Frequency",200001000000,400000.000000,2000000
          "domain@1 Frequency",200003000000,1024000.000000,2000000
-         "domain@1 Frequency",200005000000,1024000.000000,1
+         "domain@1 Frequency",200005000000,1024000.000000,0
          """))
 
   def test_android_dvfs_counter_stats(self):
@@ -991,8 +991,8 @@ class AndroidStdlib(TestSuite):
          """,
         out=Csv("""
          "name","max","min","dur","wgt_avg"
-         "bus_throughput Frequency",1014000.000000,553000.000000,4000000,783499.942375
-         "domain@1 Frequency",1024000.000000,400000.000000,4000000,712000.078000
+         "bus_throughput Frequency",1014000.000000,553000.000000,2000000,783500.000000
+         "domain@1 Frequency",1024000.000000,400000.000000,2000000,712000.000000
          """))
 
   def test_android_dvfs_counter_residency(self):
@@ -1002,7 +1002,7 @@ class AndroidStdlib(TestSuite):
             ftrace_events {
               cpu: 0
               event {
-                timestamp: 200001000001
+                timestamp: 200001000000
                 pid: 2
                 clock_set_rate {
                 name : "bus_throughput"
@@ -1010,7 +1010,7 @@ class AndroidStdlib(TestSuite):
                 }
               }
               event {
-                timestamp: 200003000001
+                timestamp: 200003000000
                 pid: 2
                 clock_set_rate {
                   name: "bus_throughput"

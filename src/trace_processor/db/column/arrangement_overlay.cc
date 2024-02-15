@@ -38,14 +38,6 @@ ArrangementOverlay::ArrangementOverlay(const std::vector<uint32_t>* arrangement,
                                        Indices::State arrangement_state)
     : arrangement_(arrangement), arrangement_state_(arrangement_state) {}
 
-std::unique_ptr<DataLayerChain> ArrangementOverlay::MakeChain(
-    std::unique_ptr<DataLayerChain> inner,
-    ChainCreationArgs args) {
-  return std::make_unique<ChainImpl>(std::move(inner), arrangement_,
-                                     arrangement_state_,
-                                     args.does_layer_order_chain_contents);
-}
-
 ArrangementOverlay::ChainImpl::ChainImpl(
     std::unique_ptr<DataLayerChain> inner,
     const std::vector<uint32_t>* arrangement,
@@ -161,14 +153,13 @@ RangeOrBitVector ArrangementOverlay::ChainImpl::IndexSearchValidated(
               Indices::State::kNonmonotonic});
 }
 
-void ArrangementOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void ArrangementOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void ArrangementOverlay::ChainImpl::StableSort(SortToken* start,
+                                               SortToken* end,
+                                               SortDirection direction) const {
+  for (SortToken* it = start; it != end; ++it) {
+    it->index = (*arrangement_)[it->index];
+  }
+  inner_->StableSort(start, end, direction);
 }
 
 void ArrangementOverlay::ChainImpl::Serialize(StorageProto* storage) const {

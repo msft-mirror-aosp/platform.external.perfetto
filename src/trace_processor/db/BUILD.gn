@@ -39,7 +39,7 @@ source_set("minimal") {
     "../util:glob",
     "../util:regex",
     "../util:util",
-    "column:minimal",
+    "column",
   ]
 }
 
@@ -101,6 +101,7 @@ if (enable_perfetto_benchmarks) {
       "../../base:test_support",
       "../containers",
       "../tables:tables_python",
+      "column",
     ]
     sources = [
       "column_storage_overlay_benchmark.cc",
