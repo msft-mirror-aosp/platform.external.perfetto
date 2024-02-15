@@ -19,9 +19,11 @@
 #include <cstdint>
 #include <vector>
 
+#include "data_layer.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/fake_storage.h"
+#include "src/trace_processor/db/column/numeric_storage.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "test/gtest_and_gmock.h"
@@ -31,6 +33,18 @@ namespace {
 
 using testing::ElementsAre;
 using testing::IsEmpty;
+
+TEST(SelectorOverlay, SingleSearch) {
+  BitVector selector{0, 1, 1, 0, 0, 1, 1, 0};
+  auto fake = FakeStorage::SearchSubset(8, Range(2, 5));
+  SelectorOverlay storage(&selector);
+  auto chain = storage.MakeChain(fake->MakeChain());
+
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 1),
+            SingleSearchResult::kMatch);
+  ASSERT_EQ(chain->SingleSearch(FilterOp::kGe, SqlValue::Long(0u), 0),
+            SingleSearchResult::kNoMatch);
+}
 
 TEST(SelectorOverlay, SearchAll) {
   BitVector selector{0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1};
@@ -113,6 +127,40 @@ TEST(SelectorOverlay, OrderedIndexSearchNone) {
       Indices{table_idx.data(), static_cast<uint32_t>(table_idx.size()),
               Indices::State::kNonmonotonic});
   ASSERT_EQ(res.size(), 0u);
+}
+
+TEST(SelectorOverlay, StableSort) {
+  std::vector<uint32_t> numeric_data{3, 1, 0, 0, 2, 4, 3, 4};
+  NumericStorage<uint32_t> numeric(&numeric_data, ColumnType::kUint32, false);
+
+  BitVector selector{0, 1, 0, 1, 1, 1, 1, 1};
+  SelectorOverlay overlay(&selector);
+  auto chain = overlay.MakeChain(numeric.MakeChain());
+
+  auto make_tokens = []() {
+    return std::vector{
+        column::DataLayerChain::SortToken{0, 0},
+        column::DataLayerChain::SortToken{1, 1},
+        column::DataLayerChain::SortToken{2, 2},
+        column::DataLayerChain::SortToken{3, 3},
+        column::DataLayerChain::SortToken{4, 4},
+        column::DataLayerChain::SortToken{5, 5},
+    };
+  };
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kAscending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(1, 0, 2, 4, 3, 5));
+  }
+  {
+    auto tokens = make_tokens();
+    chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
+                      column::DataLayerChain::SortDirection::kDescending);
+    ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
+                ElementsAre(3, 5, 4, 2, 0, 1));
+  }
 }
 
 }  // namespace

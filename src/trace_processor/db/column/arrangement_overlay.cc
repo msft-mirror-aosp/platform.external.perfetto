@@ -59,6 +59,13 @@ ArrangementOverlay::ChainImpl::ChainImpl(
                   inner_->size());
 }
 
+SingleSearchResult ArrangementOverlay::ChainImpl::SingleSearch(
+    FilterOp op,
+    SqlValue sql_val,
+    uint32_t index) const {
+  return inner_->SingleSearch(op, sql_val, (*arrangement_)[index]);
+}
+
 SearchValidationResult ArrangementOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue value) const {
@@ -154,14 +161,13 @@ RangeOrBitVector ArrangementOverlay::ChainImpl::IndexSearchValidated(
               Indices::State::kNonmonotonic});
 }
 
-void ArrangementOverlay::ChainImpl::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
-}
-
-void ArrangementOverlay::ChainImpl::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_FATAL("Not implemented");
+void ArrangementOverlay::ChainImpl::StableSort(SortToken* start,
+                                               SortToken* end,
+                                               SortDirection direction) const {
+  for (SortToken* it = start; it != end; ++it) {
+    it->index = (*arrangement_)[it->index];
+  }
+  inner_->StableSort(start, end, direction);
 }
 
 void ArrangementOverlay::ChainImpl::Serialize(StorageProto* storage) const {

@@ -72,11 +72,34 @@ class DataLayer : public RefCounted {
 // functionality for querying the transformed data of the entire chain.
 class DataLayerChain {
  public:
+  // Indicates the direction of the sort on a single chain.
+  enum class SortDirection {
+    kAscending,
+    kDescending,
+  };
+  // Struct wrapping indices to elements of this chain. Passed to sorting
+  // functions.
+  struct SortToken {
+    // An index pointing to an element in this chain. Indicates the element
+    // at this index should be compared.
+    uint32_t index;
+
+    // An opaque value which can be set to some value meaningful to the
+    // caller. Implementations *should not* read at this value.
+    uint32_t payload;
+  };
   using StorageProto = protos::pbzero::SerializedColumn_Storage;
 
   virtual ~DataLayerChain();
 
   // Start of public API.
+
+  // Checks whether element at the the provided index match |op| and |value|.
+  //
+  // Returns true if the element matches, false otherwise.
+  virtual SingleSearchResult SingleSearch(FilterOp op,
+                                          SqlValue value,
+                                          uint32_t row) const = 0;
 
   // Searches for elements which match |op| and |value| between |range.start|
   // and |range.end|.
@@ -164,13 +187,21 @@ class DataLayerChain {
     PERFETTO_FATAL("For GCC");
   }
 
-  // Sorts |rows| in ascending order with the comparator:
-  // data[rows[a]] < data[rows[b]].
-  virtual void Sort(uint32_t* rows, uint32_t rows_size) const = 0;
-
-  // Stable sorts |rows| in ascending order with the comparator:
-  // data[rows[a]] < data[rows[b]].
-  virtual void StableSort(uint32_t* rows, uint32_t rows_size) const = 0;
+  // Stable sorts an array of SortToken elements between |start| and |end|
+  // using a comparator defined by looking up the elements in this chain using
+  // the index given by SortToken::index. |direction| indicates the direction of
+  // the sort (ascending or descending).
+  //
+  // In simple terms the expectation is for implementations do something like:
+  // ```
+  // std::stable_sort(start, index, [](const SortToken& a, const SortToken& b) {
+  //  return Get(a.index) < Get(b.index);
+  // });
+  // ```
+  // with |Get| being a function to lookup the element in this chain.
+  virtual void StableSort(SortToken* start,
+                          SortToken* end,
+                          SortDirection direction) const = 0;
 
   // Serializes storage data to proto format.
   virtual void Serialize(StorageProto*) const = 0;

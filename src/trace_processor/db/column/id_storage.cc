@@ -38,7 +38,6 @@
 #include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
-
 namespace {
 
 template <typename Comparator>
@@ -154,6 +153,46 @@ SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
 
 std::unique_ptr<DataLayerChain> IdStorage::MakeChain() {
   return std::make_unique<ChainImpl>();
+}
+
+SingleSearchResult IdStorage::ChainImpl::SingleSearch(FilterOp op,
+                                                      SqlValue sql_val,
+                                                      uint32_t index) const {
+  if (sql_val.type != SqlValue::kLong ||
+      sql_val.long_value > std::numeric_limits<uint32_t>::max() ||
+      sql_val.long_value < std::numeric_limits<uint32_t>::min()) {
+    // Because of the large amount of code needing for handling comparisions
+    // with doubles or out of range values, just defer to the full search.
+    return SingleSearchResult::kNeedsFullSearch;
+  }
+  auto val = static_cast<uint32_t>(sql_val.long_value);
+  switch (op) {
+    case FilterOp::kEq:
+      return index == val ? SingleSearchResult::kMatch
+                          : SingleSearchResult::kNoMatch;
+    case FilterOp::kNe:
+      return index != val ? SingleSearchResult::kMatch
+                          : SingleSearchResult::kNoMatch;
+    case FilterOp::kGe:
+      return index >= val ? SingleSearchResult::kMatch
+                          : SingleSearchResult::kNoMatch;
+    case FilterOp::kGt:
+      return index > val ? SingleSearchResult::kMatch
+                         : SingleSearchResult::kNoMatch;
+    case FilterOp::kLe:
+      return index <= val ? SingleSearchResult::kMatch
+                          : SingleSearchResult::kNoMatch;
+    case FilterOp::kLt:
+      return index < val ? SingleSearchResult::kMatch
+                         : SingleSearchResult::kNoMatch;
+    case FilterOp::kIsNotNull:
+      return SingleSearchResult::kMatch;
+    case FilterOp::kIsNull:
+    case FilterOp::kGlob:
+    case FilterOp::kRegex:
+      return SingleSearchResult::kNoMatch;
+  }
+  PERFETTO_FATAL("For GCC");
 }
 
 RangeOrBitVector IdStorage::ChainImpl::SearchValidated(
@@ -309,15 +348,22 @@ Range IdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   PERFETTO_FATAL("FilterOp not matched");
 }
 
-void IdStorage::ChainImpl::StableSort(uint32_t* indices,
-                                      uint32_t indices_size) const {
-  // We can use sort, as |indices| will not have duplicates.
-  Sort(indices, indices_size);
-}
-
-void IdStorage::ChainImpl::Sort(uint32_t* indices,
-                                uint32_t indices_size) const {
-  std::sort(indices, indices + indices_size);
+void IdStorage::ChainImpl::StableSort(SortToken* start,
+                                      SortToken* end,
+                                      SortDirection direction) const {
+  switch (direction) {
+    case SortDirection::kAscending:
+      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+        return a.index < b.index;
+      });
+      return;
+    case SortDirection::kDescending:
+      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+        return a.index > b.index;
+      });
+      return;
+  }
+  PERFETTO_FATAL("For GCC");
 }
 
 void IdStorage::ChainImpl::Serialize(StorageProto* storage) const {
