@@ -34,9 +34,6 @@
 
 namespace perfetto::trace_processor::column {
 
-SelectorOverlay::SelectorOverlay(const BitVector* selector)
-    : selector_(selector) {}
-
 SelectorOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                       const BitVector* selector)
     : inner_(std::move(inner)), selector_(selector) {}
@@ -45,6 +42,25 @@ SingleSearchResult SelectorOverlay::ChainImpl::SingleSearch(FilterOp op,
                                                             SqlValue sql_val,
                                                             uint32_t i) const {
   return inner_->SingleSearch(op, sql_val, selector_->IndexOfNthSet(i));
+}
+
+UniqueSearchResult SelectorOverlay::ChainImpl::UniqueSearch(
+    FilterOp op,
+    SqlValue sql_val,
+    uint32_t* index) const {
+  switch (inner_->UniqueSearch(op, sql_val, index)) {
+    case UniqueSearchResult::kMatch:
+      if (*index >= selector_->size() || !selector_->IsSet(*index)) {
+        return UniqueSearchResult::kNoMatch;
+      }
+      *index = selector_->CountSetBits(*index);
+      return UniqueSearchResult::kMatch;
+    case UniqueSearchResult::kNoMatch:
+      return UniqueSearchResult::kNoMatch;
+    case UniqueSearchResult::kNeedsFullSearch:
+      return UniqueSearchResult::kNeedsFullSearch;
+  }
+  PERFETTO_FATAL("For GCC");
 }
 
 SearchValidationResult SelectorOverlay::ChainImpl::ValidateSearchConstraints(

@@ -38,6 +38,10 @@ class DummyStorage final : public DataLayer {
                                     SqlValue,
                                     uint32_t) const override;
 
+    UniqueSearchResult UniqueSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t*) const override;
+
     SearchValidationResult ValidateSearchConstraints(FilterOp,
                                                      SqlValue) const override;
 
@@ -61,7 +65,7 @@ class DummyStorage final : public DataLayer {
 
     std::string DebugString() const override { return "DummyStorage"; }
   };
-  std::unique_ptr<DataLayerChain> MakeChain() override;
+  std::unique_ptr<DataLayerChain> MakeChain();
 };
 
 }  // namespace perfetto::trace_processor::column

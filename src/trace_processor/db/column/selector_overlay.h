@@ -34,10 +34,11 @@ namespace perfetto::trace_processor::column {
 class SelectorOverlay final : public DataLayer {
  public:
   explicit SelectorOverlay(const BitVector*);
+  ~SelectorOverlay() override;
 
   std::unique_ptr<DataLayerChain> MakeChain(
       std::unique_ptr<DataLayerChain>,
-      ChainCreationArgs = ChainCreationArgs()) override;
+      ChainCreationArgs = ChainCreationArgs());
 
  private:
   class ChainImpl : public DataLayerChain {
@@ -47,6 +48,10 @@ class SelectorOverlay final : public DataLayer {
     SingleSearchResult SingleSearch(FilterOp,
                                     SqlValue,
                                     uint32_t) const override;
+
+    UniqueSearchResult UniqueSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t*) const override;
 
     SearchValidationResult ValidateSearchConstraints(FilterOp,
                                                      SqlValue) const override;
