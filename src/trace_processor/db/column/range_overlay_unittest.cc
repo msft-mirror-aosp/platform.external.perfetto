@@ -17,6 +17,8 @@
 #include "src/trace_processor/db/column/range_overlay.h"
 
 #include <cstdint>
+#include <limits>
+#include <utility>
 #include <vector>
 
 #include "perfetto/trace_processor/basic_types.h"
@@ -35,12 +37,12 @@ using testing::ElementsAre;
 using testing::IsEmpty;
 using Range = Range;
 
-TEST(SelectorOverlay, SearchSingle) {
+TEST(SelectorOverlay, SingleSearch) {
   Range range(3, 8);
   RangeOverlay storage(&range);
-  auto fake = FakeStorage::SearchSubset(
+  auto fake = FakeStorageChain::SearchSubset(
       8, BitVector{false, false, false, true, false, false, false, false});
-  auto chain = storage.MakeChain(fake->MakeChain());
+  auto chain = storage.MakeChain(std::move(fake));
 
   ASSERT_EQ(chain->SingleSearch(FilterOp::kEq, SqlValue::Long(0u), 0),
             SingleSearchResult::kMatch);
@@ -48,11 +50,45 @@ TEST(SelectorOverlay, SearchSingle) {
             SingleSearchResult::kNoMatch);
 }
 
+TEST(SelectorOverlay, UniqueSearch) {
+  Range range(1, 3);
+  RangeOverlay storage(&range);
+  auto fake = FakeStorageChain::SearchSubset(5, Range(2, 3));
+  auto chain = storage.MakeChain(std::move(fake));
+
+  uint32_t row = std::numeric_limits<uint32_t>::max();
+  ASSERT_EQ(chain->UniqueSearch(FilterOp::kIsNotNull, SqlValue(), &row),
+            UniqueSearchResult::kMatch);
+  ASSERT_EQ(row, 1u);
+}
+
+TEST(SelectorOverlay, UniqueSearchLowOutOfBounds) {
+  Range range(3, 8);
+  RangeOverlay storage(&range);
+  auto fake = FakeStorageChain::SearchSubset(8, Range(1, 2));
+  auto chain = storage.MakeChain(std::move(fake));
+
+  uint32_t row = std::numeric_limits<uint32_t>::max();
+  ASSERT_EQ(chain->UniqueSearch(FilterOp::kIsNotNull, SqlValue(), &row),
+            UniqueSearchResult::kNoMatch);
+}
+
+TEST(SelectorOverlay, UniqueSearchHighOutOfBounds) {
+  Range range(3, 8);
+  RangeOverlay storage(&range);
+  auto fake = FakeStorageChain::SearchSubset(9, Range(8, 9));
+  auto chain = storage.MakeChain(std::move(fake));
+
+  uint32_t row = std::numeric_limits<uint32_t>::max();
+  ASSERT_EQ(chain->UniqueSearch(FilterOp::kIsNotNull, SqlValue(), &row),
+            UniqueSearchResult::kNoMatch);
+}
+
 TEST(RangeOverlay, SearchAll) {
   Range range(3, 8);
   RangeOverlay storage(&range);
-  auto fake = FakeStorage::SearchAll(10);
-  auto chain = storage.MakeChain(fake->MakeChain());
+  auto fake = FakeStorageChain::SearchAll(10);
+  auto chain = storage.MakeChain(std::move(fake));
 
   auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(1, 4));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1u, 2u, 3u));
@@ -61,38 +97,40 @@ TEST(RangeOverlay, SearchAll) {
 TEST(RangeOverlay, SearchNone) {
   Range range(3, 8);
   RangeOverlay storage(&range);
-  auto fake = FakeStorage::SearchNone(10);
-  auto chain = storage.MakeChain(fake->MakeChain());
+  auto fake = FakeStorageChain::SearchNone(10);
+  auto chain = storage.MakeChain(std::move(fake));
 
   auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(1, 4));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), IsEmpty());
 }
 
 TEST(RangeOverlay, SearchLimited) {
-  auto fake = FakeStorage::SearchSubset(10, std::vector<uint32_t>{4});
+  auto fake = FakeStorageChain::SearchSubset(10, std::vector<uint32_t>{4});
   Range range(3, 5);
   RangeOverlay storage(&range);
-  auto chain = storage.MakeChain(fake->MakeChain());
+  auto chain = storage.MakeChain(std::move(fake));
 
   auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(0, 2));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1u));
 }
 
 TEST(RangeOverlay, SearchBitVector) {
-  auto fake = FakeStorage::SearchSubset(8, BitVector({0, 1, 0, 1, 0, 1, 0, 0}));
+  auto fake =
+      FakeStorageChain::SearchSubset(8, BitVector({0, 1, 0, 1, 0, 1, 0, 0}));
   Range range(3, 6);
   RangeOverlay storage(&range);
-  auto chain = storage.MakeChain(fake->MakeChain());
+  auto chain = storage.MakeChain(std::move(fake));
 
   auto res = chain->Search(FilterOp::kGe, SqlValue::Long(0u), Range(0, 3));
   ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(0, 2));
 }
 
 TEST(RangeOverlay, IndexSearch) {
-  auto fake = FakeStorage::SearchSubset(8, BitVector({0, 1, 0, 1, 0, 1, 0, 0}));
+  auto fake =
+      FakeStorageChain::SearchSubset(8, BitVector({0, 1, 0, 1, 0, 1, 0, 0}));
   Range range(3, 5);
   RangeOverlay storage(&range);
-  auto chain = storage.MakeChain(fake->MakeChain());
+  auto chain = storage.MakeChain(std::move(fake));
 
   std::vector<uint32_t> table_idx{1u, 0u, 3u};
   RangeOrBitVector res = chain->IndexSearch(

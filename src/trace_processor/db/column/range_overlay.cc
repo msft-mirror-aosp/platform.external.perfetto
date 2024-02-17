@@ -34,8 +34,6 @@ namespace perfetto::trace_processor::column {
 
 using Range = Range;
 
-RangeOverlay::RangeOverlay(const Range* range) : range_(range) {}
-
 RangeOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                    const Range* range)
     : inner_(std::move(inner)), range_(range) {
@@ -47,6 +45,25 @@ SingleSearchResult RangeOverlay::ChainImpl::SingleSearch(FilterOp op,
                                                          uint32_t i) const {
   PERFETTO_DCHECK(i < range_->size());
   return inner_->SingleSearch(op, sql_val, i + range_->start);
+}
+
+UniqueSearchResult RangeOverlay::ChainImpl::UniqueSearch(
+    FilterOp op,
+    SqlValue sql_val,
+    uint32_t* index) const {
+  switch (inner_->UniqueSearch(op, sql_val, index)) {
+    case UniqueSearchResult::kMatch:
+      if (!range_->Contains(*index)) {
+        return UniqueSearchResult::kNoMatch;
+      }
+      *index -= range_->start;
+      return UniqueSearchResult::kMatch;
+    case UniqueSearchResult::kNoMatch:
+      return UniqueSearchResult::kNoMatch;
+    case UniqueSearchResult::kNeedsFullSearch:
+      return UniqueSearchResult::kNeedsFullSearch;
+  }
+  PERFETTO_FATAL("For GCC");
 }
 
 SearchValidationResult RangeOverlay::ChainImpl::ValidateSearchConstraints(
