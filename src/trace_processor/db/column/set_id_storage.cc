@@ -66,13 +66,6 @@ uint32_t LowerBoundIntrinsic(const SetId* data, SetId id, Range range) {
 
 }  // namespace
 
-SetIdStorage::SetIdStorage(const std::vector<uint32_t>* values)
-    : values_(values) {}
-
-std::unique_ptr<DataLayerChain> SetIdStorage::MakeChain() {
-  return std::make_unique<ChainImpl>(values_);
-}
-
 SetIdStorage::ChainImpl::ChainImpl(const std::vector<uint32_t>* values)
     : values_(values) {}
 
@@ -88,6 +81,12 @@ SingleSearchResult SetIdStorage::ChainImpl::SingleSearch(FilterOp op,
   }
   return utils::SingleSearchNumeric(op, (*values_)[i],
                                     static_cast<uint32_t>(sql_val.long_value));
+}
+
+UniqueSearchResult SetIdStorage::ChainImpl::UniqueSearch(FilterOp,
+                                                         SqlValue,
+                                                         uint32_t*) const {
+  return UniqueSearchResult::kNeedsFullSearch;
 }
 
 SearchValidationResult SetIdStorage::ChainImpl::ValidateSearchConstraints(

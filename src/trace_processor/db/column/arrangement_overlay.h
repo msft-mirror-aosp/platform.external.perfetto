@@ -36,10 +36,11 @@ class ArrangementOverlay final : public DataLayer {
  public:
   ArrangementOverlay(const std::vector<uint32_t>* arrangement,
                      Indices::State arrangement_state);
+  ~ArrangementOverlay() override;
 
   std::unique_ptr<DataLayerChain> MakeChain(
       std::unique_ptr<DataLayerChain>,
-      ChainCreationArgs = ChainCreationArgs()) override;
+      ChainCreationArgs = ChainCreationArgs());
 
  private:
   class ChainImpl : public DataLayerChain {
@@ -52,6 +53,10 @@ class ArrangementOverlay final : public DataLayer {
     SingleSearchResult SingleSearch(FilterOp,
                                     SqlValue,
                                     uint32_t) const override;
+
+    UniqueSearchResult UniqueSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t*) const override;
 
     SearchValidationResult ValidateSearchConstraints(FilterOp,
                                                      SqlValue) const override;

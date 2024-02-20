@@ -78,14 +78,6 @@ BitVector ReconcileStorageResult(FilterOp op,
 
 }  // namespace
 
-NullOverlay::NullOverlay(const BitVector* non_null) : non_null_(non_null) {}
-
-std::unique_ptr<DataLayerChain> NullOverlay::MakeChain(
-    std::unique_ptr<DataLayerChain> inner,
-    ChainCreationArgs) {
-  return std::make_unique<ChainImpl>(std::move(inner), non_null_);
-}
-
 SingleSearchResult NullOverlay::ChainImpl::SingleSearch(FilterOp op,
                                                         SqlValue sql_val,
                                                         uint32_t index) const {
@@ -108,6 +100,24 @@ SingleSearchResult NullOverlay::ChainImpl::SingleSearch(FilterOp op,
                  ? inner_->SingleSearch(op, sql_val,
                                         non_null_->CountSetBits(index))
                  : SingleSearchResult::kNoMatch;
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
+UniqueSearchResult NullOverlay::ChainImpl::UniqueSearch(FilterOp op,
+                                                        SqlValue sql_val,
+                                                        uint32_t* index) const {
+  switch (inner_->UniqueSearch(op, sql_val, index)) {
+    case UniqueSearchResult::kMatch:
+      if (*index >= non_null_->CountSetBits()) {
+        return UniqueSearchResult::kNoMatch;
+      }
+      *index = non_null_->IndexOfNthSet(*index);
+      return UniqueSearchResult::kMatch;
+    case UniqueSearchResult::kNoMatch:
+      return UniqueSearchResult::kNoMatch;
+    case UniqueSearchResult::kNeedsFullSearch:
+      return UniqueSearchResult::kNeedsFullSearch;
   }
   PERFETTO_FATAL("For GCC");
 }

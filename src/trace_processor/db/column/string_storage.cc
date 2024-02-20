@@ -197,15 +197,6 @@ uint32_t UpperBoundExtrinsic(StringPool* pool,
 
 }  // namespace
 
-StringStorage::StringStorage(StringPool* string_pool,
-                             const std::vector<StringPool::Id>* data,
-                             bool is_sorted)
-    : data_(data), string_pool_(string_pool), is_sorted_(is_sorted) {}
-
-std::unique_ptr<DataLayerChain> StringStorage::MakeChain() {
-  return std::make_unique<ChainImpl>(string_pool_, data_, is_sorted_);
-}
-
 StringStorage::ChainImpl::ChainImpl(StringPool* string_pool,
                                     const std::vector<StringPool::Id>* data,
                                     bool is_sorted)
@@ -243,8 +234,8 @@ SingleSearchResult StringStorage::ChainImpl::SingleSearch(FilterOp op,
     case FilterOp::kNe: {
       std::optional<StringPool::Id> id =
           string_pool_->GetId(base::StringView(sql_val.string_value));
-      return id && NotEqual()((*data_)[i], *id) ? SingleSearchResult::kMatch
-                                                : SingleSearchResult::kNoMatch;
+      return !id || NotEqual()((*data_)[i], *id) ? SingleSearchResult::kMatch
+                                                 : SingleSearchResult::kNoMatch;
     }
     case FilterOp::kGe:
       return GreaterEqual{string_pool_}(
@@ -287,6 +278,12 @@ SingleSearchResult StringStorage::ChainImpl::SingleSearch(FilterOp op,
       PERFETTO_FATAL("Already handled above");
   }
   PERFETTO_FATAL("For GCC");
+}
+
+UniqueSearchResult StringStorage::ChainImpl::UniqueSearch(FilterOp,
+                                                          SqlValue,
+                                                          uint32_t*) const {
+  return UniqueSearchResult::kNeedsFullSearch;
 }
 
 SearchValidationResult StringStorage::ChainImpl::ValidateSearchConstraints(

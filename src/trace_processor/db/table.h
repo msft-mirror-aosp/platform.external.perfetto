@@ -118,9 +118,6 @@ class Table {
     std::vector<Column> columns;
   };
 
-  static bool kUseFilterV2;
-  static bool kUseSortV2;
-
   virtual ~Table();
 
   // We explicitly define the move constructor here because we need to update
@@ -135,10 +132,8 @@ class Table {
 
   // Filters and sorts the tables with the arguments specified, returning the
   // result as a RowMap.
-  RowMap QueryToRowMap(
-      const std::vector<Constraint>&,
-      const std::vector<Order>&,
-      RowMap::OptimizeFor = RowMap::OptimizeFor::kMemory) const;
+  RowMap QueryToRowMap(const std::vector<Constraint>&,
+                       const std::vector<Order>&) const;
 
   // Applies the RowMap |rm| onto this table and returns an iterator over the
   // resulting rows.
@@ -202,25 +197,7 @@ class Table {
  private:
   friend class ColumnLegacy;
 
-  PERFETTO_ALWAYS_INLINE RowMap FilterToRowMap(
-      const std::vector<Constraint>& cs,
-      RowMap::OptimizeFor optimize_for = RowMap::OptimizeFor::kMemory) const {
-    if (cs.empty()) {
-      return {0, row_count_, optimize_for};
-    }
-
-    if (kUseFilterV2) {
-      if (optimize_for == RowMap::OptimizeFor::kMemory) {
-        return QueryExecutor::FilterLegacy(this, cs);
-      }
-      return RowMap(QueryExecutor::FilterLegacy(this, cs).TakeAsIndexVector());
-    }
-    RowMap rm(0, row_count_, optimize_for);
-    for (const Constraint& c : cs) {
-      columns_[c.col_idx].FilterInto(c.op, c.value, &rm);
-    }
-    return rm;
-  }
+  void CreateChains() const;
 
   Table CopyExceptOverlays() const;
 
@@ -232,7 +209,7 @@ class Table {
   std::vector<RefPtr<column::DataLayer>> storage_layers_;
   std::vector<RefPtr<column::DataLayer>> null_layers_;
   std::vector<RefPtr<column::DataLayer>> overlay_layers_;
-  std::vector<std::unique_ptr<column::DataLayerChain>> chains_;
+  mutable std::vector<std::unique_ptr<column::DataLayerChain>> chains_;
 };
 
 }  // namespace perfetto::trace_processor

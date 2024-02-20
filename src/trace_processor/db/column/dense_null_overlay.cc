@@ -34,15 +34,6 @@
 
 namespace perfetto::trace_processor::column {
 
-DenseNullOverlay::DenseNullOverlay(const BitVector* non_null)
-    : non_null_(non_null) {}
-
-std::unique_ptr<DataLayerChain> DenseNullOverlay::MakeChain(
-    std::unique_ptr<DataLayerChain> inner,
-    ChainCreationArgs) {
-  return std::make_unique<ChainImpl>(std::move(inner), non_null_);
-}
-
 DenseNullOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                        const BitVector* non_null)
     : inner_(std::move(inner)), non_null_(non_null) {}
@@ -66,6 +57,27 @@ SingleSearchResult DenseNullOverlay::ChainImpl::SingleSearch(
     case FilterOp::kRegex:
       return non_null_->IsSet(index) ? inner_->SingleSearch(op, sql_val, index)
                                      : SingleSearchResult::kNoMatch;
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
+UniqueSearchResult DenseNullOverlay::ChainImpl::UniqueSearch(
+    FilterOp op,
+    SqlValue sql_val,
+    uint32_t* index) const {
+  switch (inner_->UniqueSearch(op, sql_val, index)) {
+    case UniqueSearchResult::kMatch:
+      if (*index >= non_null_->size()) {
+        return UniqueSearchResult::kNoMatch;
+      }
+      // If non_null_[index] is not set, then any result returned by |inner_| is
+      // meaningless as the value in |inner_| is not a "real" value.
+      return non_null_->IsSet(*index) ? UniqueSearchResult::kMatch
+                                      : UniqueSearchResult::kNeedsFullSearch;
+    case UniqueSearchResult::kNoMatch:
+      return UniqueSearchResult::kNoMatch;
+    case UniqueSearchResult::kNeedsFullSearch:
+      return UniqueSearchResult::kNeedsFullSearch;
   }
   PERFETTO_FATAL("For GCC");
 }

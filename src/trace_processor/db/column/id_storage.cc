@@ -151,10 +151,6 @@ SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
   return SearchValidationResult::kOk;
 }
 
-std::unique_ptr<DataLayerChain> IdStorage::MakeChain() {
-  return std::make_unique<ChainImpl>();
-}
-
 SingleSearchResult IdStorage::ChainImpl::SingleSearch(FilterOp op,
                                                       SqlValue sql_val,
                                                       uint32_t index) const {
@@ -193,6 +189,19 @@ SingleSearchResult IdStorage::ChainImpl::SingleSearch(FilterOp op,
       return SingleSearchResult::kNoMatch;
   }
   PERFETTO_FATAL("For GCC");
+}
+
+UniqueSearchResult IdStorage::ChainImpl::UniqueSearch(FilterOp op,
+                                                      SqlValue sql_val,
+                                                      uint32_t* index) const {
+  if (sql_val.type != SqlValue::kLong ||
+      sql_val.long_value >= std::numeric_limits<uint32_t>::max() ||
+      sql_val.long_value <= std::numeric_limits<uint32_t>::min() ||
+      op != FilterOp::kEq) {
+    return UniqueSearchResult::kNeedsFullSearch;
+  }
+  *index = static_cast<uint32_t>(sql_val.long_value);
+  return UniqueSearchResult::kMatch;
 }
 
 RangeOrBitVector IdStorage::ChainImpl::SearchValidated(

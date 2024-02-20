@@ -17,7 +17,6 @@
 #include "src/trace_processor/db/column/dummy_storage.h"
 
 #include <cstdint>
-#include <memory>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
@@ -26,13 +25,15 @@
 
 namespace perfetto::trace_processor::column {
 
-std::unique_ptr<DataLayerChain> DummyStorage::MakeChain() {
-  return std::make_unique<ChainImpl>();
-}
-
 SingleSearchResult DummyStorage::ChainImpl::SingleSearch(FilterOp,
                                                          SqlValue,
                                                          uint32_t) const {
+  PERFETTO_FATAL("Shouldn't be called");
+}
+
+UniqueSearchResult DummyStorage::ChainImpl::UniqueSearch(FilterOp,
+                                                         SqlValue,
+                                                         uint32_t*) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
