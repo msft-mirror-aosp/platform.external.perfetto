@@ -594,12 +594,15 @@ message ProtoLogConfig {
 }
 
 message ProtoLogGroup {
-  // The ProtoLog tag this configuration entry applies to.
-  optional string tag = 1;
+  // The ProtoLog group name this configuration entry applies to.
+  optional string group_name = 1;
   // Specify the level from which to start capturing protologs.
   // e.g. if ProtoLogLevel.WARN is specified only warning, errors and fatal log
   // message will be traced.
   optional ProtoLogLevel log_from = 2;
+  // When set to true we will collect the stacktrace for each protolog message
+  // in this group that we are tracing.
+  optional bool collect_stacktrace = 3;
 }
 
 // End of protos/perfetto/config/android/protolog_config.proto
@@ -4848,13 +4851,16 @@ message ProtoLogMessage {
   /* log statement identifier, created from message string and log level. */
   optional fixed64 message_id = 1;
   /* string parameters passed to the log call that have been interned. */
-  repeated uint32 interned_str_params = 2;
+  repeated uint32 str_param_iids = 2;
   /* integer parameters passed to the log call. */
   repeated sint64 sint64_params = 3;
   /* floating point parameters passed to the log call. */
   repeated double double_params = 4;
   /* boolean parameters passed to the log call. */
   repeated int32 boolean_params = 5;
+  // id of the interned stacktrace string
+  // (only dumped if explicitly confuigured to do so)
+  optional uint32 stacktrace_iid = 6;
 }
 
 /* contains all the data required to fully decode the protolog messages */
@@ -10444,6 +10450,8 @@ message FtraceCpuStats {
 
   // Size of entries currently in the kernel buffer (see |entries|) in bytes.
   // The field should be named "bytes", but is misnamed for historical reasons.
+  // This value has known inaccuracies before Linux v6.6:
+  // https://github.com/torvalds/linux/commit/45d99ea
   optional uint64 bytes_read = 5;
 
   // The timestamp for the oldest event still in the ring buffer.
@@ -10555,10 +10563,6 @@ message FtraceEventBundle {
   // Set to true if there was data loss between the last time we've read from
   // the corresponding per-cpu kernel buffer, and the earliest event recorded
   // in this bundle.
-  // TODO(rsavitski): consider replicating in the newer FtraceError. This field
-  // has been set since the original implementation, but used only for manual
-  // debugging. Trace processor instead looks at the FtraceStats totals for the
-  // tracing session.
   optional bool lost_events = 3;
 
   // Optionally-enabled compact encoding of a batch of scheduling events. Only
@@ -12455,6 +12459,8 @@ message InternedData {
 
   // Interned protolog strings args.
   repeated InternedString protolog_string_args = 36;
+  // Interned protolog stacktraces.
+  repeated InternedString protolog_stacktrace = 37;
 }
 
 // End of protos/perfetto/trace/interned_data/interned_data.proto

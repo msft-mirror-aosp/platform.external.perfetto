@@ -35,10 +35,12 @@
 #include <unistd.h>
 #endif
 
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -50,6 +52,7 @@
 #include "perfetto/ext/base/ctrl_c_handler.h"
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/getopt.h"
+#include "perfetto/ext/base/no_destructor.h"
 #include "perfetto/ext/base/pipe.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/temp_file.h"
@@ -80,7 +83,7 @@
 namespace perfetto {
 namespace {
 
-perfetto::PerfettoCmd* g_perfetto_cmd;
+std::atomic<perfetto::PerfettoCmd*> g_perfetto_cmd;
 
 const uint32_t kOnTraceDataTimeoutMs = 3000;
 const uint32_t kCloneTimeoutMs = 10000;
@@ -207,13 +210,13 @@ const char* kStateDir = "/data/misc/perfetto-traces";
 
 PerfettoCmd::PerfettoCmd() {
   // Only the main thread instance on the main thread will receive ctrl-c.
-  if (!g_perfetto_cmd)
-    g_perfetto_cmd = this;
+  PerfettoCmd* set_if_null = nullptr;
+  g_perfetto_cmd.compare_exchange_strong(set_if_null, this);
 }
 
 PerfettoCmd::~PerfettoCmd() {
-  if (g_perfetto_cmd == this) {
-    g_perfetto_cmd = nullptr;
+  PerfettoCmd* self = this;
+  if (g_perfetto_cmd.compare_exchange_strong(self, nullptr)) {
     if (ctrl_c_handler_installed_) {
       task_runner_.RemoveFileDescriptorWatch(ctrl_c_evt_.fd());
     }
@@ -355,6 +358,11 @@ std::optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     PrintUsage(argv[0]);
     return 1;
   }
+
+  // getopt is not thread safe and cmdline parsing requires a mutex for the case
+  // of concurrent cmdline parsing for bugreport snapshots.
+  static base::NoDestructor<std::mutex> getopt_mutex;
+  std::unique_lock<std::mutex> getopt_lock(getopt_mutex.ref());
 
   optind = 1;  // Reset getopt state. It's reused by the snapshot thread.
   for (;;) {
@@ -565,6 +573,7 @@ std::optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     has_config_options = true;
     config_options.categories.push_back(argv[i]);
   }
+  getopt_lock.unlock();
 
   if (query_service_ && (is_detach() || is_attach() || background_)) {
     PERFETTO_ELOG("--query cannot be combined with any other argument");
@@ -1289,9 +1298,8 @@ void PerfettoCmd::SetupCtrlCSignalHandler() {
     return;
   ctrl_c_handler_installed_ = true;
   base::InstallCtrlCHandler([] {
-    if (!g_perfetto_cmd)
-      return;
-    g_perfetto_cmd->SignalCtrlC();
+    if (PerfettoCmd* main_thread = g_perfetto_cmd.load())
+      main_thread->SignalCtrlC();
   });
   auto weak_this = weak_factory_.GetWeakPtr();
   task_runner_.AddFileDescriptorWatch(ctrl_c_evt_.fd(), [weak_this] {
