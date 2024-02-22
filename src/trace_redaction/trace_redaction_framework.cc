@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,14 @@
  * limitations under the License.
  */
 
-#ifndef SRC_PROFILING_SYMBOLIZER_FILESYSTEM_H_
-#define SRC_PROFILING_SYMBOLIZER_FILESYSTEM_H_
+#include "src/trace_redaction/trace_redaction_framework.h"
 
-#include "src/profiling/symbolizer/local_symbolizer.h"
+namespace perfetto::trace_redaction {
 
-namespace perfetto {
-namespace profiling {
+CollectPrimitive::~CollectPrimitive() = default;
 
-using FileCallback = std::function<void(const char*, size_t)>;
-bool WalkDirectories(std::vector<std::string> dirs, FileCallback fn);
+BuildPrimitive::~BuildPrimitive() = default;
 
-}  // namespace profiling
-}  // namespace perfetto
+TransformPrimitive::~TransformPrimitive() = default;
 
-#endif  // SRC_PROFILING_SYMBOLIZER_FILESYSTEM_H_
+}  // namespace perfetto::trace_redaction
