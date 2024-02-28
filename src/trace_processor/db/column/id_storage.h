@@ -17,44 +17,59 @@
 #define SRC_TRACE_PROCESSOR_DB_COLUMN_ID_STORAGE_H_
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
-// Storage for Id columns.
-class IdStorage final : public DataNode {
+// Base level storage for id columns.
+//
+// Note: This storage does not have any size instead spanning the entire
+// uint32_t space (any such integer is a valid id). Overlays (e.g.
+// RangeOverlay/SelectorOverlay) can be used to limit which ids are
+// included in the column.
+class IdStorage final : public DataLayer {
  public:
-  explicit IdStorage(uint32_t size);
+  IdStorage();
+  ~IdStorage() override;
 
-  std::unique_ptr<DataNode::Queryable> MakeQueryable() override;
+  std::unique_ptr<DataLayerChain> MakeChain();
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    explicit Queryable(uint32_t size);
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp,
+                                          SqlValue,
+                                          Indices) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
-    void StableSort(uint32_t*, uint32_t) const override;
-
-    void Sort(uint32_t*, uint32_t) const override;
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection) const override;
 
     void Serialize(StorageProto*) const override;
 
-    uint32_t size() const override { return size_; }
+    uint32_t size() const override {
+      return std::numeric_limits<uint32_t>::max();
+    }
 
     std::string DebugString() const override { return "IdStorage"; }
 
@@ -63,11 +78,7 @@ class IdStorage final : public DataNode {
 
     BitVector IndexSearch(FilterOp, Id, uint32_t*, uint32_t) const;
     static Range BinarySearchIntrinsic(FilterOp, Id, Range);
-
-    const uint32_t size_ = 0;
   };
-
-  const uint32_t size_ = 0;
 };
 
 }  // namespace perfetto::trace_processor::column

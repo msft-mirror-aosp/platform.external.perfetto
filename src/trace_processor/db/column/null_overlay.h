@@ -23,36 +23,47 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
 // Overlay which introduces the layer of nullability. Specifically, spreads out
 // the storage with nulls using a BitVector.
-class NullOverlay : public DataNode {
+class NullOverlay final : public DataLayer {
  public:
   explicit NullOverlay(const BitVector* non_null);
+  ~NullOverlay() override;
 
-  std::unique_ptr<Queryable> MakeQueryable(std::unique_ptr<Queryable>) override;
+  std::unique_ptr<DataLayerChain> MakeChain(
+      std::unique_ptr<DataLayerChain>,
+      ChainCreationArgs = ChainCreationArgs());
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    Queryable(std::unique_ptr<DataNode::Queryable>, const BitVector* non_null);
+    ChainImpl(std::unique_ptr<DataLayerChain>, const BitVector* non_null);
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp,
+                                          SqlValue,
+                                          Indices) const override;
 
-    void StableSort(uint32_t* rows, uint32_t rows_size) const override;
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
-    void Sort(uint32_t* rows, uint32_t rows_size) const override;
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection) const override;
 
     void Serialize(StorageProto*) const override;
 
@@ -61,7 +72,7 @@ class NullOverlay : public DataNode {
     std::string DebugString() const override { return "NullOverlay"; }
 
    private:
-    std::unique_ptr<DataNode::Queryable> inner_ = nullptr;
+    std::unique_ptr<DataLayerChain> inner_ = nullptr;
     const BitVector* non_null_ = nullptr;
   };
 

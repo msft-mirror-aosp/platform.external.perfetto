@@ -166,7 +166,7 @@ class TraceViewer implements m.ClassComponent {
                   Time.max(newTime, visibleTimeScale.timeSpan.start.toTime());
             } else {
               newTime =
-                  Time.max(newTime, visibleTimeScale.timeSpan.end.toTime());
+                  Time.min(newTime, visibleTimeScale.timeSpan.end.toTime());
             }
             // When editing the time range we always use the saved tracks,
             // since these will not change.
@@ -227,7 +227,6 @@ class TraceViewer implements m.ClassComponent {
         globals.state.scrollingTracks.map((key) => {
           const trackBundle = this.resolveTrack(key);
           return new TrackPanel({
-            key,
             trackKey: key,
             title: trackBundle.title,
             tags: trackBundle.tags,
@@ -256,7 +255,6 @@ class TraceViewer implements m.ClassComponent {
           const key = group.tracks[i];
           const trackBundle = this.resolveTrack(key);
           const panel = new TrackPanel({
-            key: `track-${group.id}-${key}`,
             trackKey: key,
             title: trackBundle.title,
             tags: trackBundle.tags,
@@ -294,7 +292,8 @@ class TraceViewer implements m.ClassComponent {
               globals.makeSelection(Actions.deselect({}));
             },
           },
-          m('.pinned-panel-container', m(PanelContainer, {
+          m(PanelContainer, {
+            className: 'header-panel-container',
             doesScroll: false,
             panels: [
               ...overviewPanel,
@@ -302,24 +301,32 @@ class TraceViewer implements m.ClassComponent {
               this.timeSelectionPanel,
               this.notesPanel,
               this.tickmarkPanel,
-              ...globals.state.pinnedTracks.map((key) => {
-                const trackBundle = this.resolveTrack(key);
-                return new TrackPanel({
-                  key,
-                  trackKey: key,
-                  title: trackBundle.title,
-                  tags: trackBundle.tags,
-                  trackFSM: trackBundle.trackFSM,
-                });
-              }),
             ],
             kind: 'OVERVIEW',
-          })),
-          m('.scrolling-panel-container', m(PanelContainer, {
+          }),
+          m(PanelContainer, {
+            className: 'pinned-panel-container',
+            doesScroll: true,
+            panels: globals.state.pinnedTracks.map((key) => {
+              const trackBundle = this.resolveTrack(key);
+              return new TrackPanel({
+                trackKey: key,
+                title: trackBundle.title,
+                tags: trackBundle.tags,
+                trackFSM: trackBundle.trackFSM,
+                revealOnCreate: true,
+              });
+            }),
+            kind: 'TRACKS',
+          }),
+          m(PanelContainer, {
+            className: 'scrolling-panel-container',
             doesScroll: true,
             panels: scrollingPanels,
             kind: 'TRACKS',
-          })))),
+          }),
+        ),
+      ),
       this.renderTabPanel());
 
     globals.trackManager.flushOldTracks();

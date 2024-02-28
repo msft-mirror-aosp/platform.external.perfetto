@@ -34,9 +34,8 @@ from python.generators.sql_processing.utils import check_banned_include_all
 
 # Allowlist path are relative to the stdlib root.
 CREATE_TABLE_ALLOWLIST = {
-    '/android/binder.sql': [
-        '_oom_score', '_async_binder_reply', '_binder_async_txn_raw'
-    ],
+    '/prelude/trace_bounds.sql': ['trace_bounds'],
+    '/android/binder.sql': ['_oom_score'],
     '/android/monitor_contention.sql': [
         '_isolated', 'android_monitor_contention_chain',
         'android_monitor_contention'
@@ -91,6 +90,11 @@ def main():
         sql = f.read()
 
       parsed = parse_file(rel_path, sql)
+
+      # Some modules (i.e. `deprecated`) should not be checked.
+      if not parsed:
+        continue
+
       modules.append((path, sql, parsed))
 
       if args.verbose:
@@ -107,6 +111,10 @@ def main():
       if 'RUN_METRIC' in line:
         errors.append(f"RUN_METRIC is banned in standard library.\n"
                       f"Offending file: {path}\n")
+      if 'include perfetto module common.' in line.casefold():
+        errors.append(
+            f"Common module has been deprecated in the standard library.\n"
+            f"Offending file: {path}\n")
       if 'insert into' in line.casefold():
         errors.append(f"INSERT INTO table is not allowed in standard library.\n"
                       f"Offending file: {path}\n")

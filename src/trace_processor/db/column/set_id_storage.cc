@@ -30,7 +30,7 @@
 #include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "src/trace_processor/tp_metatrace.h"
@@ -39,7 +39,6 @@
 #include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
-
 namespace {
 
 using SetId = SetIdStorage::SetId;
@@ -67,19 +66,26 @@ uint32_t LowerBoundIntrinsic(const SetId* data, SetId id, Range range) {
 
 }  // namespace
 
-SetIdStorage::SetIdStorage(const std::vector<uint32_t>* values)
+SetIdStorage::ChainImpl::ChainImpl(const std::vector<uint32_t>* values)
     : values_(values) {}
 
-std::unique_ptr<DataNode::Queryable> SetIdStorage::MakeQueryable() {
-  return std::make_unique<Queryable>(values_);
+SingleSearchResult SetIdStorage::ChainImpl::SingleSearch(FilterOp op,
+                                                         SqlValue sql_val,
+                                                         uint32_t i) const {
+  if (sql_val.type != SqlValue::kLong ||
+      sql_val.long_value > std::numeric_limits<uint32_t>::max() ||
+      sql_val.long_value < std::numeric_limits<uint32_t>::min()) {
+    // Because of the large amount of code needing for handling comparisions
+    // with doubles or out of range values, just defer to the full search.
+    return SingleSearchResult::kNeedsFullSearch;
+  }
+  return utils::SingleSearchNumeric(op, (*values_)[i],
+                                    static_cast<uint32_t>(sql_val.long_value));
 }
 
-SetIdStorage::Queryable::Queryable(const std::vector<uint32_t>* values)
-    : values_(values) {}
-
-SearchValidationResult SetIdStorage::Queryable::ValidateSearchConstraints(
-    SqlValue val,
-    FilterOp op) const {
+SearchValidationResult SetIdStorage::ChainImpl::ValidateSearchConstraints(
+    FilterOp op,
+    SqlValue val) const {
   // NULL checks.
   if (PERFETTO_UNLIKELY(val.is_null())) {
     if (op == FilterOp::kIsNotNull) {
@@ -147,12 +153,13 @@ SearchValidationResult SetIdStorage::Queryable::ValidateSearchConstraints(
   return SearchValidationResult::kOk;
 }
 
-RangeOrBitVector SetIdStorage::Queryable::Search(FilterOp op,
-                                                 SqlValue sql_val,
-                                                 Range search_range) const {
+RangeOrBitVector SetIdStorage::ChainImpl::SearchValidated(
+    FilterOp op,
+    SqlValue sql_val,
+    Range search_range) const {
   PERFETTO_DCHECK(search_range.end <= size());
 
-  PERFETTO_TP_TRACE(metatrace::Category::DB, "SetIdStorage::Queryable::Search",
+  PERFETTO_TP_TRACE(metatrace::Category::DB, "SetIdStorage::ChainImpl::Search",
                     [&search_range, op](metatrace::Record* r) {
                       r->AddArg("Start", std::to_string(search_range.start));
                       r->AddArg("End", std::to_string(search_range.end));
@@ -163,7 +170,7 @@ RangeOrBitVector SetIdStorage::Queryable::Search(FilterOp op,
   // It's a valid filter operation if |sql_val| is a double, although it
   // requires special logic.
   if (sql_val.type == SqlValue::kDouble) {
-    switch (utils::CompareIntColumnWithDouble(&sql_val, op)) {
+    switch (utils::CompareIntColumnWithDouble(op, &sql_val)) {
       case SearchValidationResult::kOk:
         break;
       case SearchValidationResult::kAllData:
@@ -187,11 +194,12 @@ RangeOrBitVector SetIdStorage::Queryable::Search(FilterOp op,
   return RangeOrBitVector(BinarySearchIntrinsic(op, val, search_range));
 }
 
-RangeOrBitVector SetIdStorage::Queryable::IndexSearch(FilterOp op,
-                                                      SqlValue sql_val,
-                                                      Indices indices) const {
+RangeOrBitVector SetIdStorage::ChainImpl::IndexSearchValidated(
+    FilterOp op,
+    SqlValue sql_val,
+    Indices indices) const {
   PERFETTO_TP_TRACE(
-      metatrace::Category::DB, "SetIdStorage::Queryable::IndexSearch",
+      metatrace::Category::DB, "SetIdStorage::ChainImpl::IndexSearch",
       [indices, op](metatrace::Record* r) {
         r->AddArg("Count", std::to_string(indices.size));
         r->AddArg("Op", std::to_string(static_cast<uint32_t>(op)));
@@ -200,7 +208,7 @@ RangeOrBitVector SetIdStorage::Queryable::IndexSearch(FilterOp op,
   // It's a valid filter operation if |sql_val| is a double, although it
   // requires special logic.
   if (sql_val.type == SqlValue::kDouble) {
-    switch (utils::CompareIntColumnWithDouble(&sql_val, op)) {
+    switch (utils::CompareIntColumnWithDouble(op, &sql_val)) {
       case SearchValidationResult::kOk:
         break;
       case SearchValidationResult::kAllData:
@@ -251,11 +259,12 @@ RangeOrBitVector SetIdStorage::Queryable::IndexSearch(FilterOp op,
   return RangeOrBitVector(std::move(builder).Build());
 }
 
-Range SetIdStorage::Queryable::OrderedIndexSearch(FilterOp op,
-                                                  SqlValue sql_val,
-                                                  Indices indices) const {
+Range SetIdStorage::ChainImpl::OrderedIndexSearchValidated(
+    FilterOp op,
+    SqlValue sql_val,
+    Indices indices) const {
   // Indices are monotonic non-contiguous values.
-  auto res = SetIdStorage::Queryable::Search(
+  auto res = SearchValidated(
       op, sql_val, Range(indices.data[0], indices.data[indices.size - 1] + 1));
   PERFETTO_CHECK(res.IsRange());
   Range res_range = std::move(res).TakeIfRange();
@@ -269,7 +278,7 @@ Range SetIdStorage::Queryable::OrderedIndexSearch(FilterOp op,
           static_cast<uint32_t>(std::distance(indices.data, end_ptr))};
 }
 
-Range SetIdStorage::Queryable::BinarySearchIntrinsic(FilterOp op,
+Range SetIdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
                                                      SetId val,
                                                      Range range) const {
   switch (op) {
@@ -297,17 +306,26 @@ Range SetIdStorage::Queryable::BinarySearchIntrinsic(FilterOp op,
   return {};
 }
 
-void SetIdStorage::Queryable::StableSort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_ELOG("Not implemented");
+void SetIdStorage::ChainImpl::StableSort(SortToken* start,
+                                         SortToken* end,
+                                         SortDirection direction) const {
+  switch (direction) {
+    case SortDirection::kAscending:
+      std::stable_sort(start, end,
+                       [this](const SortToken& a, const SortToken& b) {
+                         return (*values_)[a.index] < (*values_)[b.index];
+                       });
+      break;
+    case SortDirection::kDescending:
+      std::stable_sort(start, end,
+                       [this](const SortToken& a, const SortToken& b) {
+                         return (*values_)[a.index] > (*values_)[b.index];
+                       });
+      break;
+  }
 }
 
-void SetIdStorage::Queryable::Sort(uint32_t*, uint32_t) const {
-  // TODO(b/307482437): Implement.
-  PERFETTO_ELOG("Not implemented");
-}
-
-void SetIdStorage::Queryable::Serialize(StorageProto* msg) const {
+void SetIdStorage::ChainImpl::Serialize(StorageProto* msg) const {
   auto* vec_msg = msg->set_set_id_storage();
   vec_msg->set_values(reinterpret_cast<const uint8_t*>(values_->data()),
                       sizeof(SetId) * size());

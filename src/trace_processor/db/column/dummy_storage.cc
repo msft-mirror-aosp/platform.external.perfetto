@@ -17,56 +17,55 @@
 #include "src/trace_processor/db/column/dummy_storage.h"
 
 #include <cstdint>
-#include <memory>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
-std::unique_ptr<DataNode::Queryable> DummyStorage::MakeQueryable() {
-  return std::make_unique<Queryable>();
-}
-
-SearchValidationResult DummyStorage::Queryable::ValidateSearchConstraints(
-    SqlValue,
-    FilterOp) const {
+SingleSearchResult DummyStorage::ChainImpl::SingleSearch(FilterOp,
+                                                         SqlValue,
+                                                         uint32_t) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-RangeOrBitVector DummyStorage::Queryable::Search(FilterOp,
-                                                 SqlValue,
-                                                 Range) const {
+SearchValidationResult DummyStorage::ChainImpl::ValidateSearchConstraints(
+    FilterOp,
+    SqlValue) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-RangeOrBitVector DummyStorage::Queryable::IndexSearch(FilterOp,
-                                                      SqlValue,
-                                                      Indices) const {
+RangeOrBitVector DummyStorage::ChainImpl::SearchValidated(FilterOp,
+                                                          SqlValue,
+                                                          Range) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-Range DummyStorage::Queryable::OrderedIndexSearch(FilterOp,
-                                                  SqlValue,
-                                                  Indices) const {
+RangeOrBitVector DummyStorage::ChainImpl::IndexSearchValidated(FilterOp,
+                                                               SqlValue,
+                                                               Indices) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-void DummyStorage::Queryable::StableSort(uint32_t*, uint32_t) const {
+Range DummyStorage::ChainImpl::OrderedIndexSearchValidated(FilterOp,
+                                                           SqlValue,
+                                                           Indices) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-void DummyStorage::Queryable::Sort(uint32_t*, uint32_t) const {
+void DummyStorage::ChainImpl::StableSort(SortToken*,
+                                         SortToken*,
+                                         SortDirection) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-uint32_t DummyStorage::Queryable::size() const {
+uint32_t DummyStorage::ChainImpl::size() const {
   return 0;
 }
 
-void DummyStorage::Queryable::Serialize(StorageProto*) const {
+void DummyStorage::ChainImpl::Serialize(StorageProto*) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 

@@ -577,18 +577,32 @@ enum ProtoLogLevel {
 // ProtoLog is a logging mechanism that is intented to be more efficient than
 // logcat. This configures what logs to capture in the tracing instance.
 message ProtoLogConfig {
+  enum TracingMode {
+    // When using the DEFAULT tracing mode, only log groups and levels specified
+    // in the group_overrides are traced.
+    DEFAULT = 0;
+    // When using the ENABLE_ALL tracing mode, all log groups and levels are
+    // traced, unless specified in the group_overrides.
+    ENABLE_ALL = 1;
+  }
+
   // Specified the configurations for each of the logging groups. If none is
   // specified for a group the defaults will be used.
   repeated ProtoLogGroup group_overrides = 1;
+  // Specified what tracing mode to use for the tracing instance.
+  optional TracingMode tracing_mode = 2;
 }
 
 message ProtoLogGroup {
-  // The ProtoLog tag this configuration entry applies to.
-  optional string tag = 1;
+  // The ProtoLog group name this configuration entry applies to.
+  optional string group_name = 1;
   // Specify the level from which to start capturing protologs.
   // e.g. if ProtoLogLevel.WARN is specified only warning, errors and fatal log
   // message will be traced.
   optional ProtoLogLevel log_from = 2;
+  // When set to true we will collect the stacktrace for each protolog message
+  // in this group that we are tracing.
+  optional bool collect_stacktrace = 3;
 }
 
 // End of protos/perfetto/config/android/protolog_config.proto
@@ -731,14 +745,32 @@ message EtwConfig {
 
 // Begin of protos/perfetto/config/ftrace/ftrace_config.proto
 
-// Next id: 26.
+// Next id: 28
 message FtraceConfig {
+  // Ftrace events to record, example: "sched/sched_switch".
   repeated string ftrace_events = 1;
+  // Android-specific event categories:
   repeated string atrace_categories = 2;
   repeated string atrace_apps = 3;
-  // *Per-CPU* buffer size.
+
+  // Size of each per-cpu kernel ftrace ring buffer.
+  // Not guaranteed if there are multiple concurrent tracing sessions, as the
+  // buffers cannot be resized without pausing recording in the kernel.
   optional uint32 buffer_size_kb = 10;
+
+  // If set, specifies how often the tracing daemon reads from the kernel ring
+  // buffer. Not guaranteed if there are multiple concurrent tracing sessions.
+  // Leave unset unless you're fine-tuning a local config.
   optional uint32 drain_period_ms = 11;
+
+  // If set, the tracing daemon will read kernel ring buffers as soon as
+  // they're filled past this percentage of occupancy. In other words, a value
+  // of 50 means that a read pass is triggered as soon as any per-cpu buffer is
+  // half-full. Not guaranteed if there are multiple concurrent tracing
+  // sessions.
+  // Currently does nothing on Linux kernels below v6.1.
+  // Introduced in: perfetto v43.
+  optional uint32 drain_buffer_percent = 26;
 
   // Configuration for compact encoding of scheduler events. When enabled (and
   // recording the relevant ftrace events), specific high-volume events are
@@ -907,6 +939,24 @@ message FtraceConfig {
   //  * ftrace_events
   //  * buffer_size_kb
   optional string instance_name = 25;
+
+  // If true, |buffer_size_kb| is interpreted as a lower bound, allowing the
+  // implementation to choose a bigger buffer size.
+  //
+  // Most configs for perfetto v43+ should simply leave both fields unset.
+  //
+  // If you need a config compatible with a range of perfetto builds and you
+  // used to set a non-default buffer_size_kb, consider setting both fields.
+  // Example:
+  //   buffer_size_kb: 4096
+  //   buffer_size_lower_bound: true
+  // On older builds, the per-cpu buffers will be exactly 4 MB.
+  // On v43+, buffers will be at least 4 MB.
+  // In both cases, neither is guaranteed if there are other concurrent
+  // perfetto ftrace sessions, as the buffers cannot be resized without pausing
+  // the recording in the kernel.
+  // Introduced in: perfetto v43.
+  optional bool buffer_size_lower_bound = 27;
 }
 
 // End of protos/perfetto/config/ftrace/ftrace_config.proto
@@ -4837,13 +4887,16 @@ message ProtoLogMessage {
   /* log statement identifier, created from message string and log level. */
   optional fixed64 message_id = 1;
   /* string parameters passed to the log call that have been interned. */
-  repeated uint32 interned_str_params = 2;
+  repeated uint32 str_param_iids = 2;
   /* integer parameters passed to the log call. */
   repeated sint64 sint64_params = 3;
   /* floating point parameters passed to the log call. */
   repeated double double_params = 4;
   /* boolean parameters passed to the log call. */
   repeated int32 boolean_params = 5;
+  // id of the interned stacktrace string
+  // (only dumped if explicitly confuigured to do so)
+  optional uint32 stacktrace_iid = 6;
 }
 
 /* contains all the data required to fully decode the protolog messages */
@@ -5131,8 +5184,10 @@ enum HwcCompositionType {
   // Similar to DEVICE, but the layer position may have been asynchronously set
   // through setCursorPosition
   HWC_TYPE_CURSOR = 4;
-  // Layer was composited by the device via a sideband stream.
+  // Layer was composited by the device via a sideband stream
   HWC_TYPE_SIDEBAND = 5;
+   // Layer was composited by hardware optimized for display decoration
+  HWC_TYPE_DISPLAY_DECORATION = 6;
 }
 
 // Information about each layer.
@@ -10433,6 +10488,8 @@ message FtraceCpuStats {
 
   // Size of entries currently in the kernel buffer (see |entries|) in bytes.
   // The field should be named "bytes", but is misnamed for historical reasons.
+  // This value has known inaccuracies before Linux v6.6:
+  // https://github.com/torvalds/linux/commit/45d99ea
   optional uint64 bytes_read = 5;
 
   // The timestamp for the oldest event still in the ring buffer.
@@ -10544,10 +10601,6 @@ message FtraceEventBundle {
   // Set to true if there was data loss between the last time we've read from
   // the corresponding per-cpu kernel buffer, and the earliest event recorded
   // in this bundle.
-  // TODO(rsavitski): consider replicating in the newer FtraceError. This field
-  // has been set since the original implementation, but used only for manual
-  // debugging. Trace processor instead looks at the FtraceStats totals for the
-  // tracing session.
   optional bool lost_events = 3;
 
   // Optionally-enabled compact encoding of a batch of scheduling events. Only
@@ -12444,6 +12497,8 @@ message InternedData {
 
   // Interned protolog strings args.
   repeated InternedString protolog_string_args = 36;
+  // Interned protolog stacktraces.
+  repeated InternedString protolog_stacktrace = 37;
 }
 
 // End of protos/perfetto/trace/interned_data/interned_data.proto
@@ -13518,6 +13573,24 @@ message ProcessTree {
 
 // End of protos/perfetto/trace/ps/process_tree.proto
 
+// Begin of protos/perfetto/trace/remote_clock_sync.proto
+
+// Records the parameters for aligning clock readings between machines.
+message RemoteClockSync {
+  // Synchronized clock snapshots taken on both sides of the relay port (the
+  // tracing service and the relay service). A round of clock synchronization
+  // IPC takes emits 2 SyncedClocks messages, i.e., client snapshot -> host
+  // snapshot -> client snapshot -> host snapshot.
+  message SyncedClocks {
+    optional ClockSnapshot client_clocks = 2;
+    optional ClockSnapshot host_clocks = 3;
+  }
+
+  repeated SyncedClocks synced_clocks = 1;
+}
+
+// End of protos/perfetto/trace/remote_clock_sync.proto
+
 // Begin of protos/perfetto/trace/statsd/statsd_atom.proto
 
 // Deliberate empty message. See comment on StatsdAtom#atom below.
@@ -14350,7 +14423,7 @@ message UiState {
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 107.
+// Next id: 108.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -14485,6 +14558,9 @@ message TracePacket {
 
     // InputFlinger traces
     AndroidInputEvent android_input_event = 106;
+
+    // Clock synchronization with remote machines.
+    RemoteClockSync remote_clock_sync = 107;
 
     // This field is only used for testing.
     // In previous versions of this proto this field had the id 268435455

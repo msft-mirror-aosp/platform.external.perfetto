@@ -313,6 +313,9 @@ interface TrackComponentAttrs {
   tags?: TrackTags;
   track?: Track;
   error?: Error | undefined;
+
+  // Issues a scrollTo() on this DOM element at creation time. Default: false.
+  revealOnCreate?: boolean;
 }
 
 class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
@@ -320,11 +323,18 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
     // TODO(hjd): The min height below must match the track_shell_title
     // max height in common.scss so we should read it from CSS to avoid
     // them going out of sync.
+    const TRACK_HEIGHT_MIN_PX = 18;
+    const TRACK_HEIGHT_DEFAULT_PX = 24;
+    const trackHeightRaw = attrs.heightPx ?? TRACK_HEIGHT_DEFAULT_PX;
+    const trackHeight = Math.max(trackHeightRaw, TRACK_HEIGHT_MIN_PX);
+
     return m(
       '.track',
       {
         style: {
-          height: `${Math.max(24, attrs.heightPx ?? 0)}px`,
+          // Note: Sub-pixel track heights can mess with sticky elements.
+          // Round up to the nearest integer number of pixels.
+          height: `${Math.ceil(trackHeight)}px`,
         },
         id: 'track_' + attrs.trackKey,
       },
@@ -352,6 +362,10 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
       globals.scrollToTrackKey = undefined;
     }
     this.onupdate(vnode);
+
+    if (attrs.revealOnCreate) {
+      vnode.dom.scrollIntoView();
+    }
   }
 
   onupdate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
@@ -386,11 +400,11 @@ export class TrackButton implements m.ClassComponent<TrackButtonAttrs> {
 }
 
 interface TrackPanelAttrs {
-  key: string;
   trackKey: string;
   title: string;
   tags?: TrackTags;
   trackFSM?: TrackCacheEntry;
+  revealOnCreate?: boolean;
 }
 
 export class TrackPanel implements Panel {
@@ -400,7 +414,7 @@ export class TrackPanel implements Panel {
   constructor(private readonly attrs: TrackPanelAttrs) {}
 
   get key(): string {
-    return this.attrs.key;
+    return this.attrs.trackKey;
   }
 
   get trackKey(): string {
@@ -420,7 +434,6 @@ export class TrackPanel implements Panel {
         });
       }
       return m(TrackComponent, {
-        key: attrs.key,
         trackKey: attrs.trackKey,
         title: attrs.title,
         heightPx: attrs.trackFSM.track.getHeight(),
@@ -428,12 +441,13 @@ export class TrackPanel implements Panel {
         tags: attrs.tags,
         track: attrs.trackFSM.track,
         error: attrs.trackFSM.getError(),
+        revealOnCreate: attrs.revealOnCreate,
       });
     } else {
       return m(TrackComponent, {
-        key: attrs.key,
         trackKey: attrs.trackKey,
         title: attrs.title,
+        revealOnCreate: attrs.revealOnCreate,
       });
     }
   }

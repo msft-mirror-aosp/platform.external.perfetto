@@ -25,87 +25,83 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
-// Fake implementation of Storage for use in tests.
-class FakeStorage final : public DataNode {
+// Fake implementation of DataLayerChain which can be used in unittests.
+class FakeStorageChain : public DataLayerChain {
  public:
-  std::unique_ptr<Queryable> MakeQueryable() override;
-
-  static std::unique_ptr<DataNode> SearchAll(uint32_t size) {
-    return std::unique_ptr<DataNode>(
-        new FakeStorage(size, SearchStrategy::kAll));
+  // Factory function for creating a DataLayerChain which matches all rows from
+  // [0, size).
+  static std::unique_ptr<DataLayerChain> SearchAll(uint32_t size) {
+    return std::unique_ptr<DataLayerChain>(
+        new FakeStorageChain(size, SearchStrategy::kAll, Range(), BitVector()));
   }
 
-  static std::unique_ptr<DataNode> SearchNone(uint32_t size) {
-    return std::unique_ptr<DataNode>(
-        new FakeStorage(size, SearchStrategy::kNone));
+  // Factory function for creating a DataLayerChain which matches zero rows.
+  static std::unique_ptr<DataLayerChain> SearchNone(uint32_t size) {
+    return std::unique_ptr<DataLayerChain>(new FakeStorageChain(
+        size, SearchStrategy::kNone, Range(), BitVector()));
   }
 
-  static std::unique_ptr<DataNode> SearchSubset(uint32_t size, Range r) {
-    std::unique_ptr<FakeStorage> storage(
-        new FakeStorage(size, SearchStrategy::kRange));
-    storage->range_ = r;
-    return std::move(storage);
+  // Factory function for creating a DataLayerChain which matches rows [r.start,
+  // r.end).
+  static std::unique_ptr<DataLayerChain> SearchSubset(uint32_t size, Range r) {
+    return std::unique_ptr<DataLayerChain>(
+        new FakeStorageChain(size, SearchStrategy::kRange, r, BitVector()));
   }
 
-  static std::unique_ptr<DataNode> SearchSubset(uint32_t size, BitVector bv) {
-    std::unique_ptr<FakeStorage> storage(
-        new FakeStorage(size, SearchStrategy::kBitVector));
-    storage->bit_vector_ = std::move(bv);
-    return std::move(storage);
+  // Factory function for creating a DataLayerChain which matches rows of the
+  // set bit positions of |bv|.
+  static std::unique_ptr<DataLayerChain> SearchSubset(uint32_t size,
+                                                      BitVector bv) {
+    return std::unique_ptr<DataLayerChain>(new FakeStorageChain(
+        size, SearchStrategy::kBitVector, Range(), std::move(bv)));
   }
 
-  static std::unique_ptr<DataNode> SearchSubset(
+  // Factory function for creating a DataLayerChain which matches rows specified
+  // by |index_vec|.
+  static std::unique_ptr<DataLayerChain> SearchSubset(
       uint32_t size,
       const std::vector<uint32_t>& index_vec) {
-    std::unique_ptr<FakeStorage> storage(
-        new FakeStorage(size, SearchStrategy::kBitVector));
     BitVector bv(size);
-    for (const uint32_t& i : index_vec) {
+    for (uint32_t i : index_vec) {
       bv.Set(i);
     }
-    storage->bit_vector_ = std::move(bv);
-    return std::move(storage);
+    return std::unique_ptr<DataLayerChain>(new FakeStorageChain(
+        size, SearchStrategy::kBitVector, Range(), std::move(bv)));
   }
+
+  // Implementation of DataLayerChain.
+  SingleSearchResult SingleSearch(FilterOp, SqlValue, uint32_t) const override;
+
+  SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                   SqlValue) const override;
+
+  RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
+
+  RangeOrBitVector IndexSearchValidated(FilterOp,
+                                        SqlValue,
+                                        Indices) const override;
+
+  Range OrderedIndexSearchValidated(FilterOp, SqlValue, Indices) const override;
+
+  void StableSort(SortToken* start,
+                  SortToken* end,
+                  SortDirection) const override;
+
+  void Serialize(StorageProto*) const override;
+
+  uint32_t size() const override { return size_; }
+
+  std::string DebugString() const override { return "FakeStorage"; }
 
  private:
   enum SearchStrategy { kNone, kAll, kRange, kBitVector };
 
-  class Queryable : public DataNode::Queryable {
-   public:
-    Queryable(uint32_t, SearchStrategy, Range, BitVector);
-
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
-
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
-
-    RangeOrBitVector IndexSearch(FilterOp, SqlValue, Indices) const override;
-
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
-
-    void StableSort(uint32_t* rows, uint32_t rows_size) const override;
-
-    void Sort(uint32_t* rows, uint32_t rows_size) const override;
-
-    void Serialize(StorageProto*) const override;
-
-    uint32_t size() const override { return size_; }
-
-    std::string DebugString() const override { return "FakeStorage"; }
-
-   private:
-    uint32_t size_ = 0;
-    SearchStrategy strategy_ = SearchStrategy::kNone;
-    Range range_;
-    BitVector bit_vector_;
-  };
-
-  FakeStorage(uint32_t size, SearchStrategy strategy);
+  FakeStorageChain(uint32_t, SearchStrategy, Range, BitVector);
 
   uint32_t size_ = 0;
   SearchStrategy strategy_ = SearchStrategy::kNone;

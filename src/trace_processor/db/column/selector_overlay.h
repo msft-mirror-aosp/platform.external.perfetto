@@ -23,7 +23,7 @@
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
@@ -31,29 +31,40 @@ namespace perfetto::trace_processor::column {
 // Storage which "selects" specific rows from an underlying storage using a
 // BitVector. See ArrangementOverlay for a more generic class which allows
 // duplication and rearragement but is less performant.
-class SelectorOverlay : public DataNode {
+class SelectorOverlay final : public DataLayer {
  public:
   explicit SelectorOverlay(const BitVector*);
+  ~SelectorOverlay() override;
 
-  std::unique_ptr<Queryable> MakeQueryable(std::unique_ptr<Queryable>) override;
+  std::unique_ptr<DataLayerChain> MakeChain(
+      std::unique_ptr<DataLayerChain>,
+      ChainCreationArgs = ChainCreationArgs());
 
  private:
-  class Queryable : public DataNode::Queryable {
+  class ChainImpl : public DataLayerChain {
    public:
-    Queryable(std::unique_ptr<DataNode::Queryable>, const BitVector*);
+    ChainImpl(std::unique_ptr<DataLayerChain>, const BitVector*);
 
-    SearchValidationResult ValidateSearchConstraints(SqlValue,
-                                                     FilterOp) const override;
+    SingleSearchResult SingleSearch(FilterOp,
+                                    SqlValue,
+                                    uint32_t) const override;
 
-    RangeOrBitVector Search(FilterOp, SqlValue, Range) const override;
+    SearchValidationResult ValidateSearchConstraints(FilterOp,
+                                                     SqlValue) const override;
 
-    RangeOrBitVector IndexSearch(FilterOp p, SqlValue, Indices) const override;
+    RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    Range OrderedIndexSearch(FilterOp, SqlValue, Indices) const override;
+    RangeOrBitVector IndexSearchValidated(FilterOp p,
+                                          SqlValue,
+                                          Indices) const override;
 
-    void StableSort(uint32_t* rows, uint32_t rows_size) const override;
+    Range OrderedIndexSearchValidated(FilterOp,
+                                      SqlValue,
+                                      Indices) const override;
 
-    void Sort(uint32_t* rows, uint32_t rows_size) const override;
+    void StableSort(SortToken* start,
+                    SortToken* end,
+                    SortDirection) const override;
 
     void Serialize(StorageProto*) const override;
 
@@ -62,7 +73,7 @@ class SelectorOverlay : public DataNode {
     std::string DebugString() const override { return "SelectorOverlay"; }
 
    private:
-    std::unique_ptr<DataNode::Queryable> inner_ = nullptr;
+    std::unique_ptr<DataLayerChain> inner_ = nullptr;
     const BitVector* selector_ = nullptr;
   };
 

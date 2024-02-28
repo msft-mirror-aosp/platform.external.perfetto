@@ -137,10 +137,8 @@ export class TabPanel implements m.ClassComponent {
       };
     }
 
-    const detailsPanels = globals.tabManager.detailsPanels;
-
     // Get the first "truthy" details panel
-    const panel = detailsPanels
+    const panel = globals.tabManager.detailsPanels
       .map((dp) => {
         return {
           content: dp.render(cs),

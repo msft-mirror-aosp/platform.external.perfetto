@@ -17,12 +17,12 @@
 #define SRC_TRACE_PROCESSOR_DB_QUERY_EXECUTOR_H_
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
-#include "perfetto/base/logging.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/db/column.h"
-#include "src/trace_processor/db/column/data_node.h"
+#include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor {
@@ -34,7 +34,7 @@ class QueryExecutor {
   static constexpr uint32_t kMaxOverlayCount = 8;
 
   // |row_count| is the size of the last overlay.
-  QueryExecutor(const std::vector<column::DataNode::Queryable*>& columns,
+  QueryExecutor(const std::vector<column::DataLayerChain*>& columns,
                 uint32_t row_count)
       : columns_(columns), row_count_(row_count) {}
 
@@ -50,35 +50,40 @@ class QueryExecutor {
   // Enables QueryExecutor::Filter on Table columns.
   static RowMap FilterLegacy(const Table*, const std::vector<Constraint>&);
 
+  // Enables QueryExecutor::Sort on Table columns.
+  static void SortLegacy(const Table*,
+                         const std::vector<Order>&,
+                         std::vector<uint32_t>&);
+
   // Used only in unittests. Exposes private function.
   static void BoundedColumnFilterForTesting(const Constraint&,
-                                            const column::DataNode::Queryable&,
+                                            const column::DataLayerChain&,
                                             RowMap*);
 
   // Used only in unittests. Exposes private function.
   static void IndexedColumnFilterForTesting(const Constraint&,
-                                            const column::DataNode::Queryable&,
+                                            const column::DataLayerChain&,
                                             RowMap*);
 
  private:
   // Updates RowMap with result of filtering single column using the Constraint.
   static void FilterColumn(const Constraint&,
-                           const column::DataNode::Queryable&,
+                           const column::DataLayerChain&,
                            RowMap*);
 
   // Filters the column using Range algorithm - tries to find the smallest Range
   // to filter the storage with.
   static void LinearSearch(const Constraint&,
-                           const column::DataNode::Queryable&,
+                           const column::DataLayerChain&,
                            RowMap*);
 
   // Filters the column using Index algorithm - finds the indices to filter the
   // storage with.
   static void IndexSearch(const Constraint&,
-                          const column::DataNode::Queryable&,
+                          const column::DataLayerChain&,
                           RowMap*);
 
-  std::vector<column::DataNode::Queryable*> columns_;
+  std::vector<column::DataLayerChain*> columns_;
 
   // Number of rows in the outmost overlay.
   uint32_t row_count_ = 0;

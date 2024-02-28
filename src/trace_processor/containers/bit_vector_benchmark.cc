@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <limits>
 #include <random>
 
 #include <benchmark/benchmark.h>
@@ -222,28 +223,6 @@ static void BM_BitVectorResize(benchmark::State& state) {
 }
 BENCHMARK(BM_BitVectorResize);
 
-static void BM_BitVectorRangeFixedSize(benchmark::State& state) {
-  static constexpr uint32_t kRandomSeed = 42;
-  std::minstd_rand0 rnd_engine(kRandomSeed);
-
-  uint32_t size = static_cast<uint32_t>(state.range(0));
-  uint32_t set_percentage = static_cast<uint32_t>(state.range(1));
-
-  std::vector<uint32_t> resize_fill_pool(size);
-  for (uint32_t i = 0; i < size; ++i) {
-    resize_fill_pool[i] = rnd_engine() % 100 < set_percentage ? 90 : 100;
-  }
-
-  for (auto _ : state) {
-    auto filler = [&resize_fill_pool](uint32_t i) PERFETTO_ALWAYS_INLINE {
-      return resize_fill_pool[i] < 95;
-    };
-    BitVector bv = BitVector::Range(0, size, filler);
-    benchmark::ClobberMemory();
-  }
-}
-BENCHMARK(BM_BitVectorRangeFixedSize)->Apply(BitVectorArgs);
-
 static void BM_BitVectorUpdateSetBits(benchmark::State& state) {
   static constexpr uint32_t kRandomSeed = 42;
   std::minstd_rand0 rnd_engine(kRandomSeed);
@@ -300,3 +279,17 @@ static void BM_BitVectorSetBitsIterator(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_BitVectorSetBitsIterator)->Apply(BitVectorArgs);
+
+static void BM_BitVectorFromIndexVector(benchmark::State& state) {
+  std::vector<int64_t> indices;
+  for (int64_t i = 0; i < 1024l * 1024l; i++) {
+    indices.push_back(i);
+  }
+
+  indices.push_back(std::numeric_limits<uint32_t>::max() >> 5);
+
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(BitVector::FromSortedIndexVector(indices));
+  }
+}
+BENCHMARK(BM_BitVectorFromIndexVector);
