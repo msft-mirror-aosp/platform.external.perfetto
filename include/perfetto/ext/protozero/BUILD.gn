@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
+import("../../../../gn/perfetto.gni")
 
-perfetto_sql_source_set("deprecated") {
-  sources = [ "v42/common" ]
+source_set("protozero") {
+  public_deps = [ "../base" ]
+  deps = [ "../../../../gn:default_deps" ]
+  sources = [ "proto_ring_buffer.h" ]
 }

@@ -61,31 +61,10 @@ SingleSearchResult DenseNullOverlay::ChainImpl::SingleSearch(
   PERFETTO_FATAL("For GCC");
 }
 
-UniqueSearchResult DenseNullOverlay::ChainImpl::UniqueSearch(
-    FilterOp op,
-    SqlValue sql_val,
-    uint32_t* index) const {
-  switch (inner_->UniqueSearch(op, sql_val, index)) {
-    case UniqueSearchResult::kMatch:
-      if (*index >= non_null_->size()) {
-        return UniqueSearchResult::kNoMatch;
-      }
-      // If non_null_[index] is not set, then any result returned by |inner_| is
-      // meaningless as the value in |inner_| is not a "real" value.
-      return non_null_->IsSet(*index) ? UniqueSearchResult::kMatch
-                                      : UniqueSearchResult::kNeedsFullSearch;
-    case UniqueSearchResult::kNoMatch:
-      return UniqueSearchResult::kNoMatch;
-    case UniqueSearchResult::kNeedsFullSearch:
-      return UniqueSearchResult::kNeedsFullSearch;
-  }
-  PERFETTO_FATAL("For GCC");
-}
-
 SearchValidationResult DenseNullOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue sql_val) const {
-  if (op == FilterOp::kIsNull) {
+  if (op == FilterOp::kIsNull || op == FilterOp::kIsNotNull) {
     return SearchValidationResult::kOk;
   }
   return inner_->ValidateSearchConstraints(op, sql_val);
@@ -109,6 +88,15 @@ RangeOrBitVector DenseNullOverlay::ChainImpl::SearchValidated(FilterOp op,
       }
       case SearchValidationResult::kAllData:
         return RangeOrBitVector(in);
+      case SearchValidationResult::kOk:
+        break;
+    }
+  } else if (op == FilterOp::kIsNotNull) {
+    switch (inner_->ValidateSearchConstraints(op, sql_val)) {
+      case SearchValidationResult::kNoData:
+        return RangeOrBitVector(Range());
+      case SearchValidationResult::kAllData:
+        return RangeOrBitVector(non_null_->IntersectRange(in.start, in.end));
       case SearchValidationResult::kOk:
         break;
     }
@@ -165,6 +153,23 @@ RangeOrBitVector DenseNullOverlay::ChainImpl::IndexSearchValidated(
         // There is no need to search in underlying storage. We should just
         // check if the index is set in |non_null_|.
         return RangeOrBitVector(std::move(null_indices).Build());
+      }
+      case SearchValidationResult::kAllData:
+        return RangeOrBitVector(Range(0, indices.size));
+      case SearchValidationResult::kOk:
+        break;
+    }
+  } else if (op == FilterOp::kIsNotNull) {
+    switch (inner_->ValidateSearchConstraints(op, sql_val)) {
+      case SearchValidationResult::kNoData: {
+        BitVector::Builder non_null_indices(indices.size);
+        for (const uint32_t* it = indices.data;
+             it != indices.data + indices.size; it++) {
+          non_null_indices.Append(non_null_->IsSet(*it));
+        }
+        // There is no need to search in underlying storage. We should just
+        // check if the index is set in |non_null_|.
+        return RangeOrBitVector(std::move(non_null_indices).Build());
       }
       case SearchValidationResult::kAllData:
         return RangeOrBitVector(Range(0, indices.size));
