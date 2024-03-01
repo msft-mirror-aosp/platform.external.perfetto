@@ -14,27 +14,22 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_REDACTION_PRUNE_PACKAGE_LIST_H_
-#define SRC_TRACE_REDACTION_PRUNE_PACKAGE_LIST_H_
-
-#include <string>
+#ifndef SRC_TRACE_REDACTION_POPULATE_ALLOW_LISTS_H_
+#define SRC_TRACE_REDACTION_POPULATE_ALLOW_LISTS_H_
 
 #include "perfetto/base/status.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 
 namespace perfetto::trace_redaction {
 
-// Removes all package list entries that don't match `Context.package_uid`.
-// Returns `base::ErrStatus()` if `Context.package_uid` was not set.
-class PrunePackageList final : public TransformPrimitive {
+// Populates the different allow-lists needed to remove data from the trace.
+// Configuration data in the context can be used to change the contents of the
+// lists.
+class PopulateAllowlists final : public BuildPrimitive {
  public:
-  PrunePackageList();
-  ~PrunePackageList() override;
-
-  base::Status Transform(const Context& context,
-                         std::string* packet) const override;
+  base::Status Build(Context* context) const override;
 };
 
 }  // namespace perfetto::trace_redaction
 
-#endif  // SRC_TRACE_REDACTION_PRUNE_PACKAGE_LIST_H_
+#endif  // SRC_TRACE_REDACTION_POPULATE_ALLOW_LISTS_H_
