@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,12 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/util/stack_traces_util.h"
-#include "perfetto/ext/base/string_view.h"
+#include "src/trace_processor/importers/common/sched_event_tracker.h"
 
 namespace perfetto {
 namespace trace_processor {
-namespace util {
 
-bool IsHexModuleId(base::StringView module) {
-  return module.size() == 33;
-}
+SchedEventTracker::~SchedEventTracker() = default;
 
-}  // namespace util
 }  // namespace trace_processor
 }  // namespace perfetto
