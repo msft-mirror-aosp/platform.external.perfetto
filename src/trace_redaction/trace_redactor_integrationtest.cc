@@ -14,11 +14,20 @@
  * limitations under the License.
  */
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "perfetto/base/status.h"
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/temp_file.h"
+#include "src/base/test/tmp_dir_tree.h"
 #include "src/base/test/utils.h"
 #include "src/trace_redaction/find_package_uid.h"
 #include "src/trace_redaction/prune_package_list.h"
+#include "src/trace_redaction/trace_redaction_framework.h"
 #include "src/trace_redaction/trace_redactor.h"
 #include "test/gtest_and_gmock.h"
 
@@ -36,9 +45,6 @@ using TracePacket = protos::pbzero::TracePacket;
 constexpr std::string_view kTracePath =
     "test/data/trace-redaction-general.pftrace";
 
-constexpr std::string_view kPackageName =
-    "com.Unity.com.unity.multiplayer.samples.coop";
-
 constexpr uint64_t kPackageUid = 10252;
 
 class TraceRedactorIntegrationTest : public testing::Test {
@@ -49,12 +55,9 @@ class TraceRedactorIntegrationTest : public testing::Test {
  protected:
   void SetUp() override {
     src_trace_ = base::GetTestDataPath(std::string(kTracePath));
-    dest_trace_ = std::make_unique<base::TempFile>(base::TempFile::Create());
   }
 
   const std::string& src_trace() const { return src_trace_; }
-
-  const std::string& dest_trace() const { return dest_trace_->path(); }
 
   std::vector<protozero::ConstBytes> GetPackageInfos(
       const Trace::Decoder& trace) const {
@@ -74,9 +77,8 @@ class TraceRedactorIntegrationTest : public testing::Test {
     return infos;
   }
 
- private:
   std::string src_trace_;
-  std::unique_ptr<base::TempFile> dest_trace_;
+  base::TmpDirTree tmp_dir_;
 };
 
 TEST_F(TraceRedactorIntegrationTest, FindsPackageAndFiltersPackageList) {
@@ -85,17 +87,24 @@ TEST_F(TraceRedactorIntegrationTest, FindsPackageAndFiltersPackageList) {
   redaction.transformers()->emplace_back(new PrunePackageList());
 
   Context context;
-  context.package_name = kPackageName;
+  context.package_name = "com.Unity.com.unity.multiplayer.samples.coop";
 
-  auto result = redaction.Redact(src_trace(), dest_trace(), &context);
+  auto result = redaction.Redact(
+      src_trace(), tmp_dir_.AbsolutePath("dst.pftrace"), &context);
+  tmp_dir_.TrackFile("dst.pftrace");
 
   ASSERT_TRUE(result.ok()) << result.message();
 
   std::string redacted_buffer;
-  ASSERT_TRUE(base::ReadFile(dest_trace(), &redacted_buffer));
+  ASSERT_TRUE(
+      base::ReadFile(tmp_dir_.AbsolutePath("dst.pftrace"), &redacted_buffer));
 
   Trace::Decoder redacted_trace(redacted_buffer);
   std::vector<protozero::ConstBytes> infos = GetPackageInfos(redacted_trace);
+
+  ASSERT_TRUE(context.package_uid.has_value());
+  ASSERT_EQ(NormalizeUid(context.package_uid.value()),
+            NormalizeUid(kPackageUid));
 
   // It is possible for two packages_list to appear in the trace. The
   // find_package_uid will stop after the first one is found. Package uids are
@@ -103,21 +112,66 @@ TEST_F(TraceRedactorIntegrationTest, FindsPackageAndFiltersPackageList) {
   // two packages_list to contain copies of each other - for example
   // "com.Unity.com.unity.multiplayer.samples.coop" appears in both
   // packages_list.
-  ASSERT_GE(infos.size(), 1u);
+  ASSERT_EQ(infos.size(), 2u);
 
-  for (const auto& info_buffer : infos) {
-    PackageInfo::Decoder info(info_buffer);
+  std::array<PackageInfo::Decoder, 2> decoders = {
+      PackageInfo::Decoder(infos[0]), PackageInfo::Decoder(infos[1])};
 
+  for (auto& decoder : decoders) {
+    ASSERT_TRUE(decoder.has_name());
+    ASSERT_EQ(decoder.name().ToStdString(),
+              "com.Unity.com.unity.multiplayer.samples.coop");
+
+    ASSERT_TRUE(decoder.has_uid());
+    ASSERT_EQ(NormalizeUid(decoder.uid()), NormalizeUid(kPackageUid));
+  }
+}
+
+// It is possible for multiple packages to share a uid. The names will appears
+// across multiple package lists. The only time the package name appears is in
+// the package list, so there is no way to differentiate these packages (only
+// the uid is used later), so each entry should remain.
+TEST_F(TraceRedactorIntegrationTest, RetainsAllInstancesOfUid) {
+  TraceRedactor redaction;
+  redaction.collectors()->emplace_back(new FindPackageUid());
+  redaction.transformers()->emplace_back(new PrunePackageList());
+
+  Context context;
+  context.package_name = "com.google.android.networkstack.tethering";
+
+  auto result = redaction.Redact(
+      src_trace(), tmp_dir_.AbsolutePath("dst.pftrace"), &context);
+  tmp_dir_.TrackFile("dst.pftrace");
+  ASSERT_TRUE(result.ok()) << result.message();
+
+  std::string redacted_buffer;
+  ASSERT_TRUE(
+      base::ReadFile(tmp_dir_.AbsolutePath("dst.pftrace"), &redacted_buffer));
+
+  Trace::Decoder redacted_trace(redacted_buffer);
+  std::vector<protozero::ConstBytes> infos = GetPackageInfos(redacted_trace);
+
+  ASSERT_EQ(infos.size(), 8u);
+
+  std::array<std::string, 8> package_names;
+
+  for (size_t i = 0; i < infos.size(); ++i) {
+    PackageInfo::Decoder info(infos[i]);
     ASSERT_TRUE(info.has_name());
-    ASSERT_EQ(info.name().ToStdString(), kPackageName);
-
-    ASSERT_TRUE(info.has_uid());
-    ASSERT_EQ(NormalizeUid(info.uid()), NormalizeUid(kPackageUid));
+    package_names[i] = info.name().ToStdString();
   }
 
-  ASSERT_TRUE(context.package_uid.has_value());
-  ASSERT_EQ(NormalizeUid(context.package_uid.value()),
-            NormalizeUid(kPackageUid));
+  std::sort(package_names.begin(), package_names.end());
+  ASSERT_EQ(package_names[0], "com.google.android.cellbroadcastservice");
+  ASSERT_EQ(package_names[1], "com.google.android.cellbroadcastservice");
+  ASSERT_EQ(package_names[2], "com.google.android.networkstack");
+  ASSERT_EQ(package_names[3], "com.google.android.networkstack");
+  ASSERT_EQ(package_names[4],
+            "com.google.android.networkstack.permissionconfig");
+  ASSERT_EQ(package_names[5],
+            "com.google.android.networkstack.permissionconfig");
+  ASSERT_EQ(package_names[6], "com.google.android.networkstack.tethering");
+  ASSERT_EQ(package_names[7], "com.google.android.networkstack.tethering");
 }
 
 }  // namespace

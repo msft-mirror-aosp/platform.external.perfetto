@@ -48,7 +48,7 @@ BitVector ReconcileStorageResult(FilterOp op,
   BitVector res;
   if (storage_result.IsRange()) {
     Range range = std::move(storage_result).TakeIfRange();
-    if (range.size() > 0) {
+    if (!range.empty()) {
       res = non_null.IntersectRange(non_null.IndexOfNthSet(range.start),
                                     non_null.IndexOfNthSet(range.end - 1) + 1);
 
