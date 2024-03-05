@@ -2378,7 +2378,6 @@ cc_test {
         ":perfetto_src_trace_processor_storage_storage",
         ":perfetto_src_trace_processor_tables_tables",
         ":perfetto_src_trace_processor_types_types",
-        ":perfetto_src_trace_processor_util_build_id",
         ":perfetto_src_trace_processor_util_bump_allocator",
         ":perfetto_src_trace_processor_util_descriptors",
         ":perfetto_src_trace_processor_util_glob",
@@ -2392,6 +2391,7 @@ cc_test {
         ":perfetto_src_trace_processor_util_protozero_to_text",
         ":perfetto_src_trace_processor_util_regex",
         ":perfetto_src_trace_processor_util_sql_argument",
+        ":perfetto_src_trace_processor_util_stack_traces_util",
         ":perfetto_src_trace_processor_util_stdlib",
         ":perfetto_src_trace_processor_util_util",
         ":perfetto_src_trace_processor_util_zip_reader",
@@ -5139,6 +5139,7 @@ genrule {
         "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_boot_unagg.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
+        "protos/perfetto/metrics/android/android_garbage_collection_unagg_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
         "protos/perfetto/metrics/android/anr_metric.proto",
@@ -5226,6 +5227,7 @@ genrule {
         "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_boot_unagg.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
+        "protos/perfetto/metrics/android/android_garbage_collection_unagg_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
         "protos/perfetto/metrics/android/anr_metric.proto",
@@ -5296,6 +5298,7 @@ genrule {
         "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_boot_unagg.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
+        "protos/perfetto/metrics/android/android_garbage_collection_unagg_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
         "protos/perfetto/metrics/android/anr_metric.proto",
@@ -11107,7 +11110,6 @@ filegroup {
         "src/trace_processor/importers/common/event_tracker.cc",
         "src/trace_processor/importers/common/flow_tracker.cc",
         "src/trace_processor/importers/common/global_args_tracker.cc",
-        "src/trace_processor/importers/common/mapping_tracker.cc",
         "src/trace_processor/importers/common/metadata_tracker.cc",
         "src/trace_processor/importers/common/process_tracker.cc",
         "src/trace_processor/importers/common/sched_event_tracker.cc",
@@ -11118,7 +11120,6 @@ filegroup {
         "src/trace_processor/importers/common/thread_state_tracker.cc",
         "src/trace_processor/importers/common/trace_parser.cc",
         "src/trace_processor/importers/common/track_tracker.cc",
-        "src/trace_processor/importers/common/virtual_memory_mapping.cc",
     ],
 }
 
@@ -11652,6 +11653,7 @@ genrule {
         "src/trace_processor/metrics/sql/android/android_dvfs.sql",
         "src/trace_processor/metrics/sql/android/android_fastrpc.sql",
         "src/trace_processor/metrics/sql/android/android_frame_timeline_metric.sql",
+        "src/trace_processor/metrics/sql/android/android_garbage_collection_unagg.sql",
         "src/trace_processor/metrics/sql/android/android_gpu.sql",
         "src/trace_processor/metrics/sql/android/android_hwcomposer.sql",
         "src/trace_processor/metrics/sql/android/android_hwui_metric.sql",
@@ -12062,6 +12064,7 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/sched/utilization/process.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/utilization/system.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/utilization/thread.sql",
+        "src/trace_processor/perfetto_sql/stdlib/slices/cpu_time.sql",
         "src/trace_processor/perfetto_sql/stdlib/slices/flat_slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/slices/slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/slices/with_context.sql",
@@ -12321,14 +12324,6 @@ filegroup {
     name: "perfetto_src_trace_processor_unittests",
 }
 
-// GN: //src/trace_processor/util:build_id
-filegroup {
-    name: "perfetto_src_trace_processor_util_build_id",
-    srcs: [
-        "src/trace_processor/util/build_id.cc",
-    ],
-}
-
 // GN: //src/trace_processor/util:bump_allocator
 filegroup {
     name: "perfetto_src_trace_processor_util_bump_allocator",
@@ -12426,6 +12421,14 @@ filegroup {
     name: "perfetto_src_trace_processor_util_sql_argument",
     srcs: [
         "src/trace_processor/util/sql_argument.cc",
+    ],
+}
+
+// GN: //src/trace_processor/util:stack_traces_util
+filegroup {
+    name: "perfetto_src_trace_processor_util_stack_traces_util",
+    srcs: [
+        "src/trace_processor/util/stack_traces_util.cc",
     ],
 }
 
@@ -13956,7 +13959,6 @@ cc_test {
         ":perfetto_src_trace_processor_types_types",
         ":perfetto_src_trace_processor_types_unittests",
         ":perfetto_src_trace_processor_unittests",
-        ":perfetto_src_trace_processor_util_build_id",
         ":perfetto_src_trace_processor_util_bump_allocator",
         ":perfetto_src_trace_processor_util_descriptors",
         ":perfetto_src_trace_processor_util_glob",
@@ -13970,6 +13972,7 @@ cc_test {
         ":perfetto_src_trace_processor_util_protozero_to_text",
         ":perfetto_src_trace_processor_util_regex",
         ":perfetto_src_trace_processor_util_sql_argument",
+        ":perfetto_src_trace_processor_util_stack_traces_util",
         ":perfetto_src_trace_processor_util_stdlib",
         ":perfetto_src_trace_processor_util_unittests",
         ":perfetto_src_trace_processor_util_util",
@@ -14659,7 +14662,6 @@ cc_binary {
         ":perfetto_src_trace_processor_storage_storage",
         ":perfetto_src_trace_processor_tables_tables",
         ":perfetto_src_trace_processor_types_types",
-        ":perfetto_src_trace_processor_util_build_id",
         ":perfetto_src_trace_processor_util_bump_allocator",
         ":perfetto_src_trace_processor_util_descriptors",
         ":perfetto_src_trace_processor_util_glob",
@@ -14673,6 +14675,7 @@ cc_binary {
         ":perfetto_src_trace_processor_util_protozero_to_text",
         ":perfetto_src_trace_processor_util_regex",
         ":perfetto_src_trace_processor_util_sql_argument",
+        ":perfetto_src_trace_processor_util_stack_traces_util",
         ":perfetto_src_trace_processor_util_stdlib",
         ":perfetto_src_trace_processor_util_util",
         ":perfetto_src_trace_processor_util_zip_reader",
@@ -14893,7 +14896,6 @@ cc_binary_host {
         ":perfetto_src_trace_processor_storage_storage",
         ":perfetto_src_trace_processor_tables_tables",
         ":perfetto_src_trace_processor_types_types",
-        ":perfetto_src_trace_processor_util_build_id",
         ":perfetto_src_trace_processor_util_bump_allocator",
         ":perfetto_src_trace_processor_util_descriptors",
         ":perfetto_src_trace_processor_util_glob",
@@ -14907,6 +14909,7 @@ cc_binary_host {
         ":perfetto_src_trace_processor_util_protozero_to_text",
         ":perfetto_src_trace_processor_util_regex",
         ":perfetto_src_trace_processor_util_sql_argument",
+        ":perfetto_src_trace_processor_util_stack_traces_util",
         ":perfetto_src_trace_processor_util_stdlib",
         ":perfetto_src_trace_processor_util_util",
         ":perfetto_src_trace_processor_util_zip_reader",
