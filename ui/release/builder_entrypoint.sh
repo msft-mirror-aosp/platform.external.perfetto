@@ -30,6 +30,14 @@ mount
 # support yet triggering from Gerrit.
 
 cd /workspace/
+
+EXTRA_ARGS=""
+IS_RELEASE=0
+RELEASE=$(git describe --all --exact --match 'origin/releases/v*' HEAD) || IS_RELEASE=$?
+if [[ $IS_RELEASE -eq 0 ]]; then
+  EXTRA_ARGS="--branch_only=$RELEASE"
+fi
+
 ls -A1 | xargs rm -rf
 UPSTREAM="https://android.googlesource.com/platform/external/perfetto.git"
 git clone $UPSTREAM upstream
@@ -37,4 +45,5 @@ git clone $UPSTREAM upstream
 cd upstream/
 git rev-parse HEAD
 mkdir /workspace/tmp
-python3 -u "$CUR_DUR/build_all_channels.py" --upload --tmp=/workspace/tmp
+python3 -u "$CUR_DUR/build_all_channels.py" \
+        --upload --tmp=/workspace/tmp $EXTRA_ARGS
