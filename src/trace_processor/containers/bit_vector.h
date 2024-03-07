@@ -296,7 +296,9 @@ class BitVector {
   // As an example, suppose RangeForTesting(3, 7, [](x) { return x < 5 }). This
   // would result in the following BitVector: [0 0 0 1 1 0 0]
   template <typename Filler = bool(uint32_t)>
-  static BitVector RangeForTesting(uint32_t start, uint32_t end, Filler f) {
+  PERFETTO_WARN_UNUSED_RESULT static BitVector RangeForTesting(uint32_t start,
+                                                               uint32_t end,
+                                                               Filler f) {
     // Compute the block index and BitVector index where we start and end
     // working one block at a time.
     uint32_t start_fast_block = BlockCount(start);
@@ -309,8 +311,6 @@ class BitVector {
       for (uint32_t i = start; i < end; ++i) {
         bv.Append(f(i));
       }
-      bv.counts_.emplace_back(bv.CountSetBits());
-      bv.size_ = end;
       return bv;
     }
 
@@ -350,11 +350,13 @@ class BitVector {
   // - be sorted
   // - have first element >= 0
   // - last value smaller than numeric limit of uint32_t.
-  static BitVector FromSortedIndexVector(const std::vector<int64_t>&);
+  PERFETTO_WARN_UNUSED_RESULT static BitVector FromSortedIndexVector(
+      const std::vector<int64_t>&);
 
   // Creates a BitVector of size `min(range_end, size())` with bits between
   // |start| and |end| filled with corresponding bits from |this| BitVector.
-  BitVector IntersectRange(uint32_t range_start, uint32_t range_end) const;
+  PERFETTO_WARN_UNUSED_RESULT BitVector
+  IntersectRange(uint32_t range_start, uint32_t range_end) const;
 
   // Requests the removal of unused capacity.
   // Matches the semantics of std::vector::shrink_to_fit.
@@ -918,6 +920,16 @@ class BitVector {
   // Converts a block index to a index in the BitVector.
   static constexpr uint32_t BlockToIndex(uint32_t block_idx) {
     return block_idx * Block::kBits;
+  }
+
+  // Updates the counts in |counts| by counting the set bits in |words|.
+  static void UpdateCounts(const std::vector<uint64_t>& words,
+                           std::vector<uint32_t>& counts) {
+    PERFETTO_CHECK(words.size() == counts.size() * Block::kWords);
+    for (uint32_t i = 1; i < counts.size(); ++i) {
+      counts[i] = counts[i - 1] +
+                  ConstBlock(&words[Block::kWords * (i - 1)]).CountSetBits();
+    }
   }
 
   uint32_t size_ = 0;
