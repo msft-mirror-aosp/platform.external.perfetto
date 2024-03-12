@@ -67,7 +67,7 @@ export class NotesPanel implements Panel {
 
   constructor(readonly key: string) {}
 
-  get mithril(): m.Children {
+  render(): m.Children {
     const allCollapsed = Object.values(globals.state.trackGroups)
       .every((group) => group.collapsed);
 
@@ -83,7 +83,7 @@ export class NotesPanel implements Panel {
           this.hoveredX = currentTargetOffset(e).x - TRACK_SHELL_WIDTH;
           raf.scheduleRedraw();
         },
-        mouseenter: (e: MouseEvent) => {
+        onmouseenter: (e: MouseEvent) => {
           this.hoveredX = currentTargetOffset(e).x - TRACK_SHELL_WIDTH;
           raf.scheduleRedraw();
         },

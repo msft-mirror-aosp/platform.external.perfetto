@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,23 +14,21 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_PROCESSOR_UTIL_STACK_TRACES_UTIL_H_
-#define SRC_TRACE_PROCESSOR_UTIL_STACK_TRACES_UTIL_H_
+#include "perfetto/trace_processor/trace_blob.h"
 
-#include "perfetto/ext/base/string_view.h"
+#include "test/gtest_and_gmock.h"
 
 namespace perfetto {
 namespace trace_processor {
-namespace util {
+namespace {
 
-// Returns whether this string is of a hex chrome module or not to decide
-// whether to convert the module to/from hex.
-// TODO(b/148109467): Remove workaround once all active Chrome versions
-// write raw bytes instead of a string as build_id.
-bool IsHexModuleId(base::StringView module);
+TEST(TraceBlob, MoveAssignment) {
+  TraceBlob b1 = TraceBlob::Allocate(16);
+  TraceBlob b2 = TraceBlob::Allocate(16);
 
-}  // namespace util
+  b1 = std::move(b2);
+}
+
+}  // namespace
 }  // namespace trace_processor
 }  // namespace perfetto
-
-#endif  // SRC_TRACE_PROCESSOR_UTIL_STACK_TRACES_UTIL_H_

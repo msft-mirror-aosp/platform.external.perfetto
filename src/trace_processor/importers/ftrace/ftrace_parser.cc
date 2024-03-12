@@ -26,9 +26,9 @@
 #include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
+#include "src/trace_processor/importers/common/thread_state_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/ftrace/binder_tracker.h"
-#include "src/trace_processor/importers/ftrace/thread_state_tracker.h"
 #include "src/trace_processor/importers/ftrace/v4l2_tracker.h"
 #include "src/trace_processor/importers/ftrace/virtio_video_tracker.h"
 #include "src/trace_processor/importers/i2c/i2c_tracker.h"
@@ -68,6 +68,7 @@
 #include "protos/perfetto/trace/ftrace/oom.pbzero.h"
 #include "protos/perfetto/trace/ftrace/power.pbzero.h"
 #include "protos/perfetto/trace/ftrace/raw_syscalls.pbzero.h"
+#include "protos/perfetto/trace/ftrace/rpm.pbzero.h"
 #include "protos/perfetto/trace/ftrace/samsung.pbzero.h"
 #include "protos/perfetto/trace/ftrace/sched.pbzero.h"
 #include "protos/perfetto/trace/ftrace/scm.pbzero.h"
@@ -220,6 +221,14 @@ std::string GetUfsCmdString(uint32_t ufsopcode, uint32_t gid) {
   }
   return buffer;
 }
+
+enum RpmStatus {
+  RPM_INVALID = -1,
+  RPM_ACTIVE = 0,
+  RPM_RESUMING,
+  RPM_SUSPENDED,
+  RPM_SUSPENDING,
+};
 }  // namespace
 FtraceParser::FtraceParser(TraceProcessorContext* context)
     : context_(context),
@@ -326,7 +335,13 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       bytes_read_id_end_(context_->storage->InternString("bytes_read_end")),
       android_fs_category_id_(context_->storage->InternString("android_fs")),
       android_fs_data_read_id_(
-          context_->storage->InternString("android_fs_data_read")) {
+          context_->storage->InternString("android_fs_data_read")),
+      runtime_status_invalid_id_(
+          context->storage->InternString("Invalid State")),
+      runtime_status_active_id_(context->storage->InternString("Active")),
+      runtime_status_suspending_id_(
+          context->storage->InternString("Suspending")),
+      runtime_status_resuming_id_(context->storage->InternString("Resuming")) {
   // Build the lookup table for the strings inside ftrace events (e.g. the
   // name of ftrace event fields and the names of their args).
   for (size_t i = 0; i < GetDescriptorsSize(); i++) {
@@ -1099,6 +1114,10 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         gpu_work_period_tracker_.ParseGpuWorkPeriodEvent(ts, fld_bytes);
         break;
       }
+      case FtraceEvent::kRpmStatusFieldNumber: {
+        ParseRpmStatus(ts, fld_bytes);
+        break;
+      }
       default:
         break;
     }
@@ -1120,10 +1139,11 @@ base::Status FtraceParser::ParseInlineSchedSwitch(
   }
 
   using protos::pbzero::FtraceEvent;
-  SchedEventTracker* sched_tracker = SchedEventTracker::GetOrCreate(context_);
-  sched_tracker->PushSchedSwitchCompact(cpu, ts, data.prev_state,
-                                        static_cast<uint32_t>(data.next_pid),
-                                        data.next_prio, data.next_comm);
+  FtraceSchedEventTracker* ftrace_sched_tracker =
+      FtraceSchedEventTracker::GetOrCreate(context_);
+  ftrace_sched_tracker->PushSchedSwitchCompact(
+      cpu, ts, data.prev_state, static_cast<uint32_t>(data.next_pid),
+      data.next_prio, data.next_comm);
   return util::OkStatus();
 }
 
@@ -1138,8 +1158,9 @@ base::Status FtraceParser::ParseInlineSchedWaking(
     return util::OkStatus();
   }
   using protos::pbzero::FtraceEvent;
-  SchedEventTracker* sched_tracker = SchedEventTracker::GetOrCreate(context_);
-  sched_tracker->PushSchedWakingCompact(
+  FtraceSchedEventTracker* ftrace_sched_tracker =
+      FtraceSchedEventTracker::GetOrCreate(context_);
+  ftrace_sched_tracker->PushSchedWakingCompact(
       cpu, ts, static_cast<uint32_t>(data.pid), data.target_cpu, data.prio,
       data.comm, data.common_flags);
   return util::OkStatus();
@@ -1272,8 +1293,6 @@ void FtraceParser::ParseTypedFtraceToRaw(
       case ProtoSchemaType::kInt64:
       case ProtoSchemaType::kSfixed32:
       case ProtoSchemaType::kSfixed64:
-      case ProtoSchemaType::kSint32:
-      case ProtoSchemaType::kSint64:
       case ProtoSchemaType::kBool:
       case ProtoSchemaType::kEnum: {
         inserter.AddArg(name_id, Variadic::Integer(fld.as_int64()));
@@ -1287,6 +1306,11 @@ void FtraceParser::ParseTypedFtraceToRaw(
         // as a signed 64 bit integers (but the translation back to ftrace
         // refers to this storage directly).
         inserter.AddArg(name_id, Variadic::UnsignedInteger(fld.as_uint64()));
+        break;
+      }
+      case ProtoSchemaType::kSint32:
+      case ProtoSchemaType::kSint64: {
+        inserter.AddArg(name_id, Variadic::Integer(fld.as_sint64()));
         break;
       }
       case ProtoSchemaType::kString:
@@ -1321,7 +1345,7 @@ void FtraceParser::ParseSchedSwitch(uint32_t cpu,
   protos::pbzero::SchedSwitchFtraceEvent::Decoder ss(blob.data, blob.size);
   uint32_t prev_pid = static_cast<uint32_t>(ss.prev_pid());
   uint32_t next_pid = static_cast<uint32_t>(ss.next_pid());
-  SchedEventTracker::GetOrCreate(context_)->PushSchedSwitch(
+  FtraceSchedEventTracker::GetOrCreate(context_)->PushSchedSwitch(
       cpu, timestamp, prev_pid, ss.prev_comm(), ss.prev_prio(), ss.prev_state(),
       next_pid, ss.next_comm(), ss.next_prio());
 }
@@ -3198,6 +3222,56 @@ void FtraceParser::ParseAndroidFsDatareadEnd(int64_t ts, ConstBytes data) {
                                args_inserter);
   // Erase the entry from the map.
   inode_offset_thread_map_.Erase(key);
+}
+
+StringId FtraceParser::GetRpmStatusStringId(int32_t rpm_status_val) {
+  // `RPM_SUSPENDED` is omitted from this list as it would never be used as a
+  // slice label.
+  switch (rpm_status_val) {
+    case RPM_INVALID:
+      return runtime_status_invalid_id_;
+    case RPM_SUSPENDING:
+      return runtime_status_suspending_id_;
+    case RPM_RESUMING:
+      return runtime_status_resuming_id_;
+    case RPM_ACTIVE:
+      return runtime_status_active_id_;
+  }
+
+  PERFETTO_DLOG(
+      "Invalid runtime status value obtained from rpm_status ftrace event");
+  return runtime_status_invalid_id_;
+}
+
+void FtraceParser::ParseRpmStatus(int64_t ts, protozero::ConstBytes blob) {
+  protos::pbzero::RpmStatusFtraceEvent::Decoder rpm_event(blob.data, blob.size);
+
+  // Device here refers to anything managed by a Linux kernel driver.
+  std::string device_name = rpm_event.name().ToStdString();
+  int32_t rpm_status = rpm_event.status();
+  StringId device_name_string_id =
+      context_->storage->InternString(device_name.c_str());
+  TrackId track_id =
+      context_->track_tracker->InternLinuxDeviceTrack(device_name_string_id);
+
+  // A `runtime_status` event implies a potential change in state. Hence, if an
+  // active slice exists for this device, end that slice.
+  if (devices_with_active_rpm_slice_.find(device_name) !=
+      devices_with_active_rpm_slice_.end()) {
+    context_->slice_tracker->End(ts, track_id);
+  }
+
+  // To reduce visual clutter, the "SUSPENDED" state will be omitted from the
+  // visualization, as devices typically spend the majority of their time in
+  // this state.
+  if (rpm_status == RPM_SUSPENDED) {
+    devices_with_active_rpm_slice_.erase(device_name);
+    return;
+  }
+
+  context_->slice_tracker->Begin(ts, track_id, /*category=*/kNullStringId,
+                                 /*raw_name=*/GetRpmStatusStringId(rpm_status));
+  devices_with_active_rpm_slice_.insert(device_name);
 }
 
 StringId FtraceParser::InternedKernelSymbolOrFallback(

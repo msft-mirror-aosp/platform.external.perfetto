@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "src/trace_processor/importers/ftrace/thread_state_tracker.h"
+
+#include "src/trace_processor/importers/common/thread_state_tracker.h"
 #include <optional>
 
 namespace perfetto {
@@ -138,6 +139,20 @@ void ThreadStateTracker::AddOpenState(int64_t ts,
   row.state = state;
   if (common_flags.has_value()) {
     row.irq_context = CommonFlagsToIrqContext(*common_flags);
+  }
+
+  if (waker_utid.has_value() && HasPreviousRowNumbersForUtid(*waker_utid)) {
+    auto waker_row =
+        RowNumToRef(prev_row_numbers_for_thread_[*waker_utid]->last_row);
+
+    // We expect all wakers to be Running. But there are 2 cases where this
+    // might not be true:
+    // 1. At the start of a trace the 'waker CPU' has not yet started
+    // emitting events.
+    // 2. Data loss.
+    if (IsRunning(waker_row.state())) {
+      row.waker_id = std::make_optional(waker_row.id());
+    }
   }
 
   auto row_num = storage_->mutable_thread_state_table()->Insert(row).row_number;
