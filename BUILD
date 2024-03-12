@@ -2029,6 +2029,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/power_profile_data/raven.sql",
         "src/trace_processor/metrics/sql/android/power_profile_data/redfin.sql",
         "src/trace_processor/metrics/sql/android/power_profile_data/sargo.sql",
+        "src/trace_processor/metrics/sql/android/power_profile_data/shusky.sql",
         "src/trace_processor/metrics/sql/android/power_profile_data/sunfish.sql",
         "src/trace_processor/metrics/sql/android/power_profile_data/taimen.sql",
         "src/trace_processor/metrics/sql/android/power_profile_data/walleye.sql",
@@ -2472,6 +2473,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/memory:memory
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_memory_memory",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/memory/heap_graph_dominator_tree.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/pkvm:pkvm
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
@@ -2509,6 +2518,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/sched/thread_executing_span.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/thread_level_parallelism.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/thread_state_flattened.sql",
+        "src/trace_processor/perfetto_sql/stdlib/sched/time_in_state.sql",
     ],
 )
 
@@ -2545,6 +2555,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
         ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
         ":src_trace_processor_perfetto_sql_stdlib_linux_linux",
+        ":src_trace_processor_perfetto_sql_stdlib_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
         ":src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
         ":src_trace_processor_perfetto_sql_stdlib_sched_sched",
@@ -4669,6 +4680,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",
         "protos/perfetto/trace/ftrace/regulator.proto",
+        "protos/perfetto/trace/ftrace/rpm.proto",
         "protos/perfetto/trace/ftrace/samsung.proto",
         "protos/perfetto/trace/ftrace/sched.proto",
         "protos/perfetto/trace/ftrace/scm.proto",

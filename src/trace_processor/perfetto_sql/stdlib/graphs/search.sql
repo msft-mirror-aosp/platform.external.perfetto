@@ -23,7 +23,7 @@
 -- level functions/macros in the standard library can be built.
 --
 -- Example usage on traces containing heap graphs:
---
+-- ```
 -- -- Compute the reachable nodes from the first heap root.
 -- SELECT *
 -- FROM graph_reachable_dfs!(
@@ -73,7 +73,7 @@ RETURNS TableOrSubquery AS
 -- The order of the next sibling is undefined if the |sort_key| is not unique.
 --
 -- Example usage:
---
+-- ```
 -- -- Compute the next sibling:
 -- SELECT *
 -- FROM graph_next_sibling!(

@@ -4,9 +4,16 @@ Unreleased:
   Trace Processor:
     *
   UI:
-    *
+    * Per-cpu scheduling tracks now distinguish real-time priority threads with
+      a hatched pattern and name prefix. Based on priority during switch-in.
   SDK:
     *
+
+
+v43.2 - 2024-03-07:
+  UI:
+    * Added redirection to pinned UI version when using
+      `trace_processor_shell --httpd` and pinned version is available.
 
 
 v43.1 - 2024-03-05:

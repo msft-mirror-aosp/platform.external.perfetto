@@ -34,6 +34,8 @@ source_set("trace_redaction") {
     "populate_allow_lists.h",
     "prune_package_list.cc",
     "prune_package_list.h",
+    "scrub_ftrace_events.cc",
+    "scrub_ftrace_events.h",
     "scrub_trace_packet.cc",
     "scrub_trace_packet.h",
     "trace_redaction_framework.cc",
@@ -51,6 +53,7 @@ source_set("trace_redaction") {
     "../../protos/perfetto/trace:non_minimal_zero",
     "../../protos/perfetto/trace/android:cpp",
     "../../protos/perfetto/trace/android:zero",
+    "../../protos/perfetto/trace/ftrace:zero",
     "../trace_processor:storage_minimal",
   ]
 }
@@ -65,6 +68,7 @@ source_set("integrationtests") {
     "../../include/perfetto/ext/base",
     "../../protos/perfetto/trace:non_minimal_zero",
     "../../protos/perfetto/trace/android:zero",
+    "../../protos/perfetto/trace/ftrace:zero",
     "../base:test_support",
   ]
 }
@@ -74,15 +78,19 @@ perfetto_unittest_source_set("unittests") {
   sources = [
     "find_package_uid_unittest.cc",
     "prune_package_list_unittest.cc",
+    "scrub_ftrace_events_unittest.cc",
     "scrub_trace_packet_unittest.cc",
   ]
   deps = [
     ":trace_redaction",
     "../../gn:default_deps",
     "../../gn:gtest_and_gmock",
+    "../../include/perfetto/protozero:protozero",
     "../../protos/perfetto/trace:non_minimal_cpp",
     "../../protos/perfetto/trace:zero",
     "../../protos/perfetto/trace/android:cpp",
+    "../../protos/perfetto/trace/ftrace:cpp",
+    "../../protos/perfetto/trace/ftrace:zero",
     "../../protos/perfetto/trace/ps:cpp",
     "../../protos/perfetto/trace/ps:zero",
     "../base:test_support",

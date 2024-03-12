@@ -145,12 +145,8 @@ uint32_t LowerBoundIntrinsic(StringPool* pool,
                              const StringPool::Id* data,
                              NullTermStringView val,
                              Range search_range) {
-  Less comp{pool};
-  const auto* lower =
-      std::lower_bound(data + search_range.start, data + search_range.end, val,
-                       [comp](StringPool::Id id, NullTermStringView val) {
-                         return comp(id, val);
-                       });
+  const auto* lower = std::lower_bound(
+      data + search_range.start, data + search_range.end, val, Less{pool});
   return static_cast<uint32_t>(std::distance(data, lower));
 }
 
@@ -171,10 +167,11 @@ uint32_t LowerBoundExtrinsic(StringPool* pool,
                              const StringPool::Id* data,
                              NullTermStringView val,
                              const uint32_t* indices,
-                             uint32_t indices_count) {
+                             uint32_t indices_count,
+                             uint32_t offset) {
   Less comp{pool};
   const auto* lower =
-      std::lower_bound(indices, indices + indices_count, val,
+      std::lower_bound(indices + offset, indices + indices_count, val,
                        [comp, data](uint32_t index, NullTermStringView val) {
                          return comp(data[index], val);
                        });
@@ -185,10 +182,11 @@ uint32_t UpperBoundExtrinsic(StringPool* pool,
                              const StringPool::Id* data,
                              NullTermStringView val,
                              const uint32_t* indices,
-                             uint32_t indices_count) {
+                             uint32_t indices_count,
+                             uint32_t offset) {
   Greater comp{pool};
   const auto* upper =
-      std::upper_bound(indices, indices + indices_count, val,
+      std::upper_bound(indices + offset, indices + indices_count, val,
                        [comp, data](NullTermStringView val, uint32_t index) {
                          return comp(data[index], val);
                        });
@@ -320,16 +318,35 @@ RangeOrBitVector StringStorage::ChainImpl::SearchValidated(
       case FilterOp::kGe:
       case FilterOp::kGt:
       case FilterOp::kLe:
-      case FilterOp::kLt:
-        return RangeOrBitVector(
-            BinarySearchIntrinsic(op, sql_val, search_range));
+      case FilterOp::kLt: {
+        auto first_non_null = static_cast<uint32_t>(std::distance(
+            data_->begin(),
+            std::partition_point(data_->begin() + search_range.start,
+                                 data_->begin() + search_range.end,
+                                 [](StringPool::Id id) {
+                                   return id == StringPool::Id::Null();
+                                 })));
+        return RangeOrBitVector(BinarySearchIntrinsic(
+            op, sql_val,
+            {std::max(search_range.start, first_non_null), search_range.end}));
+      }
       case FilterOp::kNe: {
         // Not equal is a special operation on binary search, as it doesn't
         // define a range, and rather just `not` range returned with `equal`
-        // operation.
-        Range r = BinarySearchIntrinsic(FilterOp::kEq, sql_val, search_range);
-        BitVector bv(r.start, true);
-        bv.Resize(r.end);
+        // operation on non null values.
+        auto first_non_null = static_cast<uint32_t>(std::distance(
+            data_->begin(),
+            std::partition_point(data_->begin() + search_range.start,
+                                 data_->begin() + search_range.end,
+                                 [](StringPool::Id id) {
+                                   return id == StringPool::Id::Null();
+                                 })));
+        Range ret = BinarySearchIntrinsic(
+            FilterOp::kEq, sql_val,
+            {std::max(search_range.start, first_non_null), search_range.end});
+        BitVector bv(first_non_null, false);
+        bv.Resize(ret.start, true);
+        bv.Resize(ret.end, false);
         bv.Resize(search_range.end, true);
         return RangeOrBitVector(std::move(bv));
       }
@@ -511,46 +528,42 @@ Range StringStorage::ChainImpl::OrderedIndexSearchValidated(
           : string_pool_->InternString(base::StringView(sql_val.AsString()));
   NullTermStringView val_str = string_pool_->Get(val);
 
+  auto first_non_null = static_cast<uint32_t>(std::distance(
+      indices.data,
+      std::partition_point(indices.data, indices.data + indices.size,
+                           [this](uint32_t i) {
+                             return (*data_)[i] == StringPool::Id::Null();
+                           })));
+
   switch (op) {
     case FilterOp::kEq:
       return {LowerBoundExtrinsic(string_pool_, data_->data(), val_str,
-                                  indices.data, indices.size),
+                                  indices.data, indices.size, first_non_null),
               UpperBoundExtrinsic(string_pool_, data_->data(), val_str,
-                                  indices.data, indices.size)};
+                                  indices.data, indices.size, first_non_null)};
     case FilterOp::kLe:
-      return {0, UpperBoundExtrinsic(string_pool_, data_->data(), val_str,
-                                     indices.data, indices.size)};
+      return {first_non_null,
+              UpperBoundExtrinsic(string_pool_, data_->data(), val_str,
+                                  indices.data, indices.size, first_non_null)};
     case FilterOp::kLt:
-      return {0, LowerBoundExtrinsic(string_pool_, data_->data(), val_str,
-                                     indices.data, indices.size)};
+      return {first_non_null,
+              LowerBoundExtrinsic(string_pool_, data_->data(), val_str,
+                                  indices.data, indices.size, first_non_null)};
     case FilterOp::kGe:
       return {LowerBoundExtrinsic(string_pool_, data_->data(), val_str,
-                                  indices.data, indices.size),
+                                  indices.data, indices.size, first_non_null),
               indices.size};
     case FilterOp::kGt:
       return {UpperBoundExtrinsic(string_pool_, data_->data(), val_str,
-                                  indices.data, indices.size),
+                                  indices.data, indices.size, first_non_null),
               indices.size};
     case FilterOp::kIsNull: {
       // Assuming nulls are at the front.
-      IsNull comp;
-      const auto* first_non_null = std::partition_point(
-          indices.data, indices.data + indices.size, [comp, this](uint32_t i) {
-            return comp((*data_)[i], StringPool::Id::Null());
-          });
-      return Range(0, static_cast<uint32_t>(
-                          std::distance(indices.data, first_non_null)));
+      return Range(0, first_non_null);
     }
     case FilterOp::kIsNotNull: {
       // Assuming nulls are at the front.
-      IsNull comp;
-      const auto* first_non_null = std::partition_point(
-          indices.data, indices.data + indices.size, [comp, this](uint32_t i) {
-            return comp((*data_)[i], StringPool::Id::Null());
-          });
-      return Range(
-          static_cast<uint32_t>(std::distance(indices.data, first_non_null)),
-          indices.size);
+      return Range(first_non_null, indices.size);
     }
 
     case FilterOp::kNe:
@@ -607,20 +620,51 @@ void StringStorage::ChainImpl::StableSort(SortToken* start,
                                           SortToken* end,
                                           SortDirection direction) const {
   switch (direction) {
-    case SortDirection::kAscending:
+    case SortDirection::kAscending: {
       std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return string_pool_->Get((*data_)[a.index]) <
-                                string_pool_->Get((*data_)[b.index]);
+                       [this](const SortToken& lhs, const SortToken& rhs) {
+                         // If RHS is NULL, we know that LHS is not less than
+                         // NULL, as nothing is less then null. This check is
+                         // only required to keep the stability of the sort.
+                         if ((*data_)[rhs.index] == StringPool::Id::Null()) {
+                           return false;
+                         }
+
+                         // If LHS is NULL, it will always be smaller than any
+                         // RHS value.
+                         if ((*data_)[lhs.index] == StringPool::Id::Null()) {
+                           return true;
+                         }
+
+                         // If neither LHS or RHS are NULL, we have to simply
+                         // check which string is smaller.
+                         return string_pool_->Get((*data_)[lhs.index]) <
+                                string_pool_->Get((*data_)[rhs.index]);
                        });
       return;
-    case SortDirection::kDescending:
+    }
+    case SortDirection::kDescending: {
       std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return string_pool_->Get((*data_)[a.index]) >
-                                string_pool_->Get((*data_)[b.index]);
+                       [this](const SortToken& lhs, const SortToken& rhs) {
+                         // If LHS is NULL, we know that it's not greater than
+                         // any RHS. This check is only required to keep the
+                         // stability of the sort.
+                         if ((*data_)[lhs.index] == StringPool::Id::Null()) {
+                           return false;
+                         }
+
+                         // If RHS is NULL, everything will be greater from it.
+                         if ((*data_)[rhs.index] == StringPool::Id::Null()) {
+                           return true;
+                         }
+
+                         // If neither LHS or RHS are NULL, we have to simply
+                         // check which string is smaller.
+                         return string_pool_->Get((*data_)[lhs.index]) >
+                                string_pool_->Get((*data_)[rhs.index]);
                        });
       return;
+    }
   }
   PERFETTO_FATAL("For GCC");
 }
