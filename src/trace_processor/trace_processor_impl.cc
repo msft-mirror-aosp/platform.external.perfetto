@@ -53,6 +53,7 @@
 #include "src/trace_processor/metrics/metrics.h"
 #include "src/trace_processor/metrics/sql/amalgamated_sql_metrics.h"
 #include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/base64.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/clock_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.h"
@@ -78,6 +79,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_flat_slice.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_sched_upid.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_slice_layout.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/interval_intersect.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.h"
 #include "src/trace_processor/perfetto_sql/prelude/tables_views.h"
 #include "src/trace_processor/perfetto_sql/stdlib/stdlib.h"
@@ -693,6 +695,11 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
     if (!status.ok())
       PERFETTO_ELOG("%s", status.c_message());
   }
+  {
+    base::Status status = RegisterBase64Functions(*engine_.get());
+    if (!status.ok())
+      PERFETTO_ELOG("%s", status.c_message());
+  }
 
   const TraceStorage* storage = context_.storage.get();
 
@@ -819,6 +826,9 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->v8_wasm_script_table());
   RegisterStaticTable(storage->v8_js_function_table());
 
+  RegisterStaticTable(storage->jit_code_table());
+  RegisterStaticTable(storage->jit_frame_table());
+
   RegisterStaticTable(storage->surfaceflinger_layers_snapshot_table());
   RegisterStaticTable(storage->surfaceflinger_layer_table());
   RegisterStaticTable(storage->surfaceflinger_transactions_table());
@@ -883,6 +893,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       new ExperimentalFlatSlice(&context_)));
   engine_->RegisterStaticTableFunction(
       std::make_unique<DominatorTree>(context_.storage->mutable_string_pool()));
+  engine_->RegisterStaticTableFunction(std::make_unique<IntervalIntersect>(
+      context_.storage->mutable_string_pool()));
   engine_->RegisterStaticTableFunction(
       std::make_unique<Dfs>(context_.storage->mutable_string_pool()));
 
