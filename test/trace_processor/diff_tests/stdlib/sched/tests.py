@@ -223,7 +223,7 @@ class StdlibSched(TestSuite):
         """,
         out=Csv("""
         "state","io_wait","blocked_function","dur"
-        "S","[NULL]","[NULL]",1404466083
+        "S","[NULL]","[NULL]",9994400675
         "Running","[NULL]","[NULL]",4655524
         "D","[NULL]","[NULL]",563645
         "R+","[NULL]","[NULL]",380156
@@ -240,8 +240,26 @@ class StdlibSched(TestSuite):
         """,
         out=Csv("""
         "state","io_wait","cpu","blocked_function","dur"
-        "S","[NULL]","[NULL]","[NULL]",1404466083
+        "S","[NULL]","[NULL]","[NULL]",9994400675
         "Running","[NULL]",2,"[NULL]",4655524
         "D","[NULL]","[NULL]","[NULL]",563645
         "R+","[NULL]","[NULL]","[NULL]",380156
         """))
+
+  def test_sched_time_in_state_for_cpu_in_interval(self):
+    return DiffTestBlueprint(
+        trace=DataPath('example_android_trace_30s.pb'),
+        query="""
+      INCLUDE PERFETTO MODULE sched.time_in_state;
+      SELECT * FROM
+      sched_time_in_state_for_cpu_in_interval(1, TRACE_START(), TRACE_DUR());
+      """,
+        out=Csv("""
+        "end_state","dur"
+        "D",311982601
+        "DK",31103960
+        "R",23230879715
+        "R+",1148673560
+        "S",3868233011
+        "x",35240577
+      """))
