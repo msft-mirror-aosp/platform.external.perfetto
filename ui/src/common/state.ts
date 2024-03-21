@@ -134,7 +134,9 @@ export const MAX_TIME = 180;
 // 44. Add TabsV2 state.
 // 45. Remove v1 tracks.
 // 46. Remove trackKeyByTrackId.
-export const STATE_VERSION = 46;
+// 47. Selection V2
+// 48. Rename legacySelection -> selection and introduce new Selection type.
+export const STATE_VERSION = 48;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -386,7 +388,7 @@ export interface GenericSliceSelection {
   detailsPanelConfig: {kind: string; config: GenericSliceDetailsTabConfigBase};
 }
 
-export type Selection = (
+export type LegacySelection = (
   | NoteSelection
   | SliceSelection
   | CounterSelection
@@ -399,7 +401,41 @@ export type Selection = (
   | LogSelection
   | GenericSliceSelection
 ) & {trackKey?: string};
-export type SelectionKind = Selection['kind']; // 'THREAD_STATE' | 'SLICE' ...
+export type SelectionKind = LegacySelection['kind']; // 'THREAD_STATE' | 'SLICE' ...
+
+export interface LegacySelectionWrapper {
+  kind: 'legacy';
+  legacySelection: LegacySelection;
+}
+
+export interface SingleSelection {
+  kind: 'single';
+  trackKey: string;
+  eventId: string;
+}
+
+export interface NewAreaSelection {
+  kind: 'area';
+  trackKey: string;
+  start: time;
+  end: time;
+}
+
+export interface UnionSelection {
+  kind: 'union';
+  selections: Selection[];
+}
+
+export interface EmptySelection {
+  kind: 'empty';
+}
+
+export type Selection =
+  | SingleSelection
+  | NewAreaSelection
+  | UnionSelection
+  | EmptySelection
+  | LegacySelectionWrapper;
 
 export interface Pagination {
   offset: number;
@@ -573,7 +609,7 @@ export interface State {
   permalink: PermalinkConfig;
   notes: ObjectById<Note | AreaNote>;
   status: Status;
-  currentSelection: Selection | null;
+  selection: Selection;
   currentFlamegraphState: FlamegraphState | null;
   logsPagination: Pagination;
   ftracePagination: Pagination;
@@ -996,4 +1032,12 @@ export function getContainingTrackId(
     return null;
   }
   return parentId;
+}
+
+export function getLegacySelection(state: State): LegacySelection | null {
+  const selection = state.selection;
+  if (selection.kind === 'legacy') {
+    return selection.legacySelection;
+  }
+  return null;
 }

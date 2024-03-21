@@ -18,9 +18,10 @@ import {Hotkey} from '../base/hotkeys';
 import {duration, time} from '../base/time';
 import {Migrate, Store} from '../base/store';
 import {ColorScheme} from '../core/colorizer';
-import {Selection} from '../common/state';
+import {LegacySelection} from '../common/state';
 import {PanelSize} from '../frontend/panel';
 import {EngineProxy} from '../trace_processor/engine';
+import {UntypedEventSet} from '../common/event_set';
 
 export {EngineProxy} from '../trace_processor/engine';
 export {
@@ -208,6 +209,11 @@ export interface Track {
   onMouseMove?(position: {x: number; y: number}): void;
   onMouseClick?(position: {x: number; y: number}): boolean;
   onMouseOut?(): void;
+
+  /**
+   * Optional: Get the event set that represents this track's data.
+   */
+  getEventSet?(): UntypedEventSet;
 }
 
 // A definition of a track, including a renderer implementation and metadata.
@@ -325,7 +331,7 @@ export interface TabDescriptor {
 }
 
 export interface DetailsPanel {
-  render(selection: Selection): m.Children;
+  render(selection: LegacySelection): m.Children;
   isLoading?(): boolean;
 }
 
