@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,20 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/perfetto_sql/intrinsics/functions/sql_function.h"
+#ifndef SRC_TRACE_REDACTION_OPTIMIZE_TIMELINE_H_
+#define SRC_TRACE_REDACTION_OPTIMIZE_TIMELINE_H_
 
 #include "perfetto/base/status.h"
+#include "src/trace_redaction/trace_redaction_framework.h"
 
-namespace perfetto::trace_processor {
+namespace perfetto::trace_redaction {
 
-base::Status SqlFunction::VerifyPostConditions(Context*) {
-  return base::OkStatus();
-}
+// Converts a timeline from a write-only structure to a read-only structure.
+class OptimizeTimeline : public BuildPrimitive {
+ public:
+  base::Status Build(Context* context) const override;
+};
 
-void SqlFunction::Cleanup(Context*) {}
+}  // namespace perfetto::trace_redaction
 
-}  // namespace perfetto::trace_processor
+#endif  // SRC_TRACE_REDACTION_OPTIMIZE_TIMELINE_H_
