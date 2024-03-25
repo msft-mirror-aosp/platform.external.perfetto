@@ -30,7 +30,7 @@
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/status_or.h"
 #include "perfetto/trace_processor/basic_types.h"
-#include "src/trace_processor/sqlite/sqlite_result.h"
+#include "src/trace_processor/sqlite/bindings/sqlite_result.h"
 #include "src/trace_processor/sqlite/sqlite_table.h"
 
 namespace perfetto::trace_processor::sqlite::utils {
@@ -137,6 +137,12 @@ inline void ReportSqlValue(
   }
 }
 
+inline int SetError(sqlite3_vtab* tab, const char* status) {
+  sqlite3_free(tab->zErrMsg);
+  tab->zErrMsg = sqlite3_mprintf("%s", status);
+  return SQLITE_ERROR;
+}
+
 inline void SetError(sqlite3_context* ctx, const base::Status& status) {
   PERFETTO_CHECK(!status.ok());
   sqlite::result::Error(ctx, status.c_message());
@@ -167,9 +173,10 @@ base::Status ExtractFromSqlValue(const SqlValue& value,
                                  std::optional<const char*>&);
 
 // Returns the column names for the table named by |raw_table_name|.
-base::Status GetColumnsForTable(sqlite3* db,
-                                const std::string& raw_table_name,
-                                std::vector<SqliteTable::Column>& columns);
+base::Status GetColumnsForTable(
+    sqlite3* db,
+    const std::string& raw_table_name,
+    std::vector<SqliteTableLegacy::Column>& columns);
 
 // Reads a `SQLITE_TEXT` value and returns it as a wstring (UTF-16) in the
 // default byte order. `value` must be a `SQLITE_TEXT`.

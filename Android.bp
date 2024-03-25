@@ -2376,6 +2376,7 @@ cc_test {
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_interface",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_table_functions",
         ":perfetto_src_trace_processor_sorter_sorter",
+        ":perfetto_src_trace_processor_sqlite_bindings_bindings",
         ":perfetto_src_trace_processor_sqlite_query_constraints",
         ":perfetto_src_trace_processor_sqlite_sqlite",
         ":perfetto_src_trace_processor_storage_minimal",
@@ -12221,6 +12222,7 @@ filegroup {
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/connected_flow.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/descendant.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs_weight_bounded.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/dominator_tree.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_annotated_stack.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_counter_dur.cc",
@@ -12314,6 +12316,7 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/android/battery_stats.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/binder.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/broadcasts.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/critical_blocking_calls.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/dvfs.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/freezer.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/garbage_collection.sql",
@@ -12440,6 +12443,11 @@ filegroup {
         "src/trace_processor/sorter/trace_sorter_unittest.cc",
         "src/trace_processor/sorter/trace_token_buffer_unittest.cc",
     ],
+}
+
+// GN: //src/trace_processor/sqlite/bindings:bindings
+filegroup {
+    name: "perfetto_src_trace_processor_sqlite_bindings_bindings",
 }
 
 // GN: //src/trace_processor/sqlite:query_constraints
@@ -14281,6 +14289,7 @@ cc_test {
         ":perfetto_src_trace_processor_rpc_unittests",
         ":perfetto_src_trace_processor_sorter_sorter",
         ":perfetto_src_trace_processor_sorter_unittests",
+        ":perfetto_src_trace_processor_sqlite_bindings_bindings",
         ":perfetto_src_trace_processor_sqlite_query_constraints",
         ":perfetto_src_trace_processor_sqlite_sqlite",
         ":perfetto_src_trace_processor_sqlite_unittests",
@@ -14995,6 +15004,7 @@ cc_binary {
         ":perfetto_src_trace_processor_rpc_rpc",
         ":perfetto_src_trace_processor_rpc_stdiod",
         ":perfetto_src_trace_processor_sorter_sorter",
+        ":perfetto_src_trace_processor_sqlite_bindings_bindings",
         ":perfetto_src_trace_processor_sqlite_query_constraints",
         ":perfetto_src_trace_processor_sqlite_sqlite",
         ":perfetto_src_trace_processor_storage_minimal",
@@ -15427,6 +15437,7 @@ cc_binary_host {
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_interface",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_table_functions",
         ":perfetto_src_trace_processor_sorter_sorter",
+        ":perfetto_src_trace_processor_sqlite_bindings_bindings",
         ":perfetto_src_trace_processor_sqlite_query_constraints",
         ":perfetto_src_trace_processor_sqlite_sqlite",
         ":perfetto_src_trace_processor_storage_minimal",
