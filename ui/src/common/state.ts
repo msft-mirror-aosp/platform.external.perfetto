@@ -15,7 +15,6 @@
 import {BigintMath} from '../base/bigint_math';
 import {duration, Time, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
-import {GenericSliceDetailsTabConfigBase} from '../frontend/generic_slice_details_tab';
 import {
   Aggregation,
   PivotTree,
@@ -24,6 +23,28 @@ import {
 import {PrimaryTrackSortKey} from '../public/index';
 
 import {Direction} from './event_set';
+
+import {
+  selectionToLegacySelection,
+  Selection,
+  LegacySelection,
+  ProfileType,
+} from '../core/selection_manager';
+
+export {
+  Selection,
+  SelectionKind,
+  NoteSelection,
+  SliceSelection,
+  CounterSelection,
+  HeapProfileSelection,
+  PerfSamplesSelection,
+  LegacySelection,
+  AreaSelection,
+  ProfileType,
+  ChromeSliceSelection,
+  CpuProfileSampleSelection,
+} from '../core/selection_manager';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -58,18 +79,6 @@ export interface VisibleState extends Timestamped {
   start: time;
   end: time;
   resolution: duration;
-}
-
-export interface AreaSelection {
-  kind: 'AREA';
-  areaId: string;
-  // When an area is marked it will be assigned a unique note id and saved as
-  // an AreaNote for the user to return to later. id = 0 is the special id that
-  // is overwritten when a new area is marked. Any other id is a persistent
-  // marking that will not be overwritten.
-  // When not set, the area selection will be replaced with any
-  // new area selection (i.e. not saved anywhere).
-  noteId?: string;
 }
 
 export type AreaById = Area & {id: string};
@@ -134,7 +143,11 @@ export const MAX_TIME = 180;
 // 44. Add TabsV2 state.
 // 45. Remove v1 tracks.
 // 46. Remove trackKeyByTrackId.
-export const STATE_VERSION = 46;
+// 47. Selection V2
+// 48. Rename legacySelection -> selection and introduce new Selection type.
+// 49. Remove currentTab, which is only relevant to TabsV1.
+// 50. Remove ftrace filter state.
+export const STATE_VERSION = 50;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -170,21 +183,23 @@ export type UtidToTrackSortKey = {
   };
 };
 
-export enum ProfileType {
-  HEAP_PROFILE = 'heap_profile',
-  MIXED_HEAP_PROFILE = 'heap_profile:com.android.art,libc.malloc',
-  NATIVE_HEAP_PROFILE = 'heap_profile:libc.malloc',
-  JAVA_HEAP_SAMPLES = 'heap_profile:com.android.art',
-  JAVA_HEAP_GRAPH = 'graph',
-  PERF_SAMPLE = 'perf',
-}
-
 export enum FlamegraphStateViewingOption {
   SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY = 'SPACE',
   ALLOC_SPACE_MEMORY_ALLOCATED_KEY = 'ALLOC_SPACE',
   OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS',
   OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS',
   PERF_SAMPLES_KEY = 'PERF_SAMPLES',
+}
+
+export interface FlamegraphState {
+  kind: 'FLAMEGRAPH_STATE';
+  upids: number[];
+  start: time;
+  end: time;
+  type: ProfileType;
+  viewingOption: FlamegraphStateViewingOption;
+  focusRegex: string;
+  expandedCallsite?: CallsiteInfo;
 }
 
 export interface CallsiteInfo {
@@ -307,109 +322,9 @@ export interface AreaNote {
   text: string;
 }
 
-export interface NoteSelection {
-  kind: 'NOTE';
-  id: string;
-}
-
-export interface SliceSelection {
-  kind: 'SLICE';
-  id: number;
-}
-
-export interface CounterSelection {
-  kind: 'COUNTER';
-  leftTs: time;
-  rightTs: time;
-  id: number;
-}
-
-export interface HeapProfileSelection {
-  kind: 'HEAP_PROFILE';
-  id: number;
-  upid: number;
-  ts: time;
-  type: ProfileType;
-}
-
-export interface PerfSamplesSelection {
-  kind: 'PERF_SAMPLES';
-  id: number;
-  upid: number;
-  leftTs: time;
-  rightTs: time;
-  type: ProfileType;
-}
-
-export interface FlamegraphState {
-  kind: 'FLAMEGRAPH_STATE';
-  upids: number[];
-  start: time;
-  end: time;
-  type: ProfileType;
-  viewingOption: FlamegraphStateViewingOption;
-  focusRegex: string;
-  expandedCallsite?: CallsiteInfo;
-}
-
-export interface CpuProfileSampleSelection {
-  kind: 'CPU_PROFILE_SAMPLE';
-  id: number;
-  utid: number;
-  ts: time;
-}
-
-export interface ChromeSliceSelection {
-  kind: 'CHROME_SLICE';
-  id: number;
-  table?: string;
-}
-
-export interface ThreadStateSelection {
-  kind: 'THREAD_STATE';
-  id: number;
-}
-
-export interface LogSelection {
-  kind: 'LOG';
-  id: number;
-  trackKey: string;
-}
-
-export interface GenericSliceSelection {
-  kind: 'GENERIC_SLICE';
-  id: number;
-  sqlTableName: string;
-  start: time;
-  duration: duration;
-  // NOTE: this config can be expanded for multiple details panel types.
-  detailsPanelConfig: {kind: string; config: GenericSliceDetailsTabConfigBase};
-}
-
-export type Selection = (
-  | NoteSelection
-  | SliceSelection
-  | CounterSelection
-  | HeapProfileSelection
-  | CpuProfileSampleSelection
-  | ChromeSliceSelection
-  | ThreadStateSelection
-  | AreaSelection
-  | PerfSamplesSelection
-  | LogSelection
-  | GenericSliceSelection
-) & {trackKey?: string};
-export type SelectionKind = Selection['kind']; // 'THREAD_STATE' | 'SLICE' ...
-
 export interface Pagination {
   offset: number;
   count: number;
-}
-
-export type StringListPatch = ['add' | 'remove', string];
-
-export interface FtraceFilterPatch {
-  excludedNames: StringListPatch[];
 }
 
 export interface RecordingTarget {
@@ -520,13 +435,6 @@ export interface LogFilteringCriteria {
   hideNonMatching: boolean;
 }
 
-export interface FtraceFilterState {
-  // We use an exclude list rather than include list for filtering events, as we
-  // want to include all events by default but we won't know what names are
-  // present initially.
-  excludedNames: string[];
-}
-
 export interface PendingDeeplinkState {
   ts?: string;
   dur?: string;
@@ -573,11 +481,9 @@ export interface State {
   permalink: PermalinkConfig;
   notes: ObjectById<Note | AreaNote>;
   status: Status;
-  currentSelection: Selection | null;
+  selection: Selection;
   currentFlamegraphState: FlamegraphState | null;
   logsPagination: Pagination;
-  ftracePagination: Pagination;
-  ftraceFilter: FtraceFilterState;
   traceConversionInProgress: boolean;
 
   /**
@@ -605,8 +511,6 @@ export interface State {
   pendingScrollId?: number;
 
   searchIndex: number;
-
-  currentTab?: string;
 
   tabs: TabsV2State;
 
@@ -996,4 +900,8 @@ export function getContainingTrackId(
     return null;
   }
   return parentId;
+}
+
+export function getLegacySelection(state: State): LegacySelection | null {
+  return selectionToLegacySelection(state.selection);
 }

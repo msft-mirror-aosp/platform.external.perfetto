@@ -14,7 +14,6 @@
 
 import {BigintMath} from '../base/bigint_math';
 import {assertExists} from '../base/logging';
-import {createStore, Store} from '../base/store';
 import {duration, Span, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
@@ -31,30 +30,29 @@ import {
 } from '../common/high_precision_time';
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
-import {onSelectionChanged} from '../common/selection_observer';
 import {
   CallsiteInfo,
   EngineConfig,
   ProfileType,
   RESOLUTION_DEFAULT,
   State,
+  getLegacySelection,
 } from '../common/state';
 import {TabManager} from '../common/tab_registry';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {TrackManager} from '../common/track_cache';
-import {TABS_V2_FLAG} from '../core/feature_flags';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {Engine} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 
 import {Analytics, initAnalytics} from './analytics';
-import {BottomTabList} from './bottom_tab';
 import {Timeline} from './frontend_local_state';
 import {Router} from './router';
 import {horizontalScrollToTs} from './scroll_helper';
 import {ServiceWorkerController} from './service_worker_controller';
 import {SliceSqlId} from './sql_types';
+import {createStore, Store} from '../base/store';
 import {PxSpan, TimeScale} from './time_scale';
 
 const INSTANT_FOCUS_DURATION = 1n;
@@ -187,27 +185,6 @@ export interface ThreadDesc {
 }
 type ThreadMap = Map<number, ThreadDesc>;
 
-export interface FtraceEvent {
-  id: number;
-  ts: time;
-  name: string;
-  cpu: number;
-  thread: string | null;
-  process: string | null;
-  args: string;
-}
-
-export interface FtracePanelData {
-  events: FtraceEvent[];
-  offset: number;
-  numEvents: number; // Number of events in the visible window
-}
-
-export interface FtraceStat {
-  name: string;
-  count: number;
-}
-
 function getRoot() {
   // Works out the root directory where the content should be served from
   // e.g. `http://origin/v1.2.3/`.
@@ -237,8 +214,6 @@ export interface MakeSelectionOpts {
  */
 class Globals {
   readonly root = getRoot();
-
-  bottomTabList?: BottomTabList = undefined;
 
   private _testing = false;
   private _dispatch?: Dispatch = undefined;
@@ -272,14 +247,13 @@ class Globals {
   private _router?: Router = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
-  private _ftraceCounters?: FtraceStat[] = undefined;
-  private _ftracePanelData?: FtracePanelData = undefined;
   private _cmdManager = new CommandManager();
   private _realtimeOffset = Time.ZERO;
   private _utcOffset = Time.ZERO;
   private _traceTzOffset = Time.ZERO;
   private _tabManager = new TabManager();
   private _trackManager = new TrackManager(this._store);
+  private _hasFtrace: boolean = false;
 
   scrollToTrackKey?: string | number;
   httpRpcState: HttpRpcState = {connected: false};
@@ -520,16 +494,12 @@ class Globals {
     this._currentSearchResults = results;
   }
 
+  set hasFtrace(value: boolean) {
+    this._hasFtrace = value;
+  }
+
   get hasFtrace(): boolean {
-    return Boolean(this._ftraceCounters && this._ftraceCounters.length > 0);
-  }
-
-  get ftraceCounters(): FtraceStat[] | undefined {
-    return this._ftraceCounters;
-  }
-
-  set ftraceCounters(value: FtraceStat[] | undefined) {
-    this._ftraceCounters = value;
+    return this._hasFtrace;
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
@@ -611,48 +581,18 @@ class Globals {
     return this.state.engine;
   }
 
-  get ftracePanelData(): FtracePanelData | undefined {
-    return this._ftracePanelData;
-  }
-
-  set ftracePanelData(data: FtracePanelData | undefined) {
-    this._ftracePanelData = data;
-  }
-
   makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
     const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
-
-    const previousState = this.state;
 
     const currentSelectionTabUri = 'current_selection';
 
     // A new selection should cancel the current search selection.
     clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
 
-    if (TABS_V2_FLAG.get()) {
-      if (action.type !== 'deselect' && switchToCurrentSelectionTab) {
-        globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
-      }
-    } else {
-      if (action.type === 'deselect') {
-        globals.dispatch(Actions.setCurrentTab({tab: undefined}));
-      } else if (switchToCurrentSelectionTab) {
-        globals.dispatch(Actions.setCurrentTab({tab: currentSelectionTabUri}));
-      }
+    if (action.type !== 'deselect' && switchToCurrentSelectionTab) {
+      globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
     }
     globals.dispatch(action);
-
-    // HACK(stevegolton + altimin): This is a workaround to allow passing the
-    // next tab state to the Bottom Tab API
-    if (this.state.currentSelection !== previousState.currentSelection) {
-      // TODO(altimin): Currently we are not triggering this when changing
-      // the set of selected tracks via toggling per-track checkboxes.
-      // Fix that.
-      onSelectionChanged(
-        this.state.currentSelection ?? undefined,
-        switchToCurrentSelectionTab,
-      );
-    }
   }
 
   resetForTesting() {
@@ -809,7 +749,7 @@ class Globals {
   }
 
   findTimeRangeOfSelection(): {start: time; end: time} {
-    const selection = this.state.currentSelection;
+    const selection = getLegacySelection(this.state);
     let start = Time.INVALID;
     let end = Time.INVALID;
     if (selection === null) {

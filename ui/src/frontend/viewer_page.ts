@@ -19,12 +19,11 @@ import {clamp} from '../base/math_utils';
 import {Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {TrackCacheEntry} from '../common/track_cache';
-import {TABS_V2_FLAG, featureFlags} from '../core/feature_flags';
+import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {TrackTags} from '../public';
 
 import {TRACK_SHELL_WIDTH} from './css_constants';
-import {DetailsPanel} from './details_panel';
 import {globals} from './globals';
 import {NotesPanel} from './notes_panel';
 import {OverviewTimelinePanel} from './overview_timeline_panel';
@@ -40,6 +39,7 @@ import {DISMISSED_PANNING_HINT_KEY} from './topbar';
 import {TrackGroupPanel} from './track_group_panel';
 import {TrackPanel} from './track_panel';
 import {assertExists} from '../base/logging';
+import {getLegacySelection} from '../common/state';
 
 const OVERVIEW_PANEL_FLAG = featureFlags.register({
   id: 'overviewVisible',
@@ -51,7 +51,7 @@ const OVERVIEW_PANEL_FLAG = featureFlags.register({
 // Checks if the mousePos is within 3px of the start or end of the
 // current selected time range.
 function onTimeRangeBoundary(mousePos: number): 'START' | 'END' | null {
-  const selection = globals.state.currentSelection;
+  const selection = getLegacySelection(globals.state);
   if (selection !== null && selection.kind === 'AREA') {
     // If frontend selectedArea exists then we are in the process of editing the
     // time range and need to use that value instead.
@@ -152,7 +152,7 @@ class TraceViewer implements m.ClassComponent {
         const {visibleTimeScale} = timeline;
         this.keepCurrentSelection = true;
         if (editing) {
-          const selection = globals.state.currentSelection;
+          const selection = getLegacySelection(globals.state);
           if (selection !== null && selection.kind === 'AREA') {
             const area = globals.timeline.selectedArea
               ? globals.timeline.selectedArea
@@ -208,7 +208,7 @@ class TraceViewer implements m.ClassComponent {
         // If we are editing we need to pass the current id through to ensure
         // the marked area with that id is also updated.
         if (edit) {
-          const selection = globals.state.currentSelection;
+          const selection = getLegacySelection(globals.state);
           if (selection !== null && selection.kind === 'AREA' && area) {
             globals.dispatch(
               Actions.editArea({area, areaId: selection.areaId}),
@@ -365,11 +365,7 @@ class TraceViewer implements m.ClassComponent {
   }
 
   private renderTabPanel() {
-    if (TABS_V2_FLAG.get()) {
-      return m(TabPanel);
-    } else {
-      return m(DetailsPanel);
-    }
+    return m(TabPanel);
   }
 }
 

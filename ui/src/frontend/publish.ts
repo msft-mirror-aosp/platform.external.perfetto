@@ -14,7 +14,7 @@
 
 import {time} from '../base/time';
 import {Actions} from '../common/actions';
-import {AggregateData, isEmptyData} from '../common/aggregation_data';
+import {AggregateData} from '../common/aggregation_data';
 import {ConversionJobStatusUpdate} from '../common/conversion_jobs';
 import {
   LogBoundsKey,
@@ -26,14 +26,13 @@ import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
 import {raf} from '../core/raf_scheduler';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
+import {getLegacySelection} from '../common/state';
 
 import {
   CounterDetails,
   CpuProfileDetails,
   FlamegraphDetails,
   Flow,
-  FtracePanelData,
-  FtraceStat,
   globals,
   QuantizedLoad,
   SliceDetails,
@@ -104,8 +103,8 @@ export function publishCpuProfileDetails(details: CpuProfileDetails) {
   globals.publishRedraw();
 }
 
-export function publishFtraceCounters(counters: FtraceStat[]) {
-  globals.ftraceCounters = counters;
+export function publishHasFtrace(value: boolean): void {
+  globals.hasFtrace = value;
   globals.publishRedraw();
 }
 
@@ -169,15 +168,11 @@ export function publishAggregateData(args: {
   kind: string;
 }) {
   globals.setAggregateData(args.kind, args.data);
-  if (!isEmptyData(args.data)) {
-    globals.dispatch(Actions.setCurrentTab({tab: args.data.tabName}));
-  }
   globals.publishRedraw();
 }
 
 export function publishQueryResult(args: {id: string; data?: {}}) {
   globals.queryResults.set(args.id, args.data);
-  globals.dispatch(Actions.setCurrentTab({tab: `query_result_${args.id}`}));
   globals.publishRedraw();
 }
 
@@ -194,7 +189,6 @@ export function publishSliceDetails(click: SliceDetails) {
   const id = click.id;
   if (id !== undefined && id === globals.state.pendingScrollId) {
     findCurrentSelection();
-    globals.dispatch(Actions.setCurrentTab({tab: 'slice'}));
     globals.dispatch(Actions.clearPendingScrollId({id: undefined}));
   }
   globals.publishRedraw();
@@ -212,8 +206,9 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
   // focus. In all other cases the focusedFlowId(Left|Right) will be set to -1.
   globals.dispatch(Actions.setHighlightedFlowLeftId({flowId: -1}));
   globals.dispatch(Actions.setHighlightedFlowRightId({flowId: -1}));
-  if (globals.state.currentSelection?.kind === 'CHROME_SLICE') {
-    const sliceId = globals.state.currentSelection.id;
+  const currentSelection = getLegacySelection(globals.state);
+  if (currentSelection?.kind === 'CHROME_SLICE') {
+    const sliceId = currentSelection.id;
     for (const flow of globals.connectedFlows) {
       if (flow.begin.sliceId === sliceId) {
         globals.dispatch(Actions.setHighlightedFlowRightId({flowId: flow.id}));
@@ -224,11 +219,6 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
     }
   }
 
-  globals.publishRedraw();
-}
-
-export function publishFtracePanelData(data: FtracePanelData) {
-  globals.ftracePanelData = data;
   globals.publishRedraw();
 }
 

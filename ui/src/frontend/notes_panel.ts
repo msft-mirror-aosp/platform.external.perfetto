@@ -19,11 +19,11 @@ import {Icons} from '../base/semantic_icons';
 import {Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {randomColor} from '../core/colorizer';
-import {AreaNote, Note} from '../common/state';
+import {AreaNote, Note, getLegacySelection} from '../common/state';
 import {raf} from '../core/raf_scheduler';
 import {Button} from '../widgets/button';
 
-import {BottomTab, bottomTabRegistry, NewBottomTabArgs} from './bottom_tab';
+import {BottomTab, NewBottomTabArgs} from './bottom_tab';
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {
@@ -177,7 +177,7 @@ export class NotesPanel implements Panel {
         this.hoveredX !== null && this.mouseOverNote(this.hoveredX, note);
       if (currentIsHovered) aNoteIsHovered = true;
 
-      const selection = globals.state.currentSelection;
+      const selection = getLegacySelection(globals.state);
       const isSelected =
         selection !== null &&
         ((selection.kind === 'NOTE' && selection.id === note.id) ||
@@ -404,7 +404,6 @@ export class NotesEditorTab extends BottomTab<NotesEditorTabConfig> {
           minimal: true,
           onclick: () => {
             globals.dispatch(Actions.removeNote({id: this.config.id}));
-            globals.dispatch(Actions.setCurrentTab({tab: undefined}));
             raf.scheduleFullRedraw();
           },
         }),
@@ -412,5 +411,3 @@ export class NotesEditorTab extends BottomTab<NotesEditorTabConfig> {
     );
   }
 }
-
-bottomTabRegistry.register(NotesEditorTab);

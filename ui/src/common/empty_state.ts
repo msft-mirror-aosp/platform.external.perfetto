@@ -129,17 +129,10 @@ export function createEmptyState(): State {
       count: 0,
     },
 
-    ftracePagination: {
-      offset: 0,
-      count: 0,
-    },
-
-    ftraceFilter: {
-      excludedNames: [],
-    },
-
     status: {msg: '', timestamp: 0},
-    currentSelection: null,
+    selection: {
+      kind: 'empty',
+    },
     currentFlamegraphState: null,
     traceConversionInProgress: false,
 
