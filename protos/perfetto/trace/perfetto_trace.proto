@@ -3162,23 +3162,27 @@ message TrackEventConfig {
   //   7. Pattern matches in disabled categories.
   //   8. Pattern matches in disabled tags.
   //
-  // If none of the steps produced a match, the category is enabled by default.
+  // If none of the steps produced a match:
+  //  - In the C++ SDK (`perfetto::Category`), categories are enabled by
+  //  default.
+  //  - In the C SDK (`PerfettoTeCategory`), categories are disabled by default.
   //
   // Examples:
   //
   //  - To enable all non-slow/debug categories:
   //
-  //       No configuration needed, happens by default.
+  //       enabled_categories: "*"
   //
-  //  - To enable a specific category:
+  //  - To enable specific categories:
   //
-  //       disabled_categories = ["*"]
-  //       enabled_categories = ["my_category"]
+  //       disabled_categories: "*"
+  //       enabled_categories: "my_category"
+  //       enabled_categories: "my_category2"
   //
   //  - To enable only categories with a specific tag:
   //
-  //       disabled_tags = ["*"]
-  //       enabled_tags = ["my_tag"]
+  //       disabled_tags: "*"
+  //       enabled_tags: "my_tag"
   //
 
   // Default: []
@@ -13771,7 +13775,7 @@ message Atom {}
 // trace.
 message StatsdAtom {
   // Atom should be filled with an Atom proto from:
-  // https://cs.android.com/android/platform/superproject/+/master:frameworks/proto_logging/stats/atoms.proto?q=f:stats%2Fatoms.proto$%20message%5C%20Atom
+  // https://cs.android.com/android/platform/superproject/main/+/main:frameworks/proto_logging/stats/atoms.proto?q=f:stats%2Fatoms.proto$%20message%5C%20Atom
   // We don't reference Atom directly here since we don't want to import
   // Atom.proto and all its transitive dependencies into Perfetto.
   // atom and timestamp_nanos have the same cardinality
