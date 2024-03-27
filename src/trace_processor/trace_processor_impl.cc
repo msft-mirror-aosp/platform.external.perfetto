@@ -85,6 +85,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/connected_flow.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/descendant.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs_weight_bounded.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dominator_tree.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_annotated_stack.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_counter_dur.h"
@@ -174,7 +175,7 @@ void BuildBoundsTable(sqlite3* db, std::pair<int64_t, int64_t> bounds) {
   }
 }
 
-class ValueAtMaxTs : public SqliteAggregateFunction {
+class ValueAtMaxTs : public SqliteAggregateFunction<ValueAtMaxTs> {
  public:
   struct Context {
     bool initialized;
@@ -742,8 +743,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   engine_->sqlite_engine()->RegisterVirtualTableModule<SpanJoinOperatorTable>(
       "span_outer_join", engine_.get(),
       SqliteTableLegacy::TableType::kExplicitCreate, false);
-  engine_->sqlite_engine()->RegisterVirtualTableModule<WindowOperatorTable>(
-      "window", storage, SqliteTableLegacy::TableType::kExplicitCreate, true);
+  engine_->sqlite_engine()->RegisterVirtualTableModule<WindowOperatorModule>(
+      "window", std::make_unique<WindowOperatorModule::Context>());
 
   // Initalize the tables and views in the prelude.
   InitializePreludeTablesViews(db);
@@ -775,8 +776,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
           metrics::RunMetric::Context{engine_.get(), &sql_metrics_}));
 
   // Legacy tables.
-  engine_->sqlite_engine()->RegisterVirtualTableModule<SqlStatsTable>(
-      "sqlstats", storage, SqliteTableLegacy::TableType::kEponymousOnly, false);
+  engine_->sqlite_engine()->RegisterVirtualTableModule<SqlStatsModule>(
+      "sqlstats", storage);
   engine_->sqlite_engine()->RegisterVirtualTableModule<StatsModule>("stats",
                                                                     storage);
 
@@ -919,6 +920,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       context_.storage->mutable_string_pool()));
   engine_->RegisterStaticTableFunction(
       std::make_unique<Dfs>(context_.storage->mutable_string_pool()));
+  engine_->RegisterStaticTableFunction(std::make_unique<DfsWeightBounded>(
+      context_.storage->mutable_string_pool()));
 
   // Metrics.
   RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
