@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,10 @@
 
 syntax = "proto2";
 
-package perfetto.proto;
+package perfetto.protos;
 
-// This is a manual import of ShellData:
-// https://cs.android.com/android/platform/superproject/main/+/main:packages/modules/StatsD/statsd/src/shell/shell_data.proto;l=27;drc=d2e51ecdf08753688fb889b657dcba60adb994f3
-// This must exactly match perfetto.protos.StatsdAtom.
-message ShellData {
-  repeated bytes atom = 1;
-  repeated int64 timestamp_nanos = 2;
+// Event insights emitted by the Pixel modem.
+message PixelModemEventInsight {
+  // Opaque string containing arguments from the modem.
+  optional string detokenized_message = 1;
 }

@@ -13,6 +13,8 @@
 // limitations under the License.
 
 import {duration, time} from '../base/time';
+import {Store} from '../base/store';
+import {assertUnreachable} from '../base/logging';
 import {GenericSliceDetailsTabConfigBase} from './generic_slice_details_types';
 
 export enum ProfileType {
@@ -158,8 +160,104 @@ export type Selection =
 export function selectionToLegacySelection(
   selection: Selection,
 ): LegacySelection | null {
-  if (selection.kind === 'legacy') {
-    return selection.legacySelection;
+  switch (selection.kind) {
+    case 'area':
+    case 'single':
+    case 'empty':
+      return null;
+    case 'union':
+      for (const child of selection.selections) {
+        const result = selectionToLegacySelection(child);
+        if (result !== null) {
+          return result;
+        }
+      }
+      return null;
+    case 'legacy':
+      return selection.legacySelection;
+    default:
+      assertUnreachable(selection);
+      return null;
   }
-  return null;
+}
+
+interface SelectionState {
+  selection: Selection;
+}
+
+export class SelectionManager {
+  private store: Store<SelectionState>;
+
+  constructor(store: Store<SelectionState>) {
+    this.store = store;
+  }
+
+  clear(): void {
+    this.store.edit((draft) => {
+      draft.selection = {
+        kind: 'empty',
+      };
+    });
+  }
+
+  private addSelection(selection: Selection): void {
+    this.store.edit((draft) => {
+      switch (draft.selection.kind) {
+        case 'empty':
+          draft.selection = selection;
+          break;
+        case 'union':
+          draft.selection.selections.push(selection);
+          break;
+        case 'single':
+        case 'legacy':
+        case 'area':
+          draft.selection = {
+            kind: 'union',
+            selections: [draft.selection, selection],
+          };
+          break;
+        default:
+          assertUnreachable(draft.selection);
+          break;
+      }
+    });
+  }
+
+  // There is no matching addLegacy as we did not support multi-single
+  // selection with the legacy selection system.
+  setLegacy(legacySelection: LegacySelection): void {
+    this.clear();
+    this.addSelection({
+      kind: 'legacy',
+      legacySelection,
+    });
+  }
+
+  setEvent(
+    trackKey: string,
+    eventId: string,
+    legacySelection?: LegacySelection,
+  ) {
+    this.clear();
+    this.addEvent(trackKey, eventId, legacySelection);
+  }
+
+  addEvent(
+    trackKey: string,
+    eventId: string,
+    legacySelection?: LegacySelection,
+  ) {
+    this.addSelection({
+      kind: 'single',
+      trackKey,
+      eventId,
+    });
+    if (legacySelection) {
+      this.addSelection({
+        kind: 'legacy',
+        legacySelection,
+      });
+    }
+  }
 }

@@ -639,21 +639,6 @@ export const StateActions = {
     }
   },
 
-  selectSlice(
-    state: StateDraft,
-    args: {id: number; trackKey: string; scroll?: boolean},
-  ): void {
-    state.selection = {
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'SLICE',
-        id: args.id,
-        trackKey: args.trackKey,
-      },
-    };
-    state.pendingScrollId = args.scroll ? args.id : undefined;
-  },
-
   selectCounter(
     state: StateDraft,
     args: {leftTs: time; rightTs: time; id: number; trackKey: string},
@@ -741,6 +726,7 @@ export const StateActions = {
       type: args.type,
       viewingOption: args.viewingOption,
       focusRegex: '',
+      expandedCallsiteByViewingOption: {},
     };
   },
 
@@ -761,10 +747,15 @@ export const StateActions = {
 
   expandFlamegraphState(
     state: StateDraft,
-    args: {expandedCallsite?: CallsiteInfo},
+    args: {
+      expandedCallsite?: CallsiteInfo;
+      viewingOption: FlamegraphStateViewingOption;
+    },
   ): void {
     if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.expandedCallsite = args.expandedCallsite;
+    state.currentFlamegraphState.expandedCallsiteByViewingOption[
+      args.viewingOption
+    ] = args.expandedCallsite;
   },
 
   changeViewFlamegraphState(
@@ -835,6 +826,10 @@ export const StateActions = {
     };
   },
 
+  setPendingScrollId(state: StateDraft, args: {pendingScrollId: number}): void {
+    state.pendingScrollId = args.pendingScrollId;
+  },
+
   clearPendingScrollId(state: StateDraft, _: {}): void {
     state.pendingScrollId = undefined;
   },
@@ -850,27 +845,6 @@ export const StateActions = {
         id: args.id,
         trackKey: args.trackKey,
       },
-    };
-  },
-
-  selectLog(
-    state: StateDraft,
-    args: {id: number; trackKey: string; scroll?: boolean},
-  ): void {
-    state.selection = {
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'LOG',
-        id: args.id,
-        trackKey: args.trackKey,
-      },
-    };
-    state.pendingScrollId = args.scroll ? args.id : undefined;
-  },
-
-  deselect(state: StateDraft, _: {}): void {
-    state.selection = {
-      kind: 'empty',
     };
   },
 
