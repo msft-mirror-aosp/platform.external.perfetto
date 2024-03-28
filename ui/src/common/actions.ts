@@ -80,6 +80,7 @@ export interface AddTrackArgs {
   trackSortKey: TrackSortKey;
   trackGroup?: string;
   params?: unknown;
+  closeable?: boolean;
 }
 
 export interface PostedTrace {
@@ -211,6 +212,7 @@ export const StateActions = {
         labels: track.labels,
         uri: track.uri,
         params: track.params,
+        closeable: track.closeable,
       };
       if (track.trackGroup === SCROLLING_TRACK_GROUP) {
         state.scrollingTracks.push(trackKey);
@@ -726,6 +728,7 @@ export const StateActions = {
       type: args.type,
       viewingOption: args.viewingOption,
       focusRegex: '',
+      expandedCallsiteByViewingOption: {},
     };
   },
 
@@ -746,10 +749,15 @@ export const StateActions = {
 
   expandFlamegraphState(
     state: StateDraft,
-    args: {expandedCallsite?: CallsiteInfo},
+    args: {
+      expandedCallsite?: CallsiteInfo;
+      viewingOption: FlamegraphStateViewingOption;
+    },
   ): void {
     if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.expandedCallsite = args.expandedCallsite;
+    state.currentFlamegraphState.expandedCallsiteByViewingOption[
+      args.viewingOption
+    ] = args.expandedCallsite;
   },
 
   changeViewFlamegraphState(
