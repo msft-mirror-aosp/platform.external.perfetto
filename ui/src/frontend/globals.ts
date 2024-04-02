@@ -14,6 +14,7 @@
 
 import {BigintMath} from '../base/bigint_math';
 import {assertExists} from '../base/logging';
+import {createStore, Store} from '../base/store';
 import {duration, Span, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
@@ -52,8 +53,8 @@ import {Router} from './router';
 import {horizontalScrollToTs} from './scroll_helper';
 import {ServiceWorkerController} from './service_worker_controller';
 import {SliceSqlId} from './sql_types';
-import {createStore, Store} from '../base/store';
 import {PxSpan, TimeScale} from './time_scale';
+import {SelectionManager, LegacySelection} from '../core/selection_manager';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -185,27 +186,6 @@ export interface ThreadDesc {
 }
 type ThreadMap = Map<number, ThreadDesc>;
 
-export interface FtraceEvent {
-  id: number;
-  ts: time;
-  name: string;
-  cpu: number;
-  thread: string | null;
-  process: string | null;
-  args: string;
-}
-
-export interface FtracePanelData {
-  events: FtraceEvent[];
-  offset: number;
-  numEvents: number; // Number of events in the visible window
-}
-
-export interface FtraceStat {
-  name: string;
-  count: number;
-}
-
 function getRoot() {
   // Works out the root directory where the content should be served from
   // e.g. `http://origin/v1.2.3/`.
@@ -230,6 +210,14 @@ export interface MakeSelectionOpts {
   clearSearch?: boolean;
 }
 
+// All of these control additional things we can do when doing a
+// selection.
+export interface LegacySelectionArgs {
+  clearSearch: boolean;
+  switchToCurrentSelectionTab: boolean;
+  pendingScrollId: number | undefined;
+}
+
 /**
  * Global accessors for state/dispatch in the frontend.
  */
@@ -238,7 +226,7 @@ class Globals {
 
   private _testing = false;
   private _dispatch?: Dispatch = undefined;
-  private _store = createStore(createEmptyState());
+  private _store = createStore<State>(createEmptyState());
   private _timeline?: Timeline = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
@@ -268,14 +256,14 @@ class Globals {
   private _router?: Router = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
-  private _ftraceCounters?: FtraceStat[] = undefined;
-  private _ftracePanelData?: FtracePanelData = undefined;
   private _cmdManager = new CommandManager();
   private _realtimeOffset = Time.ZERO;
   private _utcOffset = Time.ZERO;
   private _traceTzOffset = Time.ZERO;
   private _tabManager = new TabManager();
   private _trackManager = new TrackManager(this._store);
+  private _selectionManager = new SelectionManager(this._store);
+  private _hasFtrace: boolean = false;
 
   scrollToTrackKey?: string | number;
   httpRpcState: HttpRpcState = {connected: false};
@@ -333,6 +321,7 @@ class Globals {
     this._flamegraphDetails = {};
     this._cpuProfileDetails = {};
     this.engines.clear();
+    this._selectionManager.clear();
   }
 
   // Only initialises the store - useful for testing.
@@ -516,16 +505,12 @@ class Globals {
     this._currentSearchResults = results;
   }
 
+  set hasFtrace(value: boolean) {
+    this._hasFtrace = value;
+  }
+
   get hasFtrace(): boolean {
-    return Boolean(this._ftraceCounters && this._ftraceCounters.length > 0);
-  }
-
-  get ftraceCounters(): FtraceStat[] | undefined {
-    return this._ftraceCounters;
-  }
-
-  set ftraceCounters(value: FtraceStat[] | undefined) {
-    this._ftraceCounters = value;
+    return this._hasFtrace;
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
@@ -607,26 +592,42 @@ class Globals {
     return this.state.engine;
   }
 
-  get ftracePanelData(): FtracePanelData | undefined {
-    return this._ftracePanelData;
-  }
-
-  set ftracePanelData(data: FtracePanelData | undefined) {
-    this._ftracePanelData = data;
-  }
-
   makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
     const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
-
     const currentSelectionTabUri = 'current_selection';
 
     // A new selection should cancel the current search selection.
     clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
 
-    if (action.type !== 'deselect' && switchToCurrentSelectionTab) {
+    if (switchToCurrentSelectionTab) {
       globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
     }
     globals.dispatch(action);
+  }
+
+  setLegacySelection(
+    legacySelection: LegacySelection,
+    args: LegacySelectionArgs,
+  ): void {
+    this._selectionManager.setLegacy(legacySelection);
+    if (args.clearSearch) {
+      globals.dispatch(Actions.setSearchIndex({index: -1}));
+    }
+    if (args.pendingScrollId !== undefined) {
+      globals.dispatch(
+        Actions.setPendingScrollId({
+          pendingScrollId: args.pendingScrollId,
+        }),
+      );
+    }
+    if (args.switchToCurrentSelectionTab) {
+      globals.dispatch(Actions.showTab({uri: 'current_selection'}));
+    }
+  }
+
+  clearSelection(): void {
+    globals.dispatch(Actions.setSearchIndex({index: -1}));
+    this._selectionManager.clear();
   }
 
   resetForTesting() {

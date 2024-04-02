@@ -22,7 +22,7 @@ import {
 } from '../frontend/pivot_table_types';
 import {PrimaryTrackSortKey} from '../public/index';
 
-import {Direction} from './event_set';
+import {Direction} from '../core/event_set';
 
 import {
   selectionToLegacySelection,
@@ -146,7 +146,9 @@ export const MAX_TIME = 180;
 // 47. Selection V2
 // 48. Rename legacySelection -> selection and introduce new Selection type.
 // 49. Remove currentTab, which is only relevant to TabsV1.
-export const STATE_VERSION = 49;
+// 50. Remove ftrace filter state.
+// 51. Changed structure of FlamegraphState.expandedCallsiteByViewingOption.
+export const STATE_VERSION = 51;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -188,6 +190,24 @@ export enum FlamegraphStateViewingOption {
   OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS',
   OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS',
   PERF_SAMPLES_KEY = 'PERF_SAMPLES',
+  DOMINATOR_TREE_OBJ_SIZE_KEY = 'DOMINATED_OBJ_SIZE',
+  DOMINATOR_TREE_OBJ_COUNT_KEY = 'DOMINATED_OBJ_COUNT',
+}
+
+const HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS = [
+  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_SIZE_KEY,
+  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_COUNT_KEY,
+] as const;
+
+export type HeapGraphDominatorTreeViewingOption =
+  (typeof HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS)[number];
+
+export function isHeapGraphDominatorTreeViewingOption(
+  option: FlamegraphStateViewingOption,
+): option is HeapGraphDominatorTreeViewingOption {
+  return (
+    HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS as readonly FlamegraphStateViewingOption[]
+  ).includes(option);
 }
 
 export interface FlamegraphState {
@@ -198,7 +218,7 @@ export interface FlamegraphState {
   type: ProfileType;
   viewingOption: FlamegraphStateViewingOption;
   focusRegex: string;
-  expandedCallsite?: CallsiteInfo;
+  expandedCallsiteByViewingOption: {[key: string]: CallsiteInfo | undefined};
 }
 
 export interface CallsiteInfo {
@@ -261,6 +281,7 @@ export interface TrackState {
   trackGroup?: string;
   params?: unknown;
   state?: unknown;
+  closeable?: boolean;
 }
 
 export interface TrackGroupState {
@@ -324,12 +345,6 @@ export interface AreaNote {
 export interface Pagination {
   offset: number;
   count: number;
-}
-
-export type StringListPatch = ['add' | 'remove', string];
-
-export interface FtraceFilterPatch {
-  excludedNames: StringListPatch[];
 }
 
 export interface RecordingTarget {
@@ -440,13 +455,6 @@ export interface LogFilteringCriteria {
   hideNonMatching: boolean;
 }
 
-export interface FtraceFilterState {
-  // We use an exclude list rather than include list for filtering events, as we
-  // want to include all events by default but we won't know what names are
-  // present initially.
-  excludedNames: string[];
-}
-
 export interface PendingDeeplinkState {
   ts?: string;
   dur?: string;
@@ -496,8 +504,6 @@ export interface State {
   selection: Selection;
   currentFlamegraphState: FlamegraphState | null;
   logsPagination: Pagination;
-  ftracePagination: Pagination;
-  ftraceFilter: FtraceFilterState;
   traceConversionInProgress: boolean;
 
   /**

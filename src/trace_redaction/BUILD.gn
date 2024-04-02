@@ -42,10 +42,14 @@ source_set("trace_redaction") {
     "proto_util.h",
     "prune_package_list.cc",
     "prune_package_list.h",
+    "redact_sched_switch.cc",
+    "redact_sched_switch.h",
     "scrub_ftrace_events.cc",
     "scrub_ftrace_events.h",
     "scrub_process_trees.cc",
     "scrub_process_trees.h",
+    "scrub_task_rename.cc",
+    "scrub_task_rename.h",
     "scrub_trace_packet.cc",
     "scrub_trace_packet.h",
     "trace_redaction_framework.cc",
@@ -59,9 +63,7 @@ source_set("trace_redaction") {
     "../../include/perfetto/ext/base",
     "../../include/perfetto/protozero:protozero",
     "../../include/perfetto/trace_processor:storage",
-    "../../protos/perfetto/trace:non_minimal_cpp",
     "../../protos/perfetto/trace:non_minimal_zero",
-    "../../protos/perfetto/trace/android:cpp",
     "../../protos/perfetto/trace/android:zero",
     "../../protos/perfetto/trace/ftrace:zero",
     "../../protos/perfetto/trace/ps:zero",
@@ -72,8 +74,10 @@ source_set("trace_redaction") {
 source_set("integrationtests") {
   testonly = true
   sources = [
+    "redact_sched_switch_integrationtest.cc",
     "scrub_ftrace_events_integrationtest.cc",
     "scrub_process_trees_integrationtest.cc",
+    "scrub_task_rename_integrationtest.cc",
     "trace_redactor_integrationtest.cc",
   ]
   deps = [
@@ -97,7 +101,9 @@ perfetto_unittest_source_set("unittests") {
     "process_thread_timeline_unittest.cc",
     "proto_util_unittest.cc",
     "prune_package_list_unittest.cc",
+    "redact_sched_switch_unittest.cc",
     "scrub_ftrace_events_unittest.cc",
+    "scrub_task_rename_unittest.cc",
     "scrub_trace_packet_unittest.cc",
   ]
   deps = [

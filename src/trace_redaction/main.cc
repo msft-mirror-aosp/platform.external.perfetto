@@ -21,8 +21,10 @@
 #include "src/trace_redaction/optimize_timeline.h"
 #include "src/trace_redaction/populate_allow_lists.h"
 #include "src/trace_redaction/prune_package_list.h"
+#include "src/trace_redaction/redact_sched_switch.h"
 #include "src/trace_redaction/scrub_ftrace_events.h"
 #include "src/trace_redaction/scrub_process_trees.h"
+#include "src/trace_redaction/scrub_task_rename.h"
 #include "src/trace_redaction/scrub_trace_packet.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 #include "src/trace_redaction/trace_redactor.h"
@@ -48,6 +50,8 @@ static base::Status Main(std::string_view input,
   redactor.transformers()->emplace_back(new ScrubTracePacket());
   redactor.transformers()->emplace_back(new ScrubFtraceEvents());
   redactor.transformers()->emplace_back(new ScrubProcessTrees());
+  redactor.transformers()->emplace_back(new ScrubTaskRename());
+  redactor.transformers()->emplace_back(new RedactSchedSwitch());
 
   Context context;
   context.package_name = package_name;
