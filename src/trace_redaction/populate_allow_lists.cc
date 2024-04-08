@@ -29,6 +29,15 @@ base::Status PopulateAllowlists::Build(Context* context) const {
     return base::ErrStatus("Trace packet allow-list should be empty.");
   }
 
+  // TRACE PACKET NOTES
+  //
+  //    protos::pbzero::TracePacket::kAndroidSystemPropertyFieldNumber
+  //
+  //      AndroidSystemProperty exposes a key-value pair structure with no
+  //      constraints around keys or values, making fine-grain redaction
+  //      difficult. Because this packet's value has no measurable, the safest
+  //      option to drop the whole packet.
+
   context->trace_packet_allow_list = {
       protos::pbzero::TracePacket::kProcessTreeFieldNumber,
       protos::pbzero::TracePacket::kProcessStatsFieldNumber,
@@ -42,7 +51,6 @@ base::Status PopulateAllowlists::Build(Context* context) const {
       protos::pbzero::TracePacket::kServiceEventFieldNumber,
       protos::pbzero::TracePacket::kInitialDisplayStateFieldNumber,
       protos::pbzero::TracePacket::kFrameTimelineEventFieldNumber,
-      protos::pbzero::TracePacket::kAndroidSystemPropertyFieldNumber,
       protos::pbzero::TracePacket::kSynchronizationMarkerFieldNumber,
       protos::pbzero::TracePacket::kFtraceEventsFieldNumber,
 
@@ -75,11 +83,12 @@ base::Status PopulateAllowlists::Build(Context* context) const {
   // without additional redaction. This list should be configured in a build
   // primitive so that they can be optionally included.
   //
+  // protos::pbzero::FtraceEvent::kPrintFieldNumber,
+  //
   // TODO: Some fields will create new packets (e.g. binder calls may create
   // new spans. This is currently not supported (generated packets still
   // need to be redacted).
   //
-  // protos::pbzero::FtraceEvent::kPrintFieldNumber,
   // protos::pbzero::FtraceEvent::kBinderTransactionFieldNumber,
   // protos::pbzero::FtraceEvent::kBinderTransactionReceivedFieldNumber,
   // protos::pbzero::FtraceEvent::kBinderSetPriorityFieldNumber,
