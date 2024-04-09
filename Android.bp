@@ -12376,6 +12376,7 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/android/monitor_contention.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/network_packets.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/oom_adjuster.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/power_rails.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/process_metadata.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/screenshots.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/services.sql",
@@ -12851,6 +12852,7 @@ filegroup {
     srcs: [
         "src/trace_redaction/build_timeline.cc",
         "src/trace_redaction/filter_ftrace_using_allowlist.cc",
+        "src/trace_redaction/filter_print_events.cc",
         "src/trace_redaction/filter_sched_waking_events.cc",
         "src/trace_redaction/find_package_uid.cc",
         "src/trace_redaction/optimize_timeline.cc",
@@ -12860,6 +12862,7 @@ filegroup {
         "src/trace_redaction/prune_package_list.cc",
         "src/trace_redaction/redact_sched_switch.cc",
         "src/trace_redaction/scrub_ftrace_events.cc",
+        "src/trace_redaction/scrub_process_stats.cc",
         "src/trace_redaction/scrub_process_trees.cc",
         "src/trace_redaction/scrub_task_rename.cc",
         "src/trace_redaction/scrub_trace_packet.cc",
