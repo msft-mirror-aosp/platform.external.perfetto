@@ -14,16 +14,14 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_REDACTION_REDACT_SCHED_WAKING_H_
-#define SRC_TRACE_REDACTION_REDACT_SCHED_WAKING_H_
-
-#include <string>
+#ifndef SRC_TRACE_REDACTION_SCRUB_PROCESS_STATS_H_
+#define SRC_TRACE_REDACTION_SCRUB_PROCESS_STATS_H_
 
 #include "src/trace_redaction/trace_redaction_framework.h"
 
 namespace perfetto::trace_redaction {
 
-class RedactSchedWaking final : public TransformPrimitive {
+class ScrubProcessStats : public TransformPrimitive {
  public:
   base::Status Transform(const Context& context,
                          std::string* packet) const override;
@@ -31,4 +29,4 @@ class RedactSchedWaking final : public TransformPrimitive {
 
 }  // namespace perfetto::trace_redaction
 
-#endif  // SRC_TRACE_REDACTION_REDACT_SCHED_WAKING_H_
+#endif  // SRC_TRACE_REDACTION_SCRUB_PROCESS_STATS_H_

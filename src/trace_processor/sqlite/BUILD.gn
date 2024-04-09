@@ -20,7 +20,7 @@ source_set("sqlite") {
   sources = [
     "db_sqlite_table.cc",
     "db_sqlite_table.h",
-    "query_cache.h",
+    "module_lifecycle_manager.h",
     "scoped_db.h",
     "sql_source.cc",
     "sql_source.h",
@@ -34,6 +34,7 @@ source_set("sqlite") {
     "sqlite_tokenizer.h",
     "sqlite_utils.cc",
     "sqlite_utils.h",
+    "sqlite_value.h",
     "stats_table.cc",
     "stats_table.h",
   ]
@@ -43,6 +44,7 @@ source_set("sqlite") {
     "../../../gn:default_deps",
     "../../../gn:sqlite",
     "../../../include/perfetto/trace_processor",
+    "../../../include/perfetto/trace_processor:basic_types",
     "../../../protos/perfetto/trace/ftrace:zero",
     "../../../protos/perfetto/trace_processor:zero",
     "../../base",
@@ -88,7 +90,9 @@ perfetto_unittest_source_set("unittests") {
     "../../../gn:default_deps",
     "../../../gn:gtest_and_gmock",
     "../../../gn:sqlite",
+    "../../../include/perfetto/trace_processor:basic_types",
     "../../base",
+    "../../base:test_support",
   ]
 }
 

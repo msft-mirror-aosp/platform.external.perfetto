@@ -5253,12 +5253,15 @@ message LayersSnapshotProto {
   // elapsed realtime in nanos since boot of when this entry was logged
   optional sfixed64 elapsed_realtime_nanos = 1;
 
-  // where the trace originated
+  // SurfaceFlinger's stage where the snapshot was triggered.
+  // Currently either "visibleRegionsDirty" or "bufferLatched".
   optional string where = 2;
 
   optional LayersProto layers = 3;
 
   // Blob for the current HWC information for all layers, reported by dumpsys.
+  // Example:
+  //   "maxDownScale: 4, maxFullWidth: 8192, HWState: 1, AssignedState: 3, ..."
   optional string hwc_blob = 4;
 
   // Excludes state sent during composition like visible region and composition
@@ -5280,6 +5283,7 @@ message LayersProto {
 
 message DisplayProto {
   optional uint64 id = 1;
+  // Display descriptor, e.g. "Built-In Screen"
   optional string name = 2;
   optional uint32 layer_stack = 3;
   optional SizeProto size = 4;
@@ -5314,12 +5318,14 @@ message LayerProto {
   // unique id per layer.
   optional int32 id = 1;
   // unique name per layer.
+  // Example: "Wallpaper".
   optional string name = 2;
   // list of children this layer may have. May be empty.
   repeated int32 children = 3 [packed = true];
   // list of layers that are z order relative to this layer.
   repeated int32 relatives = 4 [packed = true];
-  // The type of layer, ex Color, Layer
+  // The type of layer.
+  // Examples: "ContainerLayer", "BufferStateLayer".
   optional string type = 5;
   optional RegionProto transparent_region = 6;
   optional RegionProto visible_region = 7;
@@ -5340,7 +5346,14 @@ message LayerProto {
   optional RectProto final_crop = 15 [deprecated = true];
   optional bool is_opaque = 16;
   optional bool invalidate = 17;
+  // Composition states's dataspace.
+  // Examples: "STANDARD_BT709", "STANDARD_BT601_625".
+  // See full enum in
+  // frameworks/native/libs/nativewindow/include/android/data_space.h
   optional string dataspace = 18;
+  // Buffer's pixel format
+  // Examples: "PIXEL_FORMAT_TRANSLUCENT", "PIXEL_FORMAT_RGBA_8888".
+  // See full enum in frameworks/native/libs/ui/include/ui/PixelFormat.h
   optional string pixel_format = 19;
   // The layer's actual color.
   optional ColorProto color = 20;
@@ -7259,6 +7272,20 @@ message DpuTracingMarkWriteFtraceEvent {
   optional uint32 type = 5;
   optional int32 value = 6;
 }
+message DpuDsiCmdFifoStatusFtraceEvent {
+  optional uint32 header = 1;
+  optional uint32 payload = 2;
+}
+message DpuDsiRxFtraceEvent {
+  optional uint32 cmd = 1;
+  optional uint32 rx_buf = 2;
+}
+message DpuDsiTxFtraceEvent {
+  optional uint32 type = 1;
+  optional uint32 tx_buf = 2;
+  optional uint32 last = 3;
+  optional uint32 delay_ms = 4;
+}
 
 // End of protos/perfetto/trace/ftrace/dpu.proto
 
@@ -8256,6 +8283,40 @@ message F2fsIostatLatencyFtraceEvent {
   optional uint32 n_wr_s_avg = 26;
   optional uint32 n_wr_s_cnt = 27;
   optional uint32 n_wr_s_peak = 28;
+}
+message F2fsBackgroundGcFtraceEvent {
+  optional uint64 dev = 1;
+  optional uint32 wait_ms = 2;
+  optional uint32 prefree = 3;
+  optional uint32 free = 4;
+}
+message F2fsGcBeginFtraceEvent {
+  optional uint64 dev = 1;
+  optional uint32 sync = 2;
+  optional uint32 background = 3;
+  optional int64 dirty_nodes = 4;
+  optional int64 dirty_dents = 5;
+  optional int64 dirty_imeta = 6;
+  optional uint32 free_sec = 7;
+  optional uint32 free_seg = 8;
+  optional int32 reserved_seg = 9;
+  optional uint32 prefree_seg = 10;
+  optional int32 gc_type = 11;
+  optional uint32 no_bg_gc = 12;
+  optional uint32 nr_free_secs = 13;
+}
+message F2fsGcEndFtraceEvent {
+  optional uint64 dev = 1;
+  optional int32 ret = 2;
+  optional int32 seg_freed = 3;
+  optional int32 sec_freed = 4;
+  optional int64 dirty_nodes = 5;
+  optional int64 dirty_dents = 6;
+  optional int64 dirty_imeta = 7;
+  optional uint32 free_sec = 8;
+  optional uint32 free_seg = 9;
+  optional int32 reserved_seg = 10;
+  optional uint32 prefree_seg = 11;
 }
 
 // End of protos/perfetto/trace/ftrace/f2fs.proto
@@ -10607,6 +10668,12 @@ message FtraceEvent {
     RpmStatusFtraceEvent rpm_status = 489;
     PanelWriteGenericFtraceEvent panel_write_generic = 490;
     SchedMigrateTaskFtraceEvent sched_migrate_task = 491;
+    DpuDsiCmdFifoStatusFtraceEvent dpu_dsi_cmd_fifo_status = 492;
+    DpuDsiRxFtraceEvent dpu_dsi_rx = 493;
+    DpuDsiTxFtraceEvent dpu_dsi_tx = 494;
+    F2fsBackgroundGcFtraceEvent f2fs_background_gc = 495;
+    F2fsGcBeginFtraceEvent f2fs_gc_begin = 496;
+    F2fsGcEndFtraceEvent f2fs_gc_end = 497;
   }
 }
 
