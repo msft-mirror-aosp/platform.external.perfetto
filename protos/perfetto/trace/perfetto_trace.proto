@@ -339,13 +339,10 @@ enum BuiltinClock {
   BUILTIN_CLOCK_MONOTONIC_COARSE = 4;
   BUILTIN_CLOCK_MONOTONIC_RAW = 5;
   BUILTIN_CLOCK_BOOTTIME = 6;
+  BUILTIN_CLOCK_TSC = 9;
   BUILTIN_CLOCK_MAX_ID = 63;
 
   reserved 7, 8;
-
-  // An internal CL (ag/16521245) has taken this for BUILTIN_CLOCK_TSC.
-  // That might get upstreamed later on. Avoid diverging on this ID in future.
-  reserved 9;
 }
 
 // End of protos/perfetto/common/builtin_clock.proto
@@ -6000,6 +5997,20 @@ message ChromeEventBundle {
 }
 
 // End of protos/perfetto/trace/chrome/chrome_trace_event.proto
+
+// Begin of protos/perfetto/trace/chrome/chrome_trigger.proto
+
+// When a TracingSession receives a trigger it records the boot time
+// nanoseconds in the TracePacket's timestamp field. We emit this data so
+// filtering can be done on triggers received in the trace.
+message ChromeTrigger {
+  // Name of the trigger which was received.
+  optional string trigger_name = 1;
+  // MD5 hash of the trigger name.
+  optional string trigger_hash = 2;
+}
+
+// End of protos/perfetto/trace/chrome/chrome_trigger.proto
 
 // Begin of protos/perfetto/trace/chrome/v8.proto
 
@@ -14680,7 +14691,7 @@ message UiState {
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 108.
+// Next id: 109.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -14721,6 +14732,7 @@ message TracePacket {
     AndroidLogPacket android_log = 39;
     SystemInfo system_info = 45;
     Trigger trigger = 46;
+    ChromeTrigger chrome_trigger = 109;
     PackagesList packages_list = 47;
     ChromeBenchmarkMetadata chrome_benchmark_metadata = 48;
     PerfettoMetatrace perfetto_metatrace = 49;

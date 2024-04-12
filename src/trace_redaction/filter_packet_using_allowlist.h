@@ -14,27 +14,27 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_REDACTION_REDACT_SCHED_SWITCH_H_
-#define SRC_TRACE_REDACTION_REDACT_SCHED_SWITCH_H_
+#ifndef SRC_TRACE_REDACTION_FILTER_PACKET_USING_ALLOWLIST_H_
+#define SRC_TRACE_REDACTION_FILTER_PACKET_USING_ALLOWLIST_H_
 
-#include "src/trace_redaction/redact_ftrace_event.h"
+#include "src/trace_redaction/scrub_trace_packet.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 
 namespace perfetto::trace_redaction {
 
-// Goes through ftrace events and conditonally removes the comm values from
-// sched switch events.
-class RedactSchedSwitch : public FtraceEventRedaction {
+// Since the number of allow-listed message types, and the allow-list is
+// small, the look-up can be considered constant time.
+//
+// There is a constant max number of fields in a packet. Given this limit and
+// the constant allow-list look-up, this primitive can be considered linear.
+class FilterPacketUsingAllowlist : public TracePacketFilter {
  public:
-  RedactSchedSwitch();
+  base::Status VerifyContext(const Context& context) const override;
 
-  base::Status Redact(
-      const Context& context,
-      const protos::pbzero::FtraceEvent::Decoder& event,
-      protozero::ConstBytes bytes,
-      protos::pbzero::FtraceEvent* event_message) const override;
+  bool KeepPacket(const Context& context,
+                  const std::string& bytes) const override;
 };
 
 }  // namespace perfetto::trace_redaction
 
-#endif  // SRC_TRACE_REDACTION_REDACT_SCHED_SWITCH_H_
+#endif  // SRC_TRACE_REDACTION_FILTER_PACKET_USING_ALLOWLIST_H_
