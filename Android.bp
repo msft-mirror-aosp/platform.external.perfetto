@@ -11435,6 +11435,7 @@ filegroup {
         "src/trace_processor/importers/common/flow_tracker.cc",
         "src/trace_processor/importers/common/global_args_tracker.cc",
         "src/trace_processor/importers/common/jit_cache.cc",
+        "src/trace_processor/importers/common/machine_tracker.cc",
         "src/trace_processor/importers/common/mapping_tracker.cc",
         "src/trace_processor/importers/common/metadata_tracker.cc",
         "src/trace_processor/importers/common/process_tracker.cc",
@@ -11766,6 +11767,7 @@ filegroup {
         "src/trace_processor/importers/proto/memory_tracker_snapshot_module.cc",
         "src/trace_processor/importers/proto/memory_tracker_snapshot_parser.cc",
         "src/trace_processor/importers/proto/metadata_minimal_module.cc",
+        "src/trace_processor/importers/proto/multi_machine_trace_manager.cc",
         "src/trace_processor/importers/proto/network_trace_module.cc",
         "src/trace_processor/importers/proto/packet_analyzer.cc",
         "src/trace_processor/importers/proto/packet_sequence_state_generation.cc",
@@ -12870,6 +12872,7 @@ filegroup {
         "src/trace_redaction/prune_package_list.cc",
         "src/trace_redaction/redact_ftrace_event.cc",
         "src/trace_redaction/redact_sched_switch.cc",
+        "src/trace_redaction/redact_task_newtask.cc",
         "src/trace_redaction/scrub_ftrace_events.cc",
         "src/trace_redaction/scrub_process_stats.cc",
         "src/trace_redaction/scrub_process_trees.cc",
@@ -12893,6 +12896,7 @@ filegroup {
         "src/trace_redaction/proto_util_unittest.cc",
         "src/trace_redaction/prune_package_list_unittest.cc",
         "src/trace_redaction/redact_sched_switch_unittest.cc",
+        "src/trace_redaction/redact_task_newtask_unittest.cc",
     ],
 }
 
