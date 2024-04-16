@@ -339,13 +339,10 @@ enum BuiltinClock {
   BUILTIN_CLOCK_MONOTONIC_COARSE = 4;
   BUILTIN_CLOCK_MONOTONIC_RAW = 5;
   BUILTIN_CLOCK_BOOTTIME = 6;
+  BUILTIN_CLOCK_TSC = 9;
   BUILTIN_CLOCK_MAX_ID = 63;
 
   reserved 7, 8;
-
-  // An internal CL (ag/16521245) has taken this for BUILTIN_CLOCK_TSC.
-  // That might get upstreamed later on. Avoid diverging on this ID in future.
-  reserved 9;
 }
 
 // End of protos/perfetto/common/builtin_clock.proto
@@ -6001,6 +5998,20 @@ message ChromeEventBundle {
 
 // End of protos/perfetto/trace/chrome/chrome_trace_event.proto
 
+// Begin of protos/perfetto/trace/chrome/chrome_trigger.proto
+
+// Information about a specific trigger during a background tracing scenario
+// Associated packet timestamps are useful to delimitate a scenario range in a
+// trace. Triggers are also useful for filtering traces.
+message ChromeTrigger {
+  // Name of the trigger which was received.
+  optional string trigger_name = 1;
+  // SHA1 hash of the trigger name.
+  optional fixed32 trigger_name_hash = 2;
+}
+
+// End of protos/perfetto/trace/chrome/chrome_trigger.proto
+
 // Begin of protos/perfetto/trace/chrome/v8.proto
 
 // These are the protos for the V8 data source.
@@ -8327,6 +8338,32 @@ message FastrpcDmaStatFtraceEvent {
   optional int32 cid = 1;
   optional int64 len = 2;
   optional uint64 total_allocated = 3;
+}
+message FastrpcDmaFreeFtraceEvent {
+  optional int32 cid = 1;
+  optional uint64 phys = 2;
+  optional uint64 size = 3;
+}
+message FastrpcDmaAllocFtraceEvent {
+  optional int32 cid = 1;
+  optional uint64 phys = 2;
+  optional uint64 size = 3;
+  optional uint64 attr = 4;
+  optional int32 mflags = 5;
+}
+message FastrpcDmaUnmapFtraceEvent {
+  optional int32 cid = 1;
+  optional uint64 phys = 2;
+  optional uint64 size = 3;
+}
+message FastrpcDmaMapFtraceEvent {
+  optional int32 cid = 1;
+  optional int32 fd = 2;
+  optional uint64 phys = 3;
+  optional uint64 size = 4;
+  optional uint64 len = 5;
+  optional uint32 attr = 6;
+  optional int32 mflags = 7;
 }
 
 // End of protos/perfetto/trace/ftrace/fastrpc.proto
@@ -10674,6 +10711,10 @@ message FtraceEvent {
     F2fsBackgroundGcFtraceEvent f2fs_background_gc = 495;
     F2fsGcBeginFtraceEvent f2fs_gc_begin = 496;
     F2fsGcEndFtraceEvent f2fs_gc_end = 497;
+    FastrpcDmaFreeFtraceEvent fastrpc_dma_free = 498;
+    FastrpcDmaAllocFtraceEvent fastrpc_dma_alloc = 499;
+    FastrpcDmaUnmapFtraceEvent fastrpc_dma_unmap = 500;
+    FastrpcDmaMapFtraceEvent fastrpc_dma_map = 501;
   }
 }
 
@@ -14680,7 +14721,7 @@ message UiState {
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 108.
+// Next id: 109.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -14721,6 +14762,7 @@ message TracePacket {
     AndroidLogPacket android_log = 39;
     SystemInfo system_info = 45;
     Trigger trigger = 46;
+    ChromeTrigger chrome_trigger = 109;
     PackagesList packages_list = 47;
     ChromeBenchmarkMetadata chrome_benchmark_metadata = 48;
     PerfettoMetatrace perfetto_metatrace = 49;

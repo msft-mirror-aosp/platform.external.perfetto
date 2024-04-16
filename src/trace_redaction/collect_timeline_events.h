@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_REDACTION_BUILD_TIMELINE_H_
-#define SRC_TRACE_REDACTION_BUILD_TIMELINE_H_
+#ifndef SRC_TRACE_REDACTION_COLLECT_TIMELINE_EVENTS_H_
+#define SRC_TRACE_REDACTION_COLLECT_TIMELINE_EVENTS_H_
 
-#include "perfetto/ext/base/status_or.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
@@ -26,13 +25,16 @@ namespace perfetto::trace_redaction {
 
 // Creates events from process_tree, task_newtask, and sched_process_free
 // packets and stores them in a timeline.
-class BuildTimeline : public CollectPrimitive {
+class CollectTimelineEvents : public CollectPrimitive {
  public:
-  base::StatusOr<ContinueCollection> Collect(
-      const protos::pbzero::TracePacket::Decoder& packet,
-      Context* context) const override;
+  base::Status Begin(Context* context) const override;
+
+  base::Status Collect(const protos::pbzero::TracePacket::Decoder& packet,
+                       Context* context) const override;
+
+  base::Status End(Context* context) const override;
 };
 
 }  // namespace perfetto::trace_redaction
 
-#endif  // SRC_TRACE_REDACTION_BUILD_TIMELINE_H_
+#endif  // SRC_TRACE_REDACTION_COLLECT_TIMELINE_EVENTS_H_

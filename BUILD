@@ -1477,6 +1477,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/global_args_tracker.h",
         "src/trace_processor/importers/common/jit_cache.cc",
         "src/trace_processor/importers/common/jit_cache.h",
+        "src/trace_processor/importers/common/machine_tracker.cc",
+        "src/trace_processor/importers/common/machine_tracker.h",
         "src/trace_processor/importers/common/mapping_tracker.cc",
         "src/trace_processor/importers/common/mapping_tracker.h",
         "src/trace_processor/importers/common/metadata_tracker.cc",
@@ -1850,6 +1852,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/memory_tracker_snapshot_parser.h",
         "src/trace_processor/importers/proto/metadata_minimal_module.cc",
         "src/trace_processor/importers/proto/metadata_minimal_module.h",
+        "src/trace_processor/importers/proto/multi_machine_trace_manager.cc",
+        "src/trace_processor/importers/proto/multi_machine_trace_manager.h",
         "src/trace_processor/importers/proto/network_trace_module.cc",
         "src/trace_processor/importers/proto/network_trace_module.h",
         "src/trace_processor/importers/proto/packet_analyzer.cc",
@@ -2388,6 +2392,7 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/android/frames/per_frame_metrics.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/frames/timeline.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/frames/timeline_maxsdk28.sql",
     ],
 )
 
@@ -4646,6 +4651,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/chrome/chrome_benchmark_metadata.proto",
         "protos/perfetto/trace/chrome/chrome_metadata.proto",
         "protos/perfetto/trace/chrome/chrome_trace_event.proto",
+        "protos/perfetto/trace/chrome/chrome_trigger.proto",
         "protos/perfetto/trace/chrome/v8.proto",
     ],
     visibility = [
