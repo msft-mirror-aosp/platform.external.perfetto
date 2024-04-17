@@ -450,7 +450,7 @@ export abstract class BaseCounterTrack implements Track {
     return m(
       PopupMenu2,
       {
-        trigger: m(Button, {icon: 'show_chart', minimal: true, compact: true}),
+        trigger: m(Button, {icon: 'show_chart', compact: true}),
       },
       this.getCounterContextMenuItems(),
     );
@@ -963,6 +963,6 @@ export abstract class BaseCounterTrack implements Track {
   }
 
   get unit(): string {
-    return this.getCounterOptions().unit ?? '?';
+    return this.getCounterOptions().unit ?? '';
   }
 }
