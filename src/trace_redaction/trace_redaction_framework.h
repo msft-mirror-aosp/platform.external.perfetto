@@ -24,7 +24,6 @@
 
 #include "perfetto/base/flat_set.h"
 #include "perfetto/base/status.h"
-#include "perfetto/ext/base/status_or.h"
 #include "src/trace_redaction/process_thread_timeline.h"
 
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
@@ -158,6 +157,17 @@ class Context {
   //  3.  In this example, a cpu_idle event populates the one-of slot in the
   //      ftrace event
   base::FlatSet<uint32_t> ftrace_packet_allow_list;
+
+  //  message SuspendResumeFtraceEvent {
+  //    optional string action = 1 [(datapol.semantic_type) = ST_NOT_REQUIRED];
+  //    optional int32 val = 2;
+  //    optional uint32 start = 3 [(datapol.semantic_type) = ST_NOT_REQUIRED];
+  //  }
+  //
+  // The "action" in SuspendResumeFtraceEvent is a free-form string. There are
+  // some know and expected values. Those values are stored here and all events
+  // who's action value is not found here, the ftrace event will be dropped.
+  base::FlatSet<std::string> suspend_result_allow_list;
 
   // The timeline is a query-focused data structure that connects a pid to a
   // uid at specific point in time.

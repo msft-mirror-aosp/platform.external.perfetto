@@ -17,8 +17,11 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_PROCESS_TRACKER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_PROCESS_TRACKER_H_
 
-#include <tuple>
+#include <stdint.h>
+
+#include <optional>
 #include <unordered_set>
+#include <vector>
 
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/string_view.h"
@@ -35,6 +38,7 @@ namespace trace_processor {
 enum class ThreadNamePriority {
   kOther = 0,
   kFtrace = 1,
+  kEtwTrace = 1,
   kProcessTree = 2,
   kTrackDescriptorThreadType = 3,
   kTrackDescriptor = 4,
