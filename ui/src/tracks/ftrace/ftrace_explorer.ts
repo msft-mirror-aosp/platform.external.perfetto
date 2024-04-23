@@ -39,14 +39,16 @@ import {
   STR_NULL,
 } from '../../public';
 import {raf} from '../../core/raf_scheduler';
-import {VisibleState} from '../../common/state';
+import {AsyncLimiter} from '../../base/async_limiter';
+import {Monitor} from '../../base/monitor';
+import {Button} from '../../widgets/button';
 
 const ROW_H = 20;
 const PAGE_SIZE = 250;
 
 interface FtraceExplorerAttrs {
-  counters: FtraceStat[];
-  store: Store<FtraceFilter>;
+  cache: FtraceExplorerCache;
+  filterStore: Store<FtraceFilter>;
   engine: EngineProxy;
 }
 
@@ -71,33 +73,80 @@ interface Pagination {
   pageCount: number;
 }
 
+export interface FtraceExplorerCache {
+  state: 'blank' | 'loading' | 'valid';
+  counters: FtraceStat[];
+}
+
+async function getFtraceCounters(engine: EngineProxy): Promise<FtraceStat[]> {
+  // TODO(stevegolton): this is an extraordinarily slow query on large traces
+  // as it goes through every ftrace event which can be a lot on big traces.
+  // Consider if we can have some different UX which avoids needing these
+  // counts
+  // TODO(mayzner): the +name below is an awful hack to workaround
+  // extraordinarily slow sorting of strings. However, even with this hack,
+  // this is just a slow query. There are various ways we can improve this
+  // (e.g. with using the vtab_distinct APIs of SQLite).
+  const result = await engine.query(`
+    select
+      name,
+      count(1) as cnt
+    from ftrace_event
+    group by name
+    order by cnt desc
+  `);
+  const counters: FtraceStat[] = [];
+  const it = result.iter({name: STR, cnt: NUM});
+  for (let row = 0; it.valid(); it.next(), row++) {
+    counters.push({name: it.name, count: it.cnt});
+  }
+  return counters;
+}
+
 export class FtraceExplorer implements m.ClassComponent<FtraceExplorerAttrs> {
-  private paginationStore = createStore<Pagination>({
+  private readonly paginationStore = createStore<Pagination>({
     page: 0,
     pageCount: 0,
   });
-  private oldPagination?: Pagination;
-  private oldFilterState?: FtraceFilter;
-  private oldVisibleState?: VisibleState;
+  private readonly monitor: Monitor;
+  private readonly queryLimiter = new AsyncLimiter();
 
   // A cache of the data we have most recently loaded from our store
   private data?: FtracePanelData;
 
-  view({attrs}: m.CVnode<FtraceExplorerAttrs>) {
-    if (this.shouldUpdate(attrs.store)) {
-      this.oldVisibleState = globals.state.frontendLocalState.visibleState;
-      this.oldFilterState = attrs.store.state;
-      this.oldPagination = this.paginationStore.state;
-      lookupFtraceEvents(
-        attrs.engine,
-        this.paginationStore.state.page * PAGE_SIZE,
-        this.paginationStore.state.pageCount * PAGE_SIZE,
-        attrs.store.state,
-      ).then((data) => {
-        this.data = data;
-        raf.scheduleFullRedraw();
-      });
+  constructor({attrs}: m.CVnode<FtraceExplorerAttrs>) {
+    this.monitor = new Monitor([
+      () => globals.state.frontendLocalState.visibleState.start,
+      () => globals.state.frontendLocalState.visibleState.end,
+      () => attrs.filterStore.state,
+      () => this.paginationStore.state,
+    ]);
+
+    if (attrs.cache.state === 'blank') {
+      getFtraceCounters(attrs.engine)
+        .then((counters) => {
+          attrs.cache.counters = counters;
+          attrs.cache.state = 'valid';
+        })
+        .catch(() => {
+          attrs.cache.state = 'blank';
+        });
+      attrs.cache.state = 'loading';
     }
+  }
+
+  view({attrs}: m.CVnode<FtraceExplorerAttrs>) {
+    this.monitor.ifStateChanged(() =>
+      this.queryLimiter.schedule(async () => {
+        this.data = await lookupFtraceEvents(
+          attrs.engine,
+          this.paginationStore.state.page * PAGE_SIZE,
+          this.paginationStore.state.pageCount * PAGE_SIZE,
+          attrs.filterStore.state,
+        );
+        raf.scheduleFullRedraw();
+      }),
+    );
 
     return m(
       DetailsShell,
@@ -124,7 +173,7 @@ export class FtraceExplorer implements m.ClassComponent<FtraceExplorerAttrs> {
     const visibleRowCount = Math.ceil(scrollContainer.clientHeight / ROW_H);
 
     // Work out which "page" we're on
-    const page = Math.floor(visibleRowOffset / PAGE_SIZE) - 1;
+    const page = Math.max(0, Math.floor(visibleRowOffset / PAGE_SIZE) - 1);
     const pageCount = Math.ceil(visibleRowCount / PAGE_SIZE) + 2;
 
     if (page !== prevPage || pageCount !== prevPageCount) {
@@ -134,24 +183,6 @@ export class FtraceExplorer implements m.ClassComponent<FtraceExplorerAttrs> {
       });
       raf.scheduleFullRedraw();
     }
-  }
-
-  private shouldUpdate(filterStore: Store<FtraceFilter>): boolean {
-    if (filterStore.state !== this.oldFilterState) {
-      return true;
-    }
-
-    if (
-      globals.state.frontendLocalState.visibleState !== this.oldVisibleState
-    ) {
-      return true;
-    }
-
-    if (this.paginationStore.state !== this.oldPagination) {
-      return true;
-    }
-
-    return false;
   }
 
   onRowOver(ts: time) {
@@ -172,18 +203,27 @@ export class FtraceExplorer implements m.ClassComponent<FtraceExplorerAttrs> {
   }
 
   private renderFilterPanel(attrs: FtraceExplorerAttrs) {
-    const excludeList = attrs.store.state.excludeList;
-    const options: MultiSelectOption[] = attrs.counters.map(({name, count}) => {
-      return {
-        id: name,
-        name: `${name} (${count})`,
-        checked: !excludeList.some((excluded: string) => excluded === name),
-      };
-    });
+    if (attrs.cache.state !== 'valid') {
+      return m(Button, {
+        label: 'Filter',
+        disabled: true,
+        loading: true,
+      });
+    }
+
+    const excludeList = attrs.filterStore.state.excludeList;
+    const options: MultiSelectOption[] = attrs.cache.counters.map(
+      ({name, count}) => {
+        return {
+          id: name,
+          name: `${name} (${count})`,
+          checked: !excludeList.some((excluded: string) => excluded === name),
+        };
+      },
+    );
 
     return m(PopupMultiSelect, {
       label: 'Filter',
-      minimal: true,
       icon: 'filter_list_alt',
       popupPosition: PopupPosition.Top,
       options,
@@ -196,7 +236,7 @@ export class FtraceExplorer implements m.ClassComponent<FtraceExplorerAttrs> {
             newList.add(id);
           }
         });
-        attrs.store.edit((draft) => {
+        attrs.filterStore.edit((draft) => {
           draft.excludeList = Array.from(newList);
         });
       },
@@ -288,10 +328,8 @@ async function lookupFtraceEvents(
       process.name as process,
       to_ftrace(ftrace_event.id) as args
     from ftrace_event
-    left join thread
-    on ftrace_event.utid = thread.utid
-    left join process
-    on thread.upid = process.upid
+    join thread using (utid)
+    left join process on thread.upid = process.upid
     where
       ftrace_event.name not in (${excludeListSql}) and
       ts >= ${start} and ts <= ${end}

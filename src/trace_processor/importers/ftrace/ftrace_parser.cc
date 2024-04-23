@@ -68,6 +68,7 @@
 #include "protos/perfetto/trace/ftrace/mm_event.pbzero.h"
 #include "protos/perfetto/trace/ftrace/net.pbzero.h"
 #include "protos/perfetto/trace/ftrace/oom.pbzero.h"
+#include "protos/perfetto/trace/ftrace/panel.pbzero.h"
 #include "protos/perfetto/trace/ftrace/power.pbzero.h"
 #include "protos/perfetto/trace/ftrace/raw_syscalls.pbzero.h"
 #include "protos/perfetto/trace/ftrace/rpm.pbzero.h"
@@ -1011,11 +1012,11 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         break;
       }
       case FtraceEvent::kFuncgraphEntryFieldNumber: {
-        ParseFuncgraphEntry(ts, pid, fld_bytes, seq_state);
+        ParseFuncgraphEntry(ts, cpu, pid, fld_bytes, seq_state);
         break;
       }
       case FtraceEvent::kFuncgraphExitFieldNumber: {
-        ParseFuncgraphExit(ts, pid, fld_bytes, seq_state);
+        ParseFuncgraphExit(ts, cpu, pid, fld_bytes, seq_state);
         break;
       }
       case FtraceEvent::kV4l2QbufFieldNumber:
@@ -1143,6 +1144,10 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         ParseRpmStatus(ts, fld_bytes);
         break;
       }
+      case FtraceEvent::kPanelWriteGenericFieldNumber: {
+        ParsePanelWriteGeneric(ts, pid, fld_bytes);
+        break;
+      }
       default:
         break;
     }
@@ -1259,9 +1264,10 @@ void FtraceParser::ParseGenericFtrace(int64_t ts,
   protos::pbzero::GenericFtraceEvent::Decoder evt(blob.data, blob.size);
   StringId event_id = context_->storage->InternString(evt.event_name());
   UniqueTid utid = context_->process_tracker->GetOrCreateThread(tid);
-  RawId id = context_->storage->mutable_ftrace_event_table()
-                 ->Insert({ts, event_id, cpu, utid})
-                 .id;
+  RawId id =
+      context_->storage->mutable_ftrace_event_table()
+          ->Insert({ts, event_id, cpu, utid, {}, {}, context_->machine_id()})
+          .id;
   auto inserter = context_->args_tracker->AddArgsTo(id);
 
   for (auto it = evt.field(); it; ++it) {
@@ -1300,10 +1306,15 @@ void FtraceParser::ParseTypedFtraceToRaw(
   FtraceMessageDescriptor* m = GetMessageDescriptorForId(ftrace_id);
   const auto& message_strings = ftrace_message_strings_[ftrace_id];
   UniqueTid utid = context_->process_tracker->GetOrCreateThread(tid);
-  RawId id =
-      context_->storage->mutable_ftrace_event_table()
-          ->Insert({timestamp, message_strings.message_name_id, cpu, utid})
-          .id;
+  RawId id = context_->storage->mutable_ftrace_event_table()
+                 ->Insert({timestamp,
+                           message_strings.message_name_id,
+                           cpu,
+                           utid,
+                           {},
+                           {},
+                           context_->machine_id()})
+                 .id;
   auto inserter = context_->args_tracker->AddArgsTo(id);
 
   for (auto fld = decoder.ReadField(); fld.valid(); fld = decoder.ReadField()) {
@@ -3189,37 +3200,54 @@ void FtraceParser::ParseSchedCpuUtilCfs(int64_t timestamp,
 
 void FtraceParser::ParseFuncgraphEntry(
     int64_t timestamp,
+    uint32_t cpu,
     uint32_t pid,
     protozero::ConstBytes blob,
     PacketSequenceStateGeneration* seq_state) {
-  // TODO(rsavitski): remove if/when we stop collapsing all idle (swapper)
-  // threads to a single track, otherwise this breaks slice nesting.
-  if (pid == 0)
-    return;
-
   protos::pbzero::FuncgraphEntryFtraceEvent::Decoder evt(blob.data, blob.size);
   StringId name_id = InternedKernelSymbolOrFallback(evt.func(), seq_state);
 
-  UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
-  TrackId track = context_->track_tracker->InternThreadTrack(utid);
+  TrackId track = {};
+  if (pid != 0) {
+    // common case: normal thread
+    UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
+    track = context_->track_tracker->InternThreadTrack(utid);
+  } else {
+    // Idle threads (swapper) are implicit, and all share the same thread id 0.
+    // Therefore we cannot use a thread-scoped track because many instances
+    // of swapper might be running concurrently. Fall back onto global tracks
+    // (one per cpu).
+    base::StackString<255> track_name("swapper%" PRIu32 "-funcgraph", cpu);
+    StringId track_name_id =
+        context_->storage->InternString(track_name.string_view());
+    track = context_->track_tracker->InternCpuTrack(track_name_id, cpu);
+  }
+
   context_->slice_tracker->Begin(timestamp, track, kNullStringId, name_id);
 }
 
 void FtraceParser::ParseFuncgraphExit(
     int64_t timestamp,
+    uint32_t cpu,
     uint32_t pid,
     protozero::ConstBytes blob,
     PacketSequenceStateGeneration* seq_state) {
-  // TODO(rsavitski): remove if/when we stop collapsing all idle (swapper)
-  // threads to a single track, otherwise this breaks slice nesting.
-  if (pid == 0)
-    return;
-
   protos::pbzero::FuncgraphExitFtraceEvent::Decoder evt(blob.data, blob.size);
   StringId name_id = InternedKernelSymbolOrFallback(evt.func(), seq_state);
 
-  UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
-  TrackId track = context_->track_tracker->InternThreadTrack(utid);
+  TrackId track = {};
+  if (pid != 0) {
+    // common case: normal thread
+    UniqueTid utid = context_->process_tracker->GetOrCreateThread(pid);
+    track = context_->track_tracker->InternThreadTrack(utid);
+  } else {
+    // special case: see |ParseFuncgraphEntry|
+    base::StackString<255> track_name("swapper%" PRIu32 "-funcgraph", cpu);
+    StringId track_name_id =
+        context_->storage->InternString(track_name.string_view());
+    track = context_->track_tracker->InternCpuTrack(track_name_id, cpu);
+  }
+
   context_->slice_tracker->End(timestamp, track, kNullStringId, name_id);
 }
 
@@ -3327,6 +3355,22 @@ void FtraceParser::ParseRpmStatus(int64_t ts, protozero::ConstBytes blob) {
   context_->slice_tracker->Begin(ts, track_id, /*category=*/kNullStringId,
                                  /*raw_name=*/GetRpmStatusStringId(rpm_status));
   devices_with_active_rpm_slice_.insert(device_name);
+}
+
+void FtraceParser::ParsePanelWriteGeneric(int64_t timestamp,
+                                          uint32_t pid,
+                                          ConstBytes blob) {
+  protos::pbzero::PanelWriteGenericFtraceEvent::Decoder evt(blob.data,
+                                                            blob.size);
+  if (!evt.type()) {
+    context_->storage->IncrementStats(stats::systrace_parse_failure);
+    return;
+  }
+
+  uint32_t tgid = static_cast<uint32_t>(evt.pid());
+  SystraceParser::GetOrCreate(context_)->ParseKernelTracingMarkWrite(
+      timestamp, pid, static_cast<char>(evt.type()), false /*trace_begin*/,
+      evt.name(), tgid, evt.value());
 }
 
 StringId FtraceParser::InternedKernelSymbolOrFallback(

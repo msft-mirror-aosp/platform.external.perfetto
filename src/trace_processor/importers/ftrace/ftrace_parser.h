@@ -237,10 +237,12 @@ class FtraceParser {
   void ParseSchedCpuUtilCfs(int64_t timestamp, protozero::ConstBytes);
 
   void ParseFuncgraphEntry(int64_t timestamp,
+                           uint32_t cpu,
                            uint32_t pid,
                            protozero::ConstBytes blob,
                            PacketSequenceStateGeneration* seq_state);
   void ParseFuncgraphExit(int64_t timestamp,
+                          uint32_t cpu,
                           uint32_t pid,
                           protozero::ConstBytes blob,
                           PacketSequenceStateGeneration* seq_state);
@@ -296,6 +298,9 @@ class FtraceParser {
                                    protozero::ConstBytes);
   StringId GetRpmStatusStringId(int32_t rpm_status_val);
   void ParseRpmStatus(int64_t ts, protozero::ConstBytes);
+  void ParsePanelWriteGeneric(int64_t timestamp,
+                              uint32_t pid,
+                              protozero::ConstBytes);
 
   TraceProcessorContext* context_;
   RssStatTracker rss_stat_tracker_;
