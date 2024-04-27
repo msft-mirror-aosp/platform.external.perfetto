@@ -1998,6 +1998,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/android_multiuser.sql",
         "src/trace_processor/metrics/sql/android/android_multiuser_populator.sql",
         "src/trace_processor/metrics/sql/android/android_netperf.sql",
+        "src/trace_processor/metrics/sql/android/android_oom_adjuster.sql",
         "src/trace_processor/metrics/sql/android/android_other_traces.sql",
         "src/trace_processor/metrics/sql/android/android_package_list.sql",
         "src/trace_processor/metrics/sql/android/android_powrails.sql",
@@ -2313,6 +2314,10 @@ perfetto_cc_tp_tables(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_intrinsics_operators_operators",
     srcs = [
+        "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.h",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.h",
         "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.cc",
         "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.h",
         "src/trace_processor/perfetto_sql/intrinsics/operators/window_operator.cc",
@@ -4442,6 +4447,7 @@ perfetto_proto_library(
         "protos/perfetto/metrics/android/android_boot_unagg.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
         "protos/perfetto/metrics/android/android_garbage_collection_unagg_metric.proto",
+        "protos/perfetto/metrics/android/android_oom_adjuster_metric.proto",
         "protos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.proto",
         "protos/perfetto/metrics/android/android_trusty_workqueues.proto",
         "protos/perfetto/metrics/android/anr_metric.proto",
