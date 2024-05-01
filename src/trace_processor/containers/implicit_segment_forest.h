@@ -98,7 +98,9 @@ class ImplicitSegmentForest {
     values_.emplace_back(std::move(v));
 
     size_t len = values_.size();
-    auto levels_to_index = static_cast<uint32_t>(__builtin_ctzl(~len)) - 1;
+    auto levels_to_index = static_cast<uint32_t>(__builtin_ctzl(
+                               static_cast<unsigned long>(~len))) -
+                           1;
 
     size_t cur = len - 1;
     for (uint32_t level = 0; level < levels_to_index; ++level) {
@@ -113,6 +115,9 @@ class ImplicitSegmentForest {
   // Returns the value at |n| in the tree: this corresponds to the |n|th
   // element |Push|-ed into the tree.
   const T& operator[](uint32_t n) { return values_[n * 2]; }
+
+  // Returns the number of elements pushed into the forest.
+  uint32_t size() const { return static_cast<uint32_t>(values_.size() / 2); }
 
  private:
   static uint32_t Lsp(uint32_t x) { return x & -x; }

@@ -122,10 +122,17 @@ target_product_available = [
 # Proto target groups which will be made public.
 proto_groups = {
     'trace': {
-        'types': ['filegroup', 'lite'],
+        'types': ['lite'],
         'targets': [
             '//protos/perfetto/trace:non_minimal_source_set',
             '//protos/perfetto/trace:minimal_source_set',
+        ]
+    },
+    'winscope': {
+        'types': ['filegroup'],
+        'targets': [
+            '//protos/perfetto/trace:non_minimal_source_set',
+            '//protos/perfetto/trace/android:winscope_extensions:source_set',
         ]
     },
     'config': {
@@ -768,7 +775,6 @@ def create_proto_modules(blueprint: Blueprint, gn: GnParser,
   # The .proto filegroup will be added to `tool_files` of rdeps so that the
   # genrules can be sandboxed.
 
-  tool_files = set()
   for proto_dep in target.proto_deps().union(target.transitive_proto_deps()):
     tool_files.add(":" + label_to_module_name(proto_dep.name))
 
