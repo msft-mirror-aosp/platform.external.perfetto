@@ -47,10 +47,6 @@ namespace perfetto::trace_redaction {
 // collection of ftrace event messages) because data in a sched_switch message
 // is needed in order to know if the event should be added to the bundle.
 
-RedactSchedSwitch::RedactSchedSwitch()
-    : FtraceEventRedaction(
-          protos::pbzero::FtraceEvent::kSchedSwitchFieldNumber) {}
-
 base::Status RedactSchedSwitch::Redact(
     const Context& context,
     const protos::pbzero::FtraceEvent::Decoder& event,
@@ -88,13 +84,17 @@ base::Status RedactSchedSwitch::Redact(
     switch (field.id()) {
       case protos::pbzero::SchedSwitchFtraceEvent::kNextCommFieldNumber:
         if (next_slice.uid == context.package_uid) {
-          proto_util::AppendField(field, sched_switch_message);
+          sched_switch_message->set_next_comm(field.as_string());
+        } else {
+          sched_switch_message->set_next_comm("");
         }
         break;
 
       case protos::pbzero::SchedSwitchFtraceEvent::kPrevCommFieldNumber:
         if (prev_slice.uid == context.package_uid) {
-          proto_util::AppendField(field, sched_switch_message);
+          sched_switch_message->set_prev_comm(field.as_string());
+        } else {
+          sched_switch_message->set_prev_comm("");
         }
         break;
 
