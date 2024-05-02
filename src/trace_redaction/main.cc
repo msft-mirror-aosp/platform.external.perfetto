@@ -17,6 +17,7 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "src/trace_redaction/collect_frame_cookies.h"
+#include "src/trace_redaction/collect_system_info.h"
 #include "src/trace_redaction/collect_timeline_events.h"
 #include "src/trace_redaction/filter_ftrace_using_allowlist.h"
 #include "src/trace_redaction/filter_packet_using_allowlist.h"
@@ -51,12 +52,14 @@ static base::Status Main(std::string_view input,
   redactor.emplace_collect<FindPackageUid>();
   redactor.emplace_collect<CollectTimelineEvents>();
   redactor.emplace_collect<CollectFrameCookies>();
+  redactor.emplace_collect<CollectSystemInfo>();
 
   // Add all builders.
   redactor.emplace_build<PopulateAllowlists>();
   redactor.emplace_build<AllowSuspendResume>();
   redactor.emplace_build<OptimizeTimeline>();
   redactor.emplace_build<ReduceFrameCookies>();
+  redactor.emplace_build<BuildSyntheticThreads>();
 
   // Add all transforms.
   auto* scrub_packet = redactor.emplace_transform<ScrubTracePacket>();
@@ -78,9 +81,12 @@ static base::Status Main(std::string_view input,
   redactor.emplace_transform<ScrubProcessStats>();
 
   auto* redact_ftrace_events = redactor.emplace_transform<RedactFtraceEvent>();
-  redact_ftrace_events->emplace_back<RedactSchedSwitch>();
-  redact_ftrace_events->emplace_back<RedactTaskNewTask>();
-  redact_ftrace_events->emplace_back<RedactProcessFree>();
+  redact_ftrace_events
+      ->emplace_back<RedactSchedSwitch::kFieldId, RedactSchedSwitch>();
+  redact_ftrace_events
+      ->emplace_back<RedactTaskNewTask::kFieldId, RedactTaskNewTask>();
+  redact_ftrace_events
+      ->emplace_back<RedactProcessFree::kFieldId, RedactProcessFree>();
 
   Context context;
   context.package_name = package_name;
