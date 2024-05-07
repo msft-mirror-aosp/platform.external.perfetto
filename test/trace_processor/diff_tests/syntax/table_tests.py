@@ -83,7 +83,7 @@ class PerfettoTable(TestSuite):
 
   def test_perfetto_table_info_runtime_table(self):
     return DiffTestBlueprint(
-        trace=DataPath('android_boot.pftrace'),
+        trace=TextProto(''),
         query="""
         CREATE PERFETTO TABLE foo AS
         SELECT * FROM
@@ -134,7 +134,7 @@ class PerfettoTable(TestSuite):
 
   def test_create_perfetto_table_id_column(self):
     return DiffTestBlueprint(
-        trace=DataPath('android_boot.pftrace'),
+        trace=TextProto(''),
         query="""
         CREATE PERFETTO TABLE foo AS
         SELECT 2 AS c
@@ -149,4 +149,105 @@ class PerfettoTable(TestSuite):
         out=Csv("""
         "col_type"
         "id"
+        """))
+
+  def test_distinct_trivial(self):
+    return DiffTestBlueprint(
+        trace=DataPath('example_android_trace_30s.pb'),
+        query="""
+        WITH trivial_count AS (
+          SELECT DISTINCT name AS c FROM slice
+        ),
+        few_results AS (
+          SELECT DISTINCT depth AS c FROM slice
+        ),
+        simple_nullable AS (
+          SELECT DISTINCT parent_id AS c FROM slice
+        ),
+        selector AS (
+          SELECT DISTINCT cpu AS c FROM ftrace_event
+        )
+        SELECT
+          (SELECT COUNT(*) FROM trivial_count) AS name,
+          (SELECT COUNT(*) FROM few_results) AS depth,
+          (SELECT COUNT(*) FROM simple_nullable) AS parent_id,
+          (SELECT COUNT(*) FROM selector) AS cpu_from_ftrace;
+        """,
+        out=Csv("""
+        "name","depth","parent_id","cpu_from_ftrace"
+        3073,8,4529,8
+        """))
+
+  def test_limit(self):
+    return DiffTestBlueprint(
+        trace=TextProto(''),
+        query="""
+        WITH data(a, b) AS (
+          VALUES
+            (0, 1),
+            (1, 10),
+            (2, 20),
+            (3, 30),
+            (4, 40),
+            (5, 50)
+        )
+        SELECT * FROM data LIMIT 3;
+        """,
+        out=Csv("""
+        "a","b"
+        0,1
+        1,10
+        2,20
+        """))
+
+  def test_limit_and_offset_in_bounds(self):
+    return DiffTestBlueprint(
+        trace=TextProto(''),
+        query="""
+        WITH data(a, b) AS (
+          VALUES
+            (0, 1),
+            (1, 10),
+            (2, 20),
+            (3, 30),
+            (4, 40),
+            (5, 50),
+            (6, 60),
+            (7, 70),
+            (8, 80),
+            (9, 90)
+        )
+        SELECT * FROM data LIMIT 2 OFFSET 3;
+        """,
+        out=Csv("""
+        "a","b"
+        3,30
+        4,40
+        """))
+
+  def test_limit_and_offset_not_in_bounds(self):
+    return DiffTestBlueprint(
+        trace=TextProto(''),
+        query="""
+        WITH data(a, b) AS (
+          VALUES
+            (0, 1),
+            (1, 10),
+            (2, 20),
+            (3, 30),
+            (4, 40),
+            (5, 50),
+            (6, 60),
+            (7, 70),
+            (8, 80),
+            (9, 90)
+        )
+        SELECT * FROM data LIMIT 5 OFFSET 6;
+        """,
+        out=Csv("""
+        "a","b"
+        6,60
+        7,70
+        8,80
+        9,90
         """))
