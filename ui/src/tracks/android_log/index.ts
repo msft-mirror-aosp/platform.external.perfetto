@@ -12,150 +12,87 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {PluginContext} from '../../common/plugin_api';
-import {NUM} from '../../common/query_result';
-import {fromNs, toNsCeil, toNsFloor} from '../../common/time';
-import {TrackData} from '../../common/track_data';
-import {LIMIT} from '../../common/track_data';
-import {
-  TrackController,
-} from '../../controller/track_controller';
-import {checkerboardExcept} from '../../frontend/checkerboard';
-import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
+import m from 'mithril';
+
+import {LogFilteringCriteria, LogPanel} from './logs_panel';
+import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {NUM} from '../../trace_processor/query_result';
+import {AndroidLogTrack} from './logs_track';
 
 export const ANDROID_LOGS_TRACK_KIND = 'AndroidLogTrack';
 
-export interface Data extends TrackData {
-  // Total number of log events within [start, end], before any quantization.
-  numEvents: number;
+const VERSION = 1;
 
-  // Below: data quantized by resolution and aggregated by event priority.
+const DEFAULT_STATE: AndroidLogPluginState = {
+  version: VERSION,
+  filter: {
+    // The first two log priorities are ignored.
+    minimumLevel: 2,
+    tags: [],
+    textEntry: '',
+    hideNonMatching: true,
+  },
+};
 
-  timestamps: Float64Array;
-
-  // Each Uint8 value has the i-th bit is set if there is at least one log
-  // event at the i-th priority level at the corresponding time in |timestamps|.
-  priorities: Uint8Array;
+interface AndroidLogPluginState {
+  version: number;
+  filter: LogFilteringCriteria;
 }
 
-export interface Config {}
+class AndroidLog implements Plugin {
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    const store = ctx.mountStore<AndroidLogPluginState>((init) => {
+      return init && (init as {version: unknown}).version === VERSION
+        ? (init as AndroidLogPluginState)
+        : DEFAULT_STATE;
+    });
 
-interface LevelCfg {
-  color: string;
-  prios: number[];
-}
-
-const LEVELS: LevelCfg[] = [
-  {color: 'hsl(122, 39%, 49%)', prios: [0, 1, 2, 3]},  // Up to DEBUG: Green.
-  {color: 'hsl(0, 0%, 70%)', prios: [4]},              // 4 (INFO) -> Gray.
-  {color: 'hsl(45, 100%, 51%)', prios: [5]},           // 5 (WARN) -> Amber.
-  {color: 'hsl(4, 90%, 58%)', prios: [6]},             // 6 (ERROR) -> Red.
-  {color: 'hsl(291, 64%, 42%)', prios: [7]},           // 7 (FATAL) -> Purple
-];
-
-const MARGIN_TOP = 2;
-const RECT_HEIGHT = 35;
-const EVT_PX = 2;  // Width of an event tick in pixels.
-
-class AndroidLogTrackController extends TrackController<Config, Data> {
-  static readonly kind = ANDROID_LOGS_TRACK_KIND;
-
-  async onBoundsChange(start: number, end: number, resolution: number):
-      Promise<Data> {
-    const startNs = toNsFloor(start);
-    const endNs = toNsCeil(end);
-
-    // |resolution| is in s/px the frontend wants.
-    const quantNs = toNsCeil(resolution);
-
-    const queryRes = await this.query(`
-      select
-        cast(ts / ${quantNs} as integer) * ${quantNs} as tsQuant,
-        prio,
-        count(prio) as numEvents
-      from android_logs
-      where ts >= ${startNs} and ts <= ${endNs}
-      group by tsQuant, prio
-      order by tsQuant, prio limit ${LIMIT};`);
-
-    const rowCount = queryRes.numRows();
-    const result = {
-      start,
-      end,
-      resolution,
-      length: rowCount,
-      numEvents: 0,
-      timestamps: new Float64Array(rowCount),
-      priorities: new Uint8Array(rowCount),
-    };
-
-
-    const it = queryRes.iter({tsQuant: NUM, prio: NUM, numEvents: NUM});
-    for (let row = 0; it.valid(); it.next(), row++) {
-      result.timestamps[row] = fromNs(it.tsQuant);
-      const prio = Math.min(it.prio, 7);
-      result.priorities[row] |= (1 << prio);
-      result.numEvents += it.numEvents;
+    const result = await ctx.engine.query(
+      `select count(1) as cnt from android_logs`,
+    );
+    const logCount = result.firstRow({cnt: NUM}).cnt;
+    if (logCount > 0) {
+      ctx.registerStaticTrack({
+        uri: 'perfetto.AndroidLog',
+        displayName: 'Android logs',
+        kind: ANDROID_LOGS_TRACK_KIND,
+        trackFactory: () => new AndroidLogTrack(ctx.engine),
+      });
     }
-    return result;
+
+    const androidLogsTabUri = 'perfetto.AndroidLog#tab';
+
+    // Eternal tabs should always be available even if there is nothing to show
+    const filterStore = store.createSubStore(
+      ['filter'],
+      (x) => x as LogFilteringCriteria,
+    );
+
+    ctx.registerTab({
+      isEphemeral: false,
+      uri: androidLogsTabUri,
+      content: {
+        render: () =>
+          m(LogPanel, {filterStore: filterStore, engine: ctx.engine}),
+        getTitle: () => 'Android Logs',
+      },
+    });
+
+    if (logCount > 0) {
+      ctx.addDefaultTab(androidLogsTabUri);
+    }
+
+    ctx.registerCommand({
+      id: 'perfetto.AndroidLog#ShowLogsTab',
+      name: 'Show android logs tab',
+      callback: () => {
+        ctx.tabs.showTab(androidLogsTabUri);
+      },
+    });
   }
 }
 
-class AndroidLogTrack extends Track<Config, Data> {
-  static readonly kind = ANDROID_LOGS_TRACK_KIND;
-  static create(args: NewTrackArgs): AndroidLogTrack {
-    return new AndroidLogTrack(args);
-  }
-
-  constructor(args: NewTrackArgs) {
-    super(args);
-  }
-
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-
-    const data = this.data();
-
-    if (data === undefined) return;  // Can't possibly draw anything.
-
-    const dataStartPx = timeScale.timeToPx(data.start);
-    const dataEndPx = timeScale.timeToPx(data.end);
-    const visibleStartPx = timeScale.timeToPx(visibleWindowTime.start);
-    const visibleEndPx = timeScale.timeToPx(visibleWindowTime.end);
-
-    checkerboardExcept(
-        ctx,
-        this.getHeight(),
-        visibleStartPx,
-        visibleEndPx,
-        dataStartPx,
-        dataEndPx);
-
-    const quantWidth =
-        Math.max(EVT_PX, timeScale.deltaTimeToPx(data.resolution));
-    const blockH = RECT_HEIGHT / LEVELS.length;
-    for (let i = 0; i < data.timestamps.length; i++) {
-      for (let lev = 0; lev < LEVELS.length; lev++) {
-        let hasEventsForCurColor = false;
-        for (const prio of LEVELS[lev].prios) {
-          if (data.priorities[i] & (1 << prio)) hasEventsForCurColor = true;
-        }
-        if (!hasEventsForCurColor) continue;
-        ctx.fillStyle = LEVELS[lev].color;
-        const px = Math.floor(timeScale.timeToPx(data.timestamps[i]));
-        ctx.fillRect(px, MARGIN_TOP + blockH * lev, quantWidth, blockH);
-      }  // for(lev)
-    }    // for (timestamps)
-  }
-}
-
-function activate(ctx: PluginContext) {
-  ctx.registerTrack(AndroidLogTrack);
-  ctx.registerTrackController(AndroidLogTrackController);
-}
-
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.AndroidLog',
-  activate,
+  plugin: AndroidLog,
 };

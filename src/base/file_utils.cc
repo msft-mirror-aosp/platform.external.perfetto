@@ -21,16 +21,18 @@
 
 #include <algorithm>
 #include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "perfetto/base/build_config.h"
+#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/base/platform_handle.h"
 #include "perfetto/base/status.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/platform.h"
 #include "perfetto/ext/base/scoped_file.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/utils.h"
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
@@ -40,6 +42,17 @@
 #include <stringapiset.h>
 #else
 #include <dirent.h>
+#include <unistd.h>
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
+#define PERFETTO_SET_FILE_PERMISSIONS
+#include <fcntl.h>
+#include <grp.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -54,11 +67,11 @@ int CloseFindHandle(HANDLE h) {
   return FindClose(h) ? 0 : -1;
 }
 
-Optional<std::wstring> ToUtf16(const std::string str) {
+std::optional<std::wstring> ToUtf16(const std::string str) {
   int len = MultiByteToWideChar(CP_UTF8, 0, str.data(),
                                 static_cast<int>(str.size()), nullptr, 0);
   if (len < 0) {
-    return base::nullopt;
+    return std::nullopt;
   }
   std::vector<wchar_t> tmp;
   tmp.resize(static_cast<std::vector<wchar_t>::size_type>(len));
@@ -66,7 +79,7 @@ Optional<std::wstring> ToUtf16(const std::string str) {
       MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()),
                           tmp.data(), static_cast<int>(tmp.size()));
   if (len < 0) {
-    return base::nullopt;
+    return std::nullopt;
   }
   PERFETTO_CHECK(static_cast<std::vector<wchar_t>::size_type>(len) ==
                  tmp.size());
@@ -344,6 +357,89 @@ std::string GetFileExtension(const std::string& filename) {
   if (ext_idx == std::string::npos)
     return std::string();
   return filename.substr(ext_idx);
+}
+
+base::Status SetFilePermissions(const std::string& file_path,
+                                const std::string& group_name_or_id,
+                                const std::string& mode_bits) {
+#ifdef PERFETTO_SET_FILE_PERMISSIONS
+  PERFETTO_CHECK(!file_path.empty());
+  PERFETTO_CHECK(!group_name_or_id.empty());
+
+  // Default |group_id| to -1 for not changing the group ownership.
+  gid_t group_id = static_cast<gid_t>(-1);
+  auto maybe_group_id = base::StringToUInt32(group_name_or_id);
+  if (maybe_group_id) {  // A numerical group ID.
+    group_id = *maybe_group_id;
+  } else {  // A group name.
+    struct group* file_group = nullptr;
+    // Query the group ID of |group|.
+    do {
+      file_group = getgrnam(group_name_or_id.c_str());
+    } while (file_group == nullptr && errno == EINTR);
+    if (file_group == nullptr) {
+      return base::ErrStatus("Failed to get group information of %s ",
+                             group_name_or_id.c_str());
+    }
+    group_id = file_group->gr_gid;
+  }
+
+  if (PERFETTO_EINTR(chown(file_path.c_str(), geteuid(), group_id))) {
+    return base::ErrStatus("Failed to chown %s ", file_path.c_str());
+  }
+
+  // |mode| accepts values like "0660" as "rw-rw----" mode bits.
+  auto mode_value = base::StringToInt32(mode_bits, 8);
+  if (!(mode_bits.size() == 4 && mode_value.has_value())) {
+    return base::ErrStatus(
+        "The chmod mode bits must be a 4-digit octal number, e.g. 0660");
+  }
+  if (PERFETTO_EINTR(
+          chmod(file_path.c_str(), static_cast<mode_t>(mode_value.value())))) {
+    return base::ErrStatus("Failed to chmod %s", file_path.c_str());
+  }
+  return base::OkStatus();
+#else
+  base::ignore_result(file_path);
+  base::ignore_result(group_name_or_id);
+  base::ignore_result(mode_bits);
+  return base::ErrStatus(
+      "Setting file permissions is not supported on this platform");
+#endif
+}
+
+std::optional<uint64_t> GetFileSize(const std::string& file_path) {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  // This does not use base::OpenFile to avoid getting an exclusive lock.
+  base::ScopedPlatformHandle fd(
+      CreateFileA(file_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+#else
+  base::ScopedFile fd(base::OpenFile(file_path, O_RDONLY | O_CLOEXEC));
+#endif
+  if (!fd) {
+    return std::nullopt;
+  }
+  return GetFileSize(*fd);
+}
+
+std::optional<uint64_t> GetFileSize(PlatformHandle fd) {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  LARGE_INTEGER file_size;
+  file_size.QuadPart = 0;
+  if (!GetFileSizeEx(fd, &file_size)) {
+    return std::nullopt;
+  }
+  static_assert(sizeof(decltype(file_size.QuadPart)) <= sizeof(uint64_t));
+  return static_cast<uint64_t>(file_size.QuadPart);
+#else
+  struct stat buf {};
+  if (fstat(fd, &buf) == -1) {
+    return std::nullopt;
+  }
+  static_assert(sizeof(decltype(buf.st_size)) <= sizeof(uint64_t));
+  return static_cast<uint64_t>(buf.st_size);
+#endif
 }
 
 }  // namespace base

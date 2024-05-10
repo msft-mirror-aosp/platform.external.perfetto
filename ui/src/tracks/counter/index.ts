@@ -12,568 +12,450 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
-import {searchSegment} from '../../base/binary_search';
-import {assertTrue} from '../../base/logging';
+import {Time} from '../../base/time';
 import {Actions} from '../../common/actions';
-import {
-  EngineProxy,
-  NUM,
-  NUM_NULL,
-  PluginContext,
-  STR,
-  TrackInfo,
-} from '../../common/plugin_api';
-import {fromNs, toNs} from '../../common/time';
-import {TrackData} from '../../common/track_data';
-import {
-  TrackController,
-} from '../../controller/track_controller';
-import {checkerboardExcept} from '../../frontend/checkerboard';
+import {CounterDetailsPanel} from '../../frontend/counter_panel';
 import {globals} from '../../frontend/globals';
-import {PopupMenuButton, PopupMenuItem} from '../../frontend/popup_menu';
-import {NewTrackArgs, Track} from '../../frontend/track';
+import {
+  NUM_NULL,
+  STR_NULL,
+  LONG,
+  LONG_NULL,
+  NUM,
+  Plugin,
+  PluginContextTrace,
+  PluginDescriptor,
+  PrimaryTrackSortKey,
+  STR,
+} from '../../public';
+import {getTrackName} from '../../public/utils';
+import {
+  BaseCounterTrack,
+  BaseCounterTrackArgs,
+  CounterOptions,
+} from '../../frontend/base_counter_track';
 
 export const COUNTER_TRACK_KIND = 'CounterTrack';
 
-// TODO(hjd): Convert to enum.
-export type CounterScaleOptions =
-    'ZERO_BASED'|'MIN_MAX'|'DELTA_FROM_PREVIOUS'|'RATE';
+const NETWORK_TRACK_REGEX = new RegExp('^.* (Received|Transmitted)( KB)?$');
+const ENTITY_RESIDENCY_REGEX = new RegExp('^Entity residency:');
 
-export interface Data extends TrackData {
-  maximumValue: number;
-  minimumValue: number;
-  maximumDelta: number;
-  minimumDelta: number;
-  maximumRate: number;
-  minimumRate: number;
-  timestamps: Float64Array;
-  lastIds: Float64Array;
-  minValues: Float64Array;
-  maxValues: Float64Array;
-  lastValues: Float64Array;
-  totalDeltas: Float64Array;
-  rate: Float64Array;
-}
+type Modes = CounterOptions['yMode'];
 
-export interface Config {
-  name: string;
-  maximumValue?: number;
-  minimumValue?: number;
-  startTs?: number;
-  endTs?: number;
-  namespace: string;
-  trackId: number;
-  scale?: CounterScaleOptions;
-}
+// Sets the default 'mode' for counter tracks. If the regex matches
+// then the paired mode is used. Entries are in priority order so the
+// first match wins.
+const COUNTER_REGEX: [RegExp, Modes][] = [
+  // Power counters make more sense in rate mode since you're typically
+  // interested in the slope of the graph rather than the absolute
+  // value.
+  [new RegExp('^power..*$'), 'rate'],
+  // Same for cumulative PSI stall time counters, e.g., psi.cpu.some.
+  [new RegExp('^psi..*$'), 'rate'],
+  // Same for network counters.
+  [NETWORK_TRACK_REGEX, 'rate'],
+  // Entity residency
+  [ENTITY_RESIDENCY_REGEX, 'rate'],
+];
 
-class CounterTrackController extends TrackController<Config, Data> {
-  static readonly kind = COUNTER_TRACK_KIND;
-  private setup = false;
-  private maximumValueSeen = 0;
-  private minimumValueSeen = 0;
-  private maximumDeltaSeen = 0;
-  private minimumDeltaSeen = 0;
-  private maxDurNs = 0;
-
-  async onBoundsChange(start: number, end: number, resolution: number):
-      Promise<Data> {
-    const startNs = toNs(start);
-    const endNs = toNs(end);
-
-    const pxSize = this.pxSize();
-
-    // ns per quantization bucket (i.e. ns per pixel). /2 * 2 is to force it to
-    // be an even number, so we can snap in the middle.
-    const bucketNs = Math.max(Math.round(resolution * 1e9 * pxSize / 2) * 2, 1);
-
-    if (!this.setup) {
-      if (this.config.namespace === undefined) {
-        await this.query(`
-          create view ${this.tableName('counter_view')} as
-          select
-            id,
-            ts,
-            dur,
-            value,
-            delta
-          from experimental_counter_dur
-          where track_id = ${this.config.trackId};
-        `);
-      } else {
-        await this.query(`
-          create view ${this.tableName('counter_view')} as
-          select
-            id,
-            ts,
-            lead(ts, 1, ts) over (order by ts) - ts as dur,
-            lead(value, 1, value) over (order by ts) - value as delta,
-            value
-          from ${this.namespaceTable('counter')}
-          where track_id = ${this.config.trackId};
-        `);
-      }
-
-      const maxDurResult = await this.query(`
-          select
-            max(
-              iif(dur != -1, dur, (select end_ts from trace_bounds) - ts)
-            ) as maxDur
-          from ${this.tableName('counter_view')}
-      `);
-      this.maxDurNs = maxDurResult.firstRow({maxDur: NUM_NULL}).maxDur || 0;
-
-      const queryRes = await this.query(`
-        select
-          ifnull(max(value), 0) as maxValue,
-          ifnull(min(value), 0) as minValue,
-          ifnull(max(delta), 0) as maxDelta,
-          ifnull(min(delta), 0) as minDelta
-        from ${this.tableName('counter_view')}`);
-      const row = queryRes.firstRow(
-          {maxValue: NUM, minValue: NUM, maxDelta: NUM, minDelta: NUM});
-      this.maximumValueSeen = row.maxValue;
-      this.minimumValueSeen = row.minValue;
-      this.maximumDeltaSeen = row.maxDelta;
-      this.minimumDeltaSeen = row.minDelta;
-
-      this.setup = true;
+function getCounterMode(name: string): Modes | undefined {
+  for (const [re, mode] of COUNTER_REGEX) {
+    if (name.match(re)) {
+      return mode;
     }
+  }
+  return undefined;
+}
 
-    const queryRes = await this.query(`
+function getDefaultCounterOptions(name: string): Partial<CounterOptions> {
+  const options: Partial<CounterOptions> = {};
+  options.yMode = getCounterMode(name);
+
+  if (name.endsWith('_pct')) {
+    options.yOverrideMinimum = 0;
+    options.yOverrideMaximum = 100;
+    options.unit = '%';
+  }
+
+  if (name.startsWith('power.')) {
+    options.yRangeSharingKey = 'power';
+  }
+
+  if (name.startsWith('mem.')) {
+    options.yRangeSharingKey = 'mem';
+  }
+
+  if (name.startsWith('battery_stats.')) {
+    options.yRangeSharingKey = 'battery_stats';
+  }
+
+  // All 'Entity residency: foo bar1234' tracks should share a y-axis
+  // with 'Entity residency: foo baz5678' etc tracks:
+  {
+    const r = new RegExp('Entity residency: ([^ ]+) ');
+    const m = r.exec(name);
+    if (m) {
+      options.yRangeSharingKey = `entity-residency-${m[1]}`;
+    }
+  }
+
+  {
+    const r = new RegExp('GPU .* Frequency');
+    const m = r.exec(name);
+    if (m) {
+      options.yRangeSharingKey = 'gpu-frequency';
+    }
+  }
+
+  return options;
+}
+
+interface TraceProcessorCounterTrackArgs extends BaseCounterTrackArgs {
+  trackId: number;
+  rootTable?: string;
+}
+
+export class TraceProcessorCounterTrack extends BaseCounterTrack {
+  private trackId: number;
+  private rootTable: string;
+
+  constructor(args: TraceProcessorCounterTrackArgs) {
+    super(args);
+    this.trackId = args.trackId;
+    this.rootTable = args.rootTable ?? 'counter';
+  }
+
+  getSqlSource() {
+    return `select ts, value from ${this.rootTable} where track_id = ${this.trackId}`;
+  }
+
+  onMouseClick({x}: {x: number}): boolean {
+    const {visibleTimeScale} = globals.timeline;
+    const time = visibleTimeScale.pxToHpTime(x).toTime('floor');
+
+    const query = `
       select
-        (ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs} as tsq,
-        min(value) as minValue,
-        max(value) as maxValue,
-        sum(delta) as totalDelta,
-        value_at_max_ts(ts, id) as lastId,
-        value_at_max_ts(ts, value) as lastValue
-      from ${this.tableName('counter_view')}
-      where ts >= ${startNs - this.maxDurNs} and ts <= ${endNs}
-      group by tsq
-      order by tsq
+        id,
+        ts as leftTs,
+        (
+          select ts
+          from ${this.rootTable}
+          where
+            track_id = ${this.trackId}
+            and ts >= ${time}
+          order by ts
+          limit 1
+        ) as rightTs
+      from ${this.rootTable}
+      where
+        track_id = ${this.trackId}
+        and ts < ${time}
+      order by ts DESC
+      limit 1
+    `;
+
+    this.engine.query(query).then((result) => {
+      const it = result.iter({
+        id: NUM,
+        leftTs: LONG,
+        rightTs: LONG_NULL,
+      });
+      if (!it.valid()) {
+        return;
+      }
+      const trackKey = this.trackKey;
+      const id = it.id;
+      const leftTs = Time.fromRaw(it.leftTs);
+
+      // TODO(stevegolton): Don't try to guess times and durations here, make it
+      // obvious to the user that this counter sample has no duration as it's
+      // the last one in the series
+      const rightTs = Time.fromRaw(it.rightTs ?? leftTs);
+
+      globals.makeSelection(
+        Actions.selectCounter({
+          leftTs,
+          rightTs,
+          id,
+          trackKey,
+        }),
+      );
+    });
+
+    return true;
+  }
+}
+
+class CounterPlugin implements Plugin {
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    await this.addCounterTracks(ctx);
+    await this.addGpuFrequencyTracks(ctx);
+    await this.addCpuFreqLimitCounterTracks(ctx);
+    await this.addCpuPerfCounterTracks(ctx);
+    await this.addThreadCounterTracks(ctx);
+    await this.addProcessCounterTracks(ctx);
+
+    ctx.registerDetailsPanel({
+      render: (sel) => {
+        if (sel.kind === 'COUNTER') {
+          return m(CounterDetailsPanel);
+        } else {
+          return undefined;
+        }
+      },
+    });
+  }
+
+  private async addCounterTracks(ctx: PluginContextTrace) {
+    const result = await ctx.engine.query(`
+      select name, id, unit
+      from (
+        select name, id, unit
+        from counter_track
+        where type = 'counter_track'
+        union
+        select name, id, unit
+        from gpu_counter_track
+        where name != 'gpufreq'
+      )
+      order by name
     `);
 
-    const numRows = queryRes.numRows();
-
-    const data: Data = {
-      start,
-      end,
-      length: numRows,
-      maximumValue: this.maximumValue(),
-      minimumValue: this.minimumValue(),
-      maximumDelta: this.maximumDeltaSeen,
-      minimumDelta: this.minimumDeltaSeen,
-      maximumRate: 0,
-      minimumRate: 0,
-      resolution,
-      timestamps: new Float64Array(numRows),
-      lastIds: new Float64Array(numRows),
-      minValues: new Float64Array(numRows),
-      maxValues: new Float64Array(numRows),
-      lastValues: new Float64Array(numRows),
-      totalDeltas: new Float64Array(numRows),
-      rate: new Float64Array(numRows),
-    };
-
-    const it = queryRes.iter({
-      'tsq': NUM,
-      'lastId': NUM,
-      'minValue': NUM,
-      'maxValue': NUM,
-      'lastValue': NUM,
-      'totalDelta': NUM,
+    // Add global or GPU counter tracks that are not bound to any pid/tid.
+    const it = result.iter({
+      name: STR,
+      unit: STR_NULL,
+      id: NUM,
     });
-    let lastValue = 0;
-    let lastTs = 0;
-    for (let row = 0; it.valid(); it.next(), row++) {
-      const ts = fromNs(it.tsq);
-      const value = it.lastValue;
-      const rate = (value - lastValue) / (ts - lastTs);
-      lastTs = ts;
-      lastValue = value;
 
-      data.timestamps[row] = ts;
-      data.lastIds[row] = it.lastId;
-      data.minValues[row] = it.minValue;
-      data.maxValues[row] = it.maxValue;
-      data.lastValues[row] = value;
-      data.totalDeltas[row] = it.totalDelta;
-      data.rate[row] = rate;
-      if (row > 0) {
-        data.rate[row - 1] = rate;
-        data.maximumRate = Math.max(data.maximumRate, rate);
-        data.minimumRate = Math.min(data.minimumRate, rate);
-      }
-    }
-    return data;
-  }
-
-  private maximumValue() {
-    if (this.config.maximumValue === undefined) {
-      return this.maximumValueSeen;
-    } else {
-      return this.config.maximumValue;
+    for (; it.valid(); it.next()) {
+      const trackId = it.id;
+      const displayName = it.name;
+      const unit = it.unit ?? undefined;
+      ctx.registerStaticTrack({
+        uri: `perfetto.Counter#${trackId}`,
+        displayName,
+        kind: COUNTER_TRACK_KIND,
+        trackIds: [trackId],
+        trackFactory: (trackCtx) => {
+          return new TraceProcessorCounterTrack({
+            engine: ctx.engine,
+            trackKey: trackCtx.trackKey,
+            trackId,
+            options: {
+              ...getDefaultCounterOptions(displayName),
+              unit,
+            },
+          });
+        },
+        sortKey: PrimaryTrackSortKey.COUNTER_TRACK,
+      });
     }
   }
 
-  private minimumValue() {
-    if (this.config.minimumValue === undefined) {
-      return this.minimumValueSeen;
-    } else {
-      return this.config.minimumValue;
-    }
-  }
-}
+  async addCpuFreqLimitCounterTracks(ctx: PluginContextTrace): Promise<void> {
+    const cpuFreqLimitCounterTracksSql = `
+      select name, id
+      from cpu_counter_track
+      where name glob "Cpu * Freq Limit"
+      order by name asc
+    `;
 
-
-// 0.5 Makes the horizontal lines sharp.
-const MARGIN_TOP = 3.5;
-const RECT_HEIGHT = 24.5;
-
-class CounterTrack extends Track<Config, Data> {
-  static readonly kind = COUNTER_TRACK_KIND;
-  static create(args: NewTrackArgs): CounterTrack {
-    return new CounterTrack(args);
+    this.addCpuCounterTracks(ctx, cpuFreqLimitCounterTracksSql);
   }
 
-  private mousePos = {x: 0, y: 0};
-  private hoveredValue: number|undefined = undefined;
-  private hoveredTs: number|undefined = undefined;
-  private hoveredTsEnd: number|undefined = undefined;
-
-  constructor(args: NewTrackArgs) {
-    super(args);
+  async addCpuPerfCounterTracks(ctx: PluginContextTrace): Promise<void> {
+    // Perf counter tracks are bound to CPUs, follow the scheduling and
+    // frequency track naming convention ("Cpu N ...").
+    // Note: we might not have a track for a given cpu if no data was seen from
+    // it. This might look surprising in the UI, but placeholder tracks are
+    // wasteful as there's no way of collapsing global counter tracks at the
+    // moment.
+    const addCpuPerfCounterTracksSql = `
+      select printf("Cpu %u %s", cpu, name) as name, id
+      from perf_counter_track as pct
+      order by perf_session_id asc, pct.name asc, cpu asc
+    `;
+    this.addCpuCounterTracks(ctx, addCpuPerfCounterTracksSql);
   }
 
-  getHeight() {
-    return MARGIN_TOP + RECT_HEIGHT;
-  }
+  async addCpuCounterTracks(
+    ctx: PluginContextTrace,
+    sql: string,
+  ): Promise<void> {
+    const result = await ctx.engine.query(sql);
 
-  getContextMenu(): m.Vnode<any> {
-    const currentScale = this.config.scale;
-    const scales: {name: CounterScaleOptions, humanName: string}[] = [
-      {name: 'ZERO_BASED', humanName: 'Zero based'},
-      {name: 'MIN_MAX', humanName: 'Min/Max'},
-      {name: 'DELTA_FROM_PREVIOUS', humanName: 'Delta'},
-      {name: 'RATE', humanName: 'Rate'},
-    ];
-    const items: PopupMenuItem[] = [];
-    for (const scale of scales) {
-      let text;
-      if (currentScale === scale.name) {
-        text = `*${scale.humanName}*`;
-      } else {
-        text = scale.humanName;
-      }
-      items.push({
-        itemType: 'regular',
-        text,
-        callback: () => {
-          this.config.scale = scale.name;
-          Actions.updateTrackConfig({
-            id: this.trackState.id,
-            config: this.config,
+    const it = result.iter({
+      name: STR,
+      id: NUM,
+    });
+
+    for (; it.valid(); it.next()) {
+      const name = it.name;
+      const trackId = it.id;
+      ctx.registerTrack({
+        uri: `perfetto.Counter#cpu${trackId}`,
+        displayName: name,
+        kind: COUNTER_TRACK_KIND,
+        trackIds: [trackId],
+        trackFactory: (trackCtx) => {
+          return new TraceProcessorCounterTrack({
+            engine: ctx.engine,
+            trackKey: trackCtx.trackKey,
+            trackId: trackId,
+            options: getDefaultCounterOptions(name),
           });
         },
       });
     }
-    return m(PopupMenuButton, {
-      icon: 'show_chart',
-      items,
+  }
+
+  async addThreadCounterTracks(ctx: PluginContextTrace): Promise<void> {
+    const result = await ctx.engine.query(`
+      select
+        thread_counter_track.name as trackName,
+        utid,
+        upid,
+        tid,
+        thread.name as threadName,
+        thread_counter_track.id as trackId,
+        thread.start_ts as startTs,
+        thread.end_ts as endTs
+      from thread_counter_track
+      join thread using(utid)
+      where thread_counter_track.name != 'thread_time'
+    `);
+
+    const it = result.iter({
+      startTs: LONG_NULL,
+      trackId: NUM,
+      endTs: LONG_NULL,
+      trackName: STR_NULL,
+      utid: NUM,
+      upid: NUM_NULL,
+      tid: NUM_NULL,
+      threadName: STR_NULL,
     });
-  }
-
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
-    // TODO: fonts and colors should come from the CSS and not hardcoded here.
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-    const data = this.data();
-
-    // Can't possibly draw anything.
-    if (data === undefined || data.timestamps.length === 0) {
-      return;
-    }
-
-    assertTrue(data.timestamps.length === data.minValues.length);
-    assertTrue(data.timestamps.length === data.maxValues.length);
-    assertTrue(data.timestamps.length === data.lastValues.length);
-    assertTrue(data.timestamps.length === data.totalDeltas.length);
-    assertTrue(data.timestamps.length === data.rate.length);
-
-    const scale: CounterScaleOptions = this.config.scale || 'ZERO_BASED';
-
-    let minValues = data.minValues;
-    let maxValues = data.maxValues;
-    let lastValues = data.lastValues;
-    let maximumValue = data.maximumValue;
-    let minimumValue = data.minimumValue;
-    if (scale === 'DELTA_FROM_PREVIOUS') {
-      lastValues = data.totalDeltas;
-      minValues = data.totalDeltas;
-      maxValues = data.totalDeltas;
-      maximumValue = data.maximumDelta;
-      minimumValue = data.minimumDelta;
-    }
-    if (scale === 'RATE') {
-      lastValues = data.rate;
-      minValues = data.rate;
-      maxValues = data.rate;
-      maximumValue = data.maximumRate;
-      minimumValue = data.minimumRate;
-    }
-
-    const endPx = Math.floor(timeScale.timeToPx(visibleWindowTime.end));
-    const zeroY = MARGIN_TOP + RECT_HEIGHT / (minimumValue < 0 ? 2 : 1);
-
-    // Quantize the Y axis to quarters of powers of tens (7.5K, 10K, 12.5K).
-    const maxValue = Math.max(maximumValue, 0);
-
-    let yMax = Math.max(Math.abs(minimumValue), maxValue);
-    const kUnits = ['', 'K', 'M', 'G', 'T', 'E'];
-    const exp = Math.ceil(Math.log10(Math.max(yMax, 1)));
-    const pow10 = Math.pow(10, exp);
-    yMax = Math.ceil(yMax / (pow10 / 4)) * (pow10 / 4);
-    let yRange = 0;
-    const unitGroup = Math.floor(exp / 3);
-    let yMin = 0;
-    let yLabel = '';
-    if (scale === 'MIN_MAX') {
-      yRange = maximumValue - minimumValue;
-      yMin = minimumValue;
-      yLabel = 'min - max';
-    } else {
-      yRange = minimumValue < 0 ? yMax * 2 : yMax;
-      yMin = minimumValue < 0 ? -yMax : 0;
-      yLabel = `${yMax / Math.pow(10, unitGroup * 3)} ${kUnits[unitGroup]}`;
-      if (scale === 'DELTA_FROM_PREVIOUS') {
-        yLabel += '\u0394';
-      } else if (scale === 'RATE') {
-        yLabel += '\u0394/t';
-      }
-    }
-
-    // There are 360deg of hue. We want a scale that starts at green with
-    // exp <= 3 (<= 1KB), goes orange around exp = 6 (~1MB) and red/violet
-    // around exp >= 9 (1GB).
-    // The hue scale looks like this:
-    // 0                              180                                 360
-    // Red        orange         green | blue         purple          magenta
-    // So we want to start @ 180deg with pow=0, go down to 0deg and then wrap
-    // back from 360deg back to 180deg.
-    const expCapped = Math.min(Math.max(exp - 3), 9);
-    const hue = (180 - Math.floor(expCapped * (180 / 6)) + 360) % 360;
-
-    ctx.fillStyle = `hsl(${hue}, 45%, 75%)`;
-    ctx.strokeStyle = `hsl(${hue}, 45%, 45%)`;
-
-    const calculateX = (ts: number) => {
-      return Math.floor(timeScale.timeToPx(ts));
-    };
-    const calculateY = (value: number) => {
-      return MARGIN_TOP + RECT_HEIGHT -
-          Math.round(((value - yMin) / yRange) * RECT_HEIGHT);
-    };
-
-    ctx.beginPath();
-    ctx.moveTo(calculateX(data.timestamps[0]), zeroY);
-    let lastDrawnY = zeroY;
-    for (let i = 0; i < data.timestamps.length; i++) {
-      const x = calculateX(data.timestamps[i]);
-      const minY = calculateY(minValues[i]);
-      const maxY = calculateY(maxValues[i]);
-      const lastY = calculateY(lastValues[i]);
-
-      ctx.lineTo(x, lastDrawnY);
-      if (minY === maxY) {
-        assertTrue(lastY === minY);
-        ctx.lineTo(x, lastY);
-      } else {
-        ctx.lineTo(x, minY);
-        ctx.lineTo(x, maxY);
-        ctx.lineTo(x, lastY);
-      }
-      lastDrawnY = lastY;
-    }
-    ctx.lineTo(endPx, lastDrawnY);
-    ctx.lineTo(endPx, zeroY);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Draw the Y=0 dashed line.
-    ctx.strokeStyle = `hsl(${hue}, 10%, 71%)`;
-    ctx.beginPath();
-    ctx.setLineDash([2, 4]);
-    ctx.moveTo(0, zeroY);
-    ctx.lineTo(endPx, zeroY);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    ctx.font = '10px Roboto Condensed';
-
-    if (this.hoveredValue !== undefined && this.hoveredTs !== undefined) {
-      // TODO(hjd): Add units.
-      let text: string;
-      if (scale === 'DELTA_FROM_PREVIOUS') {
-        text = 'delta: ';
-      } else if (scale === 'RATE') {
-        text = 'delta/t: ';
-      } else {
-        text = 'value: ';
-      }
-
-      text += `${this.hoveredValue.toLocaleString()}`;
-
-      ctx.fillStyle = `hsl(${hue}, 45%, 75%)`;
-      ctx.strokeStyle = `hsl(${hue}, 45%, 45%)`;
-
-      const xStart = Math.floor(timeScale.timeToPx(this.hoveredTs));
-      const xEnd = this.hoveredTsEnd === undefined ?
-          endPx :
-          Math.floor(timeScale.timeToPx(this.hoveredTsEnd));
-      const y = MARGIN_TOP + RECT_HEIGHT -
-          Math.round(((this.hoveredValue - yMin) / yRange) * RECT_HEIGHT);
-
-      // Highlight line.
-      ctx.beginPath();
-      ctx.moveTo(xStart, y);
-      ctx.lineTo(xEnd, y);
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.lineWidth = 1;
-
-      // Draw change marker.
-      ctx.beginPath();
-      ctx.arc(
-          xStart, y, 3 /* r*/, 0 /* start angle*/, 2 * Math.PI /* end angle*/);
-      ctx.fill();
-      ctx.stroke();
-
-      // Draw the tooltip.
-      this.drawTrackHoverTooltip(ctx, this.mousePos, text);
-    }
-
-    // Write the Y scale on the top left corner.
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.fillRect(0, 0, 42, 16);
-    ctx.fillStyle = '#666';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(`${yLabel}`, 5, 14);
-
-    // TODO(hjd): Refactor this into checkerboardExcept
-    {
-      const endPx = timeScale.timeToPx(visibleWindowTime.end);
-      const counterEndPx =
-          Math.min(timeScale.timeToPx(this.config.endTs || Infinity), endPx);
-
-      // Grey out RHS.
-      if (counterEndPx < endPx) {
-        ctx.fillStyle = '#0000001f';
-        ctx.fillRect(counterEndPx, 0, endPx - counterEndPx, this.getHeight());
-      }
-    }
-
-    // If the cached trace slices don't fully cover the visible time range,
-    // show a gray rectangle with a "Loading..." label.
-    checkerboardExcept(
-        ctx,
-        this.getHeight(),
-        timeScale.timeToPx(visibleWindowTime.start),
-        timeScale.timeToPx(visibleWindowTime.end),
-        timeScale.timeToPx(data.start),
-        timeScale.timeToPx(data.end));
-  }
-
-  onMouseMove(pos: {x: number, y: number}) {
-    const data = this.data();
-    if (data === undefined) return;
-    this.mousePos = pos;
-    const {timeScale} = globals.frontendLocalState;
-    const time = timeScale.pxToTime(pos.x);
-
-    const values = this.config.scale === 'DELTA_FROM_PREVIOUS' ?
-        data.totalDeltas :
-        data.lastValues;
-    const [left, right] = searchSegment(data.timestamps, time);
-    this.hoveredTs = left === -1 ? undefined : data.timestamps[left];
-    this.hoveredTsEnd = right === -1 ? undefined : data.timestamps[right];
-    this.hoveredValue = left === -1 ? undefined : values[left];
-  }
-
-  onMouseOut() {
-    this.hoveredValue = undefined;
-    this.hoveredTs = undefined;
-  }
-
-  onMouseClick({x}: {x: number}) {
-    const data = this.data();
-    if (data === undefined) return false;
-    const {timeScale} = globals.frontendLocalState;
-    const time = timeScale.pxToTime(x);
-    const [left, right] = searchSegment(data.timestamps, time);
-    if (left === -1) {
-      return false;
-    } else {
-      const counterId = data.lastIds[left];
-      if (counterId === -1) return true;
-      globals.makeSelection(Actions.selectCounter({
-        leftTs: toNs(data.timestamps[left]),
-        rightTs: right !== -1 ? toNs(data.timestamps[right]) : -1,
-        id: counterId,
-        trackId: this.trackState.id,
-      }));
-      return true;
+    for (; it.valid(); it.next()) {
+      const utid = it.utid;
+      const tid = it.tid;
+      const trackId = it.trackId;
+      const trackName = it.trackName;
+      const threadName = it.threadName;
+      const kind = COUNTER_TRACK_KIND;
+      const name = getTrackName({
+        name: trackName,
+        utid,
+        tid,
+        kind,
+        threadName,
+        threadTrack: true,
+      });
+      ctx.registerTrack({
+        uri: `perfetto.Counter#thread${trackId}`,
+        displayName: name,
+        kind,
+        trackIds: [trackId],
+        trackFactory: (trackCtx) => {
+          return new TraceProcessorCounterTrack({
+            engine: ctx.engine,
+            trackKey: trackCtx.trackKey,
+            trackId: trackId,
+            options: getDefaultCounterOptions(name),
+          });
+        },
+      });
     }
   }
-}
 
-async function globalTrackProvider(engine: EngineProxy): Promise<TrackInfo[]> {
-  const result = await engine.query(`
-    select name, id
-    from (
-      select name, id
-      from counter_track
-      where type = 'counter_track'
-      union
-      select name, id
-      from gpu_counter_track
-      where name != 'gpufreq'
-    )
-    order by name
+  async addProcessCounterTracks(ctx: PluginContextTrace): Promise<void> {
+    const result = await ctx.engine.query(`
+    select
+      process_counter_track.id as trackId,
+      process_counter_track.name as trackName,
+      upid,
+      process.pid,
+      process.name as processName
+    from process_counter_track
+    join process using(upid);
   `);
-
-  // Add global or GPU counter tracks that are not bound to any pid/tid.
-  const it = result.iter({
-    name: STR,
-    id: NUM,
-  });
-
-  const tracks: TrackInfo[] = [];
-  for (; it.valid(); it.next()) {
-    const name = it.name;
-    const trackId = it.id;
-    tracks.push({
-      trackKind: COUNTER_TRACK_KIND,
-      name,
-      config: {
-        name,
-        trackId,
-      },
+    const it = result.iter({
+      trackId: NUM,
+      trackName: STR_NULL,
+      upid: NUM,
+      pid: NUM_NULL,
+      processName: STR_NULL,
     });
+    for (let i = 0; it.valid(); ++i, it.next()) {
+      const trackId = it.trackId;
+      const pid = it.pid;
+      const trackName = it.trackName;
+      const upid = it.upid;
+      const processName = it.processName;
+      const kind = COUNTER_TRACK_KIND;
+      const name = getTrackName({
+        name: trackName,
+        upid,
+        pid,
+        kind,
+        processName,
+      });
+      ctx.registerTrack({
+        uri: `perfetto.Counter#process${trackId}`,
+        displayName: name,
+        kind: COUNTER_TRACK_KIND,
+        trackIds: [trackId],
+        trackFactory: (trackCtx) => {
+          return new TraceProcessorCounterTrack({
+            engine: ctx.engine,
+            trackKey: trackCtx.trackKey,
+            trackId: trackId,
+            options: getDefaultCounterOptions(name),
+          });
+        },
+      });
+    }
   }
-  return tracks;
+
+  private async addGpuFrequencyTracks(ctx: PluginContextTrace) {
+    const engine = ctx.engine;
+    const numGpus = await engine.getNumberOfGpus();
+
+    for (let gpu = 0; gpu < numGpus; gpu++) {
+      // Only add a gpu freq track if we have
+      // gpu freq data.
+      const freqExistsResult = await engine.query(`
+      select id
+      from gpu_counter_track
+      where name = 'gpufreq' and gpu_id = ${gpu}
+      limit 1;
+    `);
+      if (freqExistsResult.numRows() > 0) {
+        const trackId = freqExistsResult.firstRow({id: NUM}).id;
+        const uri = `perfetto.Counter#gpu_freq${gpu}`;
+        const name = `Gpu ${gpu} Frequency`;
+        ctx.registerTrack({
+          uri,
+          displayName: name,
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [trackId],
+          trackFactory: (trackCtx) => {
+            return new TraceProcessorCounterTrack({
+              engine: ctx.engine,
+              trackKey: trackCtx.trackKey,
+              trackId: trackId,
+              options: getDefaultCounterOptions(name),
+            });
+          },
+        });
+      }
+    }
+  }
 }
 
-export function activate(ctx: PluginContext) {
-  ctx.registerTrackController(CounterTrackController);
-  ctx.registerTrack(CounterTrack);
-  ctx.registerTrackProvider(globalTrackProvider);
-}
-
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.Counter',
-  activate,
+  plugin: CounterPlugin,
 };

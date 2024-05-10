@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export class DragGestureHandler {
+import {Disposable} from '../base/disposable';
+
+export class DragGestureHandler implements Disposable {
   private readonly boundOnMouseDown = this.onMouseDown.bind(this);
   private readonly boundOnMouseMove = this.onMouseMove.bind(this);
   private readonly boundOnMouseUp = this.onMouseUp.bind(this);
@@ -21,10 +23,11 @@ export class DragGestureHandler {
   private _isDragging = false;
 
   constructor(
-      private element: HTMLElement,
-      private onDrag: (x: number, y: number) => void,
-      private onDragStarted: (x: number, y: number) => void = () => {},
-      private onDragFinished = () => {}) {
+    private element: HTMLElement,
+    private onDrag: (x: number, y: number) => void,
+    private onDragStarted: (x: number, y: number) => void = () => {},
+    private onDragFinished = () => {},
+  ) {
     element.addEventListener('mousedown', this.boundOnMouseDown);
   }
 
@@ -33,8 +36,6 @@ export class DragGestureHandler {
     document.body.addEventListener('mousemove', this.boundOnMouseMove);
     document.body.addEventListener('mouseup', this.boundOnMouseUp);
     this.pendingMouseDownEvent = e;
-    // Prevent interactions with other DragGestureHandlers and event listeners
-    e.stopPropagation();
   }
 
   // We don't start the drag gesture on mouse down, instead we wait until
@@ -43,37 +44,50 @@ export class DragGestureHandler {
   private startDragGesture(e: MouseEvent) {
     this.clientRect = this.element.getBoundingClientRect();
     this.onDragStarted(
-        e.clientX - this.clientRect.left, e.clientY - this.clientRect.top);
+      e.clientX - this.clientRect.left,
+      e.clientY - this.clientRect.top,
+    );
   }
 
   private onMouseMove(e: MouseEvent) {
     if (e.buttons === 0) {
-      return this.onMouseUp(e);
+      return this.onMouseUp();
     }
-    if (this.pendingMouseDownEvent &&
-        (Math.abs(e.clientX - this.pendingMouseDownEvent.clientX) > 1 ||
-         Math.abs(e.clientY - this.pendingMouseDownEvent.clientY) > 1)) {
+    if (
+      this.pendingMouseDownEvent &&
+      (Math.abs(e.clientX - this.pendingMouseDownEvent.clientX) > 1 ||
+        Math.abs(e.clientY - this.pendingMouseDownEvent.clientY) > 1)
+    ) {
       this.startDragGesture(this.pendingMouseDownEvent);
       this.pendingMouseDownEvent = undefined;
     }
     if (!this.pendingMouseDownEvent) {
       this.onDrag(
-          e.clientX - this.clientRect!.left, e.clientY - this.clientRect!.top);
+        e.clientX - this.clientRect!.left,
+        e.clientY - this.clientRect!.top,
+      );
     }
-    e.stopPropagation();
   }
 
-  private onMouseUp(e: MouseEvent) {
+  private onMouseUp() {
     this._isDragging = false;
     document.body.removeEventListener('mousemove', this.boundOnMouseMove);
     document.body.removeEventListener('mouseup', this.boundOnMouseUp);
     if (!this.pendingMouseDownEvent) {
       this.onDragFinished();
     }
-    e.stopPropagation();
   }
 
   get isDragging() {
     return this._isDragging;
+  }
+
+  dispose() {
+    if (this._isDragging) {
+      this.onMouseUp();
+    }
+    document.body.removeEventListener('mousedown', this.boundOnMouseDown);
+    document.body.removeEventListener('mousemove', this.boundOnMouseMove);
+    document.body.removeEventListener('mouseup', this.boundOnMouseUp);
   }
 }

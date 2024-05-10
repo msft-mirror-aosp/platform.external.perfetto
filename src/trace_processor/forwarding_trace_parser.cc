@@ -19,9 +19,9 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
-#include "src/trace_processor/importers/proto/proto_trace_parser.h"
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
+#include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -53,6 +53,7 @@ TraceSorter::SortingMode ConvertSortingMode(SortingMode sorting_mode) {
 // Fuchsia traces have a magic number as documented here:
 // https://fuchsia.googlesource.com/fuchsia/+/HEAD/docs/development/tracing/trace-format/README.md#magic-number-record-trace-info-type-0
 constexpr uint64_t kFuchsiaMagicNumber = 0x0016547846040010;
+constexpr char kPerfMagic[] = "PERFILE2";
 
 }  // namespace
 
@@ -61,7 +62,7 @@ ForwardingTraceParser::ForwardingTraceParser(TraceProcessorContext* context)
 
 ForwardingTraceParser::~ForwardingTraceParser() {}
 
-util::Status ForwardingTraceParser::Parse(TraceBlobView blob) {
+base::Status ForwardingTraceParser::Parse(TraceBlobView blob) {
   // If this is the first Parse() call, guess the trace type and create the
   // appropriate parser.
   if (!reader_) {
@@ -80,21 +81,16 @@ util::Status ForwardingTraceParser::Parse(TraceBlobView blob) {
 
           // JSON traces have no guarantees about the order of events in them.
           context_->sorter.reset(
-              new TraceSorter(context_, std::move(context_->json_trace_parser),
-                              TraceSorter::SortingMode::kFullSort));
-        } else {
-          return util::ErrStatus("JSON support is disabled");
+              new TraceSorter(context_, TraceSorter::SortingMode::kFullSort));
+          break;
         }
-        break;
+        return base::ErrStatus("JSON support is disabled");
       }
       case kProtoTraceType: {
         PERFETTO_DLOG("Proto trace detected");
         auto sorting_mode = ConvertSortingMode(context_->config.sorting_mode);
         reader_.reset(new ProtoTraceReader(context_));
-        context_->sorter.reset(new TraceSorter(
-            context_,
-            std::unique_ptr<TraceParser>(new ProtoTraceParser(context_)),
-            sorting_mode));
+        context_->sorter.reset(new TraceSorter(context_, sorting_mode));
         context_->process_tracker->SetPidZeroIsUpidZeroIdleProcess();
         break;
       }
@@ -104,22 +100,20 @@ util::Status ForwardingTraceParser::Parse(TraceBlobView blob) {
           reader_ = std::move(context_->ninja_log_parser);
           break;
         }
-        return util::ErrStatus("Ninja support is disabled");
+        return base::ErrStatus("Ninja support is disabled");
       }
       case kFuchsiaTraceType: {
         PERFETTO_DLOG("Fuchsia trace detected");
-        if (context_->fuchsia_trace_parser &&
+        if (context_->fuchsia_record_parser &&
             context_->fuchsia_trace_tokenizer) {
           reader_ = std::move(context_->fuchsia_trace_tokenizer);
 
           // Fuschia traces can have massively out of order events.
-          context_->sorter.reset(new TraceSorter(
-              context_, std::move(context_->fuchsia_trace_parser),
-              TraceSorter::SortingMode::kFullSort));
-        } else {
-          return util::ErrStatus("Fuchsia support is disabled");
+          context_->sorter.reset(
+              new TraceSorter(context_, TraceSorter::SortingMode::kFullSort));
+          break;
         }
-        break;
+        return base::ErrStatus("Fuchsia support is disabled");
       }
       case kSystraceTraceType:
         PERFETTO_DLOG("Systrace trace detected");
@@ -127,9 +121,8 @@ util::Status ForwardingTraceParser::Parse(TraceBlobView blob) {
         if (context_->systrace_trace_parser) {
           reader_ = std::move(context_->systrace_trace_parser);
           break;
-        } else {
-          return util::ErrStatus("Systrace support is disabled");
         }
+        return base::ErrStatus("Systrace support is disabled");
       case kGzipTraceType:
       case kCtraceTraceType:
         if (trace_type == kGzipTraceType) {
@@ -140,20 +133,30 @@ util::Status ForwardingTraceParser::Parse(TraceBlobView blob) {
         if (context_->gzip_trace_parser) {
           reader_ = std::move(context_->gzip_trace_parser);
           break;
-        } else {
-          return util::ErrStatus(kNoZlibErr);
         }
+        return base::ErrStatus(kNoZlibErr);
       case kAndroidBugreportTraceType:
+        PERFETTO_DLOG("Android Bugreport detected");
         if (context_->android_bugreport_parser) {
           reader_ = std::move(context_->android_bugreport_parser);
           break;
         }
-        return util::ErrStatus("Android Bugreport support is disabled. %s",
+        return base::ErrStatus("Android Bugreport support is disabled. %s",
                                kNoZlibErr);
+      case kPerfDataTraceType:
+        PERFETTO_DLOG("perf data detected");
+        if (context_->perf_data_trace_tokenizer &&
+            context_->perf_record_parser) {
+          reader_ = std::move(context_->perf_data_trace_tokenizer);
+          context_->sorter.reset(
+              new TraceSorter(context_, TraceSorter::SortingMode::kDefault));
+          break;
+        }
+        return base::ErrStatus("perf.data parsing support is disabled.");
       case kUnknownTraceType:
         // If renaming this error message don't remove the "(ERR:fmt)" part.
         // The UI's error_dialog.ts uses it to make the dialog more graceful.
-        return util::ErrStatus("Unknown trace type provided (ERR:fmt)");
+        return base::ErrStatus("Unknown trace type provided (ERR:fmt)");
     }
   }
 
@@ -174,6 +177,9 @@ TraceType GuessTraceType(const uint8_t* data, size_t size) {
     memcpy(&first_word, data, sizeof(first_word));
     if (first_word == kFuchsiaMagicNumber)
       return kFuchsiaTraceType;
+  }
+  if (base::StartsWith(start, kPerfMagic)) {
+    return kPerfDataTraceType;
   }
   std::string start_minus_white_space = RemoveWhitespace(start);
   if (base::StartsWith(start_minus_white_space, "{\""))

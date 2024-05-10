@@ -59,6 +59,7 @@ default_targets = [
     '//protos/perfetto/trace:perfetto_trace_protos',
     '//src/android_internal:libperfetto_android_internal',
     '//src/base:perfetto_base_default_platform',
+    '//src/shared_lib:libperfetto_c',
     '//src/perfetto_cmd:perfetto',
     '//src/perfetto_cmd:trigger_perfetto',
     '//src/profiling/memory:heapprofd_client',
@@ -70,9 +71,11 @@ default_targets = [
     '//src/traced/probes:traced_probes',
     '//src/traced/service:traced',
     '//src/trace_processor:trace_processor_shell',
+    '//src/trace_redaction:trace_redactor',
     '//test/cts:perfetto_cts_deps',
     '//test/cts:perfetto_cts_jni_deps',
     '//test:perfetto_gtest_logcat_printer',
+    '//test:perfetto_end_to_end_integrationtests',
     '//test/vts:perfetto_vts_deps',
 ]
 
@@ -101,20 +104,43 @@ target_host_supported = [
     '//:libperfetto',
     '//:libperfetto_client_experimental',
     '//protos/perfetto/trace:perfetto_trace_protos',
+    '//src/shared_lib:libperfetto_c',
     '//src/trace_processor:demangle',
     '//src/trace_processor:trace_processor_shell',
+    '//src/traced/probes:traced_probes',
+    '//src/traced/service:traced',
 ]
 
 target_vendor_available = [
     '//:libperfetto_client_experimental',
 ]
 
+target_product_available = [
+    '//:libperfetto_client_experimental',
+]
+
 # Proto target groups which will be made public.
 proto_groups = {
-    'trace': [
-        '//protos/perfetto/trace:non_minimal_source_set',
-        '//protos/perfetto/trace:minimal_source_set'
-    ],
+    'trace': {
+        'types': ['lite'],
+        'targets': [
+            '//protos/perfetto/trace:non_minimal_source_set',
+            '//protos/perfetto/trace:minimal_source_set',
+        ]
+    },
+    'winscope': {
+        'types': ['filegroup'],
+        'targets': [
+            '//protos/perfetto/trace:non_minimal_source_set',
+            '//protos/perfetto/trace/android:winscope_extensions_source_set',
+        ]
+    },
+    'config': {
+        'types': ['lite'],
+        'targets': [
+            '//protos/perfetto/config:source_set',
+        ]
+    },
 }
 
 needs_libfts = [
@@ -133,7 +159,7 @@ shared_library_allowlist = [
     'android.hardware.health@2.0',
     'android.hardware.health-V2-ndk',
     'android.hardware.power.stats@1.0',
-    "android.hardware.power.stats-V1-cpp",
+    'android.hardware.power.stats-V1-cpp',
     'base',
     'binder',
     'binder_ndk',
@@ -145,8 +171,9 @@ shared_library_allowlist = [
     'log',
     'services',
     'statssocket',
-    "tracingproxy",
+    'tracingproxy',
     'utils',
+    'statspull',
 ]
 
 # Static libraries which are directly translated to Android system equivalents.
@@ -171,11 +198,10 @@ android_protobuf_src = 'external/protobuf/src'
 cflag_allowlist = r'^-DPERFETTO.*$'
 
 # Compiler defines which are passed through to the blueprint.
-define_allowlist = r'^(GOOGLE_PROTO.*)|(ZLIB_.*)|(USE_MMAP)|(HAVE_HIDDEN)$'
+define_allowlist = r'^(GOOGLE_PROTO.*)|(ZLIB_.*)|(USE_MMAP)$'
 
 # The directory where the generated perfetto_build_flags.h will be copied into.
 buildflags_dir = 'include/perfetto/base/build_configs/android_tree'
-
 
 def enumerate_data_deps():
   with open(os.path.join(ROOT_DIR, 'tools', 'test_data.txt')) as f:
@@ -233,10 +259,6 @@ additional_args = {
         ('test_suites', {'general-tests'}),
         ('test_config', 'PerfettoIntegrationTests.xml'),
     ],
-    'traced_probes': [('required', {
-        'libperfetto_android_internal', 'trigger_perfetto', 'traced_perf',
-        'mm_events'
-    }),],
     'libperfetto_android_internal': [('static_libs', {'libhealthhalutils'}),],
     'trace_processor_shell': [
         ('strip', {
@@ -251,12 +273,16 @@ additional_args = {
     ],
     'libperfetto_client_experimental': [
         ('apex_available', {
-            '//apex_available:platform', 'com.android.art',
-            'com.android.art.debug', 'com.android.tethering'
+            '//apex_available:platform', '//apex_available:anyapex'
         }),
         ('min_sdk_version', '30'),
         ('shared_libs', {'liblog'}),
         ('export_include_dirs', {'include', buildflags_dir}),
+    ],
+    'libperfetto_c': [
+        ('min_sdk_version', '30'),
+        ('export_include_dirs', {'include'}),
+        ('cflags', {'-DPERFETTO_SHLIB_SDK_IMPLEMENTATION'}),
     ],
     'perfetto_trace_protos': [
         ('apex_available', {
@@ -266,6 +292,7 @@ additional_args = {
         ('min_sdk_version', 'S'),
     ],
     'libperfetto': [('export_include_dirs', {'include', buildflags_dir}),],
+    'perfetto': [('required', {'perfetto_persistent_cfg.pbtxt'}),],
 }
 
 
@@ -322,7 +349,7 @@ def enable_libunwind(module):
 
 def enable_sqlite(module):
   if module.type == 'cc_binary_host':
-    module.static_libs.add('libsqlite')
+    module.static_libs.add('libsqlite_static_noicu')
     module.static_libs.add('sqlite_ext_percentile')
   elif module.host_supported:
     # Copy what the sqlite3 command line tool does.
@@ -331,7 +358,7 @@ def enable_sqlite(module):
     module.android.shared_libs.add('liblog')
     module.android.shared_libs.add('libutils')
     module.android.static_libs.add('sqlite_ext_percentile')
-    module.host.static_libs.add('libsqlite')
+    module.host.static_libs.add('libsqlite_static_noicu')
     module.host.static_libs.add('sqlite_ext_percentile')
   else:
     module.shared_libs.add('libsqlite')
@@ -499,6 +526,7 @@ class Module(object):
     self.cmd: Optional[str] = None
     self.host_supported = False
     self.vendor_available = False
+    self.product_available = False
     self.init_rc = set()
     self.out = set()
     self.export_include_dirs = set()
@@ -522,6 +550,7 @@ class Module(object):
     self.apex_available = set()
     self.min_sdk_version = None
     self.proto = dict()
+    self.output_extension: Optional[str] = None
     # The genrule_XXX below are properties that must to be propagated back
     # on the module(s) that depend on the genrule.
     self.genrule_headers = set()
@@ -548,6 +577,8 @@ class Module(object):
       self._output_field(output, 'host_supported')
     if self.vendor_available:
       self._output_field(output, 'vendor_available')
+    if self.product_available:
+      self._output_field(output, 'product_available')
     self._output_field(output, 'init_rc')
     self._output_field(output, 'out')
     self._output_field(output, 'export_include_dirs')
@@ -571,6 +602,7 @@ class Module(object):
     self._output_field(output, 'stubs')
     self._output_field(output, 'proto')
     self._output_field(output, 'main')
+    self._output_field(output, 'output_extension')
 
     target_out = []
     self._output_field(target_out, 'android')
@@ -697,8 +729,11 @@ def create_proto_modules(blueprint: Blueprint, gn: GnParser,
   cmd = ['mkdir -p %s &&' % cpp_out_dir, '$(location aprotoc)']
   cmd += ['--proto_path=%s' % tree_path]
 
+  tool_files = set()
   if buildtools_protobuf_src in target.proto_paths:
     cmd += ['--proto_path=%s' % android_protobuf_src]
+    # Add `google/protobuf/descriptor.proto` to implicit deps
+    tool_files.add(':libprotobuf-internal-descriptor-proto')
 
   # Descriptor targets only generate a single target.
   if target.proto_plugin == 'descriptor':
@@ -717,6 +752,12 @@ def create_proto_modules(blueprint: Blueprint, gn: GnParser,
     # add them to srcs.
     descriptor_module.srcs.update(
         gn_utils.label_to_path(src) for src in target.sources)
+    # Add the tool_files to srcs so that they get copied if this action is
+    # sandboxed in Soong.
+    # Add to `srcs` instead of `tool_files` (the latter will require a
+    # --proto_path that depends on Soong's sandbox implementation.)
+    descriptor_module.srcs.update(
+        src for src in tool_files)
     for dep in target.transitive_proto_deps():
       current_target = gn.get_target(dep.name)
       descriptor_module.srcs.update(
@@ -729,11 +770,30 @@ def create_proto_modules(blueprint: Blueprint, gn: GnParser,
   # generated files needs to declare two different types of dependencies --
   # source files in 'srcs' and headers in 'generated_headers' -- and it's not
   # valid to generate .h files from a source dependency and vice versa.
+  #
+  # We create an additional filegroup for .proto
+  # The .proto filegroup will be added to `tool_files` of rdeps so that the
+  # genrules can be sandboxed.
+
+  for proto_dep in target.proto_deps().union(target.transitive_proto_deps()):
+    tool_files.add(":" + label_to_module_name(proto_dep.name))
+
+  filegroup_module = Module('filegroup', target_module_name, target.name)
+  filegroup_module.srcs.update(
+      gn_utils.label_to_path(src) for src in target.sources)
+  blueprint.add_module(filegroup_module)
+
   source_module_name = target_module_name + '_gen'
   source_module = Module('genrule', source_module_name, target.name)
-  blueprint.add_module(source_module)
+  # Add the "root" .proto filegroup to srcs
+  source_module.srcs = set([':' + target_module_name])
+  # Add the tool_files to srcs so that they get copied if this action is
+  # sandboxed in Soong.
+  # Add to `srcs` instead of `tool_files` (the latter will require a
+  # --proto_path that depends on Soong's sandbox implementation.)
   source_module.srcs.update(
-      gn_utils.label_to_path(src) for src in target.sources)
+      src for src in tool_files)
+  blueprint.add_module(source_module)
 
   header_module = Module('genrule', source_module_name + '_headers',
                          target.name)
@@ -778,19 +838,20 @@ def create_proto_modules(blueprint: Blueprint, gn: GnParser,
   else:
     raise Error('Unsupported proto plugin: %s' % target.proto_plugin)
 
-  cmd += ['$(in)']
+  cmd += ['$(locations :%s)' % target_module_name]
   source_module.cmd = ' '.join(cmd)
   header_module.cmd = source_module.cmd
   source_module.tools = tools
   header_module.tools = tools
 
+
   for sfx in suffixes:
     source_module.out.update('%s/%s' %
                              (tree_path, src.replace('.proto', '.%s.cc' % sfx))
-                             for src in source_module.srcs)
+                             for src in filegroup_module.srcs)
     header_module.out.update('%s/%s' %
                              (tree_path, src.replace('.proto', '.%s.h' % sfx))
-                             for src in header_module.srcs)
+                             for src in filegroup_module.srcs)
   return source_module
 
 
@@ -818,10 +879,9 @@ def create_tp_tables_module(blueprint: Blueprint, gn: GnParser,
   module.cmd = ' '.join([
       f'$(location {bp_binary_module_name})',
       '--gen-dir=$(genDir)',
+      '--relative-input-dir=external/perfetto',
       '--inputs',
       '$(in)',
-      '--outputs',
-      '$(out)',
   ])
   module.out.update(target.outputs)
   module.genrule_headers.add(module.name)
@@ -856,6 +916,12 @@ def create_amalgamated_sql_module(blueprint: Blueprint, gn: GnParser,
   module.out.update(target.outputs)
 
   for dep in target.transitive_deps:
+    # Use globs for the chrome stdlib so the file does not need to be
+    # regenerated in autoroll CLs.
+    if dep.name.startswith(
+          '//src/trace_processor/perfetto_sql/stdlib/chrome:chrome_sql'):
+      module.srcs.add('src/trace_processor/perfetto_sql/stdlib/chrome/**/*.sql')
+      continue
     module.srcs.update(
         [gn_utils.label_to_path(src) for src in gn.get_target(dep.name).inputs])
   blueprint.add_module(module)
@@ -902,23 +968,34 @@ def create_gen_version_module(blueprint: Blueprint, target: GnParser.Target,
 
 
 def create_proto_group_modules(blueprint, gn: GnParser, module_name: str,
-                               target_names):
-  # TODO(lalitm): today, we're only adding a Java lite module because that's
-  # the only one used in practice. In the future, if we need other target types
-  # (e.g. C++, Java full etc.) add them here.
-  bp_module_name = label_to_module_name(module_name) + '_java_protos'
-  module = Module('java_library', bp_module_name, bp_module_name)
-  module.comment = f'''GN: [{', '.join(target_names)}]'''
-  module.proto = {'type': 'lite', 'canonical_path_from_root': False}
+                               group):
+  target_names = group['targets']
+  module_types = group['types']
+  module_sources = set()
 
   for name in target_names:
     target = gn.get_target(name)
-    module.srcs.update(gn_utils.label_to_path(src) for src in target.sources)
+    module_sources.update(gn_utils.label_to_path(src) for src in target.sources)
     for dep_label in target.transitive_proto_deps():
       dep = gn.get_target(dep_label.name)
-      module.srcs.update(gn_utils.label_to_path(src) for src in dep.sources)
+      module_sources.update(gn_utils.label_to_path(src) for src in dep.sources)
 
-  blueprint.add_module(module)
+  for type in module_types:
+    if type == 'filegroup':
+      name = label_to_module_name(module_name) + '_filegroup_proto'
+      module = Module('filegroup', name, name)
+      module.comment = f'''GN: [{', '.join(target_names)}]'''
+      module.srcs = module_sources
+      blueprint.add_module(module)
+    elif type == 'lite':
+      name = label_to_module_name(module_name) + '_java_protos'
+      module = Module('java_library', name, name)
+      module.comment = f'''GN: [{', '.join(target_names)}]'''
+      module.proto = {'type': 'lite', 'canonical_path_from_root': False}
+      module.srcs = module_sources
+      blueprint.add_module(module)
+    else:
+      raise Error('Unhandled proto group type: {}'.format(group.type))
 
 
 def _get_cflags(target: GnParser.Target):
@@ -987,8 +1064,12 @@ def create_modules_from_target(blueprint: Blueprint, gn: GnParser,
   blueprint.add_module(module)
   module.host_supported = (name_without_toolchain in target_host_supported)
   module.vendor_available = (name_without_toolchain in target_vendor_available)
+  module.product_available = (name_without_toolchain in target_product_available)
   module.init_rc.update(target_initrc.get(target.name, []))
-  module.srcs.update(
+  if target.type != 'proto_library':
+    # proto_library embeds a "root" filegroup in its srcs.
+    # Skip to prevent adding dups
+    module.srcs.update(
       gn_utils.label_to_path(src)
       for src in target.sources
       if is_supported_source_file(src))
@@ -1170,8 +1251,8 @@ def main():
   # checker = gn_utils.ODRChecker(gn, target_name)
 
   # Add any proto groups to the blueprint.
-  for l_name, t_names in proto_groups.items():
-    create_proto_group_modules(blueprint, gn, l_name, t_names)
+  for name, group in proto_groups.items():
+    create_proto_group_modules(blueprint, gn, name, group)
 
   output = [
       """// Copyright (C) 2017 The Android Open Source Project

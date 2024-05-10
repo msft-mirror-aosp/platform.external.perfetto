@@ -27,11 +27,7 @@
 #include <google/protobuf/compiler/code_generator.h>
 #include <google/protobuf/compiler/importer.h>
 #include <google/protobuf/compiler/plugin.h>
-#include <google/protobuf/dynamic_message.h>
 #include <google/protobuf/io/printer.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
-#include <google/protobuf/util/field_comparator.h>
-#include <google/protobuf/util/message_differencer.h>
 
 #include "perfetto/ext/base/string_utils.h"
 
@@ -99,7 +95,13 @@ class CppObjGenerator : public ::google::protobuf::compiler::CodeGenerator {
     return full_type;
   }
 
+  template <class T>
+  bool HasSamePackage(const T* descriptor) const {
+    return descriptor->file()->package() == package_;
+  }
+
   mutable std::string wrapper_namespace_;
+  mutable std::string package_;
 };
 
 CppObjGenerator::CppObjGenerator() = default;
@@ -119,6 +121,8 @@ bool CppObjGenerator::Generate(const google::protobuf::FileDescriptor* file,
       return false;
     }
   }
+
+  package_ = file->package();
 
   auto get_file_name = [](const FileDescriptor* proto) {
     return StripSuffix(proto->name(), ".proto") + ".gen";
@@ -376,10 +380,16 @@ std::string CppObjGenerator::GetCppType(const FieldDescriptor* field,
       return constref ? "const std::string&" : "std::string";
     case FieldDescriptor::TYPE_MESSAGE:
       assert(!field->options().lazy());
-      return constref ? "const " + GetFullName(field->message_type()) + "&"
-                      : GetFullName(field->message_type());
+      return constref
+                 ? "const " +
+                       GetFullName(field->message_type(),
+                                   !HasSamePackage(field->message_type())) +
+                       "&"
+                 : GetFullName(field->message_type(),
+                               !HasSamePackage(field->message_type()));
     case FieldDescriptor::TYPE_ENUM:
-      return GetFullName(field->enum_type());
+      return GetFullName(field->enum_type(),
+                         !HasSamePackage(field->enum_type()));
     case FieldDescriptor::TYPE_GROUP:
       abort();
   }
@@ -702,9 +712,14 @@ void CppObjGenerator::GenClassDef(const Descriptor* msg, Printer* p) const {
   p->Print("bool $n$::operator==(const $n$& other) const {\n", "n", full_name);
   p->Indent();
 
-  p->Print("return unknown_fields_ == other.unknown_fields_");
+  p->Print(
+      "return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, "
+      "other.unknown_fields_)");
   for (int i = 0; i < msg->field_count(); i++)
-    p->Print("\n && $n$_ == other.$n$_", "n", msg->field(i)->lowercase_name());
+    p->Print(
+        "\n && ::protozero::internal::gen_helpers::EqualsField($n$_, "
+        "other.$n$_)",
+        "n", msg->field(i)->lowercase_name());
   p->Print(";");
   p->Outdent();
   p->Print("\n}\n\n");

@@ -20,18 +20,14 @@
 #include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/tables/track_tables_py.h"
 
 namespace perfetto {
 namespace trace_processor {
 
-#if !PERFETTO_IS_AT_LEAST_CPP17()
-// static
-constexpr uint64_t TrackEventTracker::kDefaultDescriptorTrackUuid;
-#endif
-
 TrackEventTracker::TrackEventTracker(TraceProcessorContext* context)
     : source_key_(context->storage->InternString("source")),
-      source_id_key_(context->storage->InternString("source_id")),
+      source_id_key_(context->storage->InternString("trace_id")),
       is_root_in_scope_key_(context->storage->InternString("is_root_in_scope")),
       category_key_(context->storage->InternString("category")),
       has_first_packet_on_sequence_key_id_(
@@ -76,13 +72,15 @@ void TrackEventTracker::ReserveDescriptorThreadTrack(uint64_t uuid,
                                                      StringId name,
                                                      uint32_t pid,
                                                      uint32_t tid,
-                                                     int64_t timestamp) {
+                                                     int64_t timestamp,
+                                                     bool use_separate_track) {
   DescriptorTrackReservation reservation;
   reservation.min_timestamp = timestamp;
   reservation.parent_uuid = parent_uuid;
   reservation.pid = pid;
   reservation.tid = tid;
   reservation.name = name;
+  reservation.use_separate_track = use_separate_track;
 
   std::map<uint64_t, DescriptorTrackReservation>::iterator it;
   bool inserted;
@@ -163,11 +161,27 @@ void TrackEventTracker::ReserveDescriptorChildTrack(uint64_t uuid,
   context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
 }
 
-base::Optional<TrackId> TrackEventTracker::GetDescriptorTrack(
+TrackId TrackEventTracker::InsertThreadTrack(UniqueTid utid) {
+  tables::ThreadTrackTable::Row row;
+  row.utid = utid;
+  row.machine_id = context_->machine_id();
+  auto* thread_tracks = context_->storage->mutable_thread_track_table();
+  return thread_tracks->Insert(row).id;
+}
+
+TrackId TrackEventTracker::InternThreadTrack(UniqueTid utid) {
+  auto it = thread_tracks_.find(utid);
+  if (it != thread_tracks_.end()) {
+    return it->second;
+  }
+  return thread_tracks_[utid] = InsertThreadTrack(utid);
+}
+
+std::optional<TrackId> TrackEventTracker::GetDescriptorTrack(
     uint64_t uuid,
     StringId event_name,
-    base::Optional<uint32_t> packet_sequence_id) {
-  base::Optional<TrackId> track_id =
+    std::optional<uint32_t> packet_sequence_id) {
+  std::optional<TrackId> track_id =
       GetDescriptorTrackImpl(uuid, packet_sequence_id);
   if (!track_id || event_name.is_null())
     return track_id;
@@ -191,19 +205,19 @@ base::Optional<TrackId> TrackEventTracker::GetDescriptorTrack(
   return track_id;
 }
 
-base::Optional<TrackId> TrackEventTracker::GetDescriptorTrackImpl(
+std::optional<TrackId> TrackEventTracker::GetDescriptorTrackImpl(
     uint64_t uuid,
-    base::Optional<uint32_t> packet_sequence_id) {
+    std::optional<uint32_t> packet_sequence_id) {
   auto it = descriptor_tracks_.find(uuid);
   if (it != descriptor_tracks_.end())
     return it->second;
 
-  base::Optional<ResolvedDescriptorTrack> resolved_track =
+  std::optional<ResolvedDescriptorTrack> resolved_track =
       ResolveDescriptorTrack(uuid, nullptr);
   if (!resolved_track)
-    return base::nullopt;
+    return std::nullopt;
 
-  // The reservation must exist as |resolved_track| would have been nullopt
+  // The reservation must exist as |resolved_track| would have been std::nullopt
   // otherwise.
   auto reserved_it = reserved_descriptor_tracks_.find(uuid);
   PERFETTO_CHECK(reserved_it != reserved_descriptor_tracks_.end());
@@ -212,7 +226,7 @@ base::Optional<TrackId> TrackEventTracker::GetDescriptorTrackImpl(
 
   // We resolve parent_id here to ensure that it's going to be smaller
   // than the id of the child.
-  base::Optional<TrackId> parent_id;
+  std::optional<TrackId> parent_id;
   if (reservation.parent_uuid != 0) {
     parent_id = GetDescriptorTrackImpl(reservation.parent_uuid);
   }
@@ -252,8 +266,12 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
     const ResolvedDescriptorTrack& track) {
   if (track.is_root_in_scope()) {
     switch (track.scope()) {
-      case ResolvedDescriptorTrack::Scope::kThread:
+      case ResolvedDescriptorTrack::Scope::kThread: {
+        if (track.use_separate_track()) {
+          return InternThreadTrack(track.utid());
+        }
         return context_->track_tracker->InternThreadTrack(track.utid());
+      }
       case ResolvedDescriptorTrack::Scope::kProcess:
         return context_->track_tracker->InternProcessTrack(track.upid());
       case ResolvedDescriptorTrack::Scope::kGlobal:
@@ -267,22 +285,20 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
       if (track.is_counter()) {
         tables::ThreadCounterTrackTable::Row row;
         row.utid = track.utid();
+        row.machine_id = context_->machine_id();
 
         auto* thread_counter_tracks =
             context_->storage->mutable_thread_counter_track_table();
         return thread_counter_tracks->Insert(row).id;
       }
 
-      tables::ThreadTrackTable::Row row;
-      row.utid = track.utid();
-
-      auto* thread_tracks = context_->storage->mutable_thread_track_table();
-      return thread_tracks->Insert(row).id;
+      return InsertThreadTrack(track.utid());
     }
     case ResolvedDescriptorTrack::Scope::kProcess: {
       if (track.is_counter()) {
         tables::ProcessCounterTrackTable::Row row;
         row.upid = track.upid();
+        row.machine_id = context_->machine_id();
 
         auto* process_counter_tracks =
             context_->storage->mutable_process_counter_track_table();
@@ -291,20 +307,26 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
 
       tables::ProcessTrackTable::Row row;
       row.upid = track.upid();
+      row.machine_id = context_->machine_id();
 
       auto* process_tracks = context_->storage->mutable_process_track_table();
       return process_tracks->Insert(row).id;
     }
     case ResolvedDescriptorTrack::Scope::kGlobal: {
-      if (track.is_counter())
-        return context_->storage->mutable_counter_track_table()->Insert({}).id;
-      return context_->storage->mutable_track_table()->Insert({}).id;
+      if (track.is_counter()) {
+        tables::CounterTrackTable::Row row;
+        row.machine_id = context_->machine_id();
+        return context_->storage->mutable_counter_track_table()->Insert(row).id;
+      }
+      tables::TrackTable::Row row;
+      row.machine_id = context_->machine_id();
+      return context_->storage->mutable_track_table()->Insert(row).id;
     }
   }
   PERFETTO_FATAL("For GCC");
 }
 
-base::Optional<TrackEventTracker::ResolvedDescriptorTrack>
+std::optional<TrackEventTracker::ResolvedDescriptorTrack>
 TrackEventTracker::ResolveDescriptorTrack(
     uint64_t uuid,
     std::vector<uint64_t>* descendent_uuids) {
@@ -314,7 +336,7 @@ TrackEventTracker::ResolveDescriptorTrack(
 
   auto reservation_it = reserved_descriptor_tracks_.find(uuid);
   if (reservation_it == reserved_descriptor_tracks_.end())
-    return base::nullopt;
+    return std::nullopt;
 
   // Resolve process and thread id for tracks produced from within a pid
   // namespace.
@@ -336,16 +358,16 @@ TrackEventTracker::ResolveDescriptorTrack(
       reservation.pid = *opt_resolved_pid;
   }
 
-  base::Optional<ResolvedDescriptorTrack> resolved_track =
+  std::optional<ResolvedDescriptorTrack> resolved_track =
       ResolveDescriptorTrackImpl(uuid, reservation, descendent_uuids);
   if (!resolved_track) {
-    return base::nullopt;
+    return std::nullopt;
   }
   resolved_descriptor_tracks_[uuid] = *resolved_track;
   return resolved_track;
 }
 
-base::Optional<TrackEventTracker::ResolvedDescriptorTrack>
+std::optional<TrackEventTracker::ResolvedDescriptorTrack>
 TrackEventTracker::ResolveDescriptorTrackImpl(
     uint64_t uuid,
     const DescriptorTrackReservation& reservation,
@@ -353,7 +375,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
   static constexpr size_t kMaxAncestors = 10;
 
   // Try to resolve any parent tracks recursively, too.
-  base::Optional<ResolvedDescriptorTrack> parent_resolved_track;
+  std::optional<ResolvedDescriptorTrack> parent_resolved_track;
   if (reservation.parent_uuid) {
     // Input data may contain loops or extremely long ancestor track chains. To
     // avoid stack overflow in these situations, we keep track of the ancestors
@@ -370,7 +392,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
           "Too many ancestors in parent_track_uuid hierarchy at track %" PRIu64
           " with parent %" PRIu64,
           uuid, reservation.parent_uuid);
-      return base::nullopt;
+      return std::nullopt;
     }
 
     if (std::find(descendent_uuids->begin(), descendent_uuids->end(),
@@ -379,7 +401,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
           "Loop detected in parent_track_uuid hierarchy at track %" PRIu64
           " with parent %" PRIu64,
           uuid, reservation.parent_uuid);
-      return base::nullopt;
+      return std::nullopt;
     }
 
     parent_resolved_track =
@@ -412,7 +434,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
                     *reservation.pid, *reservation.tid, old_uuid, uuid,
                     reservation.min_timestamp);
 
-      utid = context_->process_tracker->StartNewThread(base::nullopt,
+      utid = context_->process_tracker->StartNewThread(std::nullopt,
                                                        *reservation.tid);
 
       // Associate the new thread with its process.
@@ -422,7 +444,8 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
       descriptor_uuids_by_utid_[utid] = uuid;
     }
     return ResolvedDescriptorTrack::Thread(utid, false /* is_counter */,
-                                           true /* is_root*/);
+                                           true /* is_root*/,
+                                           reservation.use_separate_track);
   }
 
   if (reservation.pid) {
@@ -444,7 +467,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
                     reservation.min_timestamp);
 
       upid = context_->process_tracker->StartNewProcess(
-          base::nullopt, base::nullopt, *reservation.pid, kNullStringId,
+          std::nullopt, std::nullopt, *reservation.pid, kNullStringId,
           ThreadNamePriority::kTrackDescriptor);
 
       descriptor_uuids_by_upid_[upid] = uuid;
@@ -457,9 +480,9 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
     switch (parent_resolved_track->scope()) {
       case ResolvedDescriptorTrack::Scope::kThread:
         // If parent is a thread track, create another thread-associated track.
-        return ResolvedDescriptorTrack::Thread(parent_resolved_track->utid(),
-                                               reservation.is_counter,
-                                               false /* is_root*/);
+        return ResolvedDescriptorTrack::Thread(
+            parent_resolved_track->utid(), reservation.is_counter,
+            false /* is_root*/, parent_resolved_track->use_separate_track());
       case ResolvedDescriptorTrack::Scope::kProcess:
         // If parent is a process track, create another process-associated
         // track.
@@ -487,7 +510,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
           "Loop detected in parent_track_uuid hierarchy at track %" PRIu64
           " with parent %" PRIu64,
           uuid, kDefaultDescriptorTrackUuid);
-      return base::nullopt;
+      return std::nullopt;
     }
 
     // This track will be implicitly a child of the default global track.
@@ -500,7 +523,7 @@ TrackEventTracker::ResolveDescriptorTrackImpl(
 TrackId TrackEventTracker::GetOrCreateDefaultDescriptorTrack() {
   // If the default track was already reserved (e.g. because a producer emitted
   // a descriptor for it) or created, resolve and return it.
-  base::Optional<TrackId> track_id =
+  std::optional<TrackId> track_id =
       GetDescriptorTrack(kDefaultDescriptorTrackUuid);
   if (track_id)
     return *track_id;
@@ -511,7 +534,7 @@ TrackId TrackEventTracker::GetOrCreateDefaultDescriptorTrack() {
   return *GetDescriptorTrack(kDefaultDescriptorTrackUuid);
 }
 
-base::Optional<double> TrackEventTracker::ConvertToAbsoluteCounterValue(
+std::optional<double> TrackEventTracker::ConvertToAbsoluteCounterValue(
     uint64_t counter_track_uuid,
     uint32_t packet_sequence_id,
     double value) {
@@ -519,14 +542,14 @@ base::Optional<double> TrackEventTracker::ConvertToAbsoluteCounterValue(
   if (reservation_it == reserved_descriptor_tracks_.end()) {
     PERFETTO_DLOG("Unknown counter track with uuid %" PRIu64,
                   counter_track_uuid);
-    return base::nullopt;
+    return std::nullopt;
   }
 
   DescriptorTrackReservation& reservation = reservation_it->second;
   if (!reservation.is_counter) {
     PERFETTO_DLOG("Track with uuid %" PRIu64 " is not a counter track",
                   counter_track_uuid);
-    return base::nullopt;
+    return std::nullopt;
   }
 
   if (reservation.unit_multiplier > 0)
@@ -540,7 +563,7 @@ base::Optional<double> TrackEventTracker::ConvertToAbsoluteCounterValue(
           " got:%" PRIu32 ")",
           counter_track_uuid, reservation.packet_sequence_id,
           packet_sequence_id);
-      return base::nullopt;
+      return std::nullopt;
     }
 
     reservation.latest_value += value;
@@ -586,12 +609,14 @@ TrackEventTracker::ResolvedDescriptorTrack::Process(UniquePid upid,
 TrackEventTracker::ResolvedDescriptorTrack
 TrackEventTracker::ResolvedDescriptorTrack::Thread(UniqueTid utid,
                                                    bool is_counter,
-                                                   bool is_root) {
+                                                   bool is_root,
+                                                   bool use_separate_track) {
   ResolvedDescriptorTrack track;
   track.scope_ = Scope::kThread;
   track.is_counter_ = is_counter;
   track.is_root_in_scope_ = is_root;
   track.utid_ = utid;
+  track.use_separate_track_ = use_separate_track;
   return track;
 }
 

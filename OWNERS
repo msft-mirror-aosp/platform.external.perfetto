@@ -7,7 +7,6 @@ primiano@google.com
 skyostil@google.com
 
 # UI, Ftrace interop, traced_probes, protozero, Android internals.
-hjd@google.com
 
 # Trace Processor, metrics, infra.
 lalitm@google.com
@@ -24,6 +23,9 @@ oysteine@google.com
 
 # UI, Chromium-related metrics and simpler trace processor changes.
 altimin@google.com
+
+# UI
+stevegolton@google.com
 
 # Most Android-related metrics.
 ilkos@google.com

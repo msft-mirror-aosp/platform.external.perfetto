@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {isString} from '../../base/object_utils';
 import {
   AggregateData,
   Column,
   ColumnDef,
   ThreadStateExtra,
 } from '../../common/aggregation_data';
-import {Engine} from '../../common/engine';
-import {NUM} from '../../common/query_result';
-import {Area, Sorting} from '../../common/state';
+import {Area, Sorting, getLegacySelection} from '../../common/state';
 import {globals} from '../../frontend/globals';
 import {publishAggregateData} from '../../frontend/publish';
+import {Engine} from '../../trace_processor/engine';
+import {NUM} from '../../trace_processor/query_result';
 import {AreaSelectionHandler} from '../area_selection_handler';
 import {Controller} from '../controller';
 
@@ -44,7 +45,10 @@ export abstract class AggregationController extends Controller<'main'> {
 
   abstract createAggregateView(engine: Engine, area: Area): Promise<boolean>;
 
-  abstract getExtra(engine: Engine, area: Area): Promise<ThreadStateExtra|void>;
+  abstract getExtra(
+    engine: Engine,
+    area: Area,
+  ): Promise<ThreadStateExtra | void>;
 
   abstract getTabName(): string;
   abstract getDefaultSorting(): Sorting;
@@ -57,7 +61,7 @@ export abstract class AggregationController extends Controller<'main'> {
   }
 
   run() {
-    const selection = globals.state.currentSelection;
+    const selection = getLegacySelection(globals.state);
     if (selection === null || selection.kind !== 'AREA') {
       publishAggregateData({
         data: {
@@ -71,10 +75,12 @@ export abstract class AggregationController extends Controller<'main'> {
       return;
     }
     const aggregatePreferences =
-        globals.state.aggregatePreferences[this.args.kind];
+      globals.state.aggregatePreferences[this.args.kind];
 
-    const sortingChanged = aggregatePreferences &&
-        this.previousSorting !== aggregatePreferences.sorting;
+    const sortingChanged =
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      aggregatePreferences &&
+      this.previousSorting !== aggregatePreferences.sorting;
     const [hasAreaChanged, area] = this.areaSelectionHandler.getAreaChange();
     if ((!hasAreaChanged && !sortingChanged) || !area) return;
 
@@ -84,19 +90,21 @@ export abstract class AggregationController extends Controller<'main'> {
       this.requestingData = true;
       if (sortingChanged) this.previousSorting = aggregatePreferences.sorting;
       this.getAggregateData(area, hasAreaChanged)
-          .then((data) => publishAggregateData({data, kind: this.args.kind}))
-          .finally(() => {
-            this.requestingData = false;
-            if (this.queuedRequest) {
-              this.queuedRequest = false;
-              this.run();
-            }
-          });
+        .then((data) => publishAggregateData({data, kind: this.args.kind}))
+        .finally(() => {
+          this.requestingData = false;
+          if (this.queuedRequest) {
+            this.queuedRequest = false;
+            this.run();
+          }
+        });
     }
   }
 
-  async getAggregateData(area: Area, areaChanged: boolean):
-      Promise<AggregateData> {
+  async getAggregateData(
+    area: Area,
+    areaChanged: boolean,
+  ): Promise<AggregateData> {
     if (areaChanged) {
       const viewExists = await this.createAggregateView(this.args.engine, area);
       if (!viewExists) {
@@ -113,7 +121,9 @@ export abstract class AggregationController extends Controller<'main'> {
     const colIds = defs.map((col) => col.columnId);
     const pref = globals.state.aggregatePreferences[this.kind];
     let sorting = `${this.getDefaultSorting().column} ${
-        this.getDefaultSorting().direction}`;
+      this.getDefaultSorting().direction
+    }`;
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (pref && pref.sorting) {
       sorting = `${pref.sorting.column} ${pref.sorting.direction}`;
     }
@@ -125,8 +135,13 @@ export abstract class AggregationController extends Controller<'main'> {
     const columnSums = await Promise.all(defs.map((def) => this.getSum(def)));
     const extraData = await this.getExtra(this.args.engine, area);
     const extra = extraData ? extraData : undefined;
-    const data: AggregateData =
-        {tabName: this.getTabName(), columns, columnSums, strings: [], extra};
+    const data: AggregateData = {
+      tabName: this.getTabName(),
+      columns,
+      columnSums,
+      strings: [],
+      extra,
+    };
 
     const stringIndexes = new Map<string, number>();
     function internString(str: string) {
@@ -144,10 +159,18 @@ export abstract class AggregationController extends Controller<'main'> {
         const item = it.get(column.columnId);
         if (item === null) {
           column.data[i] = isStringColumn(column) ? internString('NULL') : 0;
-        } else if (typeof item === 'string') {
+        } else if (isString(item)) {
           column.data[i] = internString(item);
         } else if (item instanceof Uint8Array) {
           column.data[i] = internString('<Binary blob>');
+        } else if (typeof item === 'bigint') {
+          // TODO(stevegolton) It would be nice to keep bigints as bigints for
+          // the purposes of aggregation, however the aggregation infrastructure
+          // is likely to be significantly reworked when we introduce EventSet,
+          // and the complexity of supporting bigints throughout the aggregation
+          // panels in its current form is not worth it. Thus, we simply
+          // convert bigints to numbers.
+          column.data[i] = Number(item);
         } else {
           column.data[i] = item;
         }
@@ -160,7 +183,8 @@ export abstract class AggregationController extends Controller<'main'> {
   async getSum(def: ColumnDef): Promise<string> {
     if (!def.sum) return '';
     const result = await this.args.engine.query(
-        `select ifnull(sum(${def.columnId}), 0) as s from ${this.kind}`);
+      `select ifnull(sum(${def.columnId}), 0) as s from ${this.kind}`,
+    );
     let sum = result.firstRow({s: NUM}).s;
     if (def.kind === 'TIMESTAMP_NS') {
       sum = sum / 1e6;

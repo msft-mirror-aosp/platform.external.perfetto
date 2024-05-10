@@ -49,7 +49,9 @@ source_set("perfetto_cmd") {
     "../../include/perfetto/ext/traced",
   ]
   deps = [
+    ":bugreport_path",
     ":gen_cc_config_descriptor",
+    ":pbtxt_to_pb",
     ":trigger_producer",
     "../../gn:default_deps",
     "../../protos/perfetto/common:cpp",
@@ -62,16 +64,11 @@ source_set("perfetto_cmd") {
     "../protozero",
     "../tracing/ipc/consumer",
   ]
-  if (enable_perfetto_zlib) {
-    deps += [ "../../gn:zlib" ]
-  }
   sources = [
     "config.cc",
     "config.h",
     "packet_writer.cc",
     "packet_writer.h",
-    "pbtxt_to_pb.cc",
-    "pbtxt_to_pb.h",
     "perfetto_cmd.cc",
     "perfetto_cmd.h",
     "rate_limiter.cc",
@@ -81,6 +78,29 @@ source_set("perfetto_cmd") {
     deps += [ "../android_internal:lazy_library_loader" ]
     sources += [ "perfetto_cmd_android.cc" ]
   }
+}
+
+source_set("bugreport_path") {
+  sources = [ "bugreport_path.h" ]
+  deps = [ "../../gn:default_deps" ]
+  public_deps = [
+    "../../include/perfetto/base",
+    "../../include/perfetto/ext/base",
+  ]
+}
+
+source_set("pbtxt_to_pb") {
+  deps = [
+    ":gen_cc_config_descriptor",
+    "../../gn:default_deps",
+    "../../protos/perfetto/common:cpp",
+    "../base",
+    "../protozero",
+  ]
+  sources = [
+    "pbtxt_to_pb.cc",
+    "pbtxt_to_pb.h",
+  ]
 }
 
 perfetto_cc_proto_descriptor("gen_cc_config_descriptor") {
@@ -128,6 +148,7 @@ perfetto_unittest_source_set("unittests") {
   testonly = true
   public_deps = []
   deps = [
+    ":pbtxt_to_pb",
     ":perfetto_cmd",
     "../../gn:default_deps",
     "../../gn:gtest_and_gmock",
@@ -138,9 +159,6 @@ perfetto_unittest_source_set("unittests") {
     "../../protos/perfetto/trace:cpp",
     "../tracing/core",
   ]
-  if (enable_perfetto_zlib) {
-    deps += [ "../../gn:zlib" ]
-  }
   sources = [
     "config_unittest.cc",
     "packet_writer_unittest.cc",

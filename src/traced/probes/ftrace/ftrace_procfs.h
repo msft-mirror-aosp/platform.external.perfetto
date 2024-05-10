@@ -34,12 +34,10 @@ class FtraceProcfs {
   // Takes an optional |instance_path| such as "instances/wifi/", in which case
   // the returned object will be for that ftrace instance path.
   static std::unique_ptr<FtraceProcfs> CreateGuessingMountPoint(
-      const std::string& instance_path = "",
-      bool preserve_ftrace_buffer = false);
+      const std::string& instance_path = "");
 
-  static std::unique_ptr<FtraceProcfs> Create(
-      const std::string& root,
-      bool preserve_ftrace_buffer = false);
+  static std::unique_ptr<FtraceProcfs> Create(const std::string& root);
+
   static int g_kmesg_fd;
 
   explicit FtraceProcfs(const std::string& root);
@@ -156,6 +154,9 @@ class FtraceProcfs {
 
   // Get all the available clocks.
   std::set<std::string> AvailableClocks();
+
+  uint32_t ReadBufferPercent();
+  bool SetBufferPercent(uint32_t percent);
 
   // Get all the enabled events.
   virtual std::vector<std::string> ReadEnabledEvents();

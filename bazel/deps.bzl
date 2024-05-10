@@ -35,18 +35,18 @@ def perfetto_deps():
     _add_repo_if_not_existing(
         http_archive,
         name = "perfetto_dep_sqlite",
-        url = "https://storage.googleapis.com/perfetto/sqlite-amalgamation-3390200.zip",
-        sha256 = "87775784f8b22d0d0f1d7811870d39feaa7896319c7c20b849a4181c5a50609b",
-        strip_prefix = "sqlite-amalgamation-3390200",
+        url = "https://storage.googleapis.com/perfetto/sqlite-amalgamation-3440200.zip",
+        sha256 = "833be89b53b3be8b40a2e3d5fedb635080e3edb204957244f3d6987c2bb2345f",
+        strip_prefix = "sqlite-amalgamation-3440200",
         build_file = "//bazel:sqlite.BUILD",
     )
 
     _add_repo_if_not_existing(
         http_archive,
         name = "perfetto_dep_sqlite_src",
-        url = "https://storage.googleapis.com/perfetto/sqlite-src-3390200.zip",
-        sha256 = "e933d77000f45f3fbc8605f0050586a3013505a8de9b44032bd00ed72f1586f0",
-        strip_prefix = "sqlite-src-3390200",
+        url = "https://storage.googleapis.com/perfetto/sqlite-src-3440200.zip",
+        sha256 = "73187473feb74509357e8fa6cb9fd67153b2d010d00aeb2fddb6ceeb18abaf27",
+        strip_prefix = "sqlite-src-3440200",
         build_file = "//bazel:sqlite.BUILD",
     )
 
@@ -56,7 +56,6 @@ def perfetto_deps():
         remote = "https://fuchsia.googlesource.com/third_party/linenoise.git",
         commit = "c894b9e59f02203dbe4e2be657572cf88c4230c3",
         build_file = "//bazel:linenoise.BUILD",
-        shallow_since = "1469784335 +0200",
     )
 
     _add_repo_if_not_existing(
@@ -65,16 +64,14 @@ def perfetto_deps():
         remote = "https://github.com/open-source-parsers/jsoncpp",
         commit = "6aba23f4a8628d599a9ef7fa4811c4ff6e4070e2",  # v1.9.3
         build_file = "//bazel:jsoncpp.BUILD",
-        shallow_since = "1590760226 +0800",
     )
 
     _add_repo_if_not_existing(
-        new_git_repository,
+        http_archive,
         name = "perfetto_dep_zlib",
-        remote = "https://android.googlesource.com/platform/external/zlib.git",
-        commit = "5c85a2da4c13eda07f69d81a1579a5afddd35f59",
+        url = "https://storage.googleapis.com/perfetto/zlib-6d3f6aa0f87c9791ca7724c279ef61384f331dfd.tar.gz",
+        sha256 = "e9a1d6e8c936de68628ffb83a13d28a40cd6b2def2ad9378e8b951d4b8f4df18",
         build_file = "//bazel:zlib.BUILD",
-        shallow_since = "1605147005 +0000",
     )
 
     _add_repo_if_not_existing(

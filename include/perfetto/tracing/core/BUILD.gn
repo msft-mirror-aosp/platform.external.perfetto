@@ -20,8 +20,10 @@ source_set("core") {
   ]
   sources = [
     "chrome_config.h",
+    "clock_snapshots.h",
     "data_source_config.h",
     "data_source_descriptor.h",
+    "flush_flags.h",
     "trace_config.h",
     "tracing_service_capabilities.h",
     "tracing_service_state.h",

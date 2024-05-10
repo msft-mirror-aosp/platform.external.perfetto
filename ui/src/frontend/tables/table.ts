@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {allUnique, range} from '../../base/array_utils';
 import {
@@ -23,7 +23,7 @@ import {
   SortDirection,
   withDirection,
 } from '../../base/comparison_utils';
-import {globals} from '../globals';
+import {raf} from '../../core/raf_scheduler';
 import {
   menuItem,
   PopupMenuButton,
@@ -54,8 +54,10 @@ export class ColumnDescriptor<T> {
   ordering?: ComparisonFn<T>;
 
   constructor(
-      name: string, render: (row: T) => m.Child,
-      attrs?: ColumnDescriptorAttrs<T>) {
+    name: string,
+    render: (row: T) => m.Child,
+    attrs?: ColumnDescriptorAttrs<T>,
+  ) {
     this.name = name;
     this.render = render;
     this.id = attrs?.columnId === undefined ? name : attrs.columnId;
@@ -78,15 +80,26 @@ export class ColumnDescriptor<T> {
 }
 
 export function numberColumn<T>(
-    name: string, getter: (t: T) => number, contextMenu?: PopupMenuItem[]):
-    ColumnDescriptor<T> {
+  name: string,
+  getter: (t: T) => number,
+  contextMenu?: PopupMenuItem[],
+): ColumnDescriptor<T> {
   return new ColumnDescriptor<T>(name, getter, {contextMenu, sortKey: getter});
 }
 
 export function stringColumn<T>(
-    name: string, getter: (t: T) => string, contextMenu?: PopupMenuItem[]):
-    ColumnDescriptor<T> {
+  name: string,
+  getter: (t: T) => string,
+  contextMenu?: PopupMenuItem[],
+): ColumnDescriptor<T> {
   return new ColumnDescriptor<T>(name, getter, {contextMenu, sortKey: getter});
+}
+
+export function widgetColumn<T>(
+  name: string,
+  getter: (t: T) => m.Child,
+): ColumnDescriptor<T> {
+  return new ColumnDescriptor<T>(name, getter);
 }
 
 interface SortingInfo<T> {
@@ -108,7 +121,7 @@ export class TableData<T> {
     this.permutation = range(data.length);
   }
 
-  * iterateItems(): Generator<T> {
+  *iterateItems(): Generator<T> {
     for (const index of this.permutation) {
       yield this.data[index];
     }
@@ -124,25 +137,28 @@ export class TableData<T> {
     if (this._sortingInfo !== undefined) {
       this.reorder(this._sortingInfo);
     }
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
   resetOrder() {
     this.permutation = range(this.data.length);
     this._sortingInfo = undefined;
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
-  get sortingInfo(): SortingInfo<T>|undefined {
+  get sortingInfo(): SortingInfo<T> | undefined {
     return this._sortingInfo;
   }
 
   reorder(info: SortingInfo<T>) {
     this._sortingInfo = info;
-    this.permutation.sort(withDirection(
+    this.permutation.sort(
+      withDirection(
         comparingBy((index: number) => this.data[index], info.ordering),
-        info.direction));
-    globals.rafScheduler.scheduleFullRedraw();
+        info.direction,
+      ),
+    );
+    raf.scheduleFullRedraw();
   }
 }
 
@@ -152,17 +168,25 @@ export interface TableAttrs<T> {
 }
 
 function directionOnIndex(
-    columnId: string, info?: SortingInfo<any>): SortDirection|undefined {
+  columnId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  info?: SortingInfo<any>,
+): SortDirection | undefined {
   if (info === undefined) {
     return undefined;
   }
   return info.columnId === columnId ? info.direction : undefined;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class Table implements m.ClassComponent<TableAttrs<any>> {
   renderColumnHeader(
-      vnode: m.Vnode<TableAttrs<any>>, column: ColumnDescriptor<any>): m.Child {
-    let currDirection: SortDirection|undefined = undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vnode: m.Vnode<TableAttrs<any>>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    column: ColumnDescriptor<any>,
+  ): m.Child {
+    let currDirection: SortDirection | undefined = undefined;
 
     let items = column.contextMenu;
     if (column.ordering !== undefined) {
@@ -170,64 +194,85 @@ export class Table implements m.ClassComponent<TableAttrs<any>> {
       currDirection = directionOnIndex(column.id, vnode.attrs.data.sortingInfo);
       const newItems: PopupMenuItem[] = [];
       if (currDirection !== 'ASC') {
-        newItems.push(menuItem('Sort ascending', () => {
-          vnode.attrs.data.reorder(
-              {columnId: column.id, direction: 'ASC', ordering});
-        }));
+        newItems.push(
+          menuItem('Sort ascending', () => {
+            vnode.attrs.data.reorder({
+              columnId: column.id,
+              direction: 'ASC',
+              ordering,
+            });
+          }),
+        );
       }
       if (currDirection !== 'DESC') {
-        newItems.push(menuItem('Sort descending', () => {
-          vnode.attrs.data.reorder({
-            columnId: column.id,
-            direction: 'DESC',
-            ordering,
-          });
-        }));
+        newItems.push(
+          menuItem('Sort descending', () => {
+            vnode.attrs.data.reorder({
+              columnId: column.id,
+              direction: 'DESC',
+              ordering,
+            });
+          }),
+        );
       }
       if (currDirection !== undefined) {
-        newItems.push(menuItem('Restore original order', () => {
-          vnode.attrs.data.resetOrder();
-        }));
+        newItems.push(
+          menuItem('Restore original order', () => {
+            vnode.attrs.data.resetOrder();
+          }),
+        );
       }
-      items = [
-        ...newItems,
-        ...(items ?? []),
-      ];
+      items = [...newItems, ...(items ?? [])];
     }
 
     return m(
-        'td', column.name, items === undefined ? null : m(PopupMenuButton, {
-          icon: popupMenuIcon(currDirection),
-          items,
-        }));
+      'td',
+      column.name,
+      items === undefined
+        ? null
+        : m(PopupMenuButton, {
+            icon: popupMenuIcon(currDirection),
+            items,
+          }),
+    );
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   checkValid(attrs: TableAttrs<any>) {
     if (!allUnique(attrs.columns.map((c) => c.id))) {
       throw new Error('column IDs should be unique');
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   oncreate(vnode: m.VnodeDOM<TableAttrs<any>, this>) {
     this.checkValid(vnode.attrs);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onupdate(vnode: m.VnodeDOM<TableAttrs<any>, this>) {
     this.checkValid(vnode.attrs);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   view(vnode: m.Vnode<TableAttrs<any>>): m.Child {
     const attrs = vnode.attrs;
 
     return m(
-        'table.generic-table',
-        m('thead',
-          m('tr.header',
-            attrs.columns.map(
-                (column) => this.renderColumnHeader(vnode, column)))),
-        attrs.data.items().map(
-            (row) =>
-                m('tr',
-                  attrs.columns.map((column) => m('td', column.render(row))))));
+      'table.generic-table',
+      m(
+        'thead',
+        m(
+          'tr.header',
+          attrs.columns.map((column) => this.renderColumnHeader(vnode, column)),
+        ),
+      ),
+      attrs.data.items().map((row) =>
+        m(
+          'tr',
+          attrs.columns.map((column) => m('td', column.render(row))),
+        ),
+      ),
+    );
   }
 }

@@ -12,19 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
-import {timeToString} from '../common/time';
-import {TimeSpan} from '../common/time';
+import {duration, Span, time, Time, TimeSpan} from '../base/time';
+import {timestampFormat, TimestampFormat} from '../core/timestamp_format';
 
-import {TRACK_SHELL_WIDTH} from './css_constants';
+import {
+  BACKGROUND_COLOR,
+  FOREGROUND_COLOR,
+  TRACK_SHELL_WIDTH,
+} from './css_constants';
 import {globals} from './globals';
 import {
+  getMaxMajorTicks,
   TickGenerator,
   TickType,
   timeScaleForVisibleWindow,
 } from './gridline_helper';
-import {Panel, PanelSize} from './panel';
+import {PanelSize} from './panel';
+import {Panel} from './panel_container';
+import {renderDuration} from './widgets/duration';
+import {getLegacySelection} from '../common/state';
 
 export interface BBox {
   x: number;
@@ -40,11 +48,15 @@ export interface BBox {
 // The |bounds| bounding box gives the visible region, this is used to adjust
 // the positioning of the label to ensure it is on screen.
 function drawHBar(
-    ctx: CanvasRenderingContext2D, target: BBox, bounds: BBox, label: string) {
-  ctx.fillStyle = '#222';
+  ctx: CanvasRenderingContext2D,
+  target: BBox,
+  bounds: BBox,
+  label: string,
+) {
+  ctx.fillStyle = FOREGROUND_COLOR;
 
   const xLeft = Math.floor(target.x);
-  const xRight = Math.ceil(target.x + target.width);
+  const xRight = Math.floor(target.x + target.width);
   const yMid = Math.floor(target.height / 2 + target.y);
   const xWidth = xRight - xLeft;
 
@@ -66,8 +78,11 @@ function drawHBar(
   // By default put the label in the middle of the H:
   let labelXLeft = Math.floor(xWidth / 2 - labelWidth / 2 + xLeft);
 
-  if (labelWidth > target.width || labelXLeft < bounds.x ||
-      (labelXLeft + labelWidth) > (bounds.x + bounds.width)) {
+  if (
+    labelWidth > target.width ||
+    labelXLeft < bounds.x ||
+    labelXLeft + labelWidth > bounds.x + bounds.width
+  ) {
     // It won't fit in the middle or would be at least partly out of bounds
     // so put it either to the left or right:
     if (xRight > bounds.x + bounds.width) {
@@ -80,20 +95,24 @@ function drawHBar(
     }
   }
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = BACKGROUND_COLOR;
   ctx.fillRect(labelXLeft - 1, 0, labelWidth + 1, target.height);
 
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#222';
+  ctx.fillStyle = FOREGROUND_COLOR;
   ctx.font = '10px Roboto Condensed';
   ctx.fillText(label, labelXLeft, yMid);
 }
 
 function drawIBar(
-    ctx: CanvasRenderingContext2D, xPos: number, bounds: BBox, label: string) {
+  ctx: CanvasRenderingContext2D,
+  xPos: number,
+  bounds: BBox,
+  label: string,
+) {
   if (xPos < bounds.x) return;
 
-  ctx.fillStyle = '#222';
+  ctx.fillStyle = FOREGROUND_COLOR;
   ctx.fillRect(xPos, 0, 1, bounds.width);
 
   const yMid = Math.floor(bounds.height / 2 + bounds.y);
@@ -109,86 +128,113 @@ function drawIBar(
     ctx.textAlign = 'left';
   }
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = BACKGROUND_COLOR;
   ctx.fillRect(xPosLabel - 1, 0, labelWidth + 2, bounds.height);
 
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#222';
+  ctx.fillStyle = FOREGROUND_COLOR;
   ctx.font = '10px Roboto Condensed';
   ctx.fillText(label, xPosLabel, yMid);
 }
 
-export class TimeSelectionPanel extends Panel {
-  view() {
+export class TimeSelectionPanel implements Panel {
+  readonly kind = 'panel';
+  readonly selectable = false;
+  readonly trackKey = undefined;
+
+  constructor(readonly key: string) {}
+
+  render(): m.Children {
     return m('.time-selection-panel');
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
     ctx.fillStyle = '#999';
     ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
-    const scale = timeScaleForVisibleWindow(TRACK_SHELL_WIDTH, size.width);
-    if (scale.timeSpan.duration > 0 && scale.widthPx > 0) {
-      for (const {position, type} of new TickGenerator(scale)) {
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(TRACK_SHELL_WIDTH, 0, size.width - TRACK_SHELL_WIDTH, size.height);
+    ctx.clip();
+
+    const span = globals.timeline.visibleTimeSpan;
+    if (size.width > TRACK_SHELL_WIDTH && span.duration > 0n) {
+      const maxMajorTicks = getMaxMajorTicks(size.width - TRACK_SHELL_WIDTH);
+      const map = timeScaleForVisibleWindow(TRACK_SHELL_WIDTH, size.width);
+
+      const offset = globals.timestampOffset();
+      const tickGen = new TickGenerator(span, maxMajorTicks, offset);
+      for (const {type, time} of tickGen) {
+        const px = Math.floor(map.timeToPx(time));
         if (type === TickType.MAJOR) {
-          ctx.fillRect(position, 0, 1, size.height);
+          ctx.fillRect(px, 0, 1, size.height);
         }
       }
     }
 
-    const localArea = globals.frontendLocalState.selectedArea;
-    const selection = globals.state.currentSelection;
+    const localArea = globals.timeline.selectedArea;
+    const selection = getLegacySelection(globals.state);
     if (localArea !== undefined) {
-      const start = Math.min(localArea.startSec, localArea.endSec);
-      const end = Math.max(localArea.startSec, localArea.endSec);
+      const start = Time.min(localArea.start, localArea.end);
+      const end = Time.max(localArea.start, localArea.end);
       this.renderSpan(ctx, size, new TimeSpan(start, end));
     } else if (selection !== null && selection.kind === 'AREA') {
       const selectedArea = globals.state.areas[selection.areaId];
-      const start = Math.min(selectedArea.startSec, selectedArea.endSec);
-      const end = Math.max(selectedArea.startSec, selectedArea.endSec);
+      const start = Time.min(selectedArea.start, selectedArea.end);
+      const end = Time.max(selectedArea.start, selectedArea.end);
       this.renderSpan(ctx, size, new TimeSpan(start, end));
     }
 
-    if (globals.state.hoveredLogsTimestamp !== -1) {
-      this.renderHover(ctx, size, globals.state.hoveredLogsTimestamp);
+    if (globals.state.hoverCursorTimestamp !== -1n) {
+      this.renderHover(ctx, size, globals.state.hoverCursorTimestamp);
     }
 
     for (const note of Object.values(globals.state.notes)) {
-      const noteIsSelected = selection !== null && selection.kind === 'AREA' &&
-          selection.noteId === note.id;
+      const noteIsSelected =
+        selection !== null &&
+        selection.kind === 'AREA' &&
+        selection.noteId === note.id;
       if (note.noteType === 'AREA' && !noteIsSelected) {
         const selectedArea = globals.state.areas[note.areaId];
         this.renderSpan(
-            ctx,
-            size,
-            new TimeSpan(selectedArea.startSec, selectedArea.endSec));
+          ctx,
+          size,
+          new TimeSpan(selectedArea.start, selectedArea.end),
+        );
       }
     }
+
+    ctx.restore();
   }
 
-  renderHover(ctx: CanvasRenderingContext2D, size: PanelSize, ts: number) {
-    const timeScale = globals.frontendLocalState.timeScale;
-    const xPos = TRACK_SHELL_WIDTH + Math.floor(timeScale.timeToPx(ts));
-    const offsetTime = timeToString(ts - globals.state.traceTime.startSec);
-    const timeFromStart = timeToString(ts);
-    const label = `${offsetTime} (${timeFromStart})`;
+  renderHover(ctx: CanvasRenderingContext2D, size: PanelSize, ts: time) {
+    const {visibleTimeScale} = globals.timeline;
+    const xPos = TRACK_SHELL_WIDTH + Math.floor(visibleTimeScale.timeToPx(ts));
+    const domainTime = globals.toDomainTime(ts);
+    const label = stringifyTimestamp(domainTime);
     drawIBar(ctx, xPos, this.bounds(size), label);
   }
 
-  renderSpan(ctx: CanvasRenderingContext2D, size: PanelSize, span: TimeSpan) {
-    const timeScale = globals.frontendLocalState.timeScale;
-    const xLeft = timeScale.timeToPx(span.start);
-    const xRight = timeScale.timeToPx(span.end);
-    const label = timeToString(span.duration);
+  renderSpan(
+    ctx: CanvasRenderingContext2D,
+    size: PanelSize,
+    span: Span<time, duration>,
+  ) {
+    const {visibleTimeScale} = globals.timeline;
+    const xLeft = visibleTimeScale.timeToPx(span.start);
+    const xRight = visibleTimeScale.timeToPx(span.end);
+    const label = renderDuration(span.duration);
     drawHBar(
-        ctx,
-        {
-          x: TRACK_SHELL_WIDTH + xLeft,
-          y: 0,
-          width: xRight - xLeft,
-          height: size.height,
-        },
-        this.bounds(size),
-        label);
+      ctx,
+      {
+        x: TRACK_SHELL_WIDTH + xLeft,
+        y: 0,
+        width: xRight - xLeft,
+        height: size.height,
+      },
+      this.bounds(size),
+      label,
+    );
   }
 
   private bounds(size: PanelSize): BBox {
@@ -198,5 +244,25 @@ export class TimeSelectionPanel extends Panel {
       width: size.width - TRACK_SHELL_WIDTH,
       height: size.height,
     };
+  }
+}
+
+function stringifyTimestamp(time: time): string {
+  const fmt = timestampFormat();
+  switch (fmt) {
+    case TimestampFormat.UTC:
+    case TimestampFormat.TraceTz:
+    case TimestampFormat.Timecode:
+      const THIN_SPACE = '\u2009';
+      return Time.toTimecode(time).toString(THIN_SPACE);
+    case TimestampFormat.Raw:
+      return time.toString();
+    case TimestampFormat.RawLocale:
+      return time.toLocaleString();
+    case TimestampFormat.Seconds:
+      return Time.formatSeconds(time);
+    default:
+      const z: never = fmt;
+      throw new Error(`Invalid timestamp ${z}`);
   }
 }

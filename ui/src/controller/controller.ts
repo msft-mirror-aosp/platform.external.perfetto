@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export type ControllerAny = Controller</* StateType=*/ any>;
+export type ControllerAny = Controller</* StateType=*/ unknown>;
 
 export interface ControllerFactory<ConstructorArgs> {
-  new(args: ConstructorArgs): ControllerAny;
+  new (args: ConstructorArgs): ControllerAny;
 }
 
 interface ControllerInitializer<ConstructorArgs> {
@@ -24,12 +24,14 @@ interface ControllerInitializer<ConstructorArgs> {
   args: ConstructorArgs;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ControllerInitializerAny = ControllerInitializer<any>;
 
 export function Child<ConstructorArgs>(
-    id: string,
-    factory: ControllerFactory<ConstructorArgs>,
-    args: ConstructorArgs): ControllerInitializer<ConstructorArgs> {
+  id: string,
+  factory: ControllerFactory<ConstructorArgs>,
+  args: ConstructorArgs,
+): ControllerInitializer<ConstructorArgs> {
   return {id, factory, args};
 }
 
@@ -47,7 +49,7 @@ export abstract class Controller<StateType> {
     this._state = initialState;
   }
 
-  abstract run(): Children|void;
+  abstract run(): Children | void;
   onDestroy(): void {}
 
   // Invokes the current controller subtree, recursing into children.
@@ -71,8 +73,8 @@ export abstract class Controller<StateType> {
         nextChildren.set(childConfig.id, childConfig);
       }
     }
-    const dtors = new Array<(() => void)>();
-    const runners = new Array<(() => boolean)>();
+    const dtors = new Array<() => void>();
+    const runners = new Array<() => boolean>();
     for (const key of this._children.keys()) {
       if (nextChildren.has(key)) continue;
       const instance = this._children.get(key)!;
@@ -88,7 +90,7 @@ export abstract class Controller<StateType> {
       runners.push(() => instance.invoke());
     }
 
-    for (const dtor of dtors) dtor();  // Invoke all onDestroy()s.
+    for (const dtor of dtors) dtor(); // Invoke all onDestroy()s.
 
     // Invoke all runner()s.
     for (const runner of runners) {

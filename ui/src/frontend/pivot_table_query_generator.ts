@@ -15,30 +15,34 @@
  */
 
 import {sqliteString} from '../base/string_utils';
-import {
-  Area,
-  PivotTableQuery,
-  PivotTableState,
-} from '../common/state';
-import {toNs} from '../common/time';
-import {
-  getSelectedTrackIds,
-} from '../controller/aggregation/slice_aggregation_controller';
+import {Area, PivotTableQuery, PivotTableState} from '../common/state';
+import {getSelectedTrackKeys} from '../controller/aggregation/slice_aggregation_controller';
 
 import {globals} from './globals';
-import {
-  Aggregation,
-  TableColumn,
-} from './pivot_table_types';
+import {Aggregation, TableColumn} from './pivot_table_types';
+import {SqlTables} from './sql_table/well_known_tables';
 
 export interface Table {
   name: string;
+  displayName: string;
   columns: string[];
 }
 
 export const sliceTable = {
-  name: 'slice',
-  columns: ['type', 'ts', 'dur', 'category', 'name', 'depth'],
+  name: SqlTables.slice.name,
+  displayName: 'slice',
+  columns: [
+    'type',
+    'ts',
+    'dur',
+    'category',
+    'name',
+    'depth',
+    'pid',
+    'process_name',
+    'tid',
+    'thread_name',
+  ],
 };
 
 // Columns of `slice` table available for aggregation.
@@ -54,23 +58,7 @@ export const sliceAggregationColumns = [
 
 // List of available tables to query, used to populate selectors of pivot
 // columns in the UI.
-export const tables: Table[] = [
-  sliceTable,
-  {
-    name: 'process',
-    columns: [
-      'type',
-      'pid',
-      'name',
-      'parent_upid',
-      'uid',
-      'android_appid',
-      'cmdline',
-    ],
-  },
-  {name: 'thread', columns: ['type', 'name', 'tid', 'upid', 'is_main_thread']},
-  {name: 'thread_track', columns: ['type', 'name', 'utid']},
-];
+export const tables: Table[] = [sliceTable];
 
 // Queried "table column" is either:
 // 1. A real one, represented as object with table and column name.
@@ -98,12 +86,12 @@ function aggregationAlias(aggregationIndex: number): string {
   return `agg_${aggregationIndex}`;
 }
 
-export function areaFilter(area: Area): string {
-  return `
-    ts + dur > ${toNs(area.startSec)}
-    and ts < ${toNs(area.endSec)}
-    and track_id in (${getSelectedTrackIds(area).join(', ')})
-  `;
+export function areaFilters(area: Area): string[] {
+  return [
+    `ts + dur > ${area.start}`,
+    `ts < ${area.end}`,
+    `track_id in (${getSelectedTrackKeys(area).join(', ')})`,
+  ];
 }
 
 export function expression(column: TableColumn): string {
@@ -111,7 +99,7 @@ export function expression(column: TableColumn): string {
     case 'regular':
       return `${column.table}.${column.column}`;
     case 'argument':
-      return extractArgumentExpression(column.argument, 'slice');
+      return extractArgumentExpression(column.argument, SqlTables.slice.name);
   }
 }
 
@@ -119,8 +107,9 @@ function aggregationExpression(aggregation: Aggregation): string {
   if (aggregation.aggregationFunction === 'COUNT') {
     return 'COUNT()';
   }
-  return `${aggregation.aggregationFunction}(${
-      expression(aggregation.column)})`;
+  return `${aggregation.aggregationFunction}(${expression(
+    aggregation.column,
+  )})`;
 }
 
 export function extractArgumentExpression(argument: string, table?: string) {
@@ -132,8 +121,9 @@ export function aggregationIndex(pivotColumns: number, aggregationNo: number) {
   return pivotColumns + aggregationNo;
 }
 
-export function generateQueryFromState(state: PivotTableState):
-    PivotTableQuery {
+export function generateQueryFromState(
+  state: PivotTableState,
+): PivotTableQuery {
   if (state.selectionArea === undefined) {
     throw new QueryGeneratorError('Should not be called without area');
   }
@@ -146,8 +136,9 @@ export function generateQueryFromState(state: PivotTableState):
   const pivots = state.selectedPivots;
 
   const aggregations = sliceTableAggregations.map(
-      (agg, index) =>
-          `${aggregationExpression(agg)} as ${aggregationAlias(index)}`);
+    (agg, index) =>
+      `${aggregationExpression(agg)} as ${aggregationAlias(index)}`,
+  );
   const countIndex = aggregations.length;
   // Extra count aggregation, needed in order to compute combined averages.
   aggregations.push('COUNT() as hidden_count');
@@ -161,23 +152,20 @@ export function generateQueryFromState(state: PivotTableState):
     }
   }
 
-  const joins = `
-    left join thread_track on thread_track.id = slice.track_id
-    left join thread using (utid)
-    left join process using (upid)
-  `;
-
-  const whereClause = state.constrainToArea ?
-      `where ${areaFilter(globals.state.areas[state.selectionArea.areaId])}` :
-      '';
+  const whereClause = state.constrainToArea
+    ? `where ${areaFilters(
+        globals.state.areas[state.selectionArea.areaId],
+      ).join(' and\n')}`
+    : '';
   const text = `
+    INCLUDE PERFETTO MODULE slices.slices;
+
     select
       ${renderedPivots.concat(aggregations).join(',\n')}
-    from slice
-    ${pivots.length > 0 ? joins : ''}
+    from ${SqlTables.slice.name}
     ${whereClause}
     group by ${renderedPivots.join(', ')}
-    ${sortClauses.length > 0 ? ('order by ' + sortClauses.join(', ')) : ''}
+    ${sortClauses.length > 0 ? 'order by ' + sortClauses.join(', ') : ''}
   `;
 
   return {

@@ -163,7 +163,7 @@ TEST(LocalBinaryIndexerTest, NOMSAN_SimpleTree) {
 
   LocalBinaryIndexer indexer({tmp.path() + "/dir1", tmp.path() + "/dir2"});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       indexer.FindBinary("", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
@@ -171,7 +171,7 @@ TEST(LocalBinaryIndexerTest, NOMSAN_SimpleTree) {
 #else
   EXPECT_EQ(bin1.value().file_name, tmp.path() + "/dir1/elf1");
 #endif
-  base::Optional<FoundBinary> bin2 =
+  std::optional<FoundBinary> bin2 =
       indexer.FindBinary("", "BBBBBBBBBBBBBBBBBBBB");
   ASSERT_TRUE(bin2.has_value());
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
@@ -199,26 +199,28 @@ TEST(LocalBinaryIndexerTest, NOMSAN_Symlinks) {
   tmp.AddFile("real/dir1/elf2", CreateElfWithBuildId("BBBBBBBBBBBBBBBBBBBB"));
   tmp.AddFile("real/dir1/elf3", CreateElfWithBuildId("CCCCCCCCCCCCCCCCCCCC"));
   tmp.AddDir("sym");
-  symlink(tmp.AbsolutePath("real/elf1").c_str(),
-          tmp.AbsolutePath("sym/elf1").c_str());
+  EXPECT_EQ(symlink(tmp.AbsolutePath("real/elf1").c_str(),
+                    tmp.AbsolutePath("sym/elf1").c_str()),
+            0);
   tmp.TrackFile("sym/elf1");
-  symlink(tmp.AbsolutePath("real/dir1").c_str(),
-          tmp.AbsolutePath("sym/dir1").c_str());
+  EXPECT_EQ(symlink(tmp.AbsolutePath("real/dir1").c_str(),
+                    tmp.AbsolutePath("sym/dir1").c_str()),
+            0);
   tmp.TrackFile("sym/dir1");
 
   LocalBinaryIndexer indexer({tmp.AbsolutePath("sym")});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       indexer.FindBinary("", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(bin1.value().file_name, tmp.AbsolutePath("sym/elf1"));
 
-  base::Optional<FoundBinary> bin2 =
+  std::optional<FoundBinary> bin2 =
       indexer.FindBinary("", "BBBBBBBBBBBBBBBBBBBB");
   ASSERT_TRUE(bin2.has_value());
   EXPECT_EQ(bin2.value().file_name, tmp.AbsolutePath("sym/dir1/elf2"));
 
-  base::Optional<FoundBinary> bin3 =
+  std::optional<FoundBinary> bin3 =
       indexer.FindBinary("", "CCCCCCCCCCCCCCCCCCCC");
   ASSERT_TRUE(bin3.has_value());
   EXPECT_EQ(bin3.value().file_name, tmp.AbsolutePath("sym/dir1/elf3"));
@@ -235,13 +237,14 @@ TEST(LocalBinaryIndexerTest, NOMSAN_RecursiveSymlinks) {
   tmp.AddDir("main");
   tmp.AddFile("main/elf1", CreateElfWithBuildId("AAAAAAAAAAAAAAAAAAAA"));
   tmp.AddDir("main/dir1");
-  symlink(tmp.AbsolutePath("main").c_str(),
-          tmp.AbsolutePath("main/dir1/sym").c_str());
+  EXPECT_EQ(symlink(tmp.AbsolutePath("main").c_str(),
+                    tmp.AbsolutePath("main/dir1/sym").c_str()),
+            0);
   tmp.TrackFile("main/dir1/sym");
 
   LocalBinaryIndexer indexer({tmp.AbsolutePath("main")});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       indexer.FindBinary("", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(bin1.value().file_name, tmp.AbsolutePath("main/elf1"));
@@ -259,7 +262,7 @@ TEST(LocalBinaryFinderTest, AbsolutePath) {
 
   LocalBinaryFinder finder({tmp.path() + "/root"});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       finder.FindBinary("/dir/elf1.so", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(bin1.value().file_name, tmp.path() + "/root/dir/elf1.so");
@@ -273,7 +276,7 @@ TEST(LocalBinaryFinderTest, AbsolutePathWithoutBaseApk) {
 
   LocalBinaryFinder finder({tmp.path() + "/root"});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       finder.FindBinary("/dir/base.apk!elf1.so", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(bin1.value().file_name, tmp.path() + "/root/dir/elf1.so");
@@ -286,7 +289,7 @@ TEST(LocalBinaryFinderTest, OnlyFilename) {
 
   LocalBinaryFinder finder({tmp.path() + "/root"});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       finder.FindBinary("/ignored_dir/elf1.so", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(bin1.value().file_name, tmp.path() + "/root/elf1.so");
@@ -299,7 +302,7 @@ TEST(LocalBinaryFinderTest, OnlyFilenameWithoutBaseApk) {
 
   LocalBinaryFinder finder({tmp.path() + "/root"});
 
-  base::Optional<FoundBinary> bin1 = finder.FindBinary(
+  std::optional<FoundBinary> bin1 = finder.FindBinary(
       "/ignored_dir/base.apk!elf1.so", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(bin1.value().file_name, tmp.path() + "/root/elf1.so");
@@ -315,7 +318,7 @@ TEST(LocalBinaryFinderTest, BuildIdSubdir) {
 
   LocalBinaryFinder finder({tmp.path() + "/root"});
 
-  base::Optional<FoundBinary> bin1 =
+  std::optional<FoundBinary> bin1 =
       finder.FindBinary("/ignored_dir/ignored_name.so", "AAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(bin1.has_value());
   EXPECT_EQ(

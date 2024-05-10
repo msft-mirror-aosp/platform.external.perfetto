@@ -23,9 +23,11 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <functional>
 #include <list>
 #include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -57,6 +59,10 @@ struct TracingInitArgs;
 
 namespace base {
 class TaskRunner;
+}
+
+namespace shlib {
+void ResetForTesting();
 }
 
 namespace test {
@@ -108,6 +114,7 @@ class TracingMuxerImpl : public TracingMuxer {
     DataSourceFactory factory{};
     bool supports_multiple_instances = false;
     bool requires_callbacks_under_lock = false;
+    bool no_flush = false;
     DataSourceStaticState* static_state = nullptr;
   };
 
@@ -119,6 +126,7 @@ class TracingMuxerImpl : public TracingMuxer {
   bool RegisterDataSource(const DataSourceDescriptor&,
                           DataSourceFactory,
                           DataSourceParams,
+                          bool no_flush,
                           DataSourceStaticState*) override;
   void UpdateDataSourceDescriptor(const DataSourceDescriptor&,
                                   const DataSourceStaticState*) override;
@@ -190,6 +198,7 @@ class TracingMuxerImpl : public TracingMuxer {
 
  private:
   friend class test::TracingMuxerImplInternalsForTest;
+  friend void shlib::ResetForTesting();
 
   // For each TracingBackend we create and register one ProducerImpl instance.
   // This talks to the producer-side of the service, gets start/stop requests
@@ -202,7 +211,8 @@ class TracingMuxerImpl : public TracingMuxer {
    public:
     ProducerImpl(TracingMuxerImpl*,
                  TracingBackendId,
-                 uint32_t shmem_batch_commits_duration_ms);
+                 uint32_t shmem_batch_commits_duration_ms,
+                 bool shmem_direct_patching_enabled);
     ~ProducerImpl() override;
 
     void Initialize(std::unique_ptr<ProducerEndpoint> endpoint);
@@ -221,11 +231,15 @@ class TracingMuxerImpl : public TracingMuxer {
     void StartDataSource(DataSourceInstanceID,
                          const DataSourceConfig&) override;
     void StopDataSource(DataSourceInstanceID) override;
-    void Flush(FlushRequestID, const DataSourceInstanceID*, size_t) override;
+    void Flush(FlushRequestID,
+               const DataSourceInstanceID*,
+               size_t,
+               FlushFlags) override;
     void ClearIncrementalState(const DataSourceInstanceID*, size_t) override;
 
     bool SweepDeadServices();
     void SendOnConnectTriggers();
+    void NotifyFlushForDataSourceDone(DataSourceInstanceID, FlushRequestID);
 
     PERFETTO_THREAD_CHECKER(thread_checker_)
     TracingMuxerImpl* muxer_;
@@ -239,6 +253,7 @@ class TracingMuxerImpl : public TracingMuxer {
     bool producer_provided_smb_failed_ = false;
 
     const uint32_t shmem_batch_commits_duration_ms_ = 0;
+    const bool shmem_direct_patching_enabled_ = false;
 
     // Set of data sources that have been actually registered on this producer.
     // This can be a subset of the global |data_sources_|, because data sources
@@ -254,6 +269,8 @@ class TracingMuxerImpl : public TracingMuxer {
     // Triggers that should be sent when the service connects (trigger_name,
     // expiration).
     std::list<std::pair<std::string, base::TimeMillis>> on_connect_triggers_;
+
+    std::map<FlushRequestID, std::set<DataSourceInstanceID>> pending_flushes_;
 
     // The currently active service endpoint is maintained as an atomic shared
     // pointer so it won't get deleted from underneath threads that are creating
@@ -290,7 +307,7 @@ class TracingMuxerImpl : public TracingMuxer {
     void OnAttach(bool success, const TraceConfig&) override;
     void OnTraceStats(bool success, const TraceStats&) override;
     void OnObservableEvents(const ObservableEvents&) override;
-    void OnSessionCloned(bool, const std::string&) override;
+    void OnSessionCloned(const OnSessionClonedArgs&) override;
 
     void NotifyStartComplete();
     void NotifyError(const TracingError&);
@@ -492,8 +509,6 @@ class TracingMuxerImpl : public TracingMuxer {
       uint32_t backend_connection_id,
       DataSourceInstanceID,
       const DataSourceConfig&,
-      uint64_t config_hash,
-      uint64_t startup_config_hash,
       TracingSessionGlobalID startup_session_id);
   void StartDataSourceImpl(const FindDataSourceRes&);
   void StopDataSource_AsyncBeginImpl(const FindDataSourceRes&);
@@ -501,7 +516,19 @@ class TracingMuxerImpl : public TracingMuxer {
                                uint32_t backend_connection_id,
                                DataSourceInstanceID,
                                const FindDataSourceRes&);
+  bool FlushDataSource_AsyncBegin(TracingBackendId,
+                                  DataSourceInstanceID,
+                                  FlushRequestID,
+                                  FlushFlags);
+  void FlushDataSource_AsyncEnd(TracingBackendId,
+                                uint32_t backend_connection_id,
+                                DataSourceInstanceID,
+                                const FindDataSourceRes&,
+                                FlushRequestID);
   void AbortStartupTracingSession(TracingSessionGlobalID, BackendType);
+  // When ResetForTesting() is executed, `cb` will be called on the calling
+  // thread and on the muxer thread.
+  void AppendResetForTestingCallback(std::function<void()> cb);
 
   // WARNING: If you add new state here, be sure to update ResetForTesting.
   std::unique_ptr<base::TaskRunner> task_runner_;
@@ -530,6 +557,11 @@ class TracingMuxerImpl : public TracingMuxer {
   // kept alive until all inbound references have gone away. See
   // SweepDeadBackends().
   std::list<RegisteredProducerBackend> dead_backends_;
+
+  // Test only member.
+  // Executes these cleanup functions on the calling thread and on the muxer
+  // thread when ResetForTesting() is called.
+  std::list<std::function<void()>> reset_callbacks_;
 
   PERFETTO_THREAD_CHECKER(thread_checker_)
 };

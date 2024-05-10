@@ -21,8 +21,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "perfetto/base/logging.h"
@@ -49,6 +47,10 @@ namespace {
 constexpr char kRssStatThrottledTrigger[] =
     "hist:keys=mm_id,member:bucket=size/0x80000"
     ":onchange($bucket).rss_stat_throttled(mm_id,curr,member,size)";
+
+constexpr char kSuspendResumeMinimalTrigger[] =
+    "hist:keys=start:size=128:onmatch(power.suspend_resume)"
+    ".trace(suspend_resume_minimal, start) if action == 'syscore_resume'";
 }
 
 void KernelLogWrite(const char* s) {
@@ -83,8 +85,7 @@ const char* const FtraceProcfs::kTracingPaths[] = {
 
 // static
 std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
-    const std::string& instance_path,
-    bool preserve_ftrace_buffer) {
+    const std::string& instance_path) {
   std::unique_ptr<FtraceProcfs> ftrace_procfs;
   size_t index = 0;
   while (!ftrace_procfs && kTracingPaths[index]) {
@@ -92,18 +93,15 @@ std::unique_ptr<FtraceProcfs> FtraceProcfs::CreateGuessingMountPoint(
     if (!instance_path.empty())
       path += instance_path;
 
-    ftrace_procfs = Create(path, preserve_ftrace_buffer);
+    ftrace_procfs = Create(path);
   }
   return ftrace_procfs;
 }
 
 // static
-std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(
-    const std::string& root,
-    bool preserve_ftrace_buffer) {
-  if (!preserve_ftrace_buffer && !CheckRootPath(root)) {
+std::unique_ptr<FtraceProcfs> FtraceProcfs::Create(const std::string& root) {
+  if (!CheckRootPath(root))
     return nullptr;
-  }
   return std::unique_ptr<FtraceProcfs>(new FtraceProcfs(root));
 }
 
@@ -281,9 +279,14 @@ bool FtraceProcfs::MaybeSetUpEventTriggers(const std::string& group,
                                            const std::string& name) {
   bool ret = true;
 
-  if (group == "synthetic" && name == "rss_stat_throttled") {
-    ret = RemoveAllEventTriggers("kmem", "rss_stat") &&
-          CreateEventTrigger("kmem", "rss_stat", kRssStatThrottledTrigger);
+  if (group == "synthetic") {
+    if (name == "rss_stat_throttled") {
+      ret = RemoveAllEventTriggers("kmem", "rss_stat") &&
+            CreateEventTrigger("kmem", "rss_stat", kRssStatThrottledTrigger);
+    } else if (name == "suspend_resume_minimal") {
+      ret = RemoveAllEventTriggers("power", "suspend_resume") &&
+            CreateEventTrigger("power", "suspend_resume", kSuspendResumeMinimalTrigger);
+    }
   }
 
   if (!ret) {
@@ -298,8 +301,13 @@ bool FtraceProcfs::MaybeTearDownEventTriggers(const std::string& group,
                                               const std::string& name) {
   bool ret = true;
 
-  if (group == "synthetic" && name == "rss_stat_throttled")
-    ret = RemoveAllEventTriggers("kmem", "rss_stat");
+  if (group == "synthetic") {
+    if (name == "rss_stat_throttled") {
+      ret = RemoveAllEventTriggers("kmem", "rss_stat");
+    } else if (name == "suspend_resume_minimal") {
+      ret = RemoveEventTrigger("power", "suspend_resume", kSuspendResumeMinimalTrigger);
+    }
+  }
 
   if (!ret) {
     PERFETTO_PLOG("Failed to tear down event triggers for: %s:%s",
@@ -389,7 +397,7 @@ void FtraceProcfs::ClearTrace() {
   // We cannot use PERFETTO_CHECK as we might get a permission denied error
   // on Android. The permissions to these files are configured in
   // platform/framework/native/cmds/atrace/atrace.rc.
-  for (size_t cpu = 0; cpu < NumberOfCpus(); cpu++) {
+  for (size_t cpu = 0, num_cpus = NumberOfCpus(); cpu < num_cpus; cpu++) {
     ClearPerCpuTrace(cpu);
   }
 }
@@ -405,12 +413,8 @@ bool FtraceProcfs::WriteTraceMarker(const std::string& str) {
 }
 
 bool FtraceProcfs::SetCpuBufferSizeInPages(size_t pages) {
-  if (pages * base::kPageSize > 1 * 1024 * 1024 * 1024) {
-    PERFETTO_ELOG("Tried to set the per CPU buffer size to more than 1gb.");
-    return false;
-  }
   std::string path = root_ + "buffer_size_kb";
-  return WriteNumberToFile(path, pages * (base::kPageSize / 1024ul));
+  return WriteNumberToFile(path, pages * (base::GetSysPageSize() / 1024ul));
 }
 
 bool FtraceProcfs::GetTracingOn() {
@@ -505,6 +509,19 @@ std::set<std::string> FtraceProcfs::AvailableClocks() {
   return names;
 }
 
+uint32_t FtraceProcfs::ReadBufferPercent() {
+  std::string path = root_ + "buffer_percent";
+  std::string raw = ReadFileIntoString(path);
+  std::optional<uint32_t> percent =
+      base::StringToUInt32(base::StripSuffix(raw, "\n"));
+  return percent.has_value() ? *percent : 0;
+}
+
+bool FtraceProcfs::SetBufferPercent(uint32_t percent) {
+  std::string path = root_ + "buffer_percent";
+  return WriteNumberToFile(path, percent);
+}
+
 bool FtraceProcfs::WriteNumberToFile(const std::string& path, size_t value) {
   // 2^65 requires 20 digits to write.
   char buf[21];
@@ -594,7 +611,7 @@ uint32_t FtraceProcfs::ReadEventId(const std::string& group,
   if (str.size() && str[str.size() - 1] == '\n')
     str.resize(str.size() - 1);
 
-  base::Optional<uint32_t> id = base::StringToUInt32(str);
+  std::optional<uint32_t> id = base::StringToUInt32(str);
   if (!id)
     return 0;
   return *id;

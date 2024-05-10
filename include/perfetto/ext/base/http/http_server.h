@@ -18,26 +18,27 @@
 #define INCLUDE_PERFETTO_EXT_BASE_HTTP_HTTP_SERVER_H_
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "perfetto/base/task_runner.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/paged_memory.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/unix_socket.h"
 
-namespace perfetto {
-namespace base {
+namespace perfetto::base {
 
 class HttpServerConnection;
 
 struct HttpRequest {
   explicit HttpRequest(HttpServerConnection* c) : conn(c) {}
 
-  Optional<StringView> GetHeader(StringView name) const;
+  std::optional<StringView> GetHeader(StringView name) const;
 
   HttpServerConnection* conn;
 
@@ -183,7 +184,6 @@ class HttpServer : public UnixSocket::EventListener {
   bool origin_error_logged_ = false;
 };
 
-}  // namespace base
-}  // namespace perfetto
+}  // namespace perfetto::base
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_HTTP_HTTP_SERVER_H_

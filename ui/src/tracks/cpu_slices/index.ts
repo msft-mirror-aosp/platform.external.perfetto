@@ -12,134 +12,114 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {BigintMath as BIMath} from '../../base/bigint_math';
 import {search, searchEq, searchSegment} from '../../base/binary_search';
-import {assertTrue} from '../../base/logging';
+import {assertExists, assertTrue} from '../../base/logging';
+import {Duration, duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
+import {getLegacySelection} from '../../common/state';
 import {
   cropText,
   drawDoubleHeadedArrow,
   drawIncompleteSlice,
+  drawTrackHoverTooltip,
 } from '../../common/canvas_utils';
-import {colorForThread} from '../../common/colorizer';
-import {PluginContext} from '../../common/plugin_api';
-import {NUM} from '../../common/query_result';
-import {fromNs, timeToString, toNs} from '../../common/time';
+import {Color} from '../../core/color';
+import {colorForThread} from '../../core/colorizer';
 import {TrackData} from '../../common/track_data';
-import {
-  TrackController,
-} from '../../controller/track_controller';
+import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
+import {PanelSize} from '../../frontend/panel';
+import {SliceDetailsPanel} from '../../frontend/slice_details_panel';
+import {
+  EngineProxy,
+  Plugin,
+  PluginContextTrace,
+  PluginDescriptor,
+  Track,
+} from '../../public';
+import {LONG, NUM, STR_NULL} from '../../trace_processor/query_result';
+import {uuidv4Sql} from '../../base/uuid';
 
 export const CPU_SLICE_TRACK_KIND = 'CpuSliceTrack';
 
 export interface Data extends TrackData {
   // Slices are stored in a columnar fashion. All fields have the same length.
   ids: Float64Array;
-  starts: Float64Array;
-  ends: Float64Array;
+  startQs: BigInt64Array;
+  endQs: BigInt64Array;
   utids: Uint32Array;
-  isIncomplete: Uint8Array;
+  flags: Uint8Array;
   lastRowId: number;
 }
 
-export interface Config {
-  cpu: number;
-}
+const MARGIN_TOP = 3;
+const RECT_HEIGHT = 24;
+const TRACK_HEIGHT = MARGIN_TOP * 2 + RECT_HEIGHT;
 
-class CpuSliceTrackController extends TrackController<Config, Data> {
-  static readonly kind = CPU_SLICE_TRACK_KIND;
+const CPU_SLICE_FLAGS_INCOMPLETE = 1;
+const CPU_SLICE_FLAGS_REALTIME = 2;
 
-  private cachedBucketNs = Number.MAX_SAFE_INTEGER;
-  private maxDurNs = 0;
+class CpuSliceTrack implements Track {
+  private mousePos?: {x: number; y: number};
+  private utidHoveredInThisTrack = -1;
+  private fetcher = new TimelineFetcher<Data>(this.onBoundsChange.bind(this));
+
   private lastRowId = -1;
+  private engine: EngineProxy;
+  private cpu: number;
+  private trackKey: string;
+  private trackUuid = uuidv4Sql();
 
-  async onSetup() {
-    await this.query(`
-      create view ${this.tableName('sched')} as
-      select
-        ts,
-        dur,
-        utid,
-        id,
-        dur = -1 as isIncomplete
-      from sched
-      where cpu = ${this.config.cpu} and utid != 0
-    `);
-
-    const queryRes = await this.query(`
-      select ifnull(max(dur), 0) as maxDur, count(1) as rowCount
-      from ${this.tableName('sched')}
-    `);
-
-    const queryLastSlice = await this.query(`
-    select max(id) as lastSliceId from ${this.tableName('sched')}
-    `);
-    this.lastRowId = queryLastSlice.firstRow({lastSliceId: NUM}).lastSliceId;
-
-    const row = queryRes.firstRow({maxDur: NUM, rowCount: NUM});
-    this.maxDurNs = row.maxDur;
-    const rowCount = row.rowCount;
-    const bucketNs = this.cachedBucketSizeNs(rowCount);
-    if (bucketNs === undefined) {
-      return;
-    }
-
-    await this.query(`
-      create table ${this.tableName('sched_cached')} as
-      select
-        (ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs} as cached_tsq,
-        ts,
-        max(dur) as dur,
-        utid,
-        id,
-        isIncomplete
-      from ${this.tableName('sched')}
-      group by cached_tsq, isIncomplete
-      order by cached_tsq
-    `);
-    this.cachedBucketNs = bucketNs;
+  constructor(engine: EngineProxy, trackKey: string, cpu: number) {
+    this.engine = engine;
+    this.trackKey = trackKey;
+    this.cpu = cpu;
   }
 
-  async onBoundsChange(start: number, end: number, resolution: number):
-      Promise<Data> {
-    const resolutionNs = toNs(resolution);
+  async onCreate() {
+    await this.engine.query(`
+      create virtual table cpu_slice_${this.trackUuid}
+      using __intrinsic_slice_mipmap((
+        select
+          id,
+          ts,
+          iif(dur = -1, lead(ts, 1, trace_end()) over (order by ts) - ts, dur),
+          0 as depth
+        from sched
+        where cpu = ${this.cpu} and utid != 0
+      ));
+    `);
+    const it = await this.engine.query(`
+      select coalesce(max(id), -1) as lastRowId
+      from sched
+      where cpu = ${this.cpu} and utid != 0
+    `);
+    this.lastRowId = it.firstRow({lastRowId: NUM}).lastRowId;
+  }
 
-    // The resolution should always be a power of two for the logic of this
-    // function to make sense.
-    assertTrue(Math.log2(resolutionNs) % 1 === 0);
+  async onUpdate() {
+    await this.fetcher.requestDataForCurrentTime();
+  }
 
-    const boundStartNs = toNs(start);
-    const boundEndNs = toNs(end);
+  async onBoundsChange(
+    start: time,
+    end: time,
+    resolution: duration,
+  ): Promise<Data> {
+    assertTrue(BIMath.popcount(resolution) === 1, `${resolution} not pow of 2`);
 
-    // ns per quantization bucket (i.e. ns per pixel). /2 * 2 is to force it to
-    // be an even number, so we can snap in the middle.
-    const bucketNs =
-        Math.max(Math.round(resolutionNs * this.pxSize() / 2) * 2, 1);
-
-    const isCached = this.cachedBucketNs <= bucketNs;
-    const queryTsq = isCached ?
-        `cached_tsq / ${bucketNs} * ${bucketNs}` :
-        `(ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs}`;
-    const queryTable =
-        isCached ? this.tableName('sched_cached') : this.tableName('sched');
-    const constraintColumn = isCached ? 'cached_tsq' : 'ts';
-
-    const queryRes = await this.query(`
+    const queryRes = await this.engine.query(`
       select
-        ${queryTsq} as tsq,
-        ts,
-        max(dur) as dur,
-        utid,
-        id,
-        isIncomplete
-      from ${queryTable}
-      where
-        ${constraintColumn} >= ${boundStartNs - this.maxDurNs} and
-        ${constraintColumn} <= ${boundEndNs}
-      group by tsq, isIncomplete
-      order by tsq
+        (z.ts / ${resolution}) * ${resolution} as tsQ,
+        (((z.ts + z.dur) / ${resolution}) + 1) * ${resolution} as tsEndQ,
+        s.utid,
+        s.id,
+        s.dur = -1 as isIncomplete,
+        ifnull(s.priority < 100, 0) as isRealtime
+      from cpu_slice_${this.trackUuid}(${start}, ${end}, ${resolution}) z
+      cross join sched s using (id)
     `);
 
     const numRows = queryRes.numRows();
@@ -150,149 +130,135 @@ class CpuSliceTrackController extends TrackController<Config, Data> {
       length: numRows,
       lastRowId: this.lastRowId,
       ids: new Float64Array(numRows),
-      starts: new Float64Array(numRows),
-      ends: new Float64Array(numRows),
+      startQs: new BigInt64Array(numRows),
+      endQs: new BigInt64Array(numRows),
       utids: new Uint32Array(numRows),
-      isIncomplete: new Uint8Array(numRows),
+      flags: new Uint8Array(numRows),
     };
 
-    const it = queryRes.iter(
-        {tsq: NUM, ts: NUM, dur: NUM, utid: NUM, id: NUM, isIncomplete: NUM});
+    const it = queryRes.iter({
+      tsQ: LONG,
+      tsEndQ: LONG,
+      utid: NUM,
+      id: NUM,
+      isIncomplete: NUM,
+      isRealtime: NUM,
+    });
     for (let row = 0; it.valid(); it.next(), row++) {
-      const startNsQ = it.tsq;
-      const startNs = it.ts;
-      const durNs = it.dur;
-      const endNs = startNs + durNs;
-
-      // If the slice is incomplete, the end calculated later.
-      if (!it.isIncomplete) {
-        let endNsQ =
-            Math.floor((endNs + bucketNs / 2 - 1) / bucketNs) * bucketNs;
-        endNsQ = Math.max(endNsQ, startNsQ + bucketNs);
-        slices.ends[row] = fromNs(endNsQ);
-      }
-
-      slices.starts[row] = fromNs(startNsQ);
+      slices.startQs[row] = it.tsQ;
+      slices.endQs[row] = it.tsEndQ;
       slices.utids[row] = it.utid;
       slices.ids[row] = it.id;
-      slices.isIncomplete[row] = it.isIncomplete;
-    }
 
-    // If the slice is incomplete and it is the last slice in the track, the end
-    // of the slice would be the end of the visible window. Otherwise we end the
-    // slice with the beginning the next one.
-    for (let row = 0; row < slices.length; row++) {
-      if (!slices.isIncomplete[row]) {
-        continue;
+      slices.flags[row] = 0;
+      if (it.isIncomplete) {
+        slices.flags[row] |= CPU_SLICE_FLAGS_INCOMPLETE;
       }
-      const endNs =
-          row === slices.length - 1 ? boundEndNs : toNs(slices.starts[row + 1]);
-
-      let endNsQ = Math.floor((endNs + bucketNs / 2 - 1) / bucketNs) * bucketNs;
-      endNsQ = Math.max(endNsQ, toNs(slices.starts[row]) + bucketNs);
-      slices.ends[row] = fromNs(endNsQ);
+      if (it.isRealtime) {
+        slices.flags[row] |= CPU_SLICE_FLAGS_REALTIME;
+      }
     }
     return slices;
   }
 
   async onDestroy() {
-    await this.query(`drop table if exists ${this.tableName('sched_cached')}`);
-  }
-}
-
-const MARGIN_TOP = 3;
-const RECT_HEIGHT = 24;
-const TRACK_HEIGHT = MARGIN_TOP * 2 + RECT_HEIGHT;
-
-class CpuSliceTrack extends Track<Config, Data> {
-  static readonly kind = CPU_SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): CpuSliceTrack {
-    return new CpuSliceTrack(args);
-  }
-
-  private mousePos?: {x: number, y: number};
-  private utidHoveredInThisTrack = -1;
-
-  constructor(args: NewTrackArgs) {
-    super(args);
+    if (this.engine.isAlive) {
+      await this.engine.query(
+        `drop table if exists cpu_slice_${this.trackUuid}`,
+      );
+    }
+    this.fetcher.dispose();
   }
 
   getHeight(): number {
     return TRACK_HEIGHT;
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  render(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-    const data = this.data();
+    const {visibleTimeScale} = globals.timeline;
+    const data = this.fetcher.data;
 
-    if (data === undefined) return;  // Can't possibly draw anything.
+    if (data === undefined) return; // Can't possibly draw anything.
 
     // If the cached trace slices don't fully cover the visible time range,
     // show a gray rectangle with a "Loading..." label.
     checkerboardExcept(
-        ctx,
-        this.getHeight(),
-        timeScale.timeToPx(visibleWindowTime.start),
-        timeScale.timeToPx(visibleWindowTime.end),
-        timeScale.timeToPx(data.start),
-        timeScale.timeToPx(data.end));
+      ctx,
+      this.getHeight(),
+      0,
+      size.width,
+      visibleTimeScale.timeToPx(data.start),
+      visibleTimeScale.timeToPx(data.end),
+    );
 
     this.renderSlices(ctx, data);
   }
 
   renderSlices(ctx: CanvasRenderingContext2D, data: Data): void {
-    const {timeScale, visibleWindowTime} = globals.frontendLocalState;
-    assertTrue(data.starts.length === data.ends.length);
-    assertTrue(data.starts.length === data.utids.length);
+    const {visibleTimeScale, visibleTimeSpan, visibleWindowTime} =
+      globals.timeline;
+    assertTrue(data.startQs.length === data.endQs.length);
+    assertTrue(data.startQs.length === data.utids.length);
+
+    const visWindowEndPx = visibleTimeScale.hpTimeToPx(visibleWindowTime.end);
 
     ctx.textAlign = 'center';
     ctx.font = '12px Roboto Condensed';
     const charWidth = ctx.measureText('dbpqaouk').width / 8;
 
-    const rawStartIdx =
-        data.ends.findIndex((end) => end >= visibleWindowTime.start);
+    const startTime = visibleTimeSpan.start;
+    const endTime = visibleTimeSpan.end;
+
+    const rawStartIdx = data.endQs.findIndex((end) => end >= startTime);
     const startIdx = rawStartIdx === -1 ? 0 : rawStartIdx;
 
-    const [, rawEndIdx] = searchSegment(data.starts, visibleWindowTime.end);
-    const endIdx = rawEndIdx === -1 ? data.starts.length : rawEndIdx;
+    const [, rawEndIdx] = searchSegment(data.startQs, endTime);
+    const endIdx = rawEndIdx === -1 ? data.startQs.length : rawEndIdx;
 
     for (let i = startIdx; i < endIdx; i++) {
-      const tStart = data.starts[i];
-      let tEnd = data.ends[i];
+      const tStart = Time.fromRaw(data.startQs[i]);
+      let tEnd = Time.fromRaw(data.endQs[i]);
       const utid = data.utids[i];
 
       // If the last slice is incomplete, it should end with the end of the
       // window, else it might spill over the window and the end would not be
       // visible as a zigzag line.
-      if (data.ids[i] === data.lastRowId && data.isIncomplete[i]) {
-        tEnd = visibleWindowTime.end;
+      if (
+        data.ids[i] === data.lastRowId &&
+        data.flags[i] & CPU_SLICE_FLAGS_INCOMPLETE
+      ) {
+        tEnd = endTime;
       }
-      const rectStart = timeScale.timeToPx(tStart);
-      const rectEnd = timeScale.timeToPx(tEnd);
+      const rectStart = visibleTimeScale.timeToPx(tStart);
+      const rectEnd = visibleTimeScale.timeToPx(tEnd);
       const rectWidth = Math.max(1, rectEnd - rectStart);
 
       const threadInfo = globals.threads.get(utid);
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       const pid = threadInfo && threadInfo.pid ? threadInfo.pid : -1;
 
       const isHovering = globals.state.hoveredUtid !== -1;
       const isThreadHovered = globals.state.hoveredUtid === utid;
       const isProcessHovered = globals.state.hoveredPid === pid;
-      const color = colorForThread(threadInfo);
+      const colorScheme = colorForThread(threadInfo);
+      let color: Color;
+      let textColor: Color;
       if (isHovering && !isThreadHovered) {
         if (!isProcessHovered) {
-          color.l = 90;
-          color.s = 0;
+          color = colorScheme.disabled;
+          textColor = colorScheme.textDisabled;
         } else {
-          color.l = Math.min(color.l + 30, 80);
-          color.s -= 20;
+          color = colorScheme.variant;
+          textColor = colorScheme.textVariant;
         }
       } else {
-        color.l = Math.min(color.l + 10, 60);
-        color.s -= 20;
+        color = colorScheme.base;
+        textColor = colorScheme.textBase;
       }
-      ctx.fillStyle = `hsl(${color.h}, ${color.s}%, ${color.l}%)`;
-      if (data.isIncomplete[i]) {
+      ctx.fillStyle = color.cssString;
+
+      if (data.flags[i] & CPU_SLICE_FLAGS_INCOMPLETE) {
         drawIncompleteSlice(ctx, rectStart, MARGIN_TOP, rectWidth, RECT_HEIGHT);
       } else {
         ctx.fillRect(rectStart, MARGIN_TOP, rectWidth, RECT_HEIGHT);
@@ -301,14 +267,24 @@ class CpuSliceTrack extends Track<Config, Data> {
       // Don't render text when we have less than 5px to play with.
       if (rectWidth < 5) continue;
 
+      // Stylize real-time threads. We don't do it when zoomed out as the
+      // fillRect is expensive.
+      if (data.flags[i] & CPU_SLICE_FLAGS_REALTIME) {
+        ctx.fillStyle = getHatchedPattern(ctx);
+        ctx.fillRect(rectStart, MARGIN_TOP, rectWidth, RECT_HEIGHT);
+      }
+
       // TODO: consider de-duplicating this code with the copied one from
       // chrome_slices/frontend.ts.
       let title = `[utid:${utid}]`;
       let subTitle = '';
       if (threadInfo) {
+        /* eslint-disable @typescript-eslint/strict-boolean-expressions */
         if (threadInfo.pid) {
+          /* eslint-enable */
           let procName = threadInfo.procName || '';
-          if (procName.startsWith('/')) {  // Remove folder paths from name
+          if (procName.startsWith('/')) {
+            // Remove folder paths from name
             procName = procName.substring(procName.lastIndexOf('/') + 1);
           }
           title = `${procName} [${threadInfo.pid}]`;
@@ -317,69 +293,83 @@ class CpuSliceTrack extends Track<Config, Data> {
           title = `${threadInfo.threadName} [${threadInfo.tid}]`;
         }
       }
-      title = cropText(title, charWidth, rectWidth);
-      subTitle = cropText(subTitle, charWidth, rectWidth);
-      const rectXCenter = rectStart + rectWidth / 2;
-      ctx.fillStyle = '#fff';
+
+      if (data.flags[i] & CPU_SLICE_FLAGS_REALTIME) {
+        subTitle = subTitle + ' (RT)';
+      }
+
+      const right = Math.min(visWindowEndPx, rectEnd);
+      const left = Math.max(rectStart, 0);
+      const visibleWidth = Math.max(right - left, 1);
+      title = cropText(title, charWidth, visibleWidth);
+      subTitle = cropText(subTitle, charWidth, visibleWidth);
+      const rectXCenter = left + visibleWidth / 2;
+      ctx.fillStyle = textColor.cssString;
       ctx.font = '12px Roboto Condensed';
       ctx.fillText(title, rectXCenter, MARGIN_TOP + RECT_HEIGHT / 2 - 1);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.fillStyle = textColor.setAlpha(0.6).cssString;
       ctx.font = '10px Roboto Condensed';
       ctx.fillText(subTitle, rectXCenter, MARGIN_TOP + RECT_HEIGHT / 2 + 9);
     }
 
-    const selection = globals.state.currentSelection;
+    const selection = getLegacySelection(globals.state);
     const details = globals.sliceDetails;
     if (selection !== null && selection.kind === 'SLICE') {
       const [startIndex, endIndex] = searchEq(data.ids, selection.id);
       if (startIndex !== endIndex) {
-        const tStart = data.starts[startIndex];
-        const tEnd = data.ends[startIndex];
+        const tStart = Time.fromRaw(data.startQs[startIndex]);
+        const tEnd = Time.fromRaw(data.endQs[startIndex]);
         const utid = data.utids[startIndex];
         const color = colorForThread(globals.threads.get(utid));
-        const rectStart = timeScale.timeToPx(tStart);
-        const rectEnd = timeScale.timeToPx(tEnd);
+        const rectStart = visibleTimeScale.timeToPx(tStart);
+        const rectEnd = visibleTimeScale.timeToPx(tEnd);
         const rectWidth = Math.max(1, rectEnd - rectStart);
 
         // Draw a rectangle around the slice that is currently selected.
-        ctx.strokeStyle = `hsl(${color.h}, ${color.s}%, 30%)`;
+        ctx.strokeStyle = color.base.setHSL({l: 30}).cssString;
         ctx.beginPath();
         ctx.lineWidth = 3;
         ctx.strokeRect(rectStart, MARGIN_TOP - 1.5, rectWidth, RECT_HEIGHT + 3);
         ctx.closePath();
         // Draw arrow from wakeup time of current slice.
         if (details.wakeupTs) {
-          const wakeupPos = timeScale.timeToPx(details.wakeupTs);
+          const wakeupPos = visibleTimeScale.timeToPx(details.wakeupTs);
           const latencyWidth = rectStart - wakeupPos;
           drawDoubleHeadedArrow(
-              ctx,
-              wakeupPos,
-              MARGIN_TOP + RECT_HEIGHT,
-              latencyWidth,
-              latencyWidth >= 20);
+            ctx,
+            wakeupPos,
+            MARGIN_TOP + RECT_HEIGHT,
+            latencyWidth,
+            latencyWidth >= 20,
+          );
           // Latency time with a white semi-transparent background.
-          const displayText = timeToString(tStart - details.wakeupTs);
+          const latency = tStart - details.wakeupTs;
+          const displayText = Duration.humanise(latency);
           const measured = ctx.measureText(displayText);
           if (latencyWidth >= measured.width + 2) {
             ctx.fillStyle = 'rgba(255,255,255,0.7)';
             ctx.fillRect(
-                wakeupPos + latencyWidth / 2 - measured.width / 2 - 1,
-                MARGIN_TOP + RECT_HEIGHT - 12,
-                measured.width + 2,
-                11);
+              wakeupPos + latencyWidth / 2 - measured.width / 2 - 1,
+              MARGIN_TOP + RECT_HEIGHT - 12,
+              measured.width + 2,
+              11,
+            );
             ctx.textBaseline = 'bottom';
             ctx.fillStyle = 'black';
             ctx.fillText(
-                displayText,
-                wakeupPos + (latencyWidth) / 2,
-                MARGIN_TOP + RECT_HEIGHT - 1);
+              displayText,
+              wakeupPos + latencyWidth / 2,
+              MARGIN_TOP + RECT_HEIGHT - 1,
+            );
           }
         }
       }
 
       // Draw diamond if the track being drawn is the cpu of the waker.
-      if (this.config.cpu === details.wakerCpu && details.wakeupTs) {
-        const wakeupPos = Math.floor(timeScale.timeToPx(details.wakeupTs));
+      if (this.cpu === details.wakerCpu && details.wakeupTs) {
+        const wakeupPos = Math.floor(
+          visibleTimeScale.timeToPx(details.wakeupTs),
+        );
         ctx.beginPath();
         ctx.moveTo(wakeupPos, MARGIN_TOP + RECT_HEIGHT / 2 + 8);
         ctx.fillStyle = 'black';
@@ -392,44 +382,50 @@ class CpuSliceTrack extends Track<Config, Data> {
     }
 
     const hoveredThread = globals.threads.get(this.utidHoveredInThisTrack);
+    const maxHeight = this.getHeight();
     if (hoveredThread !== undefined && this.mousePos !== undefined) {
-      const tidText = `T: ${hoveredThread.threadName} [${hoveredThread.tid}]`;
+      const tidText = `T: ${hoveredThread.threadName}
+      [${hoveredThread.tid}]`;
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (hoveredThread.pid) {
-        const pidText = `P: ${hoveredThread.procName} [${hoveredThread.pid}]`;
-        this.drawTrackHoverTooltip(ctx, this.mousePos, pidText, tidText);
+        const pidText = `P: ${hoveredThread.procName}
+        [${hoveredThread.pid}]`;
+        drawTrackHoverTooltip(ctx, this.mousePos, maxHeight, pidText, tidText);
       } else {
-        this.drawTrackHoverTooltip(ctx, this.mousePos, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, maxHeight, tidText);
       }
     }
   }
 
-  onMouseMove(pos: {x: number, y: number}) {
-    const data = this.data();
+  onMouseMove(pos: {x: number; y: number}) {
+    const data = this.fetcher.data;
     this.mousePos = pos;
     if (data === undefined) return;
-    const {timeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
     if (pos.y < MARGIN_TOP || pos.y > MARGIN_TOP + RECT_HEIGHT) {
       this.utidHoveredInThisTrack = -1;
       globals.dispatch(Actions.setHoveredUtidAndPid({utid: -1, pid: -1}));
       return;
     }
-    const t = timeScale.pxToTime(pos.x);
+    const t = visibleTimeScale.pxToHpTime(pos.x);
     let hoveredUtid = -1;
 
-    for (let i = 0; i < data.starts.length; i++) {
-      const tStart = data.starts[i];
-      const tEnd = data.ends[i];
+    for (let i = 0; i < data.startQs.length; i++) {
+      const tStart = Time.fromRaw(data.startQs[i]);
+      const tEnd = Time.fromRaw(data.endQs[i]);
       const utid = data.utids[i];
-      if (tStart <= t && t <= tEnd) {
+      if (t.gte(tStart) && t.lt(tEnd)) {
         hoveredUtid = utid;
         break;
       }
     }
     this.utidHoveredInThisTrack = hoveredUtid;
     const threadInfo = globals.threads.get(hoveredUtid);
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     const hoveredPid = threadInfo ? (threadInfo.pid ? threadInfo.pid : -1) : -1;
     globals.dispatch(
-        Actions.setHoveredUtidAndPid({utid: hoveredUtid, pid: hoveredPid}));
+      Actions.setHoveredUtidAndPid({utid: hoveredUtid, pid: hoveredPid}),
+    );
   }
 
   onMouseOut() {
@@ -439,25 +435,111 @@ class CpuSliceTrack extends Track<Config, Data> {
   }
 
   onMouseClick({x}: {x: number}) {
-    const data = this.data();
+    const data = this.fetcher.data;
     if (data === undefined) return false;
-    const {timeScale} = globals.frontendLocalState;
-    const time = timeScale.pxToTime(x);
-    const index = search(data.starts, time);
+    const {visibleTimeScale} = globals.timeline;
+    const time = visibleTimeScale.pxToHpTime(x);
+    const index = search(data.startQs, time.toTime());
     const id = index === -1 ? undefined : data.ids[index];
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (!id || this.utidHoveredInThisTrack === -1) return false;
-    globals.makeSelection(
-        Actions.selectSlice({id, trackId: this.trackState.id}));
+
+    globals.setLegacySelection(
+      {
+        kind: 'SLICE',
+        id,
+        trackKey: this.trackKey,
+      },
+      {
+        clearSearch: true,
+        pendingScrollId: undefined,
+        switchToCurrentSelectionTab: true,
+      },
+    );
+
     return true;
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(CpuSliceTrackController);
-  ctx.registerTrack(CpuSliceTrack);
+class CpuSlices implements Plugin {
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    const cpus = await ctx.engine.getCpus();
+    const cpuToSize = await this.guessCpuSizes(ctx.engine);
+
+    for (const cpu of cpus) {
+      const size = cpuToSize.get(cpu);
+      const uri = `perfetto.CpuSlices#cpu${cpu}`;
+      const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
+      ctx.registerTrack({
+        uri,
+        displayName: name,
+        kind: CPU_SLICE_TRACK_KIND,
+        cpu,
+        trackFactory: ({trackKey}) => {
+          return new CpuSliceTrack(ctx.engine, trackKey, cpu);
+        },
+      });
+    }
+
+    ctx.registerDetailsPanel({
+      render: (sel) => {
+        if (sel.kind === 'SLICE') {
+          return m(SliceDetailsPanel);
+        }
+      },
+    });
+  }
+
+  async guessCpuSizes(engine: EngineProxy): Promise<Map<number, string>> {
+    const cpuToSize = new Map<number, string>();
+    await engine.query(`
+      INCLUDE PERFETTO MODULE cpu.size;
+    `);
+    const result = await engine.query(`
+      SELECT cpu, cpu_guess_core_type(cpu) as size
+      FROM cpu_counter_track;
+    `);
+
+    const it = result.iter({
+      cpu: NUM,
+      size: STR_NULL,
+    });
+
+    for (; it.valid(); it.next()) {
+      const size = it.size;
+      if (size !== null) {
+        cpuToSize.set(it.cpu, size);
+      }
+    }
+
+    return cpuToSize;
+  }
 }
 
-export const plugin = {
+// Creates a diagonal hatched pattern to be used for distinguishing slices with
+// real-time priorities. The pattern is created once as an offscreen canvas and
+// is kept cached inside the Context2D of the main canvas, without making
+// assumptions on the lifetime of the main canvas.
+function getHatchedPattern(mainCtx: CanvasRenderingContext2D): CanvasPattern {
+  const mctx = mainCtx as CanvasRenderingContext2D & {
+    sliceHatchedPattern?: CanvasPattern;
+  };
+  if (mctx.sliceHatchedPattern !== undefined) return mctx.sliceHatchedPattern;
+  const canvas = document.createElement('canvas');
+  const SIZE = 8;
+  canvas.width = canvas.height = SIZE;
+  const ctx = assertExists(canvas.getContext('2d'));
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath();
+  ctx.lineWidth = 1;
+  ctx.moveTo(0, SIZE);
+  ctx.lineTo(SIZE, 0);
+  ctx.stroke();
+  mctx.sliceHatchedPattern = assertExists(mctx.createPattern(canvas, 'repeat'));
+  return mctx.sliceHatchedPattern;
+}
+
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.CpuSlices',
-  activate,
+  plugin: CpuSlices,
 };

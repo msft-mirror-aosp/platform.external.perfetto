@@ -12,30 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
-import {v4 as uuidv4} from 'uuid';
+import m from 'mithril';
 
-import {EngineProxy} from '../common/engine';
-import {Registry} from '../common/registry';
+import {EngineProxy} from '../trace_processor/engine';
 
-import {Panel, PanelSize, PanelVNode} from './panel';
-
-export interface NewBottomTabArgs {
+export interface NewBottomTabArgs<Config> {
   engine: EngineProxy;
   tag?: string;
   uuid: string;
-  config: {};
+  config: Config;
 }
-
-// Interface for allowing registration and creation of bottom tabs.
-// See comments on |TrackCreator| for more details.
-export interface BottomTabCreator {
-  readonly kind: string;
-
-  create(args: NewBottomTabArgs): BottomTab;
-}
-
-export const bottomTabRegistry = Registry.kindRegistry<BottomTabCreator>();
 
 // An interface representing a bottom tab displayed on the panel in the bottom
 // of the ui (e.g. "Current Selection").
@@ -67,8 +53,8 @@ export abstract class BottomTabBase<Config = {}> {
   // panel.
   readonly uuid: string;
 
-  constructor(args: NewBottomTabArgs) {
-    this.config = args.config as Config;
+  constructor(args: NewBottomTabArgs<Config>) {
+    this.config = args.config;
     this.engine = args.engine;
     this.tag = args.tag;
     this.uuid = args.uuid;
@@ -78,28 +64,37 @@ export abstract class BottomTabBase<Config = {}> {
   abstract getTitle(): string;
 
   // Generate a mithril node for this component.
-  abstract createPanelVnode(): PanelVNode;
-}
+  abstract renderPanel(): m.Children;
 
+  // API for the tab to notify the TabList that it's still preparing the data.
+  // If true, adding a new tab will be delayed for a short while (~50ms) to
+  // reduce the flickering.
+  //
+  // Note: it's a "poll" rather than "push" API: there is no explicit API
+  // for the tabs to notify the tab list, as the tabs are expected to schedule
+  // global redraw anyway and the tab list will poll the tabs as necessary
+  // during the redraw.
+  isLoading(): boolean {
+    return false;
+  }
+}
 
 // BottomTabBase provides a more generic API allowing users to provide their
 // custom mithril component, which would allow them to listen to mithril
 // lifecycle events. Most cases, however, don't need them and BottomTab
 // provides a simplified API for the common case.
 export abstract class BottomTab<Config = {}> extends BottomTabBase<Config> {
-  constructor(args: NewBottomTabArgs) {
+  constructor(args: NewBottomTabArgs<Config>) {
     super(args);
   }
 
-  // These methods are direct counterparts to renderCanvas and view with
-  // slightly changes names to prevent cases when `BottomTab` will
-  // be accidentally used a mithril component.
-  abstract renderTabCanvas(ctx: CanvasRenderingContext2D, size: PanelSize):
-      void;
-  abstract viewTab(): void|m.Children;
+  abstract viewTab(): m.Children;
 
-  createPanelVnode(): m.Vnode<any, any> {
-    return m(BottomTabAdapter, {key: this.uuid, panel: this});
+  renderPanel(): m.Children {
+    return m(BottomTabAdapter, {
+      key: this.uuid,
+      panel: this,
+    } as BottomTabAdapterAttrs);
   }
 }
 
@@ -107,66 +102,8 @@ interface BottomTabAdapterAttrs {
   panel: BottomTab;
 }
 
-class BottomTabAdapter extends Panel<BottomTabAdapterAttrs> {
-  renderCanvas(
-      ctx: CanvasRenderingContext2D, size: PanelSize,
-      vnode: PanelVNode<BottomTabAdapterAttrs>): void {
-    vnode.attrs.panel.renderTabCanvas(ctx, size);
-  }
-
-  view(vnode: m.CVnode<BottomTabAdapterAttrs>): void|m.Children {
+class BottomTabAdapter implements m.ClassComponent<BottomTabAdapterAttrs> {
+  view(vnode: m.CVnode<BottomTabAdapterAttrs>): void | m.Children {
     return vnode.attrs.panel.viewTab();
-  }
-}
-
-export type AddTabArgs = {
-  kind: string,
-  config: {},
-  tag?: string,
-};
-
-export type AddTabResult = {
-  uuid: string;
-}
-
-export class BottomTabList {
-  tabs: BottomTabBase[] = [];
-  private engine: EngineProxy;
-
-  constructor(engine: EngineProxy) {
-    this.engine = engine;
-  }
-
-  // Add and create a new panel with given kind and config, replacing an
-  // existing panel with the same tag if needed. Returns the uuid of a newly
-  // created panel (which can be used in the future to close it).
-  addTab(args: AddTabArgs): AddTabResult {
-    const uuid = uuidv4();
-    const newPanel = bottomTabRegistry.get(args.kind).create({
-      engine: this.engine,
-      uuid,
-      config: args.config,
-      tag: args.tag,
-    });
-
-    const index =
-        args.tag ? this.tabs.findIndex((tab) => tab.tag === args.tag) : -1;
-    if (index === -1) {
-      this.tabs.push(newPanel);
-    } else {
-      this.tabs[index] = newPanel;
-    }
-
-    return {
-      uuid,
-    };
-  }
-
-  closeTabByTag(tag: string) {
-    this.tabs = this.tabs.filter((panel) => panel.tag !== tag);
-  }
-
-  closeTabById(uuid: string) {
-    this.tabs = this.tabs.filter((panel) => panel.uuid !== uuid);
   }
 }

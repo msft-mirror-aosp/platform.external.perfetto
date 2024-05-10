@@ -22,8 +22,10 @@
 #include <memory>
 
 #include "src/trace_processor/importers/common/chunked_trace_reader.h"
+#include "src/trace_processor/importers/proto/multi_machine_trace_manager.h"
 #include "src/trace_processor/importers/proto/proto_incremental_state.h"
 #include "src/trace_processor/importers/proto/proto_trace_tokenizer.h"
+#include "src/trace_processor/storage/trace_storage.h"
 
 namespace protozero {
 struct ConstBytes;
@@ -75,7 +77,7 @@ class ProtoTraceReader : public ChunkedTraceReader {
                          TraceBlobView interned_data);
   void ParseTraceConfig(ConstBytes);
 
-  base::Optional<StringId> GetBuiltinClockNameOrNull(uint64_t clock_id);
+  std::optional<StringId> GetBuiltinClockNameOrNull(int64_t clock_id);
 
   PacketSequenceState* GetIncrementalStateForPacketSequence(
       uint32_t sequence_id) {

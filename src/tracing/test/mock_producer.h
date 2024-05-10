@@ -55,7 +55,8 @@ class MockProducer : public Producer {
   void RegisterDataSource(const std::string& name,
                           bool ack_stop = false,
                           bool ack_start = false,
-                          bool handle_incremental_state_clear = false);
+                          bool handle_incremental_state_clear = false,
+                          bool no_flush = false);
   void UnregisterDataSource(const std::string& name);
   void RegisterTrackEventDataSource(
       const std::initializer_list<std::string>& categories,
@@ -76,28 +77,39 @@ class MockProducer : public Producer {
 
   // Expect a flush. Flushes |writer_to_flush| if non-null. If |reply| is true,
   // replies to the flush request, otherwise ignores it and doesn't reply.
-  void WaitForFlush(TraceWriter* writer_to_flush, bool reply = true);
+  void ExpectFlush(TraceWriter* writer_to_flush,
+                   bool reply = true,
+                   FlushFlags expected_flags = FlushFlags());
   // Same as above, but with a vector of writers.
-  void WaitForFlush(std::vector<TraceWriter*> writers_to_flush,
-                    bool reply = true);
+  void ExpectFlush(std::vector<TraceWriter*> writers_to_flush,
+                   bool reply = true,
+                   FlushFlags expected_flags = FlushFlags());
 
   TracingService::ProducerEndpoint* endpoint() {
     return service_endpoint_.get();
   }
 
   // Producer implementation.
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD2(SetupDataSource,
-               void(DataSourceInstanceID, const DataSourceConfig&));
-  MOCK_METHOD2(StartDataSource,
-               void(DataSourceInstanceID, const DataSourceConfig&));
-  MOCK_METHOD1(StopDataSource, void(DataSourceInstanceID));
-  MOCK_METHOD0(OnTracingSetup, void());
-  MOCK_METHOD3(Flush,
-               void(FlushRequestID, const DataSourceInstanceID*, size_t));
-  MOCK_METHOD2(ClearIncrementalState,
-               void(const DataSourceInstanceID*, size_t));
+  MOCK_METHOD(void, OnConnect, (), (override));
+  MOCK_METHOD(void, OnDisconnect, (), (override));
+  MOCK_METHOD(void,
+              SetupDataSource,
+              (DataSourceInstanceID, const DataSourceConfig&),
+              (override));
+  MOCK_METHOD(void,
+              StartDataSource,
+              (DataSourceInstanceID, const DataSourceConfig&),
+              (override));
+  MOCK_METHOD(void, StopDataSource, (DataSourceInstanceID), (override));
+  MOCK_METHOD(void, OnTracingSetup, (), (override));
+  MOCK_METHOD(void,
+              Flush,
+              (FlushRequestID, const DataSourceInstanceID*, size_t, FlushFlags),
+              (override));
+  MOCK_METHOD(void,
+              ClearIncrementalState,
+              (const DataSourceInstanceID*, size_t),
+              (override));
 
  private:
   base::TestTaskRunner* const task_runner_;

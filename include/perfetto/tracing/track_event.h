@@ -126,6 +126,7 @@
 // If the program uses multiple track event namespaces, category & track event
 // registration (see quickstart above) needs to happen for both namespaces
 // separately.
+
 #ifndef PERFETTO_TRACK_EVENT_NAMESPACE
 #define PERFETTO_TRACK_EVENT_NAMESPACE perfetto_track_event
 #endif
@@ -351,14 +352,14 @@ constexpr bool IsDynamicCategory(const ::perfetto::DynamicCategory&) {
 //               "arg", value, "arg2", value2);
 //
 #define TRACE_EVENT_BEGIN(category, name, ...) \
-  PERFETTO_INTERNAL_TRACK_EVENT(               \
-      category, name,                          \
+  PERFETTO_INTERNAL_TRACK_EVENT_WITH_METHOD(   \
+      TraceForCategory, category, name,        \
       ::perfetto::protos::pbzero::TrackEvent::TYPE_SLICE_BEGIN, ##__VA_ARGS__)
 
 // End a slice under |category|.
-#define TRACE_EVENT_END(category, ...) \
-  PERFETTO_INTERNAL_TRACK_EVENT(       \
-      category, /*name=*/nullptr,      \
+#define TRACE_EVENT_END(category, ...)              \
+  PERFETTO_INTERNAL_TRACK_EVENT_WITH_METHOD(        \
+      TraceForCategory, category, /*name=*/nullptr, \
       ::perfetto::protos::pbzero::TrackEvent::TYPE_SLICE_END, ##__VA_ARGS__)
 
 // Begin a slice which gets automatically closed when going out of scope.
@@ -366,10 +367,10 @@ constexpr bool IsDynamicCategory(const ::perfetto::DynamicCategory&) {
   PERFETTO_INTERNAL_SCOPED_TRACK_EVENT(category, name, ##__VA_ARGS__)
 
 // Emit a slice which has zero duration.
-#define TRACE_EVENT_INSTANT(category, name, ...)                            \
-  PERFETTO_INTERNAL_TRACK_EVENT(                                            \
-      category, name, ::perfetto::protos::pbzero::TrackEvent::TYPE_INSTANT, \
-      ##__VA_ARGS__)
+#define TRACE_EVENT_INSTANT(category, name, ...) \
+  PERFETTO_INTERNAL_TRACK_EVENT_WITH_METHOD(     \
+      TraceForCategory, category, name,          \
+      ::perfetto::protos::pbzero::TrackEvent::TYPE_INSTANT, ##__VA_ARGS__)
 
 // Efficiently determine if the given static or dynamic trace category or
 // category group is enabled for tracing.
@@ -414,8 +415,8 @@ constexpr bool IsDynamicCategory(const ::perfetto::DynamicCategory&) {
 //   TRACE_COUNTER("category", "MyCounter", timestamp, value);
 //
 #define TRACE_COUNTER(category, track, ...)                 \
-  PERFETTO_INTERNAL_TRACK_EVENT(                            \
-      category, /*name=*/nullptr,                           \
+  PERFETTO_INTERNAL_TRACK_EVENT_WITH_METHOD(                \
+      TraceForCategory, category, /*name=*/nullptr,         \
       ::perfetto::protos::pbzero::TrackEvent::TYPE_COUNTER, \
       ::perfetto::CounterTrack(track), ##__VA_ARGS__)
 

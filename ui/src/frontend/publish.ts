@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {time} from '../base/time';
 import {Actions} from '../common/actions';
-import {AggregateData, isEmptyData} from '../common/aggregation_data';
+import {AggregateData} from '../common/aggregation_data';
 import {ConversionJobStatusUpdate} from '../common/conversion_jobs';
-import {
-  LogBoundsKey,
-  LogEntriesKey,
-  LogExists,
-  LogExistsKey,
-} from '../common/logs';
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
+import {raf} from '../core/raf_scheduler';
+import {HttpRpcState} from '../trace_processor/http_rpc_engine';
+import {getLegacySelection} from '../common/state';
 
 import {
   CounterDetails,
@@ -37,8 +35,9 @@ import {
 } from './globals';
 import {findCurrentSelection} from './keyboard_event_handler';
 
-export function publishOverviewData(
-    data: {[key: string]: QuantizedLoad|QuantizedLoad[]}) {
+export function publishOverviewData(data: {
+  [key: string]: QuantizedLoad | QuantizedLoad[];
+}) {
   for (const [key, value] of Object.entries(data)) {
     if (!globals.overviewStore.has(key)) {
       globals.overviewStore.set(key, []);
@@ -49,17 +48,17 @@ export function publishOverviewData(
       globals.overviewStore.get(key)!.push(value);
     }
   }
-  globals.rafScheduler.scheduleRedraw();
+  raf.scheduleRedraw();
 }
 
-export function publishTrackData(args: {id: string, data: {}}) {
+export function clearOverviewData() {
+  globals.overviewStore.clear();
+  raf.scheduleRedraw();
+}
+
+export function publishTrackData(args: {id: string; data: {}}) {
   globals.setTrackData(args.id, args.data);
-  if ([LogExistsKey, LogBoundsKey, LogEntriesKey].includes(args.id)) {
-    const data = globals.trackDataStore.get(LogExistsKey) as LogExists;
-    if (data && data.exists) globals.rafScheduler.scheduleFullRedraw();
-  } else {
-    globals.rafScheduler.scheduleRedraw();
-  }
+  raf.scheduleRedraw();
 }
 
 export function publishMetricResult(metricResult: MetricResult) {
@@ -70,6 +69,11 @@ export function publishMetricResult(metricResult: MetricResult) {
 export function publishSelectedFlows(selectedFlows: Flow[]) {
   globals.selectedFlows = selectedFlows;
   globals.publishRedraw();
+}
+
+export function publishHttpRpcState(httpRpcState: HttpRpcState) {
+  globals.httpRpcState = httpRpcState;
+  raf.scheduleFullRedraw();
 }
 
 export function publishCounterDetails(click: CounterDetails) {
@@ -87,13 +91,25 @@ export function publishCpuProfileDetails(details: CpuProfileDetails) {
   globals.publishRedraw();
 }
 
-export function publishHasFtrace(hasFtrace: boolean) {
-  globals.hasFtrace = hasFtrace;
+export function publishHasFtrace(value: boolean): void {
+  globals.hasFtrace = value;
+  globals.publishRedraw();
+}
+
+export function publishRealtimeOffset(
+  offset: time,
+  utcOffset: time,
+  traceTzOffset: time,
+) {
+  globals.realtimeOffset = offset;
+  globals.utcOffset = utcOffset;
+  globals.traceTzOffset = traceTzOffset;
   globals.publishRedraw();
 }
 
 export function publishConversionJobStatusUpdate(
-    job: ConversionJobStatusUpdate) {
+  job: ConversionJobStatusUpdate,
+) {
   globals.setConversionJobStatus(job.jobName, job.jobStatus);
   globals.publishRedraw();
 }
@@ -102,7 +118,7 @@ export function publishLoading(numQueuedQueries: number) {
   globals.numQueuedQueries = numQueuedQueries;
   // TODO(hjd): Clean up loadingAnimation given that this now causes a full
   // redraw anyways. Also this should probably just go via the global state.
-  globals.rafScheduler.scheduleFullRedraw();
+  raf.scheduleFullRedraw();
 }
 
 export function publishBufferUsage(args: {percentage: number}) {
@@ -132,22 +148,19 @@ export function publishTraceErrors(numErrors: number) {
 
 export function publishMetricError(error: string) {
   globals.setMetricError(error);
-  globals.logging.logError(error, false);
   globals.publishRedraw();
 }
 
-export function publishAggregateData(
-    args: {data: AggregateData, kind: string}) {
+export function publishAggregateData(args: {
+  data: AggregateData;
+  kind: string;
+}) {
   globals.setAggregateData(args.kind, args.data);
-  if (!isEmptyData(args.data)) {
-    globals.dispatch(Actions.setCurrentTab({tab: args.data.tabName}));
-  }
   globals.publishRedraw();
 }
 
-export function publishQueryResult(args: {id: string, data?: {}}) {
+export function publishQueryResult(args: {id: string; data?: {}}) {
   globals.queryResults.set(args.id, args.data);
-  globals.dispatch(Actions.setCurrentTab({tab: `query_result_${args.id}`}));
   globals.publishRedraw();
 }
 
@@ -164,7 +177,6 @@ export function publishSliceDetails(click: SliceDetails) {
   const id = click.id;
   if (id !== undefined && id === globals.state.pendingScrollId) {
     findCurrentSelection();
-    globals.dispatch(Actions.setCurrentTab({tab: 'slice'}));
     globals.dispatch(Actions.clearPendingScrollId({id: undefined}));
   }
   globals.publishRedraw();
@@ -182,8 +194,9 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
   // focus. In all other cases the focusedFlowId(Left|Right) will be set to -1.
   globals.dispatch(Actions.setHighlightedFlowLeftId({flowId: -1}));
   globals.dispatch(Actions.setHighlightedFlowRightId({flowId: -1}));
-  if (globals.state.currentSelection?.kind === 'CHROME_SLICE') {
-    const sliceId = globals.state.currentSelection.id;
+  const currentSelection = getLegacySelection(globals.state);
+  if (currentSelection?.kind === 'CHROME_SLICE') {
+    const sliceId = currentSelection.id;
     for (const flow of globals.connectedFlows) {
       if (flow.begin.sliceId === sliceId) {
         globals.dispatch(Actions.setHighlightedFlowRightId({flowId: flow.id}));
@@ -194,5 +207,10 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
     }
   }
 
+  globals.publishRedraw();
+}
+
+export function publishShowPanningHint() {
+  globals.showPanningHint = true;
   globals.publishRedraw();
 }

@@ -15,23 +15,23 @@
  */
 
 import {Actions} from '../common/actions';
-import {DEFAULT_CHANNEL, getCurrentChannel} from '../common/channels';
-import {Engine} from '../common/engine';
-import {featureFlags} from '../common/feature_flags';
-import {ColumnType, STR} from '../common/query_result';
 import {
   AreaSelection,
   PivotTableQuery,
   PivotTableQueryMetadata,
   PivotTableResult,
   PivotTableState,
+  getLegacySelection,
 } from '../common/state';
+import {featureFlags} from '../core/feature_flags';
 import {globals} from '../frontend/globals';
 import {
   aggregationIndex,
   generateQueryFromState,
 } from '../frontend/pivot_table_query_generator';
 import {Aggregation, PivotTree} from '../frontend/pivot_table_types';
+import {Engine} from '../trace_processor/engine';
+import {ColumnType} from '../trace_processor/query_result';
 
 import {Controller} from './controller';
 
@@ -39,15 +39,16 @@ export const PIVOT_TABLE_REDUX_FLAG = featureFlags.register({
   id: 'pivotTable',
   name: 'Pivot tables V2',
   description: 'Second version of pivot table',
-  // Enabled in canary and autopush by default.
-  defaultValue: getCurrentChannel() !== DEFAULT_CHANNEL,
+  defaultValue: true,
 });
 
 function expectNumber(value: ColumnType): number {
   if (typeof value === 'number') {
     return value;
+  } else if (typeof value === 'bigint') {
+    return Number(value);
   }
-  throw new Error(`Number was expected, got ${typeof value}`);
+  throw new Error(`number or bigint was expected, got ${typeof value}`);
 }
 
 // Auxiliary class to build the tree from query response.
@@ -99,11 +100,13 @@ export class PivotTableTreeBuilder {
   updateAggregates(tree: PivotTree, row: ColumnType[]) {
     const countIndex = this.queryMetadata.countIndex;
     const treeCount =
-        countIndex >= 0 ? expectNumber(tree.aggregates[countIndex]) : 0;
-    const rowCount = countIndex >= 0 ?
-        expectNumber(
-            row[aggregationIndex(this.pivotColumnsCount, countIndex)]) :
-        0;
+      countIndex >= 0 ? expectNumber(tree.aggregates[countIndex]) : 0;
+    const rowCount =
+      countIndex >= 0
+        ? expectNumber(
+            row[aggregationIndex(this.pivotColumnsCount, countIndex)],
+          )
+        : 0;
 
     for (let i = 0; i < this.aggregateColumns.length; i++) {
       const agg = this.aggregateColumns[i];
@@ -150,8 +153,11 @@ export class PivotTableTreeBuilder {
     for (let j = 0; j < this.aggregateColumns.length; j++) {
       aggregates.push(row[aggregationIndex(this.pivotColumnsCount, j)]);
     }
-    aggregates.push(row[aggregationIndex(
-        this.pivotColumnsCount, this.aggregateColumns.length)]);
+    aggregates.push(
+      row[
+        aggregationIndex(this.pivotColumnsCount, this.aggregateColumns.length)
+      ],
+    );
 
     return {
       isCollapsed: false,
@@ -162,8 +168,9 @@ export class PivotTableTreeBuilder {
   }
 }
 
-function createEmptyQueryResult(metadata: PivotTableQueryMetadata):
-    PivotTableResult {
+function createEmptyQueryResult(
+  metadata: PivotTableQueryMetadata,
+): PivotTableResult {
   return {
     tree: {
       aggregates: [],
@@ -182,7 +189,6 @@ export class PivotTableController extends Controller<{}> {
   engine: Engine;
   lastQueryAreaId = '';
   lastQueryAreaTracks = new Set<string>();
-  requestedArgumentNames = false;
 
   constructor(args: {engine: Engine}) {
     super({});
@@ -195,7 +201,7 @@ export class PivotTableController extends Controller<{}> {
     }
 
     // ES6 Set does not have .every method, only Array does.
-    for (const track in tracks) {
+    for (const track of tracks) {
       if (!this.lastQueryAreaTracks.has(track)) {
         return false;
       }
@@ -210,8 +216,10 @@ export class PivotTableController extends Controller<{}> {
     }
 
     const newTracks = new Set(globals.state.areas[selection.areaId].tracks);
-    if (this.lastQueryAreaId !== state.selectionArea.areaId ||
-        !this.sameTracks(newTracks)) {
+    if (
+      this.lastQueryAreaId !== state.selectionArea.areaId ||
+      !this.sameTracks(newTracks)
+    ) {
       this.lastQueryAreaId = state.selectionArea.areaId;
       this.lastQueryAreaTracks = newTracks;
       return true;
@@ -243,8 +251,11 @@ export class PivotTableController extends Controller<{}> {
     if (!it.valid()) {
       // Iterator is invalid after creation; means that there are no rows
       // satisfying filtering criteria. Return an empty tree.
-      globals.dispatch(Actions.setPivotStateQueryResult(
-          {queryResult: createEmptyQueryResult(query.metadata)}));
+      globals.dispatch(
+        Actions.setPivotStateQueryResult({
+          queryResult: createEmptyQueryResult(query.metadata),
+        }),
+      );
       return;
     }
 
@@ -253,53 +264,41 @@ export class PivotTableController extends Controller<{}> {
       treeBuilder.ingestRow(nextRow());
     }
 
-    globals.dispatch(Actions.setPivotStateQueryResult(
-        {queryResult: {tree: treeBuilder.build(), metadata: query.metadata}}));
-    globals.dispatch(Actions.setCurrentTab({tab: 'pivot_table'}));
+    globals.dispatch(
+      Actions.setPivotStateQueryResult({
+        queryResult: {tree: treeBuilder.build(), metadata: query.metadata},
+      }),
+    );
   }
-
-  async requestArgumentNames() {
-    this.requestedArgumentNames = true;
-    const result = await this.engine.query(`
-      select distinct flat_key from args
-    `);
-    const it = result.iter({flat_key: STR});
-
-    const argumentNames = [];
-    while (it.valid()) {
-      argumentNames.push(it.flat_key);
-      it.next();
-    }
-
-    globals.dispatch(Actions.setPivotTableArgumentNames({argumentNames}));
-  }
-
 
   run() {
     if (!PIVOT_TABLE_REDUX_FLAG.get()) {
       return;
     }
 
-    if (!this.requestedArgumentNames) {
-      this.requestArgumentNames();
-    }
-
     const pivotTableState = globals.state.nonSerializableState.pivotTable;
-    const selection = globals.state.currentSelection;
+    const selection = getLegacySelection(globals.state);
 
-    if (pivotTableState.queryRequested ||
-        (selection !== null && selection.kind === 'AREA' &&
-         this.shouldRerun(pivotTableState, selection))) {
+    if (
+      pivotTableState.queryRequested ||
+      (selection !== null &&
+        selection.kind === 'AREA' &&
+        this.shouldRerun(pivotTableState, selection))
+    ) {
       globals.dispatch(
-          Actions.setPivotTableQueryRequested({queryRequested: false}));
+        Actions.setPivotTableQueryRequested({queryRequested: false}),
+      );
       // Need to re-run the existing query, clear the current result.
       globals.dispatch(Actions.setPivotStateQueryResult({queryResult: null}));
       this.processQuery(generateQueryFromState(pivotTableState));
     }
 
-    if (selection !== null && selection.kind === 'AREA' &&
-        (pivotTableState.selectionArea === undefined ||
-         pivotTableState.selectionArea.areaId !== selection.areaId)) {
+    if (
+      selection !== null &&
+      selection.kind === 'AREA' &&
+      (pivotTableState.selectionArea === undefined ||
+        pivotTableState.selectionArea.areaId !== selection.areaId)
+    ) {
       globals.dispatch(Actions.togglePivotTable({areaId: selection.areaId}));
     }
   }

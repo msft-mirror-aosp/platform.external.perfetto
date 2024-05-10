@@ -16,6 +16,7 @@
 
 #include <cinttypes>
 
+#include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "perfetto/ext/tracing/core/consumer.h"
@@ -31,7 +32,7 @@
 #include "perfetto/tracing/core/trace_config.h"
 #include "src/base/test/test_task_runner.h"
 #include "src/ipc/test/test_socket.h"
-#include "src/tracing/core/tracing_service_impl.h"
+#include "src/tracing/service/tracing_service_impl.h"
 #include "test/gtest_and_gmock.h"
 
 #include "protos/perfetto/config/trace_config.gen.h"
@@ -58,19 +59,26 @@ class MockProducer : public Producer {
   ~MockProducer() override {}
 
   // Producer implementation.
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD2(SetupDataSource,
-               void(DataSourceInstanceID, const DataSourceConfig&));
-  MOCK_METHOD2(StartDataSource,
-               void(DataSourceInstanceID, const DataSourceConfig&));
-  MOCK_METHOD1(StopDataSource, void(DataSourceInstanceID));
-  MOCK_METHOD0(uid, uid_t());
-  MOCK_METHOD0(OnTracingSetup, void());
-  MOCK_METHOD3(Flush,
-               void(FlushRequestID, const DataSourceInstanceID*, size_t));
-  MOCK_METHOD2(ClearIncrementalState,
-               void(const DataSourceInstanceID*, size_t));
+  MOCK_METHOD(void, OnConnect, (), (override));
+  MOCK_METHOD(void, OnDisconnect, (), (override));
+  MOCK_METHOD(void,
+              SetupDataSource,
+              (DataSourceInstanceID, const DataSourceConfig&),
+              (override));
+  MOCK_METHOD(void,
+              StartDataSource,
+              (DataSourceInstanceID, const DataSourceConfig&),
+              (override));
+  MOCK_METHOD(void, StopDataSource, (DataSourceInstanceID), (override));
+  MOCK_METHOD(void, OnTracingSetup, (), (override));
+  MOCK_METHOD(void,
+              Flush,
+              (FlushRequestID, const DataSourceInstanceID*, size_t, FlushFlags),
+              (override));
+  MOCK_METHOD(void,
+              ClearIncrementalState,
+              (const DataSourceInstanceID*, size_t),
+              (override));
 };
 
 class MockConsumer : public Consumer {
@@ -78,15 +86,18 @@ class MockConsumer : public Consumer {
   ~MockConsumer() override {}
 
   // Producer implementation.
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD1(OnTracingDisabled, void(const std::string& /*error*/));
-  MOCK_METHOD2(OnTracePackets, void(std::vector<TracePacket>*, bool));
-  MOCK_METHOD1(OnDetach, void(bool));
-  MOCK_METHOD2(OnAttach, void(bool, const TraceConfig&));
-  MOCK_METHOD2(OnTraceStats, void(bool, const TraceStats&));
-  MOCK_METHOD1(OnObservableEvents, void(const ObservableEvents&));
-  MOCK_METHOD2(OnSessionCloned, void(bool, const std::string&));
+  MOCK_METHOD(void, OnConnect, (), (override));
+  MOCK_METHOD(void, OnDisconnect, (), (override));
+  MOCK_METHOD(void,
+              OnTracingDisabled,
+              (const std::string& /*error*/),
+              (override));
+  MOCK_METHOD(void, OnTracePackets, (std::vector<TracePacket>*, bool));
+  MOCK_METHOD(void, OnDetach, (bool), (override));
+  MOCK_METHOD(void, OnAttach, (bool, const TraceConfig&), (override));
+  MOCK_METHOD(void, OnTraceStats, (bool, const TraceStats&), (override));
+  MOCK_METHOD(void, OnObservableEvents, (const ObservableEvents&), (override));
+  MOCK_METHOD(void, OnSessionCloned, (const OnSessionClonedArgs&), (override));
 
   // Workaround, gmock doesn't support yet move-only types, passing a pointer.
   void OnTraceData(std::vector<TracePacket> packets, bool has_more) {
@@ -435,11 +446,10 @@ TEST_F(TracingIntegrationTest, WriteIntoFile) {
 
   // Check that |tmp_file| contains a valid trace.proto message.
   ASSERT_EQ(0, lseek(tmp_file.fd(), 0, SEEK_SET));
-  char tmp_buf[1024];
-  ssize_t rsize = read(tmp_file.fd(), tmp_buf, sizeof(tmp_buf));
-  ASSERT_GT(rsize, 0);
+  std::string trace_contents;
+  ASSERT_TRUE(base::ReadFileDescriptor(tmp_file.fd(), &trace_contents));
   protos::gen::Trace tmp_trace;
-  ASSERT_TRUE(tmp_trace.ParseFromArray(tmp_buf, static_cast<size_t>(rsize)));
+  ASSERT_TRUE(tmp_trace.ParseFromString(trace_contents));
   size_t num_test_packet = 0;
   size_t num_clock_snapshot_packet = 0;
   size_t num_system_info_packet = 0;
@@ -515,20 +525,23 @@ TEST_F(TracingIntegrationTestWithSMBScrapingProducer, ScrapeOnFlush) {
   // Ask the service to flush, but don't flush our trace writer. This should
   // cause our uncommitted SMB chunk to be scraped.
   auto on_flush_complete = task_runner_->CreateCheckpoint("on_flush_complete");
-  consumer_endpoint_->Flush(5000, [on_flush_complete](bool success) {
-    EXPECT_TRUE(success);
-    on_flush_complete();
-  });
-  EXPECT_CALL(producer_, Flush(_, _, _))
+  FlushFlags flush_flags(FlushFlags::Initiator::kConsumerSdk,
+                         FlushFlags::Reason::kExplicit);
+  consumer_endpoint_->Flush(
+      5000,
+      [on_flush_complete](bool success) {
+        EXPECT_TRUE(success);
+        on_flush_complete();
+      },
+      flush_flags);
+  EXPECT_CALL(producer_, Flush(_, _, _, flush_flags))
       .WillOnce(Invoke([this](FlushRequestID flush_req_id,
-                              const DataSourceInstanceID*, size_t) {
+                              const DataSourceInstanceID*, size_t, FlushFlags) {
         producer_endpoint_->NotifyFlushComplete(flush_req_id);
       }));
   task_runner_->RunUntilCheckpoint("on_flush_complete");
 
-  // Read the log buffer. We should only see the first two written trace
-  // packets, because the service can't be sure the last one was written
-  // completely by the trace writer.
+  // Read the log buffer. We should see all the packets.
   consumer_endpoint_->ReadBuffers();
 
   size_t num_test_pack_rx = 0;
@@ -549,7 +562,7 @@ TEST_F(TracingIntegrationTestWithSMBScrapingProducer, ScrapeOnFlush) {
               all_packets_rx();
           }));
   task_runner_->RunUntilCheckpoint("all_packets_rx");
-  ASSERT_EQ(2u, num_test_pack_rx);
+  ASSERT_EQ(3u, num_test_pack_rx);
 
   // Disable tracing.
   consumer_endpoint_->DisableTracing();

@@ -12,65 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
-
-import {Actions} from '../../common/actions';
-import {PluginContext} from '../../common/plugin_api';
-import {globals} from '../../frontend/globals';
-import {NewTrackArgs, Track} from '../../frontend/track';
-import {TrackButton, TrackButtonAttrs} from '../../frontend/track_panel';
+import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
 import {
-  ChromeSliceTrack,
-  ChromeSliceTrackController,
-  Config as ChromeSliceConfig,
-} from '../chrome_slices';
+  VISUALISED_ARGS_SLICE_TRACK_URI,
+  VisualisedArgsState,
+} from '../../frontend/visualized_args_tracks';
+import {VisualisedArgsTrack} from './visualized_args_track';
 
-export {Data} from '../chrome_slices';
-
-export const VISUALISED_ARGS_SLICE_TRACK_KIND = 'VisualisedArgsTrack';
-
-export interface Config extends ChromeSliceConfig {
-  argName: string;
-}
-
-// The controller for arg visualisation is exactly the same as the controller
-// for Chrome slices. All customisation is done on the frontend.
-class VisualisedArgsTrackController extends ChromeSliceTrackController {
-  static readonly kind = VISUALISED_ARGS_SLICE_TRACK_KIND;
-}
-
-export class VisualisedArgsTrack extends ChromeSliceTrack {
-  static readonly kind = VISUALISED_ARGS_SLICE_TRACK_KIND;
-  static create(args: NewTrackArgs): Track {
-    return new VisualisedArgsTrack(args);
-  }
-
-  getFont() {
-    return 'italic 11px Roboto';
-  }
-
-  getTrackShellButtons(): Array<m.Vnode<TrackButtonAttrs>> {
-    const config = this.config as Config;
-    const buttons: Array<m.Vnode<TrackButtonAttrs>> = [];
-    buttons.push(m(TrackButton, {
-      action: () => {
-        globals.dispatch(
-            Actions.removeVisualisedArg({argName: config.argName}));
+class VisualisedArgsPlugin implements Plugin {
+  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+    ctx.registerTrack({
+      uri: VISUALISED_ARGS_SLICE_TRACK_URI,
+      tags: {
+        metric: true, // TODO(stevegolton): Is this track really a metric?
       },
-      i: 'close',
-      tooltip: 'Close',
-      showButton: true,
-    }));
-    return buttons;
+      trackFactory: (trackCtx) => {
+        // TODO(stevegolton): Validate params properly. Note, this is no
+        // worse than the situation we had before with track config.
+        const params = trackCtx.params as VisualisedArgsState;
+        return new VisualisedArgsTrack(
+          {
+            engine: ctx.engine,
+            trackKey: trackCtx.trackKey,
+          },
+          params.trackId,
+          params.maxDepth,
+          params.argName,
+        );
+      },
+    });
   }
 }
 
-function activate(ctx: PluginContext) {
-  ctx.registerTrackController(VisualisedArgsTrackController);
-  ctx.registerTrack(VisualisedArgsTrack);
-}
-
-export const plugin = {
+export const plugin: PluginDescriptor = {
   pluginId: 'perfetto.VisualisedArgs',
-  activate,
+  plugin: VisualisedArgsPlugin,
 };

@@ -22,7 +22,8 @@
 #include "perfetto/base/thread_utils.h"
 #include "perfetto/protozero/message_handle.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
-#include "perfetto/tracing/internal/compile_time_hash.h"
+#include "perfetto/tracing/internal/fnv1a.h"
+#include "perfetto/tracing/internal/tracing_muxer.h"
 #include "perfetto/tracing/platform.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 #include "protos/perfetto/trace/track_event/counter_descriptor.gen.h"
@@ -139,9 +140,7 @@ struct PERFETTO_EXPORT_COMPONENT Track {
   static Track MakeProcessTrack() { return Track(process_uuid, Track()); }
 
   static constexpr inline uint64_t CompileTimeHash(const char* string) {
-    return internal::CompileTimeHash()
-        .Update(string, static_cast<size_t>(base::StrEnd(string) - string))
-        .digest();
+    return internal::Fnv1a(string);
   }
 
  private:
@@ -172,22 +171,24 @@ struct PERFETTO_EXPORT_COMPONENT ProcessTrack : public Track {
 struct PERFETTO_EXPORT_COMPONENT ThreadTrack : public Track {
   const base::PlatformProcessId pid;
   const base::PlatformThreadId tid;
+  bool disallow_merging_with_system_tracks = false;
 
-  static ThreadTrack Current() { return ThreadTrack(base::GetThreadId()); }
+  static ThreadTrack Current();
 
   // Represents a thread in the current process.
-  static ThreadTrack ForThread(base::PlatformThreadId tid_) {
-    return ThreadTrack(tid_);
-  }
+  static ThreadTrack ForThread(base::PlatformThreadId tid_);
 
   void Serialize(protos::pbzero::TrackDescriptor*) const;
   protos::gen::TrackDescriptor Serialize() const;
 
  private:
-  explicit ThreadTrack(base::PlatformThreadId tid_)
+  explicit ThreadTrack(base::PlatformThreadId tid_,
+                       bool disallow_merging_with_system_tracks_)
       : Track(MakeThreadTrack(tid_)),
         pid(ProcessTrack::Current().pid),
-        tid(tid_) {}
+        tid(tid_),
+        disallow_merging_with_system_tracks(
+            disallow_merging_with_system_tracks_) {}
 };
 
 // A track for recording counter values with the TRACE_COUNTER macro. Counter
@@ -203,19 +204,19 @@ class PERFETTO_EXPORT_COMPONENT CounterTrack : public Track {
   using CounterType =
       perfetto::protos::gen::CounterDescriptor::BuiltinCounterType;
 
-  // |name| must be a string with static lifetime.
+  // |name| must outlive this object.
   constexpr explicit CounterTrack(const char* name,
                                   Track parent = MakeProcessTrack())
-      : Track(CompileTimeHash(name) ^ kCounterMagic, parent),
+      : Track(internal::Fnv1a(name) ^ kCounterMagic, parent),
         name_(name),
         category_(nullptr) {}
 
   // |unit_name| is a free-form description of the unit used by this counter. It
-  // must have static lifetime.
+  // must outlive this object.
   constexpr CounterTrack(const char* name,
                          const char* unit_name,
                          Track parent = MakeProcessTrack())
-      : Track(CompileTimeHash(name) ^ kCounterMagic, parent),
+      : Track(internal::Fnv1a(name) ^ kCounterMagic, parent),
         name_(name),
         category_(nullptr),
         unit_name_(unit_name) {}
@@ -223,7 +224,7 @@ class PERFETTO_EXPORT_COMPONENT CounterTrack : public Track {
   constexpr CounterTrack(const char* name,
                          Unit unit,
                          Track parent = MakeProcessTrack())
-      : Track(CompileTimeHash(name) ^ kCounterMagic, parent),
+      : Track(internal::Fnv1a(name) ^ kCounterMagic, parent),
         name_(name),
         category_(nullptr),
         unit_(unit) {}
@@ -326,6 +327,7 @@ class PERFETTO_EXPORT_COMPONENT TrackRegistry {
 
   static void InitializeInstance();
   static void ResetForTesting();
+  static uint64_t ComputeProcessUuid();
   static TrackRegistry* Get() { return instance_; }
 
   void EraseTrack(Track);

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
 import {Probe, ProbeAttrs} from '../record_widgets';
 import {RecordingSectionAttrs} from './recording_sections';
@@ -20,22 +20,30 @@ import {RecordingSectionAttrs} from './recording_sections';
 export class GpuSettings implements m.ClassComponent<RecordingSectionAttrs> {
   view({attrs}: m.CVnode<RecordingSectionAttrs>) {
     return m(
-        `.record-section${attrs.cssClass}`,
-        m(Probe, {
-          title: 'GPU frequency',
-          img: 'rec_cpu_freq.png',
-          descr: 'Records gpu frequency via ftrace',
-          setEnabled: (cfg, val) => cfg.gpuFreq = val,
-          isEnabled: (cfg) => cfg.gpuFreq,
-        } as ProbeAttrs),
-        m(Probe, {
-          title: 'GPU memory',
-          img: 'rec_gpu_mem_total.png',
-          descr:
-              `Allows to track per process and global total GPU memory usages.
+      `.record-section${attrs.cssClass}`,
+      m(Probe, {
+        title: 'GPU frequency',
+        img: 'rec_cpu_freq.png',
+        descr: 'Records gpu frequency via ftrace',
+        setEnabled: (cfg, val) => (cfg.gpuFreq = val),
+        isEnabled: (cfg) => cfg.gpuFreq,
+      } as ProbeAttrs),
+      m(Probe, {
+        title: 'GPU memory',
+        img: 'rec_gpu_mem_total.png',
+        descr: `Allows to track per process and global total GPU memory usages.
                 (Available on recent Android 12+ kernels)`,
-          setEnabled: (cfg, val) => cfg.gpuMemTotal = val,
-          isEnabled: (cfg) => cfg.gpuMemTotal,
-        } as ProbeAttrs));
+        setEnabled: (cfg, val) => (cfg.gpuMemTotal = val),
+        isEnabled: (cfg) => cfg.gpuMemTotal,
+      } as ProbeAttrs),
+      m(Probe, {
+        title: 'GPU work period',
+        img: 'rec_cpu_voltage.png',
+        descr: `Allows to track per package GPU work.
+                (Available on recent Android 14+ kernels)`,
+        setEnabled: (cfg, val) => (cfg.gpuWorkPeriod = val),
+        isEnabled: (cfg) => cfg.gpuWorkPeriod,
+      } as ProbeAttrs),
+    );
   }
 }

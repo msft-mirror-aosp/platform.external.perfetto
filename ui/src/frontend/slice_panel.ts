@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {timeToCode, toNs} from '../common/time';
+import m from 'mithril';
 
-import {globals, SliceDetails} from './globals';
-import {Panel} from './panel';
+import {exists} from '../base/utils';
+
+import {SliceDetails} from './globals';
 
 // To display process or thread, we want to concatenate their name with ID, but
 // either can be undefined and all the cases need to be considered carefully to
@@ -24,8 +25,10 @@ import {Panel} from './panel';
 //
 // Result can be undefined if both name and process are, in this case result is
 // not going to be displayed in the UI.
-function getDisplayName(name: string|undefined, id: number|undefined): string|
-    undefined {
+function getDisplayName(
+  name: string | undefined,
+  id: number | undefined,
+): string | undefined {
   if (name === undefined) {
     return id === undefined ? undefined : `${id}`;
   } else {
@@ -33,23 +36,21 @@ function getDisplayName(name: string|undefined, id: number|undefined): string|
   }
 }
 
-export abstract class SlicePanel extends Panel {
-  protected computeDuration(ts: number, dur: number): string {
-    return toNs(dur) === -1 ?
-        `${globals.state.traceTime.endSec - ts} (Did not end)` :
-        timeToCode(dur);
-  }
-
+export abstract class SlicePanel implements m.ClassComponent {
   protected getProcessThreadDetails(sliceInfo: SliceDetails) {
-    return new Map<string, string|undefined>([
+    return new Map<string, string | undefined>([
       ['Thread', getDisplayName(sliceInfo.threadName, sliceInfo.tid)],
       ['Process', getDisplayName(sliceInfo.processName, sliceInfo.pid)],
-      ['User ID', sliceInfo.uid ? String(sliceInfo.uid) : undefined],
+      ['User ID', exists(sliceInfo.uid) ? String(sliceInfo.uid) : undefined],
       ['Package name', sliceInfo.packageName],
+      /* eslint-disable @typescript-eslint/strict-boolean-expressions */
       [
         'Version code',
         sliceInfo.versionCode ? String(sliceInfo.versionCode) : undefined,
       ],
+      /* eslint-enable */
     ]);
   }
+
+  abstract view(vnode: m.Vnode): void | m.Children;
 }
