@@ -2277,6 +2277,8 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/dfs.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/dfs.h",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/dominator_tree.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/dominator_tree.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.cc",
@@ -2354,8 +2356,6 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/descendant.h",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs_weight_bounded.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs_weight_bounded.h",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/dominator_tree.cc",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/dominator_tree.h",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_annotated_stack.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_annotated_stack.h",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_counter_dur.cc",
@@ -2440,6 +2440,14 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startups_minsdk29.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startups_minsdk33.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/time_to_display.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/winscope:winscope
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_winscope_winscope",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/winscope/inputmethod.sql",
     ],
 )
 
@@ -2673,6 +2681,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_android_auto_auto",
         ":src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
         ":src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
+        ":src_trace_processor_perfetto_sql_stdlib_android_winscope_winscope",
         ":src_trace_processor_perfetto_sql_stdlib_chrome_chrome_sql",
         ":src_trace_processor_perfetto_sql_stdlib_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_counters_counters",
@@ -4920,6 +4929,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/tcp.proto",
         "protos/perfetto/trace/ftrace/test_bundle_wrapper.proto",
         "protos/perfetto/trace/ftrace/thermal.proto",
+        "protos/perfetto/trace/ftrace/thermal_exynos.proto",
         "protos/perfetto/trace/ftrace/trusty.proto",
         "protos/perfetto/trace/ftrace/ufs.proto",
         "protos/perfetto/trace/ftrace/v4l2.proto",
