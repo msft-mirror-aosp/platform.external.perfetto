@@ -239,6 +239,7 @@ perfetto_cc_library(
         ":src_trace_processor_importers_memory_tracker_graph_processor",
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
+        ":src_trace_processor_importers_perf_record",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -1588,6 +1589,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/ftrace/pkvm_hyp_cpu_tracker.h",
         "src/trace_processor/importers/ftrace/rss_stat_tracker.cc",
         "src/trace_processor/importers/ftrace/rss_stat_tracker.h",
+        "src/trace_processor/importers/ftrace/thermal_tracker.cc",
+        "src/trace_processor/importers/ftrace/thermal_tracker.h",
         "src/trace_processor/importers/ftrace/v4l2_tracker.cc",
         "src/trace_processor/importers/ftrace/v4l2_tracker.h",
         "src/trace_processor/importers/ftrace/virtio_gpu_tracker.cc",
@@ -1706,7 +1709,22 @@ perfetto_filegroup(
         "src/trace_processor/importers/perf/perf_data_tokenizer.h",
         "src/trace_processor/importers/perf/perf_data_tracker.cc",
         "src/trace_processor/importers/perf/perf_data_tracker.h",
+        "src/trace_processor/importers/perf/perf_file.h",
+        "src/trace_processor/importers/perf/reader.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/perf:record
+perfetto_filegroup(
+    name = "src_trace_processor_importers_perf_record",
+    srcs = [
         "src/trace_processor/importers/perf/perf_event.h",
+        "src/trace_processor/importers/perf/perf_event_attr.cc",
+        "src/trace_processor/importers/perf/perf_event_attr.h",
+        "src/trace_processor/importers/perf/perf_session.cc",
+        "src/trace_processor/importers/perf/perf_session.h",
+        "src/trace_processor/importers/perf/reader.h",
+        "src/trace_processor/importers/perf/record.h",
     ],
 )
 
@@ -5883,6 +5901,7 @@ perfetto_cc_library(
         ":src_trace_processor_importers_memory_tracker_graph_processor",
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
+        ":src_trace_processor_importers_perf_record",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6056,6 +6075,7 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_memory_tracker_graph_processor",
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
+        ":src_trace_processor_importers_perf_record",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6289,6 +6309,7 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_memory_tracker_graph_processor",
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
+        ":src_trace_processor_importers_perf_record",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
