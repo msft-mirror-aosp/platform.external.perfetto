@@ -49,6 +49,13 @@ void Track::Serialize(protos::pbzero::TrackDescriptor* desc) const {
   desc->AppendRawProtoBytes(bytes.data(), bytes.size());
 }
 
+// static
+Track Track::ThreadScoped(const void* ptr, Track parent) {
+  if (parent.uuid == 0)
+    return Track::FromPointer(ptr, ThreadTrack::Current());
+  return Track::FromPointer(ptr, parent);
+}
+
 protos::gen::TrackDescriptor ProcessTrack::Serialize() const {
   auto desc = Track::Serialize();
   auto pd = desc.mutable_process();
@@ -210,18 +217,6 @@ void TrackRegistry::UpdateTrack(Track track,
                                 const std::string& serialized_desc) {
   std::lock_guard<std::mutex> lock(mutex_);
   tracks_[track.uuid] = std::move(serialized_desc);
-}
-
-void TrackRegistry::UpdateTrackImpl(
-    Track track,
-    std::function<void(protos::pbzero::TrackDescriptor*)> fill_function) {
-  constexpr size_t kInitialSliceSize = 32;
-  constexpr size_t kMaximumSliceSize = 4096;
-  protozero::HeapBuffered<protos::pbzero::TrackDescriptor> new_descriptor(
-      kInitialSliceSize, kMaximumSliceSize);
-  fill_function(new_descriptor.get());
-  auto serialized_desc = new_descriptor.SerializeAsString();
-  UpdateTrack(track, serialized_desc);
 }
 
 void TrackRegistry::EraseTrack(Track track) {

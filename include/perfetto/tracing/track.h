@@ -120,11 +120,7 @@ struct PERFETTO_EXPORT_COMPONENT Track {
   // Construct a track using |ptr| as identifier within thread-scope.
   // Shorthand for `Track::FromPointer(ptr, ThreadTrack::Current())`
   // Usage: TRACE_EVENT_BEGIN("...", "...", perfetto::Track::ThreadScoped(this))
-  static Track ThreadScoped(
-      const void* ptr,
-      Track parent = MakeThreadTrack(base::GetThreadId())) {
-    return Track::FromPointer(ptr, parent);
-  }
+  static Track ThreadScoped(const void* ptr, Track parent = Track());
 
  protected:
   constexpr Track(uint64_t uuid_, uint64_t parent_uuid_)
@@ -332,18 +328,6 @@ class PERFETTO_EXPORT_COMPONENT TrackRegistry {
 
   void EraseTrack(Track);
 
-  // Store metadata for |track| in the registry. |fill_function| is called
-  // synchronously to record additional properties for the track.
-  template <typename TrackType>
-  void UpdateTrack(
-      const TrackType& track,
-      std::function<void(protos::pbzero::TrackDescriptor*)> fill_function) {
-    UpdateTrackImpl(track, [&](protos::pbzero::TrackDescriptor* desc) {
-      track.Serialize(desc);
-      fill_function(desc);
-    });
-  }
-
   // This variant lets the user supply a serialized track descriptor directly.
   void UpdateTrack(Track, const std::string& serialized_desc);
 
@@ -380,10 +364,6 @@ class PERFETTO_EXPORT_COMPONENT TrackRegistry {
       protozero::MessageHandle<protos::pbzero::TracePacket> packet);
 
  private:
-  void UpdateTrackImpl(
-      Track,
-      std::function<void(protos::pbzero::TrackDescriptor*)> fill_function);
-
   std::mutex mutex_;
   std::map<uint64_t /* uuid */, SerializedTrackDescriptor> tracks_;
 
