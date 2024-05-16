@@ -1375,6 +1375,7 @@ perfetto_cc_library(
         ":include_perfetto_public_protozero",
         "src/trace_processor/containers/bit_vector.h",
         "src/trace_processor/containers/implicit_segment_forest.h",
+        "src/trace_processor/containers/interval_tree.h",
         "src/trace_processor/containers/null_term_string_view.h",
         "src/trace_processor/containers/row_map.h",
         "src/trace_processor/containers/row_map_algorithms.h",
@@ -1896,7 +1897,7 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/network_trace_module.h",
         "src/trace_processor/importers/proto/packet_analyzer.cc",
         "src/trace_processor/importers/proto/packet_analyzer.h",
-        "src/trace_processor/importers/proto/packet_sequence_state.h",
+        "src/trace_processor/importers/proto/packet_sequence_state_builder.h",
         "src/trace_processor/importers/proto/packet_sequence_state_generation.cc",
         "src/trace_processor/importers/proto/perf_sample_tracker.cc",
         "src/trace_processor/importers/proto/perf_sample_tracker.h",
@@ -1906,7 +1907,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/profile_packet_sequence_state.h",
         "src/trace_processor/importers/proto/profile_packet_utils.cc",
         "src/trace_processor/importers/proto/profile_packet_utils.h",
-        "src/trace_processor/importers/proto/proto_incremental_state.h",
         "src/trace_processor/importers/proto/proto_trace_parser_impl.cc",
         "src/trace_processor/importers/proto/proto_trace_parser_impl.h",
         "src/trace_processor/importers/proto/proto_trace_reader.cc",
@@ -1919,6 +1919,7 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/track_event_module.h",
         "src/trace_processor/importers/proto/track_event_parser.cc",
         "src/trace_processor/importers/proto/track_event_parser.h",
+        "src/trace_processor/importers/proto/track_event_sequence_state.cc",
         "src/trace_processor/importers/proto/track_event_tokenizer.cc",
         "src/trace_processor/importers/proto/track_event_tokenizer.h",
         "src/trace_processor/importers/proto/track_event_tracker.cc",
@@ -1931,6 +1932,7 @@ perfetto_filegroup(
     name = "src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
     srcs = [
         "src/trace_processor/importers/proto/packet_sequence_state_generation.h",
+        "src/trace_processor/importers/proto/track_event_sequence_state.h",
     ],
 )
 
