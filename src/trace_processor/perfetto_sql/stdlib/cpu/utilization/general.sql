@@ -13,6 +13,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+INCLUDE PERFETTO MODULE cpu.freq;
+
 -- Returns the timestamp of the start of the partition that contains the |ts|.
 CREATE PERFETTO FUNCTION _partition_start(ts INT, size INT) RETURNS INT AS
 -- Division of two ints would result in floor(ts/size).
@@ -58,7 +60,7 @@ ON (p.ts <= i.ts AND i.ts < p.ts_end));
 -- Utilization is calculated as sum of average utilization of each CPU in each
 -- period, which is defined as a multiply of |interval|. For this reason
 -- first and last period might have lower then real utilization.
-CREATE PERFETTO MACRO _sched_avg_utilization_per_period(
+CREATE PERFETTO MACRO _cpu_avg_utilization_per_period(
   -- Length of the period on which utilization should be averaged.
   interval Expr,
   -- Either sched table or its filtered down version.
@@ -73,3 +75,26 @@ SELECT
   SUM(ts_end - ts)/cast_double!($interval) AS unnormalized_utilization
 FROM _interval_partitions!(_partitions($interval), $sched_table)
 GROUP BY 1);
+
+CREATE PERFETTO VIEW _cpu_freq_for_metrics AS
+SELECT
+    id,
+    ts,
+    dur,
+    cpu,
+    freq
+FROM cpu_freq_counters;
+
+CREATE PERFETTO VIEW _sched_without_id AS
+SELECT ts, dur, utid, cpu
+FROM sched
+WHERE utid != 0 AND dur != -1;
+
+CREATE VIRTUAL TABLE _cpu_freq_per_thread_span_join
+USING SPAN_LEFT_JOIN(
+    _sched_without_id PARTITIONED cpu,
+    _cpu_freq_for_metrics PARTITIONED cpu);
+
+CREATE PERFETTO TABLE _cpu_freq_per_thread
+AS SELECT * FROM _cpu_freq_per_thread_span_join;
+
