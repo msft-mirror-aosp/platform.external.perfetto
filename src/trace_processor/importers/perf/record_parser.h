@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PERF_PERF_DATA_PARSER_H_
-#define SRC_TRACE_PROCESSOR_IMPORTERS_PERF_PERF_DATA_PARSER_H_
+#ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PERF_RECORD_PARSER_H_
+#define SRC_TRACE_PROCESSOR_IMPORTERS_PERF_RECORD_PARSER_H_
 
 #include <stdint.h>
 
-#include "perfetto/base/compiler.h"
-#include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/perf/perf_data_tracker.h"
 
@@ -29,16 +27,17 @@ namespace trace_processor {
 namespace perf_importer {
 
 // Parses samples from perf.data files.
-class PerfDataParser : public PerfRecordParser {
+class RecordParser : public PerfRecordParser {
  public:
-  explicit PerfDataParser(TraceProcessorContext*);
-  ~PerfDataParser() override;
+  explicit RecordParser(TraceProcessorContext*);
+  ~RecordParser() override;
 
-  // The data in TraceBlobView has to be a perf.data sample.
-  void ParsePerfRecord(int64_t timestamp, TraceBlobView) override;
+  void ParsePerfRecord(int64_t timestamp, Record record) override;
 
  private:
-  base::StatusOr<PerfDataTracker::PerfSample> ParseSample(TraceBlobView);
+  base::Status ParseRecord(int64_t timestamp, Record record);
+  base::Status ParseSample(int64_t ts, Record record);
+  base::Status ParseMmap2(Record record);
 
   TraceProcessorContext* context_ = nullptr;
   PerfDataTracker* tracker_ = nullptr;
@@ -48,4 +47,4 @@ class PerfDataParser : public PerfRecordParser {
 }  // namespace trace_processor
 }  // namespace perfetto
 
-#endif  // SRC_TRACE_PROCESSOR_IMPORTERS_PERF_PERF_DATA_PARSER_H_
+#endif  // SRC_TRACE_PROCESSOR_IMPORTERS_PERF_RECORD_PARSER_H_
