@@ -53,8 +53,8 @@
 #include "src/trace_processor/importers/json/json_trace_tokenizer.h"
 #include "src/trace_processor/importers/json/json_utils.h"
 #include "src/trace_processor/importers/ninja/ninja_log_parser.h"
-#include "src/trace_processor/importers/perf/perf_data_parser.h"
 #include "src/trace_processor/importers/perf/perf_data_tokenizer.h"
+#include "src/trace_processor/importers/perf/record_parser.h"
 #include "src/trace_processor/importers/proto/additional_modules.h"
 #include "src/trace_processor/importers/proto/content_analyzer.h"
 #include "src/trace_processor/importers/systrace/systrace_trace_parser.h"
@@ -349,7 +349,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
   context_.perf_data_trace_tokenizer =
       std::make_unique<perf_importer::PerfDataTokenizer>(&context_);
   context_.perf_record_parser =
-      std::make_unique<perf_importer::PerfDataParser>(&context_);
+      std::make_unique<perf_importer::RecordParser>(&context_);
 
   if (util::IsGzipSupported()) {
     context_.gzip_trace_parser = std::make_unique<GzipTraceParser>(&context_);
