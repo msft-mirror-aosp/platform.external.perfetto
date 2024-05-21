@@ -272,6 +272,7 @@ perfetto_cc_library(
         ":src_trace_processor_util_build_id",
         ":src_trace_processor_util_bump_allocator",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_file_buffer",
         ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
@@ -284,6 +285,7 @@ perfetto_cc_library(
         ":src_trace_processor_util_regex",
         ":src_trace_processor_util_sql_argument",
         ":src_trace_processor_util_stdlib",
+        ":src_trace_processor_util_trace_type",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
     ],
@@ -1494,6 +1496,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/mapping_tracker.h",
         "src/trace_processor/importers/common/metadata_tracker.cc",
         "src/trace_processor/importers/common/metadata_tracker.h",
+        "src/trace_processor/importers/common/process_track_translation_table.cc",
+        "src/trace_processor/importers/common/process_track_translation_table.h",
         "src/trace_processor/importers/common/process_tracker.cc",
         "src/trace_processor/importers/common/process_tracker.h",
         "src/trace_processor/importers/common/sched_event_state.h",
@@ -1702,16 +1706,19 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_importers_perf_perf",
     srcs = [
-        "src/trace_processor/importers/perf/perf_data_parser.cc",
-        "src/trace_processor/importers/perf/perf_data_parser.h",
-        "src/trace_processor/importers/perf/perf_data_reader.cc",
-        "src/trace_processor/importers/perf/perf_data_reader.h",
+        "src/trace_processor/importers/perf/attrs_section_reader.cc",
+        "src/trace_processor/importers/perf/attrs_section_reader.h",
+        "src/trace_processor/importers/perf/features.cc",
+        "src/trace_processor/importers/perf/features.h",
+        "src/trace_processor/importers/perf/mmap_record.cc",
+        "src/trace_processor/importers/perf/mmap_record.h",
         "src/trace_processor/importers/perf/perf_data_tokenizer.cc",
         "src/trace_processor/importers/perf/perf_data_tokenizer.h",
-        "src/trace_processor/importers/perf/perf_data_tracker.cc",
-        "src/trace_processor/importers/perf/perf_data_tracker.h",
         "src/trace_processor/importers/perf/perf_file.h",
-        "src/trace_processor/importers/perf/reader.h",
+        "src/trace_processor/importers/perf/record_parser.cc",
+        "src/trace_processor/importers/perf/record_parser.h",
+        "src/trace_processor/importers/perf/sample.cc",
+        "src/trace_processor/importers/perf/sample.h",
     ],
 )
 
@@ -1719,6 +1726,8 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_importers_perf_record",
     srcs = [
+        "src/trace_processor/importers/perf/perf_counter.cc",
+        "src/trace_processor/importers/perf/perf_counter.h",
         "src/trace_processor/importers/perf/perf_event.h",
         "src/trace_processor/importers/perf/perf_event_attr.cc",
         "src/trace_processor/importers/perf/perf_event_attr.h",
@@ -1745,8 +1754,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/winscope/surfaceflinger_layers_parser.h",
         "src/trace_processor/importers/proto/winscope/surfaceflinger_transactions_parser.cc",
         "src/trace_processor/importers/proto/winscope/surfaceflinger_transactions_parser.h",
-        "src/trace_processor/importers/proto/winscope/winscope_args_parser.cc",
-        "src/trace_processor/importers/proto/winscope/winscope_args_parser.h",
         "src/trace_processor/importers/proto/winscope/winscope_module.cc",
         "src/trace_processor/importers/proto/winscope/winscope_module.h",
     ],
@@ -1875,6 +1882,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/importers/proto/active_chrome_processes_tracker.cc",
         "src/trace_processor/importers/proto/active_chrome_processes_tracker.h",
+        "src/trace_processor/importers/proto/args_parser.cc",
+        "src/trace_processor/importers/proto/args_parser.h",
         "src/trace_processor/importers/proto/chrome_string_lookup.cc",
         "src/trace_processor/importers/proto/chrome_string_lookup.h",
         "src/trace_processor/importers/proto/chrome_system_probes_module.cc",
@@ -2532,6 +2541,17 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/cpu/utilization:utilization
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_cpu_utilization_utilization",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/general.sql",
+        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/process.sql",
+        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/system.sql",
+        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/thread.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/cpu:cpu
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_cpu_cpu",
@@ -2608,17 +2628,6 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/prelude/casts.sql",
         "src/trace_processor/perfetto_sql/stdlib/prelude/slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/prelude/trace_bounds.sql",
-    ],
-)
-
-# GN target: //src/trace_processor/perfetto_sql/stdlib/sched/utilization:utilization
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_sched_utilization_utilization",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/sched/utilization/general.sql",
-        "src/trace_processor/perfetto_sql/stdlib/sched/utilization/process.sql",
-        "src/trace_processor/perfetto_sql/stdlib/sched/utilization/system.sql",
-        "src/trace_processor/perfetto_sql/stdlib/sched/utilization/thread.sql",
     ],
 )
 
@@ -2706,6 +2715,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_counters_counters",
         ":src_trace_processor_perfetto_sql_stdlib_cpu_cpu",
+        ":src_trace_processor_perfetto_sql_stdlib_cpu_utilization_utilization",
         ":src_trace_processor_perfetto_sql_stdlib_deprecated_v42_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
         ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
@@ -2714,7 +2724,6 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
         ":src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
         ":src_trace_processor_perfetto_sql_stdlib_sched_sched",
-        ":src_trace_processor_perfetto_sql_stdlib_sched_utilization_utilization",
         ":src_trace_processor_perfetto_sql_stdlib_slices_slices",
         ":src_trace_processor_perfetto_sql_stdlib_stack_trace_stack_trace",
         ":src_trace_processor_perfetto_sql_stdlib_time_time",
@@ -2902,6 +2911,15 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/util:file_buffer
+perfetto_filegroup(
+    name = "src_trace_processor_util_file_buffer",
+    srcs = [
+        "src/trace_processor/util/file_buffer.cc",
+        "src/trace_processor/util/file_buffer.h",
+    ],
+)
+
 # GN target: //src/trace_processor/util:glob
 perfetto_filegroup(
     name = "src_trace_processor_util_glob",
@@ -3011,6 +3029,15 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/util:trace_type
+perfetto_filegroup(
+    name = "src_trace_processor_util_trace_type",
+    srcs = [
+        "src/trace_processor/util/trace_type.cc",
+        "src/trace_processor/util/trace_type.h",
+    ],
+)
+
 # GN target: //src/trace_processor/util:util
 perfetto_filegroup(
     name = "src_trace_processor_util_util",
@@ -3092,6 +3119,8 @@ perfetto_filegroup(
         "src/trace_processor/trace_processor_storage.cc",
         "src/trace_processor/trace_processor_storage_impl.cc",
         "src/trace_processor/trace_processor_storage_impl.h",
+        "src/trace_processor/trace_reader_registry.cc",
+        "src/trace_processor/trace_reader_registry.h",
         "src/trace_processor/virtual_destructors.cc",
     ],
 )
@@ -5935,6 +5964,7 @@ perfetto_cc_library(
         ":src_trace_processor_util_build_id",
         ":src_trace_processor_util_bump_allocator",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_file_buffer",
         ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
@@ -5947,6 +5977,7 @@ perfetto_cc_library(
         ":src_trace_processor_util_regex",
         ":src_trace_processor_util_sql_argument",
         ":src_trace_processor_util_stdlib",
+        ":src_trace_processor_util_trace_type",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
     ],
@@ -6112,6 +6143,7 @@ perfetto_cc_binary(
         ":src_trace_processor_util_build_id",
         ":src_trace_processor_util_bump_allocator",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_file_buffer",
         ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
@@ -6124,6 +6156,7 @@ perfetto_cc_binary(
         ":src_trace_processor_util_regex",
         ":src_trace_processor_util_sql_argument",
         ":src_trace_processor_util_stdlib",
+        ":src_trace_processor_util_trace_type",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
         "src/trace_processor/trace_processor_shell.cc",
@@ -6343,6 +6376,7 @@ perfetto_cc_binary(
         ":src_trace_processor_util_build_id",
         ":src_trace_processor_util_bump_allocator",
         ":src_trace_processor_util_descriptors",
+        ":src_trace_processor_util_file_buffer",
         ":src_trace_processor_util_glob",
         ":src_trace_processor_util_gzip",
         ":src_trace_processor_util_interned_message_view",
@@ -6355,6 +6389,7 @@ perfetto_cc_binary(
         ":src_trace_processor_util_regex",
         ":src_trace_processor_util_sql_argument",
         ":src_trace_processor_util_stdlib",
+        ":src_trace_processor_util_trace_type",
         ":src_trace_processor_util_util",
         ":src_trace_processor_util_zip_reader",
         ":src_traceconv_lib",

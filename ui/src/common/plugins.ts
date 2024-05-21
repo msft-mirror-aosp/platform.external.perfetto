@@ -17,7 +17,7 @@ import {v4 as uuidv4} from 'uuid';
 import {Disposable, Trash} from '../base/disposable';
 import {Registry} from '../base/registry';
 import {Span, duration, time} from '../base/time';
-import {globals} from '../frontend/globals';
+import {TraceContext, globals} from '../frontend/globals';
 import {
   Command,
   DetailsPanel,
@@ -275,10 +275,10 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
           };
           return predicate(ref);
         })
-        .map((group) => group.id);
+        .map((group) => group.key);
 
-      for (const trackGroupId of groupsToExpand) {
-        globals.dispatch(Actions.toggleTrackGroupCollapsed({trackGroupId}));
+      for (const groupKey of groupsToExpand) {
+        globals.dispatch(Actions.toggleTrackGroupCollapsed({groupKey}));
       }
     },
 
@@ -293,10 +293,10 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
           };
           return predicate(ref);
         })
-        .map((group) => group.id);
+        .map((group) => group.key);
 
-      for (const trackGroupId of groupsToCollapse) {
-        globals.dispatch(Actions.toggleTrackGroupCollapsed({trackGroupId}));
+      for (const groupKey of groupsToCollapse) {
+        globals.dispatch(Actions.toggleTrackGroupCollapsed({groupKey}));
       }
     },
 
@@ -342,11 +342,9 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     return globals.store.createSubStore(['plugins', this.pluginId], migrate);
   }
 
-  readonly trace = {
-    get span(): Span<time, duration> {
-      return globals.stateTraceTimeTP();
-    },
-  };
+  get trace(): TraceContext {
+    return globals.traceContext;
+  }
 }
 
 function isPinned(trackId: string): boolean {

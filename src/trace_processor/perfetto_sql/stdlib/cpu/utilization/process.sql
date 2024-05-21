@@ -13,14 +13,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-INCLUDE PERFETTO MODULE sched.utilization.general;
+INCLUDE PERFETTO MODULE cpu.utilization.general;
 INCLUDE PERFETTO MODULE time.conversion;
 
 -- Returns a table of process utilization per given period.
 -- Utilization is calculated as sum of average utilization of each CPU in each
 -- period, which is defined as a multiply of |interval|. For this reason
 -- first and last period might have lower then real utilization.
-CREATE PERFETTO FUNCTION sched_process_utilization_per_period(
+CREATE PERFETTO FUNCTION cpu_process_utilization_per_period(
     -- Length of the period on which utilization should be averaged.
     interval INT,
     -- Upid of the process.
@@ -47,13 +47,13 @@ WITH sched_for_upid AS (
   JOIN thread USING (utid)
   JOIN process USING (upid)
   WHERE upid = $upid AND utid != 0)
-SELECT * FROM _sched_avg_utilization_per_period!($interval, sched_for_upid);
+SELECT * FROM _cpu_avg_utilization_per_period!($interval, sched_for_upid);
 
 -- Returns a table of process utilization per second.
 -- Utilization is calculated as sum of average utilization of each CPU in each
 -- period, which is defined as a multiply of |interval|. For this reason
 -- first and last period might have lower then real utilization.
-CREATE PERFETTO FUNCTION sched_process_utilization_per_second(
+CREATE PERFETTO FUNCTION cpu_process_utilization_per_second(
   -- Upid of the process.
   upid INT
 )
@@ -69,4 +69,36 @@ RETURNS TABLE (
   -- [0, cpu_count] range.
   unnormalized_utilization DOUBLE
 ) AS
-SELECT * FROM sched_process_utilization_per_period(time_from_s(1), $upid);
+SELECT * FROM cpu_process_utilization_per_period(time_from_s(1), $upid);
+
+-- Aggregated CPU statistics for each process.
+CREATE PERFETTO TABLE cpu_cycles_per_process(
+  -- Unique process id
+  upid INT,
+  -- Sum of CPU millicycles
+  millicycles INT,
+  -- Sum of CPU megacycles
+  megacycles INT,
+  -- Total runtime duration
+  runtime INT,
+  -- Minimum CPU frequency in kHz
+  min_freq INT,
+  -- Maximum CPU frequency in kHz
+  max_freq INT,
+  -- Average CPU frequency in kHz
+  avg_freq INT
+) AS
+WITH threads AS (
+  SELECT upid, utid FROM thread
+)
+SELECT
+  upid,
+  cast_int!(SUM(dur * freq) / 1000) AS millicycles,
+  cast_int!(SUM(dur * freq) / 1000 / 1e9) AS megacycles,
+  SUM(dur) AS runtime,
+  MIN(freq) AS min_freq,
+  MAX(freq) AS max_freq,
+  cast_int!(SUM((dur * freq) / 1000) / SUM(dur / 1000)) AS avg_freq
+FROM _cpu_freq_per_thread
+JOIN threads USING (utid)
+GROUP BY upid;

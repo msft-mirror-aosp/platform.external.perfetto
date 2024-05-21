@@ -253,15 +253,15 @@ export const StateActions = {
     // the reducer.
     args: {
       name: string;
-      id: string;
+      key: string;
       summaryTrackKey?: string;
       collapsed: boolean;
       fixedOrdering?: boolean;
     },
   ): void {
-    state.trackGroups[args.id] = {
+    state.trackGroups[args.key] = {
       name: args.name,
-      id: args.id,
+      key: args.key,
       collapsed: args.collapsed,
       tracks: [],
       summaryTrack: args.summaryTrackKey,
@@ -394,12 +394,8 @@ export const StateActions = {
     }
   },
 
-  toggleTrackGroupCollapsed(
-    state: StateDraft,
-    args: {trackGroupId: string},
-  ): void {
-    const id = args.trackGroupId;
-    const trackGroup = assertExists(state.trackGroups[id]);
+  toggleTrackGroupCollapsed(state: StateDraft, args: {groupKey: string}): void {
+    const trackGroup = assertExists(state.trackGroups[args.groupKey]);
     trackGroup.collapsed = !trackGroup.collapsed;
   },
 
@@ -446,31 +442,6 @@ export const StateActions = {
     if (state.engine !== undefined && state.engine.mode === args.mode) {
       state.engine.failed = args.failure;
     }
-  },
-
-  createPermalink(state: StateDraft, args: {isRecordingConfig: boolean}): void {
-    state.permalink = {
-      requestId: generateNextId(state),
-      hash: undefined,
-      isRecordingConfig: args.isRecordingConfig,
-    };
-  },
-
-  setPermalink(
-    state: StateDraft,
-    args: {requestId: string; hash: string},
-  ): void {
-    // Drop any links for old requests.
-    if (state.permalink.requestId !== args.requestId) return;
-    state.permalink = args;
-  },
-
-  loadPermalink(state: StateDraft, args: {hash: string}): void {
-    state.permalink = {requestId: generateNextId(state), hash: args.hash};
-  },
-
-  clearPermalink(state: StateDraft, _: {}): void {
-    state.permalink = {};
   },
 
   updateStatus(state: StateDraft, args: Status): void {
@@ -920,7 +891,7 @@ export const StateActions = {
 
   toggleTrackSelection(
     state: StateDraft,
-    args: {id: string; isTrackGroup: boolean},
+    args: {key: string; isTrackGroup: boolean},
   ) {
     const selection = state.selection;
     if (
@@ -930,12 +901,12 @@ export const StateActions = {
       return;
     }
     const areaId = selection.legacySelection.areaId;
-    const index = state.areas[areaId].tracks.indexOf(args.id);
+    const index = state.areas[areaId].tracks.indexOf(args.key);
     if (index > -1) {
       state.areas[areaId].tracks.splice(index, 1);
       if (args.isTrackGroup) {
         // Also remove all child tracks.
-        for (const childTrack of state.trackGroups[args.id].tracks) {
+        for (const childTrack of state.trackGroups[args.key].tracks) {
           const childIndex = state.areas[areaId].tracks.indexOf(childTrack);
           if (childIndex > -1) {
             state.areas[areaId].tracks.splice(childIndex, 1);
@@ -943,10 +914,10 @@ export const StateActions = {
         }
       }
     } else {
-      state.areas[areaId].tracks.push(args.id);
+      state.areas[areaId].tracks.push(args.key);
       if (args.isTrackGroup) {
         // Also add all child tracks.
-        for (const childTrack of state.trackGroups[args.id].tracks) {
+        for (const childTrack of state.trackGroups[args.key].tracks) {
           if (!state.areas[areaId].tracks.includes(childTrack)) {
             state.areas[areaId].tracks.push(childTrack);
           }

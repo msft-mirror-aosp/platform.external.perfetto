@@ -31,7 +31,7 @@ import {
   SliceDetails,
   ThreadDesc,
   ThreadStateDetails,
-  TraceTime,
+  TraceContext,
 } from './globals';
 import {findCurrentSelection} from './keyboard_event_handler';
 
@@ -96,8 +96,8 @@ export function publishHasFtrace(value: boolean): void {
   globals.publishRedraw();
 }
 
-export function publishTraceDetails(details: TraceTime): void {
-  globals.traceTime = details;
+export function publishTraceContext(details: TraceContext): void {
+  globals.traceContext = details;
   globals.publishRedraw();
 }
 
@@ -206,5 +206,10 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
 
 export function publishShowPanningHint() {
   globals.showPanningHint = true;
+  globals.publishRedraw();
+}
+
+export function publishPermalinkHash(hash: string | undefined): void {
+  globals.permalinkHash = hash;
   globals.publishRedraw();
 }

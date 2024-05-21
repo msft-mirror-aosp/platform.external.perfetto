@@ -155,7 +155,13 @@ namespace stats {
   F(traced_buf_patches_succeeded,         kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_readaheads_failed,         kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_readaheads_succeeded,      kIndexed, kInfo,     kTrace,    ""), \
-  F(traced_buf_trace_writer_packet_loss,  kIndexed, kDataLoss, kTrace,    ""), \
+  F(traced_buf_trace_writer_packet_loss,  kIndexed, kDataLoss, kTrace,         \
+      "The tracing service observed packet loss for this buffer during this "  \
+      "tracing session. This also counts packet loss that happened before "    \
+      "the RING_BUFFER start or after the DISCARD buffer end."),               \
+  F(traced_buf_sequence_packet_loss,      kIndexed, kDataLoss, kAnalysis,      \
+      "The number of groups of consecutive packets lost in each sequence for " \
+      "this buffer"), \
   F(traced_buf_write_wrap_count,          kIndexed, kInfo,     kTrace,    ""), \
   F(traced_chunks_discarded,              kSingle,  kInfo,     kTrace,    ""), \
   F(traced_data_sources_registered,       kSingle,  kInfo,     kTrace,    ""), \
@@ -262,8 +268,13 @@ namespace stats {
   F(perf_process_shard_count,             kIndexed, kInfo,     kTrace,    ""), \
   F(perf_chosen_process_shard,            kIndexed, kInfo,     kTrace,    ""), \
   F(perf_guardrail_stop_ts,               kIndexed, kDataLoss, kTrace,    ""), \
-  F(perf_samples_skipped,                 kSingle,  kInfo,     kTrace,    ""), \
+  F(perf_unknown_record_type,             kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_record_skipped,                  kSingle,  kError,    kAnalysis, ""), \
+  F(perf_samples_skipped,                 kSingle,  kError,    kAnalysis, ""), \
+  F(perf_features_skipped,                kIndexed, kInfo,     kAnalysis, ""), \
   F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,    ""), \
+  F(perf_dummy_mapping_used,              kSingle,  kInfo,     kAnalysis, ""), \
+  F(perf_invalid_event_id,                kSingle,  kError,    kTrace,    ""), \
   F(memory_snapshot_parser_failure,       kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_out_of_order,    kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_unknown_cpu_freq,                                     \

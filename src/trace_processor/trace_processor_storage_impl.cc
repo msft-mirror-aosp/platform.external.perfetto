@@ -30,6 +30,7 @@
 #include "src/trace_processor/importers/common/machine_tracker.h"
 #include "src/trace_processor/importers/common/mapping_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
+#include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/sched_event_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
@@ -45,6 +46,7 @@
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 #include "src/trace_processor/importers/proto/track_event.descriptor.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
+#include "src/trace_processor/trace_reader_registry.h"
 #include "src/trace_processor/util/descriptors.h"
 
 namespace perfetto {
@@ -52,6 +54,8 @@ namespace trace_processor {
 
 TraceProcessorStorageImpl::TraceProcessorStorageImpl(const Config& cfg)
     : context_({cfg, std::make_shared<TraceStorage>(cfg)}) {
+  context_.reader_registry->RegisterTraceReader<ProtoTraceReader>(
+      kProtoTraceType);
   context_.proto_trace_parser =
       std::make_unique<ProtoTraceParserImpl>(&context_);
   RegisterDefaultModules(&context_);
