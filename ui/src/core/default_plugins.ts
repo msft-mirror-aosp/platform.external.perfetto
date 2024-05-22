@@ -44,7 +44,6 @@ export const defaultPlugins = [
   'perfetto.CpuProfile',
   'perfetto.CpuSlices',
   'perfetto.CriticalUserInteraction',
-  'perfetto.CustomSqlTrack',
   'perfetto.DebugSlices',
   'perfetto.Flows',
   'perfetto.Frames',
@@ -58,4 +57,5 @@ export const defaultPlugins = [
   'perfetto.ThreadState',
   'perfetto.VisualisedArgs',
   'org.kernel.LinuxKernelDevices',
+  'perfetto.TrackUtils',
 ];
