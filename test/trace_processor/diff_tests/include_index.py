@@ -50,6 +50,9 @@ from diff_tests.parser.android_fs.tests import AndroidFs
 from diff_tests.parser.android.tests import AndroidParser
 from diff_tests.parser.android.tests_bugreport import AndroidBugreport
 from diff_tests.parser.android.tests_games import AndroidGames
+from diff_tests.parser.android.tests_inputmethod_clients import InputMethodClients
+from diff_tests.parser.android.tests_inputmethod_manager_service import InputMethodManagerService
+from diff_tests.parser.android.tests_inputmethod_service import InputMethodService
 from diff_tests.parser.android.tests_protolog import ProtoLog
 from diff_tests.parser.android.tests_shell_transitions import ShellTransitions
 from diff_tests.parser.android.tests_surfaceflinger_layers import SurfaceFlingerLayers
@@ -72,6 +75,7 @@ from diff_tests.parser.network.tests import NetworkParser
 from diff_tests.parser.parsing.tests import Parsing
 from diff_tests.parser.parsing.tests_debug_annotation import ParsingDebugAnnotation
 from diff_tests.parser.parsing.tests_memory_counters import ParsingMemoryCounters
+from diff_tests.parser.parsing.tests_traced_stats import ParsingTracedStats
 from diff_tests.parser.parsing.tests_rss_stats import ParsingRssStats
 from diff_tests.parser.power.tests_energy_breakdown import PowerEnergyBreakdown
 from diff_tests.parser.power.tests_entity_state_residency import EntityStateResidency
@@ -98,7 +102,7 @@ from diff_tests.stdlib.chrome.chrome_stdlib_testsuites import CHROME_STDLIB_TEST
 from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.counters.tests import StdlibCounterIntervals
-from diff_tests.stdlib.cpu.tests import CpuStdlib
+from diff_tests.stdlib.cpu.tests import Cpu
 from diff_tests.stdlib.dynamic_tables.tests import DynamicTables
 from diff_tests.stdlib.graphs.dominator_tree_tests import DominatorTree
 from diff_tests.stdlib.graphs.partition_tests import GraphPartitionTests
@@ -133,6 +137,7 @@ from diff_tests.tables.tests_counters import TablesCounters
 from diff_tests.tables.tests_sched import TablesSched
 
 sys.path.pop()
+
 
 def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
   parser_tests = [
@@ -183,6 +188,12 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
                            'SmokeComputeMetrics').fetch(),
       *SmokeJson(index_path, 'parser/smoke', 'SmokeJson').fetch(),
       *SmokeSchedEvents(index_path, 'parser/smoke', 'SmokeSchedEvents').fetch(),
+      *InputMethodClients(index_path, 'parser/android',
+                          'InputMethodClients').fetch(),
+      *InputMethodManagerService(index_path, 'parser/android',
+                                 'InputMethodManagerService').fetch(),
+      *InputMethodService(index_path, 'parser/android',
+                          'InputMethodService').fetch(),
       *SurfaceFlingerLayers(index_path, 'parser/android',
                             'SurfaceFlingerLayers').fetch(),
       *SurfaceFlingerTransactions(index_path, 'parser/android',
@@ -203,6 +214,8 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ParsingMemoryCounters(index_path, 'parser/parsing',
                              'ParsingMemoryCounters').fetch(),
       *FtraceCrop(index_path, 'parser/ftrace', 'FtraceCrop').fetch(),
+      *ParsingTracedStats(index_path, 'parser/parsing',
+                          'ParsingTracedStats').fetch(),
   ]
 
   metrics_tests = [
@@ -246,7 +259,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
 
   stdlib_tests = [
       *AndroidStdlib(index_path, 'stdlib/android', 'AndroidStdlib').fetch(),
-      *CpuStdlib(index_path, 'stdlib/cpu', 'CpuStdlib').fetch(),
+      *Cpu(index_path, 'stdlib/cpu', 'Cpu').fetch(),
       *DominatorTree(index_path, 'stdlib/graphs', 'DominatorTree').fetch(),
       *Frames(index_path, 'stdlib/android', 'Frames').fetch(),
       *GraphSearchTests(index_path, 'stdlib/graphs',

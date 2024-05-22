@@ -18,26 +18,18 @@ import {searchSegment} from '../base/binary_search';
 import {Disposable, NullDisposable} from '../base/disposable';
 import {assertTrue, assertUnreachable} from '../base/logging';
 import {Time, time} from '../base/time';
+import {uuidv4Sql} from '../base/uuid';
 import {drawTrackHoverTooltip} from '../common/canvas_utils';
 import {raf} from '../core/raf_scheduler';
-import {EngineProxy, LONG, NUM, Track} from '../public';
+import {CacheKey} from '../core/timeline_cache';
+import {Engine, LONG, NUM, Track} from '../public';
 import {Button} from '../widgets/button';
-import {MenuItem, MenuDivider, PopupMenu2} from '../widgets/menu';
+import {MenuDivider, MenuItem, PopupMenu2} from '../widgets/menu';
 
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
 import {PanelSize} from './panel';
 import {NewTrackArgs} from './track';
-import {CacheKey} from '../core/timeline_cache';
-import {featureFlags} from '../core/feature_flags';
-import {uuidv4Sql} from '../base/uuid';
-
-export const COUNTER_DEBUG_MENU_ITEMS = featureFlags.register({
-  id: 'counterDebugMenuItems',
-  name: 'Counter debug menu items',
-  description: 'Extra counter menu items for debugging purposes.',
-  defaultValue: false,
-});
 
 function roundAway(n: number): number {
   const exp = Math.ceil(Math.log10(Math.max(Math.abs(n), 1)));
@@ -194,7 +186,7 @@ export type BaseCounterTrackArgs = NewTrackArgs & {
 };
 
 export abstract class BaseCounterTrack implements Track {
-  protected engine: EngineProxy;
+  protected engine: Engine;
   protected trackKey: string;
   protected trackUuid = uuidv4Sql();
 
@@ -355,65 +347,63 @@ export abstract class BaseCounterTrack implements Track {
           },
         }),
 
-      COUNTER_DEBUG_MENU_ITEMS.get() && [
-        m(MenuDivider),
-        m(
-          MenuItem,
-          {
-            label: `Mode (currently: ${options.yMode})`,
-          },
+      m(MenuDivider),
+      m(
+        MenuItem,
+        {
+          label: `Mode (currently: ${options.yMode})`,
+        },
 
-          m(MenuItem, {
-            label: 'Value',
-            icon:
-              options.yMode === 'value'
-                ? 'radio_button_checked'
-                : 'radio_button_unchecked',
-            onclick: () => {
-              options.yMode = 'value';
-              this.invalidate();
-            },
-          }),
-
-          m(MenuItem, {
-            label: 'Delta',
-            icon:
-              options.yMode === 'delta'
-                ? 'radio_button_checked'
-                : 'radio_button_unchecked',
-            onclick: () => {
-              options.yMode = 'delta';
-              this.invalidate();
-            },
-          }),
-
-          m(MenuItem, {
-            label: 'Rate',
-            icon:
-              options.yMode === 'rate'
-                ? 'radio_button_checked'
-                : 'radio_button_unchecked',
-            onclick: () => {
-              options.yMode = 'rate';
-              this.invalidate();
-            },
-          }),
-        ),
         m(MenuItem, {
-          label: 'Round y-axis scale',
+          label: 'Value',
           icon:
-            options.yRangeRounding === 'human_readable'
-              ? 'check_box'
-              : 'check_box_outline_blank',
+            options.yMode === 'value'
+              ? 'radio_button_checked'
+              : 'radio_button_unchecked',
           onclick: () => {
-            options.yRangeRounding =
-              options.yRangeRounding === 'human_readable'
-                ? 'strict'
-                : 'human_readable';
+            options.yMode = 'value';
             this.invalidate();
           },
         }),
-      ],
+
+        m(MenuItem, {
+          label: 'Delta',
+          icon:
+            options.yMode === 'delta'
+              ? 'radio_button_checked'
+              : 'radio_button_unchecked',
+          onclick: () => {
+            options.yMode = 'delta';
+            this.invalidate();
+          },
+        }),
+
+        m(MenuItem, {
+          label: 'Rate',
+          icon:
+            options.yMode === 'rate'
+              ? 'radio_button_checked'
+              : 'radio_button_unchecked',
+          onclick: () => {
+            options.yMode = 'rate';
+            this.invalidate();
+          },
+        }),
+      ),
+      m(MenuItem, {
+        label: 'Round y-axis scale',
+        icon:
+          options.yRangeRounding === 'human_readable'
+            ? 'check_box'
+            : 'check_box_outline_blank',
+        onclick: () => {
+          options.yRangeRounding =
+            options.yRangeRounding === 'human_readable'
+              ? 'strict'
+              : 'human_readable';
+          this.invalidate();
+        },
+      }),
     ];
   }
 
@@ -451,33 +441,7 @@ export abstract class BaseCounterTrack implements Track {
 
   async onCreate(): Promise<void> {
     this.initState = await this.onInit();
-
-    const displayValueQuery = await this.engine.query(`
-        create virtual table ${this.getTableName()}
-        using __intrinsic_counter_mipmap((
-          SELECT
-            ts,
-            ${this.getValueExpression()} as value
-          FROM (${this.getSqlSource()})
-        ));
-
-        select
-          min_value as minDisplayValue,
-          max_value as maxDisplayValue
-        from ${this.getTableName()}(
-          trace_start(), trace_end(), trace_dur()
-        );
-      `);
-
-    const {minDisplayValue, maxDisplayValue} = displayValueQuery.firstRow({
-      minDisplayValue: NUM,
-      maxDisplayValue: NUM,
-    });
-
-    this.limits = {
-      minDisplayValue,
-      maxDisplayValue,
-    };
+    this.limits = await this.createTableAndFetchLimits(false);
   }
 
   async onUpdate(): Promise<void> {
@@ -498,7 +462,6 @@ export abstract class BaseCounterTrack implements Track {
     const {visibleTimeScale: timeScale} = globals.timeline;
 
     // In any case, draw whatever we have (which might be stale/incomplete).
-
     const limits = this.limits;
     const data = this.counters;
 
@@ -725,9 +688,7 @@ export abstract class BaseCounterTrack implements Track {
       this.initState.dispose();
       this.initState = undefined;
     }
-    if (this.engine.isAlive) {
-      await this.engine.query(`drop table if exists ${this.getTableName()}`);
-    }
+    await this.engine.tryQuery(`drop table if exists ${this.getTableName()}`);
   }
 
   // Compute the range of values to display and range label.
@@ -859,6 +820,10 @@ export abstract class BaseCounterTrack implements Track {
       );
     }
 
+    if (this.limits === undefined) {
+      this.limits = await this.createTableAndFetchLimits(true);
+    }
+
     const queryRes = await this.engine.query(`
       SELECT
         min_value as minDisplayValue,
@@ -905,6 +870,38 @@ export abstract class BaseCounterTrack implements Track {
     this.counters = data;
 
     raf.scheduleRedraw();
+  }
+
+  private async createTableAndFetchLimits(
+    dropTable: boolean,
+  ): Promise<CounterLimits> {
+    const dropQuery = dropTable ? `drop table ${this.getTableName()};` : '';
+    const displayValueQuery = await this.engine.query(`
+      ${dropQuery}
+      create virtual table ${this.getTableName()}
+      using __intrinsic_counter_mipmap((
+        select
+          ts,
+          ${this.getValueExpression()} as value
+        from (${this.getSqlSource()})
+      ));
+      select
+        min_value as minDisplayValue,
+        max_value as maxDisplayValue
+      from ${this.getTableName()}(
+        trace_start(), trace_end(), trace_dur()
+      );
+    `);
+
+    const {minDisplayValue, maxDisplayValue} = displayValueQuery.firstRow({
+      minDisplayValue: NUM,
+      maxDisplayValue: NUM,
+    });
+
+    return {
+      minDisplayValue,
+      maxDisplayValue,
+    };
   }
 
   get unit(): string {

@@ -31,6 +31,7 @@
 #include "src/trace_processor/importers/common/machine_tracker.h"
 #include "src/trace_processor/importers/common/mapping_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
+#include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/sched_event_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
@@ -42,10 +43,10 @@
 #include "src/trace_processor/importers/proto/multi_machine_trace_manager.h"
 #include "src/trace_processor/importers/proto/perf_sample_tracker.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
-#include "src/trace_processor/importers/proto/proto_trace_parser.h"
 #include "src/trace_processor/importers/proto/track_event.descriptor.h"
 #include "src/trace_processor/importers/proto/track_event_module.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
+#include "src/trace_processor/trace_reader_registry.h"
 #include "src/trace_processor/types/destructible.h"
 
 namespace perfetto {
@@ -53,6 +54,7 @@ namespace trace_processor {
 
 TraceProcessorContext::TraceProcessorContext(const InitArgs& args)
     : config(args.config), storage(args.storage) {
+  reader_registry = std::make_unique<TraceReaderRegistry>(this);
   // Init the trackers.
   machine_tracker.reset(new MachineTracker(this, args.raw_machine_id));
   if (!machine_id()) {
@@ -68,6 +70,8 @@ TraceProcessorContext::TraceProcessorContext(const InitArgs& args)
   event_tracker.reset(new EventTracker(this));
   sched_event_tracker.reset(new SchedEventTracker(this));
   process_tracker.reset(new ProcessTracker(this));
+  process_track_translation_table.reset(
+      new ProcessTrackTranslationTable(storage.get()));
   clock_tracker.reset(new ClockTracker(this));
   clock_converter.reset(new ClockConverter(this));
   mapping_tracker.reset(new MappingTracker(this));

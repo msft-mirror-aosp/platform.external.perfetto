@@ -20,10 +20,11 @@ import {Migrate, Store} from '../base/store';
 import {ColorScheme} from '../core/colorizer';
 import {LegacySelection} from '../common/state';
 import {PanelSize} from '../frontend/panel';
-import {EngineProxy} from '../trace_processor/engine';
+import {Engine} from '../trace_processor/engine';
 import {UntypedEventSet} from '../core/event_set';
+import {TraceContext} from '../frontend/globals';
 
-export {EngineProxy} from '../trace_processor/engine';
+export {Engine} from '../trace_processor/engine';
 export {
   LONG,
   LONG_NULL,
@@ -344,7 +345,7 @@ export interface DetailsPanel {
 // currently loaded trace. Passed to trace-relevant hooks on a plugin instead of
 // PluginContext.
 export interface PluginContextTrace extends PluginContext {
-  readonly engine: EngineProxy;
+  readonly engine: Engine;
 
   // Control over the main timeline.
   timeline: {
@@ -433,10 +434,7 @@ export interface PluginContextTrace extends PluginContext {
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;
 
-  trace: {
-    // A span representing the start and end time of the trace
-    readonly span: Span<time, duration>;
-  };
+  trace: TraceContext;
 }
 
 export interface Plugin {

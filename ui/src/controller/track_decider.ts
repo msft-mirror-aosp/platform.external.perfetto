@@ -27,22 +27,22 @@ import {globals} from '../frontend/globals';
 import {PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {PrimaryTrackSortKey} from '../public';
 import {getTrackName} from '../public/utils';
-import {Engine, EngineProxy} from '../trace_processor/engine';
+import {Engine, EngineBase} from '../trace_processor/engine';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../trace_processor/query_result';
-import {ASYNC_SLICE_TRACK_KIND} from '../tracks/async_slices';
+import {ASYNC_SLICE_TRACK_KIND} from '../core_plugins/async_slices';
 import {
   ENABLE_SCROLL_JANK_PLUGIN_V2,
   getScrollJankTracks,
-} from '../tracks/chrome_scroll_jank';
-import {decideTracks as scrollJankDecideTracks} from '../tracks/chrome_scroll_jank/chrome_tasks_scroll_jank_track';
-import {SLICE_TRACK_KIND} from '../tracks/chrome_slices';
-import {COUNTER_TRACK_KIND} from '../tracks/counter';
+} from '../core_plugins/chrome_scroll_jank';
+import {decideTracks as scrollJankDecideTracks} from '../core_plugins/chrome_scroll_jank/chrome_tasks_scroll_jank_track';
+import {COUNTER_TRACK_KIND} from '../core_plugins/counter';
 import {
   ACTUAL_FRAMES_SLICE_TRACK_KIND,
   EXPECTED_FRAMES_SLICE_TRACK_KIND,
-} from '../tracks/frames';
-import {decideTracks as screenshotDecideTracks} from '../tracks/screenshots';
-import {THREAD_STATE_TRACK_KIND} from '../tracks/thread_state';
+} from '../core_plugins/frames';
+import {decideTracks as screenshotDecideTracks} from '../core_plugins/screenshots';
+import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
+import {SLICE_TRACK_KIND} from '../core_plugins/chrome_slices/chrome_slice_track';
 
 const MEM_DMA_COUNTER_NAME = 'mem.dma_heap';
 const MEM_DMA = 'mem.dma_buffer';
@@ -76,18 +76,20 @@ const CHROME_TRACK_REGEX = new RegExp('^Chrome.*|^InputLatency::.*');
 const CHROME_TRACK_GROUP = 'Chrome Global Tracks';
 const MISC_GROUP = 'Misc Global Tracks';
 
-export async function decideTracks(engine: Engine): Promise<DeferredAction[]> {
+export async function decideTracks(
+  engine: EngineBase,
+): Promise<DeferredAction[]> {
   return new TrackDecider(engine).decideTracks();
 }
 
 class TrackDecider {
-  private engine: Engine;
+  private engine: EngineBase;
   private upidToUuid = new Map<number, string>();
   private utidToUuid = new Map<number, string>();
   private tracksToAdd: AddTrackArgs[] = [];
   private addTrackGroupActions: DeferredAction[] = [];
 
-  constructor(engine: Engine) {
+  constructor(engine: EngineBase) {
     this.engine = engine;
   }
 
@@ -116,7 +118,7 @@ class TrackDecider {
   }
 
   async addCpuSchedulingTracks(): Promise<void> {
-    const cpus = await this.engine.getCpus();
+    const cpus = globals.traceContext.cpus;
     const cpuToSize = await this.guessCpuSizes();
 
     for (const cpu of cpus) {
@@ -131,8 +133,8 @@ class TrackDecider {
     }
   }
 
-  async addCpuFreqTracks(engine: EngineProxy): Promise<void> {
-    const cpus = await this.engine.getCpus();
+  async addCpuFreqTracks(engine: Engine): Promise<void> {
+    const cpus = globals.traceContext.cpus;
 
     for (const cpu of cpus) {
       // Only add a cpu freq track if we have
@@ -165,7 +167,7 @@ class TrackDecider {
     }
   }
 
-  async addGlobalAsyncTracks(engine: EngineProxy): Promise<void> {
+  async addGlobalAsyncTracks(engine: Engine): Promise<void> {
     const rawGlobalAsyncTracks = await engine.query(`
       with global_tracks_grouped as (
         select distinct t.parent_id, t.name
@@ -226,8 +228,8 @@ class TrackDecider {
     }
   }
 
-  async addGpuFreqTracks(engine: EngineProxy): Promise<void> {
-    const numGpus = await this.engine.getNumberOfGpus();
+  async addGpuFreqTracks(engine: Engine): Promise<void> {
+    const numGpus = globals.traceContext.gpuCount;
     for (let gpu = 0; gpu < numGpus; gpu++) {
       // Only add a gpu freq track if we have
       // gpu freq data.
@@ -248,7 +250,7 @@ class TrackDecider {
     }
   }
 
-  async addCpuFreqLimitCounterTracks(engine: EngineProxy): Promise<void> {
+  async addCpuFreqLimitCounterTracks(engine: Engine): Promise<void> {
     const cpuFreqLimitCounterTracksSql = `
       select name, id
       from cpu_counter_track
@@ -259,7 +261,7 @@ class TrackDecider {
     this.addCpuCounterTracks(engine, cpuFreqLimitCounterTracksSql);
   }
 
-  async addCpuPerfCounterTracks(engine: EngineProxy): Promise<void> {
+  async addCpuPerfCounterTracks(engine: Engine): Promise<void> {
     // Perf counter tracks are bound to CPUs, follow the scheduling and
     // frequency track naming convention ("Cpu N ...").
     // Note: we might not have a track for a given cpu if no data was seen from
@@ -274,7 +276,7 @@ class TrackDecider {
     this.addCpuCounterTracks(engine, addCpuPerfCounterTracksSql);
   }
 
-  async addCpuCounterTracks(engine: EngineProxy, sql: string): Promise<void> {
+  async addCpuCounterTracks(engine: Engine, sql: string): Promise<void> {
     const result = await engine.query(sql);
 
     const it = result.iter({
@@ -516,7 +518,7 @@ class TrackDecider {
     }
   }
 
-  async addAnnotationTracks(engine: EngineProxy): Promise<void> {
+  async addAnnotationTracks(engine: Engine): Promise<void> {
     const sliceResult = await engine.query(`
       select id, name, upid, group_name
       from annotation_slice_track
@@ -607,7 +609,7 @@ class TrackDecider {
     }
   }
 
-  async addThreadStateTracks(engine: EngineProxy): Promise<void> {
+  async addThreadStateTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         utid,
@@ -657,7 +659,7 @@ class TrackDecider {
     }
   }
 
-  async addThreadCpuSampleTracks(engine: EngineProxy): Promise<void> {
+  async addThreadCpuSampleTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       with thread_cpu_sample as (
         select distinct utid
@@ -695,7 +697,7 @@ class TrackDecider {
     }
   }
 
-  async addThreadCounterTracks(engine: EngineProxy): Promise<void> {
+  async addThreadCounterTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         thread_counter_track.name as trackName,
@@ -745,7 +747,7 @@ class TrackDecider {
     }
   }
 
-  async addProcessAsyncSliceTracks(engine: EngineProxy): Promise<void> {
+  async addProcessAsyncSliceTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         upid,
@@ -790,14 +792,22 @@ class TrackDecider {
     }
   }
 
-  async addUserAsyncSliceTracks(engine: EngineProxy): Promise<void> {
+  async addUserAsyncSliceTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
+      with grouped_packages as materialized (
+        select
+          uid,
+          group_concat(package_name, ',') as package_name,
+          count() as cnt
+        from package_list
+        group by uid
+      )
       select
         t.name as name,
         t.uid as uid,
-        package_list.package_name as packageName
+        iif(g.cnt = 1, g.package_name, 'UID ' || g.uid) as packageName
       from _uid_track_track_summary_by_uid_and_name t
-      join package_list using (uid)
+      left join grouped_packages g using (uid)
     `);
 
     const it = result.iter({
@@ -815,7 +825,7 @@ class TrackDecider {
       }
       const rawName = it.name;
       const uid = it.uid === null ? undefined : it.uid;
-      const userName = it.packageName === null ? `UID: ${uid}` : it.packageName;
+      const userName = it.packageName === null ? `UID ${uid}` : it.packageName;
 
       const groupUuid = `uid-track-group${rawName}`;
       if (groupMap.get(rawName) === undefined) {
@@ -840,7 +850,7 @@ class TrackDecider {
     }
   }
 
-  async addActualFramesTracks(engine: EngineProxy): Promise<void> {
+  async addActualFramesTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         upid,
@@ -883,7 +893,7 @@ class TrackDecider {
     }
   }
 
-  async addExpectedFramesTracks(engine: EngineProxy): Promise<void> {
+  async addExpectedFramesTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         upid,
@@ -927,7 +937,7 @@ class TrackDecider {
     }
   }
 
-  async addThreadSliceTracks(engine: EngineProxy): Promise<void> {
+  async addThreadSliceTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         thread_track.utid as utid,
@@ -982,7 +992,7 @@ class TrackDecider {
     }
   }
 
-  async addProcessCounterTracks(engine: EngineProxy): Promise<void> {
+  async addProcessCounterTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select
         process_counter_track.id as trackId,
@@ -1026,7 +1036,7 @@ class TrackDecider {
     }
   }
 
-  async addProcessHeapProfileTracks(engine: EngineProxy): Promise<void> {
+  async addProcessHeapProfileTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select upid
       from _process_available_info_summary
@@ -1044,7 +1054,7 @@ class TrackDecider {
     }
   }
 
-  async addProcessPerfSamplesTracks(engine: EngineProxy): Promise<void> {
+  async addProcessPerfSamplesTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
       select upid, pid
       from _process_available_info_summary
@@ -1091,7 +1101,7 @@ class TrackDecider {
     this.upidToUuid.set(upid, uuid);
   }
 
-  async addKernelThreadGrouping(engine: EngineProxy): Promise<void> {
+  async addKernelThreadGrouping(engine: Engine): Promise<void> {
     // Identify kernel threads if this is a linux system trace, and sufficient
     // process information is available. Kernel threads are identified by being
     // children of kthreadd (always pid 2).
@@ -1154,7 +1164,7 @@ class TrackDecider {
     }
   }
 
-  async addProcessTrackGroups(engine: EngineProxy): Promise<void> {
+  async addProcessTrackGroups(engine: Engine): Promise<void> {
     // We want to create groups of tracks in a specific order.
     // The tracks should be grouped:
     //    by upid

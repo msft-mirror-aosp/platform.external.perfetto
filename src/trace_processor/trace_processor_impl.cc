@@ -46,15 +46,16 @@
 #include "src/trace_processor/importers/android_bugreport/android_bugreport_parser.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
+#include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_trace_tokenizer.h"
 #include "src/trace_processor/importers/gzip/gzip_trace_parser.h"
-#include "src/trace_processor/importers/json/json_trace_parser.h"
+#include "src/trace_processor/importers/json/json_trace_parser_impl.h"
 #include "src/trace_processor/importers/json/json_trace_tokenizer.h"
 #include "src/trace_processor/importers/json/json_utils.h"
 #include "src/trace_processor/importers/ninja/ninja_log_parser.h"
-#include "src/trace_processor/importers/perf/perf_data_parser.h"
 #include "src/trace_processor/importers/perf/perf_data_tokenizer.h"
+#include "src/trace_processor/importers/perf/record_parser.h"
 #include "src/trace_processor/importers/proto/additional_modules.h"
 #include "src/trace_processor/importers/proto/content_analyzer.h"
 #include "src/trace_processor/importers/systrace/systrace_trace_parser.h"
@@ -71,6 +72,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/dfs.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/dominator_tree.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/import.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/math.h"
@@ -89,7 +91,6 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/connected_flow.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/descendant.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dfs_weight_bounded.h"
-#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/dominator_tree.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_annotated_stack.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_counter_dur.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_flamegraph.h"
@@ -110,6 +111,7 @@
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/tp_metatrace.h"
 #include "src/trace_processor/trace_processor_storage_impl.h"
+#include "src/trace_processor/trace_reader_registry.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/types/variadic.h"
 #include "src/trace_processor/util/descriptors.h"
@@ -339,28 +341,36 @@ void InitializePreludeTablesViews(sqlite3* db) {
 
 TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
     : TraceProcessorStorageImpl(cfg), config_(cfg) {
-  context_.fuchsia_trace_tokenizer =
-      std::make_unique<FuchsiaTraceTokenizer>(&context_);
-  context_.fuchsia_trace_parser =
+  context_.reader_registry->RegisterTraceReader<FuchsiaTraceTokenizer>(
+      kFuchsiaTraceType);
+  context_.fuchsia_record_parser =
       std::make_unique<FuchsiaTraceParser>(&context_);
-  context_.ninja_log_parser = std::make_unique<NinjaLogParser>(&context_);
-  context_.systrace_trace_parser =
-      std::make_unique<SystraceTraceParser>(&context_);
-  context_.perf_data_trace_tokenizer =
-      std::make_unique<perf_importer::PerfDataTokenizer>(&context_);
-  context_.perf_data_parser =
-      std::make_unique<perf_importer::PerfDataParser>(&context_);
+
+  context_.reader_registry->RegisterTraceReader<SystraceTraceParser>(
+      kSystraceTraceType);
+  context_.reader_registry->RegisterTraceReader<NinjaLogParser>(
+      kNinjaLogTraceType);
+
+  context_.reader_registry
+      ->RegisterTraceReader<perf_importer::PerfDataTokenizer>(
+          kPerfDataTraceType);
+  context_.perf_record_parser =
+      std::make_unique<perf_importer::RecordParser>(&context_);
 
   if (util::IsGzipSupported()) {
-    context_.gzip_trace_parser = std::make_unique<GzipTraceParser>(&context_);
-    context_.android_bugreport_parser =
-        std::make_unique<AndroidBugreportParser>(&context_);
+    context_.reader_registry->RegisterTraceReader<GzipTraceParser>(
+        kGzipTraceType);
+    context_.reader_registry->RegisterTraceReader<GzipTraceParser>(
+        kCtraceTraceType);
+    context_.reader_registry->RegisterTraceReader<AndroidBugreportParser>(
+        kAndroidBugreportTraceType);
   }
 
   if (json::IsJsonSupported()) {
-    context_.json_trace_tokenizer =
-        std::make_unique<JsonTraceTokenizer>(&context_);
-    context_.json_trace_parser = std::make_unique<JsonTraceParser>(&context_);
+    context_.reader_registry->RegisterTraceReader<JsonTraceTokenizer>(
+        kJsonTraceType);
+    context_.json_trace_parser =
+        std::make_unique<JsonTraceParserImpl>(&context_);
   }
 
   if (context_.config.analyze_trace_proto_content) {
@@ -872,6 +882,10 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->jit_code_table());
   RegisterStaticTable(storage->jit_frame_table());
 
+  RegisterStaticTable(storage->inputmethod_clients_table());
+  RegisterStaticTable(storage->inputmethod_manager_service_table());
+  RegisterStaticTable(storage->inputmethod_service_table());
+
   RegisterStaticTable(storage->surfaceflinger_layers_snapshot_table());
   RegisterStaticTable(storage->surfaceflinger_layer_table());
   RegisterStaticTable(storage->surfaceflinger_transactions_table());
@@ -929,8 +943,6 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       std::make_unique<ExperimentalAnnotatedStack>(&context_));
   engine_->RegisterStaticTableFunction(
       std::make_unique<ExperimentalFlatSlice>(&context_));
-  engine_->RegisterStaticTableFunction(
-      std::make_unique<DominatorTree>(context_.storage->mutable_string_pool()));
   engine_->RegisterStaticTableFunction(std::make_unique<IntervalIntersect>(
       context_.storage->mutable_string_pool()));
   engine_->RegisterStaticTableFunction(std::make_unique<DfsWeightBounded>(
@@ -939,6 +951,9 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   // Value table aggregate functions.
   engine_->RegisterSqliteAggregateFunction<Dfs>(
       Dfs::kName, Dfs::kArgCount, context_.storage->mutable_string_pool());
+  engine_->RegisterSqliteAggregateFunction<DominatorTree>(
+      DominatorTree::kName, DominatorTree::kArgCount,
+      context_.storage->mutable_string_pool());
   engine_->RegisterSqliteAggregateFunction<StructuralTreePartition>(
       StructuralTreePartition::kName, StructuralTreePartition::kArgCount,
       context_.storage->mutable_string_pool());

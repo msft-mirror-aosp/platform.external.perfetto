@@ -15,7 +15,7 @@
 import {Draft} from 'immer';
 
 import {assertExists, assertTrue} from '../base/logging';
-import {duration, time} from '../base/time';
+import {duration, Time, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {
   GenericSliceDetailsTabConfig,
@@ -63,7 +63,6 @@ import {
   State,
   Status,
   ThreadTrackSortKey,
-  TraceTime,
   TrackSortKey,
   UtidToTrackSortKey,
   VisibleState,
@@ -449,35 +448,6 @@ export const StateActions = {
     }
   },
 
-  createPermalink(state: StateDraft, args: {isRecordingConfig: boolean}): void {
-    state.permalink = {
-      requestId: generateNextId(state),
-      hash: undefined,
-      isRecordingConfig: args.isRecordingConfig,
-    };
-  },
-
-  setPermalink(
-    state: StateDraft,
-    args: {requestId: string; hash: string},
-  ): void {
-    // Drop any links for old requests.
-    if (state.permalink.requestId !== args.requestId) return;
-    state.permalink = args;
-  },
-
-  loadPermalink(state: StateDraft, args: {hash: string}): void {
-    state.permalink = {requestId: generateNextId(state), hash: args.hash};
-  },
-
-  clearPermalink(state: StateDraft, _: {}): void {
-    state.permalink = {};
-  },
-
-  setTraceTime(state: StateDraft, args: TraceTime): void {
-    state.traceTime = args;
-  },
-
   updateStatus(state: StateDraft, args: Status): void {
     if (statusTraceEvent) {
       traceEventEnd(statusTraceEvent);
@@ -673,7 +643,7 @@ export const StateActions = {
     };
     this.openFlamegraph(state, {
       type: args.type,
-      start: state.traceTime.start as time, // TODO(stevegolton): Avoid type assertion here.
+      start: Time.ZERO,
       end: args.ts,
       upids: [args.upid],
       viewingOption: defaultViewingOption(args.type),

@@ -20,10 +20,9 @@ import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
 import {assertExists} from '../base/logging';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
-import {duration, Span, Time, time, TimeSpan} from '../base/time';
+import {duration, Span, time, TimeSpan} from '../base/time';
 import {Actions} from '../common/actions';
 import {getLegacySelection} from '../common/state';
-import {runQuery} from '../common/queries';
 import {
   DurationPrecision,
   setDurationPrecision,
@@ -32,8 +31,8 @@ import {
 } from '../core/timestamp_format';
 import {raf} from '../core/raf_scheduler';
 import {Command} from '../public';
-import {EngineProxy} from '../trace_processor/engine';
-import {THREAD_STATE_TRACK_KIND} from '../tracks/thread_state';
+import {Engine} from '../trace_processor/engine';
+import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 import {maybeRenderFullscreenModalDialog} from '../widgets/modal';
@@ -62,11 +61,13 @@ import {
   lockSliceSpan,
   moveByFocusedFlow,
 } from './keyboard_event_handler';
+import {exists} from '../base/utils';
+import {publishPermalinkHash} from './publish';
 
 function renderPermalink(): m.Children {
-  const permalink = globals.state.permalink;
-  if (!permalink.requestId || !permalink.hash) return null;
-  const url = `${self.location.origin}/#!/?s=${permalink.hash}`;
+  const hash = globals.permalinkHash;
+  if (!hash) return null;
+  const url = `${self.location.origin}/#!/?s=${hash}`;
   const linkProps = {title: 'Click to copy the URL', onclick: onClickCopy(url)};
 
   return m('.alert-permalink', [
@@ -74,7 +75,7 @@ function renderPermalink(): m.Children {
     m(
       'button',
       {
-        onclick: () => globals.dispatch(Actions.clearPermalink({})),
+        onclick: () => publishPermalinkHash(undefined),
       },
       m('i.material-icons.disallow-selection', 'close'),
     ),
@@ -154,7 +155,7 @@ export class App implements m.ClassComponent {
     this.trash.add(new AggregationsTabs());
   }
 
-  private getEngine(): EngineProxy | undefined {
+  private getEngine(): Engine | undefined {
     const engineId = globals.getCurrentEngine()?.id;
     if (engineId === undefined) {
       return undefined;
@@ -321,9 +322,8 @@ export class App implements m.ClassComponent {
         const engine = this.getEngine();
 
         if (engine !== undefined && trackUtid != 0) {
-          await runQuery(
+          await engine.query(
             `INCLUDE PERFETTO MODULE sched.thread_executing_span;`,
-            engine,
           );
           await addDebugSliceTrack(
             engine,
@@ -364,9 +364,8 @@ export class App implements m.ClassComponent {
         const engine = this.getEngine();
 
         if (engine !== undefined && trackUtid != 0) {
-          await runQuery(
+          await engine.query(
             `INCLUDE PERFETTO MODULE sched.thread_executing_span_with_slice;`,
-            engine,
           );
           await addDebugSliceTrack(
             engine,
@@ -619,8 +618,8 @@ export class App implements m.ClassComponent {
         if (selection !== null && selection.kind === 'AREA') {
           const area = globals.state.areas[selection.areaId];
           const coversEntireTimeRange =
-            globals.state.traceTime.start === area.start &&
-            globals.state.traceTime.end === area.end;
+            globals.traceContext.start === area.start &&
+            globals.traceContext.end === area.end;
           if (!coversEntireTimeRange) {
             // If the current selection is an area which does not cover the
             // entire time range, preserve the list of selected tracks and
@@ -635,7 +634,7 @@ export class App implements m.ClassComponent {
           // If the current selection is not an area, select all.
           tracksToSelect = Object.keys(globals.state.tracks);
         }
-        const {start, end} = globals.state.traceTime;
+        const {start, end} = globals.traceContext;
         globals.dispatch(
           Actions.selectArea({
             area: {
@@ -1009,7 +1008,7 @@ export class App implements m.ClassComponent {
 // there is no current selection.
 function getTimeSpanOfSelectionOrVisibleWindow(): Span<time, duration> {
   const range = globals.findTimeRangeOfSelection();
-  if (range.end !== Time.INVALID && range.start !== Time.INVALID) {
+  if (exists(range)) {
     return new TimeSpan(range.start, range.end);
   } else {
     return globals.stateVisibleTime();
