@@ -53,6 +53,10 @@ class PowerStatsDataProvider {
                                      size_t* size_of_arr) = 0;
   virtual bool GetEnergyConsumed(EnergyEstimationBreakdown* breakdown,
                                  size_t* size_of_arr) = 0;
+  virtual bool GetPowerEntityStates(PowerEntityState* state,
+                                    size_t* size_of_arr) = 0;
+  virtual bool GetPowerEntityStateResidency(PowerEntityStateResidency* state,
+                                            size_t* size_of_arr) = 0;
   virtual ~PowerStatsDataProvider() = default;
 };
 
@@ -64,6 +68,10 @@ class PowerStatsHalDataProvider : public PowerStatsDataProvider {
                              size_t* size_of_arr) override;
   bool GetEnergyConsumed(EnergyEstimationBreakdown* breakdown,
                          size_t* size_of_arr) override;
+  bool GetPowerEntityStates(PowerEntityState* state,
+                            size_t* size_of_arr) override;
+  bool GetPowerEntityStateResidency(PowerEntityStateResidency* state,
+                                    size_t* size_of_arr) override;
 
   PowerStatsHalDataProvider() = default;
   ~PowerStatsHalDataProvider() override = default;
@@ -84,6 +92,10 @@ class PowerStatsAidlDataProvider : public PowerStatsDataProvider {
                              size_t* size_of_arr) override;
   bool GetEnergyConsumed(EnergyEstimationBreakdown* breakdown,
                          size_t* size_of_arr) override;
+  bool GetPowerEntityStates(PowerEntityState* state,
+                            size_t* size_of_arr) override;
+  bool GetPowerEntityStateResidency(PowerEntityStateResidency* state,
+                                    size_t* size_of_arr) override;
 
   PowerStatsAidlDataProvider() = default;
   ~PowerStatsAidlDataProvider() override = default;
@@ -129,6 +141,16 @@ bool GetEnergyConsumed(EnergyEstimationBreakdown* breakdown,
   return GetDataProvider()->GetEnergyConsumed(breakdown, size_of_arr);
 }
 
+bool GetPowerEntityStates(PowerEntityState* state, size_t* size_of_arr) {
+  return GetDataProvider()->GetPowerEntityStates(state, size_of_arr);
+}
+
+bool GetPowerEntityStateResidency(PowerEntityStateResidency* residency,
+                                  size_t* size_of_arr) {
+  return GetDataProvider()->GetPowerEntityStateResidency(residency,
+                                                         size_of_arr);
+}
+
 /*** Power Stats HAL Implemenation *******************************************/
 
 using android::hardware::hidl_vec;
@@ -164,12 +186,10 @@ bool PowerStatsHalDataProvider::GetAvailableRails(
         descriptor.index = rail_info.index;
         descriptor.sampling_rate = rail_info.samplingRate;
 
-        strncpy(descriptor.rail_name, rail_info.railName.c_str(),
+        strlcpy(descriptor.rail_name, rail_info.railName.c_str(),
                 sizeof(descriptor.rail_name));
-        strncpy(descriptor.subsys_name, rail_info.subsysName.c_str(),
+        strlcpy(descriptor.subsys_name, rail_info.subsysName.c_str(),
                 sizeof(descriptor.subsys_name));
-        descriptor.rail_name[sizeof(descriptor.rail_name) - 1] = '\0';
-        descriptor.subsys_name[sizeof(descriptor.subsys_name) - 1] = '\0';
       }
     }
   };
@@ -220,6 +240,17 @@ bool PowerStatsHalDataProvider::GetEnergyConsumed(EnergyEstimationBreakdown*,
   return false;
 }
 
+bool PowerStatsHalDataProvider::GetPowerEntityStates(PowerEntityState*,
+                                                     size_t*) {
+  return false;
+}
+
+bool PowerStatsHalDataProvider::GetPowerEntityStateResidency(
+    PowerEntityStateResidency*,
+    size_t*) {
+  return false;
+}
+
 /*** End of Power Stats HAL Implemenation *************************************/
 
 /*** Power Stats AIDL Implemenation *******************************************/
@@ -263,10 +294,8 @@ bool PowerStatsAidlDataProvider::GetAvailableRails(RailDescriptor* descriptor,
     auto& cur = descriptor[(*size_of_arr)++];
     cur.index = result.id;
     cur.sampling_rate = 0;
-    strncpy(cur.rail_name, result.name.c_str(), sizeof(cur.rail_name));
-    strncpy(cur.subsys_name, result.subsystem.c_str(), sizeof(cur.subsys_name));
-    cur.rail_name[sizeof(cur.rail_name) - 1] = '\0';
-    cur.subsys_name[sizeof(cur.subsys_name) - 1] = '\0';
+    strlcpy(cur.rail_name, result.name.c_str(), sizeof(cur.rail_name));
+    strlcpy(cur.subsys_name, result.subsystem.c_str(), sizeof(cur.subsys_name));
   }
   return true;
 }
@@ -333,10 +362,8 @@ bool PowerStatsAidlDataProvider::GetEnergyConsumerInfo(
     auto& cur = consumers[(*size_of_arr)++];
     cur.energy_consumer_id = result.id;
     cur.ordinal = result.ordinal;
-    strncpy(cur.type, aidl::toString(result.type).c_str(), sizeof(cur.type));
-    cur.type[sizeof(cur.type) - 1] = '\0';
-    strncpy(cur.name, result.name.c_str(), sizeof(cur.name));
-    cur.name[sizeof(cur.name) - 1] = '\0';
+    strlcpy(cur.type, aidl::toString(result.type).c_str(), sizeof(cur.type));
+    strlcpy(cur.name, result.name.c_str(), sizeof(cur.name));
   }
   return true;
 }
@@ -387,6 +414,95 @@ bool PowerStatsAidlDataProvider::GetEnergyConsumed(
   }
   return true;
 }
+
+bool PowerStatsAidlDataProvider::GetPowerEntityStates(
+    PowerEntityState* entity_state,
+    size_t* size_of_arr) {
+  const size_t in_array_size = *size_of_arr;
+  *size_of_arr = 0;
+
+  aidl::IPowerStats* svc = MaybeGetService();
+  if (svc == nullptr) {
+    return false;
+  }
+
+  std::vector<aidl::PowerEntity> entities;
+  android::binder::Status status = svc->getPowerEntityInfo(&entities);
+
+  if (!status.isOk()) {
+    if (status.transactionError() == android::DEAD_OBJECT) {
+      // Service has died.  Reset it to attempt to acquire a new one next time.
+      ResetService();
+    }
+    return false;
+  }
+
+  // Iterate through all entities.
+  for (const auto& entity : entities) {
+    if (*size_of_arr >= in_array_size) {
+      break;
+    }
+
+    // Iterate through all states for this entity.
+    for (const auto& state : entity.states) {
+      if (*size_of_arr >= in_array_size) {
+        break;
+      }
+      auto& cur = entity_state[(*size_of_arr)++];
+      cur.entity_id = entity.id;
+      strlcpy(cur.entity_name, entity.name.c_str(), sizeof(cur.entity_name));
+      cur.state_id = state.id;
+      strlcpy(cur.state_name, state.name.c_str(), sizeof(cur.state_name));
+    }
+  }
+  return true;
+}
+
+bool PowerStatsAidlDataProvider::GetPowerEntityStateResidency(
+    PowerEntityStateResidency* residency,
+    size_t* size_of_arr) {
+  const size_t in_array_size = *size_of_arr;
+  *size_of_arr = 0;
+
+  aidl::IPowerStats* svc = MaybeGetService();
+  if (svc == nullptr) {
+    return false;
+  }
+
+  std::vector<int> ids;
+  std::vector<aidl::StateResidencyResult> entities;
+  android::binder::Status status = svc->getStateResidency(ids, &entities);
+
+  if (!status.isOk()) {
+    if (status.transactionError() == android::DEAD_OBJECT) {
+      // Service has died.  Reset it to attempt to acquire a new one next time.
+      ResetService();
+    }
+    return false;
+  }
+
+  // Iterate through all entities.
+  for (const auto& entity : entities) {
+    if (*size_of_arr >= in_array_size) {
+      break;
+    }
+
+    // Iterate through all states for this entity.
+    for (const auto& stateResidencyData : entity.stateResidencyData) {
+      if (*size_of_arr >= in_array_size) {
+        break;
+      }
+      auto& cur = residency[(*size_of_arr)++];
+      cur.entity_id = entity.id;
+      cur.state_id = stateResidencyData.id;
+      cur.total_time_in_state_ms = stateResidencyData.totalTimeInStateMs;
+      cur.total_state_entry_count = stateResidencyData.totalStateEntryCount;
+      cur.last_entry_timestamp_ms = stateResidencyData.lastEntryTimestampMs;
+    }
+  }
+  return true;
+}
+
 /*** End of Power Stats AIDL Implemenation ************************************/
 
 }  // namespace android_internal

@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include "perfetto/base/compiler.h"
+#include "perfetto/ext/base/string_utils.h"
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 // The include order matters on these three Windows header groups.
@@ -33,9 +34,11 @@
 
 #include <afunix.h>
 #else
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -51,8 +54,15 @@
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/base/task_runner.h"
+#include "perfetto/base/time.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/utils.h"
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+// Use a local stripped copy of vm_sockets.h from UAPI.
+#include "src/base/vm_sockets.h"
+#endif
 
 namespace perfetto {
 namespace base {
@@ -66,21 +76,16 @@ namespace base {
 
 namespace {
 
-// MSG_NOSIGNAL is not supported on Mac OS X, but in that case the socket is
-// created with SO_NOSIGPIPE (See InitializeSocket()).
-// On Windows this does't apply as signals don't exist.
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-#elif PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
-constexpr int kNoSigPipe = 0;
-#else
-constexpr int kNoSigPipe = MSG_NOSIGNAL;
-#endif
-
 // Android takes an int instead of socklen_t for the control buffer size.
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 using CBufLenType = size_t;
 #else
 using CBufLenType = socklen_t;
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+constexpr char kVsockNamePrefix[] = "vsock://";
 #endif
 
 // A wrapper around variable-size sockaddr structs.
@@ -103,7 +108,7 @@ struct SockaddrAny {
   socklen_t size;
 };
 
-inline int GetSockFamily(SockFamily family) {
+inline int MkSockFamily(SockFamily family) {
   switch (family) {
     case SockFamily::kUnix:
       return AF_UNIX;
@@ -111,12 +116,20 @@ inline int GetSockFamily(SockFamily family) {
       return AF_INET;
     case SockFamily::kInet6:
       return AF_INET6;
+    case SockFamily::kVsock:
+#ifdef AF_VSOCK
+      return AF_VSOCK;
+#else
+      return AF_UNSPEC;  // Return AF_UNSPEC on unsupported platforms.
+#endif
+    case SockFamily::kUnspec:
+      return AF_UNSPEC;
   }
   PERFETTO_CHECK(false);  // For GCC.
 }
 
-inline int GetSockType(SockType type) {
-#ifdef SOCK_CLOEXEC
+inline int MkSockType(SockType type) {
+#if defined(SOCK_CLOEXEC)
   constexpr int kSockCloExec = SOCK_CLOEXEC;
 #else
   constexpr int kSockCloExec = 0;
@@ -137,7 +150,7 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
     case SockFamily::kUnix: {
       struct sockaddr_un saddr {};
       const size_t name_len = socket_name.size();
-      if (name_len >= sizeof(saddr.sun_path)) {
+      if (name_len + 1 /* for trailing \0 */ >= sizeof(saddr.sun_path)) {
         errno = ENAMETOOLONG;
         return SockaddrAny();
       }
@@ -150,12 +163,18 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
         PERFETTO_ELOG(
             "Abstract AF_UNIX sockets are not supported on Windows, see "
             "https://github.com/microsoft/WSL/issues/4240");
-        return SockaddrAny{};
+        return SockaddrAny();
 #endif
       }
       saddr.sun_family = AF_UNIX;
       auto size = static_cast<socklen_t>(
           __builtin_offsetof(sockaddr_un, sun_path) + name_len + 1);
+
+      // Abstract sockets do NOT require a trailing null terminator (which is
+      // instad mandatory for filesystem sockets). Any byte up to `size`,
+      // including '\0' will become part of the socket name.
+      if (saddr.sun_path[0] == '\0')
+        --size;
       PERFETTO_CHECK(static_cast<size_t>(size) <= sizeof(saddr));
       return SockaddrAny(&saddr, size);
     }
@@ -191,6 +210,28 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
       freeaddrinfo(addr_info);
       return res;
     }
+    case SockFamily::kVsock: {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+      PERFETTO_CHECK(StartsWith(socket_name, kVsockNamePrefix));
+      auto address_port = StripPrefix(socket_name, kVsockNamePrefix);
+      auto parts = SplitString(address_port, ":");
+      PERFETTO_CHECK(parts.size() == 2);
+      sockaddr_vm addr;
+      memset(&addr, 0, sizeof(addr));
+      addr.svm_family = AF_VSOCK;
+      addr.svm_cid = *base::StringToUInt32(parts[0]);
+      addr.svm_port = *base::StringToUInt32(parts[1]);
+      SockaddrAny res(&addr, sizeof(addr));
+      return res;
+#else
+      errno = ENOTSOCK;
+      return SockaddrAny();
+#endif
+    }
+    case SockFamily::kUnspec:
+      errno = ENOTSOCK;
+      return SockaddrAny();
   }
   PERFETTO_CHECK(false);  // For GCC.
 }
@@ -203,8 +244,7 @@ ScopedSocketHandle CreateSocketHandle(SockFamily family, SockType type) {
   }();
   PERFETTO_CHECK(init_winsock_once);
 #endif
-  return ScopedSocketHandle(
-      socket(GetSockFamily(family), GetSockType(type), 0));
+  return ScopedSocketHandle(socket(MkSockFamily(family), MkSockType(type), 0));
 }
 
 }  // namespace
@@ -214,6 +254,29 @@ int CloseSocket(SocketHandle s) {
   return ::closesocket(s);
 }
 #endif
+
+SockFamily GetSockFamily(const char* addr) {
+  if (strlen(addr) == 0)
+    return SockFamily::kUnspec;
+
+  if (addr[0] == '@')
+    return SockFamily::kUnix;  // Abstract AF_UNIX sockets.
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  // Vsock address starts with vsock://.
+  if (strncmp(addr, kVsockNamePrefix, strlen(kVsockNamePrefix)) == 0)
+    return SockFamily::kVsock;
+#endif
+
+  // If `addr` ends in :NNNN it's either a kInet or kInet6 socket.
+  const char* col = strrchr(addr, ':');
+  if (col && CStringToInt32(col + 1).has_value()) {
+    return addr[0] == '[' ? SockFamily::kInet6 : SockFamily::kInet;
+  }
+
+  return SockFamily::kUnix;  // For anything else assume it's a linked AF_UNIX.
+}
 
 // +-----------------------+
 // | UnixSocketRaw methods |
@@ -247,9 +310,9 @@ std::pair<UnixSocketRaw, UnixSocketRaw> UnixSocketRaw::CreatePairPosix(
     SockFamily family,
     SockType type) {
   int fds[2];
-  if (socketpair(GetSockFamily(family), GetSockType(type), 0, fds) != 0)
+  if (socketpair(MkSockFamily(family), MkSockType(type), 0, fds) != 0) {
     return std::make_pair(UnixSocketRaw(), UnixSocketRaw());
-
+  }
   return std::make_pair(UnixSocketRaw(ScopedFile(fds[0]), family, type),
                         UnixSocketRaw(ScopedFile(fds[1]), family, type));
 }
@@ -278,14 +341,18 @@ UnixSocketRaw::UnixSocketRaw(ScopedSocketHandle fd,
   setsockopt(*fd_, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
 #endif
 
-  if (family == SockFamily::kInet || family == SockFamily::kInet6) {
+  if (family == SockFamily::kInet || family == SockFamily::kInet6 ||
+      family == SockFamily::kVsock) {
     int flag = 1;
     // The reinterpret_cast<const char*> is needed for Windows, where the 4th
     // arg is a const char* (on other POSIX system is a const void*).
     PERFETTO_CHECK(!setsockopt(*fd_, SOL_SOCKET, SO_REUSEADDR,
                                reinterpret_cast<const char*>(&flag),
                                sizeof(flag)));
-    flag = 1;
+  }
+
+  if (family == SockFamily::kInet || family == SockFamily::kInet6) {
+    int flag = 1;
     // Disable Nagle's algorithm, optimize for low-latency.
     // See https://github.com/google/perfetto/issues/70.
     setsockopt(*fd_, IPPROTO_TCP, TCP_NODELAY,
@@ -300,8 +367,7 @@ UnixSocketRaw::UnixSocketRaw(ScopedSocketHandle fd,
 #else
   // There is no reason why a socket should outlive the process in case of
   // exec() by default, this is just working around a broken unix design.
-  int fcntl_res = fcntl(*fd_, F_SETFD, FD_CLOEXEC);
-  PERFETTO_CHECK(fcntl_res == 0);
+  SetRetainOnExec(false);
 #endif
 }
 
@@ -332,13 +398,20 @@ void UnixSocketRaw::SetBlocking(bool is_blocking) {
 #endif
 }
 
-void UnixSocketRaw::RetainOnExec() {
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+void UnixSocketRaw::SetRetainOnExec(bool retain) {
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
   PERFETTO_DCHECK(fd_);
   int flags = fcntl(*fd_, F_GETFD, 0);
-  flags &= ~static_cast<int>(FD_CLOEXEC);
+  if (retain) {
+    flags &= ~static_cast<int>(FD_CLOEXEC);
+  } else {
+    flags |= FD_CLOEXEC;
+  }
   int fcntl_res = fcntl(*fd_, F_SETFD, flags);
   PERFETTO_CHECK(fcntl_res == 0);
+#else
+  ignore_result(retain);
 #endif
 }
 
@@ -431,19 +504,60 @@ ssize_t UnixSocketRaw::SendMsgAllPosix(struct msghdr* msg) {
   // This does not make sense on non-blocking sockets.
   PERFETTO_DCHECK(fd_);
 
+  const bool is_blocking_with_timeout =
+      tx_timeout_ms_ > 0 && ((fcntl(*fd_, F_GETFL, 0) & O_NONBLOCK) == 0);
+  const int64_t start_ms = GetWallTimeMs().count();
+
+  // Waits until some space is available in the tx buffer.
+  // Returns true if some buffer space is available, false if times out.
+  auto poll_or_timeout = [&] {
+    PERFETTO_DCHECK(is_blocking_with_timeout);
+    const int64_t deadline = start_ms + tx_timeout_ms_;
+    const int64_t now_ms = GetWallTimeMs().count();
+    if (now_ms >= deadline)
+      return false;  // Timed out
+    const int timeout_ms = static_cast<int>(deadline - now_ms);
+    pollfd pfd{*fd_, POLLOUT, 0};
+    return PERFETTO_EINTR(poll(&pfd, 1, timeout_ms)) > 0;
+  };
+
+// We implement blocking sends that require a timeout as non-blocking + poll.
+// This is because SO_SNDTIMEO doesn't work as expected (b/193234818). On linux
+// we can just pass MSG_DONTWAIT to force the send to be non-blocking. On Mac,
+// instead we need to flip the O_NONBLOCK flag back and forth.
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
+  // MSG_NOSIGNAL is not supported on Mac OS X, but in that case the socket is
+  // created with SO_NOSIGPIPE (See InitializeSocket()).
+  int send_flags = 0;
+
+  if (is_blocking_with_timeout)
+    SetBlocking(false);
+
+  auto reset_nonblock_on_exit = OnScopeExit([&] {
+    if (is_blocking_with_timeout)
+      SetBlocking(true);
+  });
+#else
+  int send_flags = MSG_NOSIGNAL | (is_blocking_with_timeout ? MSG_DONTWAIT : 0);
+#endif
+
   ssize_t total_sent = 0;
   while (msg->msg_iov) {
-    ssize_t sent = PERFETTO_EINTR(sendmsg(*fd_, msg, kNoSigPipe));
-    if (sent <= 0) {
-      if (sent == -1 && IsAgain(errno))
-        return total_sent;
-      return sent;
+    ssize_t send_res = PERFETTO_EINTR(sendmsg(*fd_, msg, send_flags));
+    if (send_res == -1 && IsAgain(errno)) {
+      if (is_blocking_with_timeout && poll_or_timeout()) {
+        continue;  // Tx buffer unblocked, repeat the loop.
+      }
+      return total_sent;
+    } else if (send_res <= 0) {
+      return send_res;  // An error occurred.
+    } else {
+      total_sent += send_res;
+      ShiftMsgHdrPosix(static_cast<size_t>(send_res), msg);
+      // Only send the ancillary data with the first sendmsg call.
+      msg->msg_control = nullptr;
+      msg->msg_controllen = 0;
     }
-    total_sent += sent;
-    ShiftMsgHdrPosix(static_cast<size_t>(sent), msg);
-    // Only send the ancillary data with the first sendmsg call.
-    msg->msg_control = nullptr;
-    msg->msg_controllen = 0;
   }
   return total_sent;
 }
@@ -541,8 +655,14 @@ ssize_t UnixSocketRaw::Receive(void* msg,
 
 bool UnixSocketRaw::SetTxTimeout(uint32_t timeout_ms) {
   PERFETTO_DCHECK(fd_);
+  // On Unix-based systems, SO_SNDTIMEO isn't used for Send() because it's
+  // unreliable (b/193234818). Instead we use non-blocking sendmsg() + poll().
+  // See SendMsgAllPosix(). We still make the setsockopt call because
+  // SO_SNDTIMEO also affects connect().
+  tx_timeout_ms_ = timeout_ms;
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
   DWORD timeout = timeout_ms;
+  ignore_result(tx_timeout_ms_);
 #else
   struct timeval timeout {};
   uint32_t timeout_sec = timeout_ms / 1000;
@@ -569,6 +689,51 @@ bool UnixSocketRaw::SetRxTimeout(uint32_t timeout_ms) {
   return setsockopt(*fd_, SOL_SOCKET, SO_RCVTIMEO,
                     reinterpret_cast<const char*>(&timeout),
                     sizeof(timeout)) == 0;
+}
+
+std::string UnixSocketRaw::GetSockAddr() const {
+  struct sockaddr_storage stg {};
+  socklen_t slen = sizeof(stg);
+  PERFETTO_CHECK(
+      getsockname(*fd_, reinterpret_cast<struct sockaddr*>(&stg), &slen) == 0);
+  char addr[255]{};
+
+  if (stg.ss_family == AF_UNIX) {
+    auto* saddr = reinterpret_cast<struct sockaddr_un*>(&stg);
+    static_assert(sizeof(addr) >= sizeof(saddr->sun_path), "addr too small");
+    memcpy(addr, saddr->sun_path, sizeof(saddr->sun_path));
+    addr[0] = addr[0] == '\0' ? '@' : addr[0];
+    addr[sizeof(saddr->sun_path) - 1] = '\0';
+    return std::string(addr);
+  }
+
+  if (stg.ss_family == AF_INET) {
+    auto* saddr = reinterpret_cast<struct sockaddr_in*>(&stg);
+    PERFETTO_CHECK(inet_ntop(AF_INET, &saddr->sin_addr, addr, sizeof(addr)));
+    uint16_t port = ntohs(saddr->sin_port);
+    base::StackString<255> addr_and_port("%s:%" PRIu16, addr, port);
+    return addr_and_port.ToStdString();
+  }
+
+  if (stg.ss_family == AF_INET6) {
+    auto* saddr = reinterpret_cast<struct sockaddr_in6*>(&stg);
+    PERFETTO_CHECK(inet_ntop(AF_INET6, &saddr->sin6_addr, addr, sizeof(addr)));
+    auto port = ntohs(saddr->sin6_port);
+    base::StackString<255> addr_and_port("[%s]:%" PRIu16, addr, port);
+    return addr_and_port.ToStdString();
+  }
+
+#if defined(AF_VSOCK) && (PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+                          PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID))
+  if (stg.ss_family == AF_VSOCK) {
+    auto* saddr = reinterpret_cast<struct sockaddr_vm*>(&stg);
+    base::StackString<255> addr_and_port("%s%d:%d", kVsockNamePrefix,
+                                         saddr->svm_cid, saddr->svm_port);
+    return addr_and_port.ToStdString();
+  }
+#endif
+
+  PERFETTO_FATAL("GetSockAddr() unsupported on family %d", stg.ss_family);
 }
 
 #if defined(__GNUC__) && !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)

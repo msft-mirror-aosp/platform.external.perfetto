@@ -20,6 +20,8 @@
 #include <sys/wait.h>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/android_utils.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/tracing/core/data_source_config.h"
 #include "src/base/test/test_task_runner.h"
 #include "test/android_test_utils.h"
@@ -34,15 +36,31 @@
 namespace perfetto {
 namespace {
 
+// Even though ART is a mainline module, there are dependencies on perfetto for
+// OOM heap dumps to work correctly.
+bool SupportsOomHeapDump() {
+  auto sdk = base::StringToInt32(base::GetAndroidProp("ro.build.version.sdk"));
+  if (sdk && *sdk >= 34) {
+    PERFETTO_LOG("SDK supports OOME heap dumps");
+    return true;
+  }
+  if (base::GetAndroidProp("ro.build.version.codename") == "UpsideDownCake") {
+    PERFETTO_LOG("Codename supports OOME heap dumps");
+    return true;
+  }
+  PERFETTO_LOG("OOME heap dumps not supported");
+  return false;
+}
+
 std::string RandomSessionName() {
   std::random_device rd;
   std::default_random_engine generator(rd());
-  std::uniform_int_distribution<char> distribution('a', 'z');
+  std::uniform_int_distribution<> distribution('a', 'z');
 
   constexpr size_t kSessionNameLen = 20;
   std::string result(kSessionNameLen, '\0');
   for (size_t i = 0; i < kSessionNameLen; ++i)
-    result[i] = distribution(generator);
+    result[i] = static_cast<char>(distribution(generator));
   return result;
 }
 
@@ -52,11 +70,11 @@ std::vector<protos::gen::TracePacket> ProfileRuntime(std::string app_name) {
   // (re)start the target app's main activity
   if (IsAppRunning(app_name)) {
     StopApp(app_name, "old.app.stopped", &task_runner);
-    task_runner.RunUntilCheckpoint("old.app.stopped", 1000 /*ms*/);
+    task_runner.RunUntilCheckpoint("old.app.stopped", 10000 /*ms*/);
   }
   StartAppActivity(app_name, "MainActivity", "target.app.running", &task_runner,
                    /*delay_ms=*/100);
-  task_runner.RunUntilCheckpoint("target.app.running", 1000 /*ms*/);
+  task_runner.RunUntilCheckpoint("target.app.running", 10000 /*ms*/);
   // If we try to dump too early in app initialization, we sometimes deadlock.
   sleep(1);
 
@@ -67,7 +85,8 @@ std::vector<protos::gen::TracePacket> ProfileRuntime(std::string app_name) {
 
   TraceConfig trace_config;
   trace_config.add_buffers()->set_size_kb(40 * 1024);
-  trace_config.set_duration_ms(6000);
+  trace_config.set_duration_ms(3000);
+  trace_config.set_data_source_stop_timeout_ms(20000);
   trace_config.set_unique_session_name(RandomSessionName().c_str());
 
   auto* ds_config = trace_config.add_data_sources()->mutable_config();
@@ -85,7 +104,60 @@ std::vector<protos::gen::TracePacket> ProfileRuntime(std::string app_name) {
   helper.WaitForReadData();
   PERFETTO_CHECK(IsAppRunning(app_name));
   StopApp(app_name, "new.app.stopped", &task_runner);
-  task_runner.RunUntilCheckpoint("new.app.stopped", 1000 /*ms*/);
+  task_runner.RunUntilCheckpoint("new.app.stopped", 10000 /*ms*/);
+  return helper.trace();
+}
+
+std::vector<protos::gen::TracePacket> TriggerOomHeapDump(std::string app_name,
+                                                         std::string heap_dump_target) {
+  base::TestTaskRunner task_runner;
+
+  // (re)start the target app's main activity
+  if (IsAppRunning(app_name)) {
+    StopApp(app_name, "old.app.stopped", &task_runner);
+    task_runner.RunUntilCheckpoint("old.app.stopped", 10000 /*ms*/);
+  }
+
+  // set up tracing
+  TestHelper helper(&task_runner);
+  helper.ConnectConsumer();
+  helper.WaitForConsumerConnect();
+
+  TraceConfig trace_config;
+  trace_config.add_buffers()->set_size_kb(40 * 1024);
+  trace_config.set_unique_session_name(RandomSessionName().c_str());
+  trace_config.set_data_source_stop_timeout_ms(60000);
+
+  auto* trigger_config = trace_config.mutable_trigger_config();
+  trigger_config->set_trigger_mode(perfetto::protos::gen::TraceConfig::TriggerConfig::START_TRACING);
+  trigger_config->set_trigger_timeout_ms(60000);
+  auto* oom_trigger = trigger_config->add_triggers();
+  oom_trigger->set_name("com.android.telemetry.art-outofmemory");
+  oom_trigger->set_stop_delay_ms(1000);
+
+  auto* ds_config = trace_config.add_data_sources()->mutable_config();
+  ds_config->set_name("android.java_hprof.oom");
+  ds_config->set_target_buffer(0);
+
+  protos::gen::JavaHprofConfig java_hprof_config;
+  java_hprof_config.add_process_cmdline(heap_dump_target.c_str());
+  ds_config->set_java_hprof_config_raw(java_hprof_config.SerializeAsString());
+
+  // start tracing
+  helper.StartTracing(trace_config);
+  StartAppActivity(app_name, "JavaOomActivity", "target.app.running", &task_runner,
+                   /*delay_ms=*/100);
+  task_runner.RunUntilCheckpoint("target.app.running", 10000 /*ms*/);
+
+  if (SupportsOomHeapDump()) {
+    helper.WaitForTracingDisabled();
+    helper.ReadData();
+    helper.WaitForReadData();
+  }
+
+  PERFETTO_CHECK(IsAppRunning(app_name));
+  StopApp(app_name, "new.app.stopped", &task_runner);
+  task_runner.RunUntilCheckpoint("new.app.stopped", 10000 /*ms*/);
   return helper.trace();
 }
 
@@ -142,11 +214,11 @@ TEST(HeapprofdJavaCtsTest, DebuggableAppRuntimeByPid) {
   // (re)start the target app's main activity
   if (IsAppRunning(app_name)) {
     StopApp(app_name, "old.app.stopped", &task_runner);
-    task_runner.RunUntilCheckpoint("old.app.stopped", 1000 /*ms*/);
+    task_runner.RunUntilCheckpoint("old.app.stopped", 10000 /*ms*/);
   }
   StartAppActivity(app_name, "MainActivity", "target.app.running", &task_runner,
                    /*delay_ms=*/100);
-  task_runner.RunUntilCheckpoint("target.app.running", 1000 /*ms*/);
+  task_runner.RunUntilCheckpoint("target.app.running", 10000 /*ms*/);
   // If we try to dump too early in app initialization, we sometimes deadlock.
   sleep(1);
 
@@ -160,7 +232,8 @@ TEST(HeapprofdJavaCtsTest, DebuggableAppRuntimeByPid) {
 
   TraceConfig trace_config;
   trace_config.add_buffers()->set_size_kb(40 * 1024);
-  trace_config.set_duration_ms(6000);
+  trace_config.set_duration_ms(3000);
+  trace_config.set_data_source_stop_timeout_ms(20000);
   trace_config.set_unique_session_name(RandomSessionName().c_str());
 
   auto* ds_config = trace_config.add_data_sources()->mutable_config();
@@ -178,10 +251,42 @@ TEST(HeapprofdJavaCtsTest, DebuggableAppRuntimeByPid) {
   helper.WaitForReadData();
   PERFETTO_CHECK(IsAppRunning(app_name));
   StopApp(app_name, "new.app.stopped", &task_runner);
-  task_runner.RunUntilCheckpoint("new.app.stopped", 1000 /*ms*/);
+  task_runner.RunUntilCheckpoint("new.app.stopped", 10000 /*ms*/);
 
   const auto& packets = helper.trace();
   AssertGraphPresent(packets);
+}
+
+TEST(HeapprofdJavaCtsTest, DebuggableAppOom) {
+  std::string app_name = "android.perfetto.cts.app.debuggable";
+  const auto& packets = TriggerOomHeapDump(app_name, "*");
+  if (SupportsOomHeapDump()) {
+    AssertGraphPresent(packets);
+  }
+}
+
+TEST(HeapprofdJavaCtsTest, ProfileableAppOom) {
+  std::string app_name = "android.perfetto.cts.app.profileable";
+  const auto& packets = TriggerOomHeapDump(app_name, "*");
+  if (SupportsOomHeapDump()) {
+    AssertGraphPresent(packets);
+  }
+}
+
+TEST(HeapprofdJavaCtsTest, ReleaseAppOom) {
+  std::string app_name = "android.perfetto.cts.app.release";
+  const auto& packets = TriggerOomHeapDump(app_name, "*");
+  if (IsUserBuild()) {
+    AssertNoProfileContents(packets);
+  } else if (SupportsOomHeapDump()) {
+    AssertGraphPresent(packets);
+  }
+}
+
+TEST(HeapprofdJavaCtsTest, DebuggableAppOomNotSelected) {
+  std::string app_name = "android.perfetto.cts.app.debuggable";
+  const auto& packets = TriggerOomHeapDump(app_name, "not.this.app");
+  AssertNoProfileContents(packets);
 }
 
 }  // namespace

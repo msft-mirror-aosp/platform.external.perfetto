@@ -40,7 +40,7 @@
 // 6. The 'activate' handler is triggered. The old v1 cache is deleted at this
 //    point.
 
-declare var self: ServiceWorkerGlobalScope;
+declare let self: ServiceWorkerGlobalScope;
 export {};
 
 const LOG_TAG = `ServiceWorker: `;
@@ -60,39 +60,54 @@ const INSTALL_TIMEOUT_MS = 30000;
 //    will get the newer version regardless, unless we hit INDEX_TIMEOUT_MS).
 // The latter happens because:
 // - / (index.html) is always served from the network (% timeout) and it pulls
-//   /v1.2.3/frontend_bundle.js.
-// - /v1.2.3/frontend_bundle.js will register /service_worker.js?v=v1.2.3 .
+//   /v1.2-sha/frontend_bundle.js.
+// - /v1.2-sha/frontend_bundle.js will register /service_worker.js?v=v1.2-sha.
 // The service_worker.js script itself never changes, but the browser
 // re-installs it because the version in the V? query-string argument changes.
-// The reinstallation will cache the new files from the v.1.2.3/manifest.json.
-self.addEventListener('install', event => {
+// The reinstallation will cache the new files from the v.1.2-sha/manifest.json.
+self.addEventListener('install', (event) => {
   const doInstall = async () => {
-    if (await caches.has('BYPASS_SERVICE_WORKER')) {
+    // If we can not access the cache we must give up on the service
+    // worker:
+    let bypass = true;
+    try {
+      bypass = await caches.has('BYPASS_SERVICE_WORKER');
+    } catch (_) {
+      // TODO(288483453)
+    }
+    if (bypass) {
       // Throw will prevent the installation.
       throw new Error(LOG_TAG + 'skipping installation, bypass enabled');
     }
 
     // Delete old cache entries from the pre-feb-2021 service worker.
-    for (const key of await caches.keys()) {
-      if (key.startsWith('dist-')) {
-        await caches.delete(key);
+    try {
+      for (const key of await caches.keys()) {
+        if (key.startsWith('dist-')) {
+          await caches.delete(key);
+        }
       }
+    } catch (_) {
+      // TODO(288483453)
+      // It's desirable to delete the old entries but it's not actually
+      // damaging to keep them around so don't give up on the
+      // installation if this fails.
     }
 
-    // The UI should register this as service_worker.js?v=v1.2.3. Extract the
+    // The UI should register this as service_worker.js?v=v1.2-sha. Extract the
     // version number and pre-fetch all the contents for the version.
-    const match = /\bv=([\w.]*)/.exec(location.search);
+    const match = /\bv=([\w.-]*)/.exec(location.search);
     if (!match) {
       throw new Error(
           'Failed to install. Was epecting a query string like ' +
-          `?v=v1.2.3 query string, got "${location.search}" instead`);
+          `?v=v1.2-sha query string, got "${location.search}" instead`);
     }
     await installAppVersionIntoCache(match[1]);
 
     // skipWaiting() still waits for the install to be complete. Without this
     // call, the new version would be activated only when all tabs are closed.
     // Instead, we ask to activate it immediately. This is safe because the
-    // subresources are versioned (e.g. /v1.2.3/frontend_bundle.js). Even if
+    // subresources are versioned (e.g. /v1.2-sha/frontend_bundle.js). Even if
     // there is an old UI tab opened while we activate() a newer version, the
     // activate() would just cause cache-misses, hence fetch from the network,
     // for the old tab.
@@ -112,7 +127,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(doActivate());
 });
 
-self.addEventListener('fetch', event => {
+self.addEventListener('fetch', (event) => {
   // The early return here will cause the browser to fall back on standard
   // network-based fetch.
   if (!shouldHandleHttpRequest(event.request)) {
@@ -165,7 +180,7 @@ async function handleHttpRequest(req: Request): Promise<Response> {
       // Fall through the code below.
     }
   } else if (url.pathname === '/offline') {
-    // Escape hatch to force serving the offline version without attemping the
+    // Escape hatch to force serving the offline version without attempting the
     // network fetch.
     const cachedRes = await caches.match(new Request('/'), cacheOps);
     if (cachedRes) return cachedRes;
@@ -210,15 +225,15 @@ async function installAppVersionIntoCache(version: string) {
       const reqOpts: RequestInit = {
         cache: 'no-cache',
         mode: 'same-origin',
-        integrity: `${integrity}`
+        integrity: `${integrity}`,
       };
       urlsToCache.push(new Request(`${version}/${resource}`, reqOpts));
     }
     await cache.addAll(urlsToCache);
     console.log(LOG_TAG + 'installation completed for ' + version);
   } catch (err) {
-    await caches.delete(CACHE_NAME);
     console.error(LOG_TAG + `Installation failed for ${manifestUrl}`, err);
+    await caches.delete(CACHE_NAME);
     throw err;
   }
 }
@@ -227,14 +242,15 @@ function fetchWithTimeout(req: Request|string, timeoutMs: number) {
   const url = (req as {url?: string}).url || `${req}`;
   return new Promise<Response>((resolve, reject) => {
     const timerId = setTimeout(() => {
-      reject(`Timed out while fetching ${url}`);
+      reject(new Error(`Timed out while fetching ${url}`));
     }, timeoutMs);
-    fetch(req).then(resp => {
+    fetch(req).then((resp) => {
       clearTimeout(timerId);
       if (resp.ok) {
         resolve(resp);
       } else {
-        reject(`Fetch failed for ${url}: ${resp.status} ${resp.statusText}`);
+        reject(new Error(
+            `Fetch failed for ${url}: ${resp.status} ${resp.statusText}`));
       }
     }, reject);
   });

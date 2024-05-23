@@ -55,7 +55,15 @@ std::string TracingMuxerFake::FakePlatform::GetCurrentProcessName() {
 
 bool TracingMuxerFake::RegisterDataSource(const DataSourceDescriptor&,
                                           DataSourceFactory,
+                                          DataSourceParams,
+                                          bool,
                                           DataSourceStaticState*) {
+  FailUninitialized();
+}
+
+void TracingMuxerFake::UpdateDataSourceDescriptor(
+    const DataSourceDescriptor&,
+    const DataSourceStaticState*) {
   FailUninitialized();
 }
 
@@ -76,6 +84,11 @@ void TracingMuxerFake::RegisterInterceptor(
     InterceptorFactory,
     InterceptorBase::TLSFactory,
     InterceptorBase::TracePacketCallback) {
+  FailUninitialized();
+}
+
+void TracingMuxerFake::ActivateTriggers(const std::vector<std::string>&,
+                                        uint32_t) {
   FailUninitialized();
 }
 

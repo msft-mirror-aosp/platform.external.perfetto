@@ -20,14 +20,20 @@
 #include <sys/wait.h>
 
 #include <random>
+#include <string>
+#include <string_view>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/ext/base/android_utils.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/tracing/core/data_source_config.h"
 #include "src/base/test/test_task_runner.h"
+#include "src/base/test/tmp_dir_tree.h"
 #include "test/android_test_utils.h"
 #include "test/gtest_and_gmock.h"
 #include "test/test_helper.h"
 
+#include "protos/perfetto/config/process_stats/process_stats_config.gen.h"
 #include "protos/perfetto/config/profiling/heapprofd_config.gen.h"
 #include "protos/perfetto/trace/profiling/profile_common.gen.h"
 #include "protos/perfetto/trace/profiling/profile_packet.gen.h"
@@ -45,30 +51,126 @@ constexpr uint64_t kExpectedIndividualAllocSz = 4153;
 static_assert(kExpectedIndividualAllocSz > kTestSamplingInterval,
               "kTestSamplingInterval invalid");
 
+// Path in the app external directory where the app writes an interation
+// counter. It is used to wait for the test apps to actually perform
+// allocations.
+constexpr std::string_view kReportCyclePath = "report_cycle.txt";
+
+// Activity that runs a JNI thread that repeatedly calls
+// malloc(kExpectedIndividualAllocSz).
+static char kMallocActivity[] = "MainActivity";
+// Activity that runs a java thread that repeatedly constructs small java
+// objects.
+static char kJavaAllocActivity[] = "JavaAllocActivity";
+
 std::string RandomSessionName() {
   std::random_device rd;
   std::default_random_engine generator(rd());
-  std::uniform_int_distribution<char> distribution('a', 'z');
+  std::uniform_int_distribution<> distribution('a', 'z');
 
   constexpr size_t kSessionNameLen = 20;
   std::string result(kSessionNameLen, '\0');
   for (size_t i = 0; i < kSessionNameLen; ++i)
-    result[i] = distribution(generator);
+    result[i] = static_cast<char>(distribution(generator));
   return result;
 }
 
+// Asks FileContentProvider.java inside the app to read a file.
+class ContentProviderReader {
+ public:
+  explicit ContentProviderReader(const std::string& app,
+                                 const std::string& path) {
+    tmp_dir_.TrackFile("contents.txt");
+    tempfile_ = tmp_dir_.AbsolutePath("contents.txt");
+
+    std::optional<int32_t> sdk =
+        base::StringToInt32(base::GetAndroidProp("ro.build.version.sdk"));
+    bool multiuser_support = sdk && *sdk >= 34;
+    cmd_ = "content read";
+    if (multiuser_support) {
+      // This is required only starting from android U.
+      cmd_ += " --user `am get-current-user`";
+    }
+    cmd_ += std::string(" --uri content://") + app + std::string("/") + path;
+    cmd_ += " >" + tempfile_;
+  }
+
+  std::optional<int64_t> ReadInt64() {
+    if (system(cmd_.c_str()) != 0) {
+      return std::nullopt;
+    }
+    return ReadInt64FromFile(tempfile_);
+  }
+
+ private:
+  std::optional<int64_t> ReadInt64FromFile(const std::string& path) {
+    std::string contents;
+    if (!base::ReadFile(path, &contents)) {
+      return std::nullopt;
+    }
+    return base::StringToInt64(contents);
+  }
+
+  base::TmpDirTree tmp_dir_;
+  std::string tempfile_;
+  std::string cmd_;
+};
+
+bool WaitForAppAllocationCycle(const std::string& app_name, size_t timeout_ms) {
+  const size_t sleep_per_attempt_us = 100 * 1000;
+  const size_t max_attempts = timeout_ms * 1000 / sleep_per_attempt_us;
+
+  ContentProviderReader app_reader(app_name, std::string(kReportCyclePath));
+
+  for (size_t attempts = 0; attempts < max_attempts;) {
+    int64_t first_value;
+    for (; attempts < max_attempts; attempts++) {
+      std::optional<int64_t> val = app_reader.ReadInt64();
+      if (val) {
+        first_value = *val;
+        break;
+      }
+      base::SleepMicroseconds(sleep_per_attempt_us);
+    }
+
+    for (; attempts < max_attempts; attempts++) {
+      std::optional<int64_t> val = app_reader.ReadInt64();
+      if (!val || *val < first_value) {
+        break;
+      }
+      if (*val >= first_value + 2) {
+        // We've observed the counter being incremented twice. We can be sure
+        // that the app has gone through a full allocation cycle.
+        return true;
+      }
+      base::SleepMicroseconds(sleep_per_attempt_us);
+    }
+  }
+  return false;
+}
+
+// Starts the activity `activity` of the app `app_name` and later starts
+// recording a trace with the allocations in `heap_names`.
+//
+// `heap_names` is a list of the heap names whose allocations will be recorded.
+// An empty list means that only the allocations in the default malloc heap
+// ("libc.malloc") are recorded.
+//
+// Returns the recorded trace.
 std::vector<protos::gen::TracePacket> ProfileRuntime(
-    const std::string& app_name) {
+    const std::string& app_name,
+    const std::string& activity,
+    const std::vector<std::string>& heap_names) {
   base::TestTaskRunner task_runner;
 
   // (re)start the target app's main activity
   if (IsAppRunning(app_name)) {
     StopApp(app_name, "old.app.stopped", &task_runner);
-    task_runner.RunUntilCheckpoint("old.app.stopped", 1000 /*ms*/);
+    task_runner.RunUntilCheckpoint("old.app.stopped", 10000 /*ms*/);
   }
-  StartAppActivity(app_name, "MainActivity", "target.app.running", &task_runner,
+  StartAppActivity(app_name, activity, "target.app.running", &task_runner,
                    /*delay_ms=*/100);
-  task_runner.RunUntilCheckpoint("target.app.running", 1000 /*ms*/);
+  task_runner.RunUntilCheckpoint("target.app.running", 10000 /*ms*/);
 
   // set up tracing
   TestHelper helper(&task_runner);
@@ -77,7 +179,6 @@ std::vector<protos::gen::TracePacket> ProfileRuntime(
 
   TraceConfig trace_config;
   trace_config.add_buffers()->set_size_kb(10 * 1024);
-  trace_config.set_duration_ms(4000);
   trace_config.set_unique_session_name(RandomSessionName().c_str());
 
   auto* ds_config = trace_config.add_data_sources()->mutable_config();
@@ -89,10 +190,17 @@ std::vector<protos::gen::TracePacket> ProfileRuntime(
   heapprofd_config.add_process_cmdline(app_name.c_str());
   heapprofd_config.set_block_client(true);
   heapprofd_config.set_all(false);
+  for (const std::string& heap_name : heap_names) {
+    heapprofd_config.add_heaps(heap_name);
+  }
   ds_config->set_heapprofd_config_raw(heapprofd_config.SerializeAsString());
 
   // start tracing
   helper.StartTracing(trace_config);
+
+  EXPECT_TRUE(WaitForAppAllocationCycle(app_name, /*timeout_ms=*/10000));
+
+  helper.DisableTracing();
   helper.WaitForTracingDisabled();
   helper.ReadData();
   helper.WaitForReadData();
@@ -100,14 +208,24 @@ std::vector<protos::gen::TracePacket> ProfileRuntime(
   return helper.trace();
 }
 
+// Starts recording a trace with the allocations in `heap_names` and later
+// starts the activity `activity` of the app `app_name`
+//
+// `heap_names` is a list of the heap names whose allocations will be recorded.
+// An empty list means that only the allocation in the default malloc heap
+// ("libc.malloc") are recorded.
+//
+// Returns the recorded trace.
 std::vector<protos::gen::TracePacket> ProfileStartup(
     const std::string& app_name,
+    const std::string& activity,
+    const std::vector<std::string>& heap_names,
     const bool enable_extra_guardrails = false) {
   base::TestTaskRunner task_runner;
 
   if (IsAppRunning(app_name)) {
     StopApp(app_name, "old.app.stopped", &task_runner);
-    task_runner.RunUntilCheckpoint("old.app.stopped", 1000 /*ms*/);
+    task_runner.RunUntilCheckpoint("old.app.stopped", 10000 /*ms*/);
   }
 
   // set up tracing
@@ -117,7 +235,6 @@ std::vector<protos::gen::TracePacket> ProfileStartup(
 
   TraceConfig trace_config;
   trace_config.add_buffers()->set_size_kb(10 * 1024);
-  trace_config.set_duration_ms(4000);
   trace_config.set_enable_extra_guardrails(enable_extra_guardrails);
   trace_config.set_unique_session_name(RandomSessionName().c_str());
 
@@ -130,16 +247,22 @@ std::vector<protos::gen::TracePacket> ProfileStartup(
   heapprofd_config.add_process_cmdline(app_name.c_str());
   heapprofd_config.set_block_client(true);
   heapprofd_config.set_all(false);
+  for (const std::string& heap_name : heap_names) {
+    heapprofd_config.add_heaps(heap_name);
+  }
   ds_config->set_heapprofd_config_raw(heapprofd_config.SerializeAsString());
 
   // start tracing
   helper.StartTracing(trace_config);
 
   // start app
-  StartAppActivity(app_name, "MainActivity", "target.app.running", &task_runner,
+  StartAppActivity(app_name, activity, "target.app.running", &task_runner,
                    /*delay_ms=*/100);
-  task_runner.RunUntilCheckpoint("target.app.running", 2000 /*ms*/);
+  task_runner.RunUntilCheckpoint("target.app.running", 10000 /*ms*/);
 
+  EXPECT_TRUE(WaitForAppAllocationCycle(app_name, /*timeout_ms=*/10000));
+
+  helper.DisableTracing();
   helper.WaitForTracingDisabled();
   helper.ReadData();
   helper.WaitForReadData();
@@ -147,7 +270,8 @@ std::vector<protos::gen::TracePacket> ProfileStartup(
   return helper.trace();
 }
 
-void AssertExpectedAllocationsPresent(
+// Check that `packets` contain some allocations performed by kMallocActivity.
+void AssertExpectedMallocsPresent(
     const std::vector<protos::gen::TracePacket>& packets) {
   ASSERT_GT(packets.size(), 0u);
 
@@ -176,6 +300,26 @@ void AssertExpectedAllocationsPresent(
   ASSERT_TRUE(found_alloc);
 }
 
+void AssertHasSampledAllocs(
+    const std::vector<protos::gen::TracePacket>& packets) {
+  ASSERT_GT(packets.size(), 0u);
+
+  bool found_alloc = false;
+  bool found_proc_dump = false;
+  for (const auto& packet : packets) {
+    for (const auto& proc_dump : packet.profile_packet().process_dumps()) {
+      found_proc_dump = true;
+      for (const auto& sample : proc_dump.samples()) {
+        if (sample.self_allocated() > 0) {
+          found_alloc = true;
+        }
+      }
+    }
+  }
+  ASSERT_TRUE(found_proc_dump);
+  ASSERT_TRUE(found_alloc);
+}
+
 void AssertNoProfileContents(
     const std::vector<protos::gen::TracePacket>& packets) {
   // If profile packets are present, they must be empty.
@@ -186,52 +330,147 @@ void AssertNoProfileContents(
 
 TEST(HeapprofdCtsTest, DebuggableAppRuntime) {
   std::string app_name = "android.perfetto.cts.app.debuggable";
-  const auto& packets = ProfileRuntime(app_name);
-  AssertExpectedAllocationsPresent(packets);
+  const auto& packets =
+      ProfileRuntime(app_name, kMallocActivity, /*heap_names=*/{});
+  AssertExpectedMallocsPresent(packets);
   StopApp(app_name);
 }
 
 TEST(HeapprofdCtsTest, DebuggableAppStartup) {
   std::string app_name = "android.perfetto.cts.app.debuggable";
-  const auto& packets = ProfileStartup(app_name);
-  AssertExpectedAllocationsPresent(packets);
+  const auto& packets =
+      ProfileStartup(app_name, kMallocActivity, /*heap_names=*/{});
+  AssertExpectedMallocsPresent(packets);
   StopApp(app_name);
 }
 
 TEST(HeapprofdCtsTest, ProfileableAppRuntime) {
   std::string app_name = "android.perfetto.cts.app.profileable";
-  const auto& packets = ProfileRuntime(app_name);
-  AssertExpectedAllocationsPresent(packets);
+  const auto& packets =
+      ProfileRuntime(app_name, kMallocActivity, /*heap_names=*/{});
+  AssertExpectedMallocsPresent(packets);
   StopApp(app_name);
 }
 
 TEST(HeapprofdCtsTest, ProfileableAppStartup) {
   std::string app_name = "android.perfetto.cts.app.profileable";
-  const auto& packets = ProfileStartup(app_name);
-  AssertExpectedAllocationsPresent(packets);
+  const auto& packets =
+      ProfileStartup(app_name, kMallocActivity, /*heap_names=*/{});
+  AssertExpectedMallocsPresent(packets);
   StopApp(app_name);
 }
 
 TEST(HeapprofdCtsTest, ReleaseAppRuntime) {
   std::string app_name = "android.perfetto.cts.app.release";
-  const auto& packets = ProfileRuntime(app_name);
+  const auto& packets =
+      ProfileRuntime(app_name, kMallocActivity, /*heap_names=*/{});
 
   if (IsUserBuild())
     AssertNoProfileContents(packets);
   else
-    AssertExpectedAllocationsPresent(packets);
+    AssertExpectedMallocsPresent(packets);
   StopApp(app_name);
 }
 
 TEST(HeapprofdCtsTest, ReleaseAppStartup) {
   std::string app_name = "android.perfetto.cts.app.release";
-  const auto& packets = ProfileStartup(app_name);
+  const auto& packets =
+      ProfileStartup(app_name, kMallocActivity, /*heap_names=*/{});
 
   if (IsUserBuild())
     AssertNoProfileContents(packets);
   else
-    AssertExpectedAllocationsPresent(packets);
+    AssertExpectedMallocsPresent(packets);
   StopApp(app_name);
+}
+
+TEST(HeapprofdCtsTest, NonProfileableAppRuntime) {
+  std::string app_name = "android.perfetto.cts.app.nonprofileable";
+  const auto& packets =
+      ProfileRuntime(app_name, kMallocActivity, /*heap_names=*/{});
+  if (IsUserBuild())
+    AssertNoProfileContents(packets);
+  else
+    AssertExpectedMallocsPresent(packets);
+  StopApp(app_name);
+}
+
+TEST(HeapprofdCtsTest, NonProfileableAppStartup) {
+  std::string app_name = "android.perfetto.cts.app.nonprofileable";
+  const auto& packets =
+      ProfileStartup(app_name, kMallocActivity, /*heap_names=*/{});
+  if (IsUserBuild())
+    AssertNoProfileContents(packets);
+  else
+    AssertExpectedMallocsPresent(packets);
+  StopApp(app_name);
+}
+
+TEST(HeapprofdCtsTest, JavaHeapRuntime) {
+  std::string app_name = "android.perfetto.cts.app.debuggable";
+  const auto& packets = ProfileRuntime(app_name, kJavaAllocActivity,
+                                       /*heap_names=*/{"com.android.art"});
+  AssertHasSampledAllocs(packets);
+  StopApp(app_name);
+}
+
+TEST(HeapprofdCtsTest, JavaHeapStartup) {
+  std::string app_name = "android.perfetto.cts.app.debuggable";
+  const auto& packets = ProfileStartup(app_name, kJavaAllocActivity,
+                                       /*heap_names=*/{"com.android.art"});
+  AssertHasSampledAllocs(packets);
+  StopApp(app_name);
+}
+
+TEST(HeapprofdCtsTest, ProfilePlatformProcess) {
+  int target_pid = PidForProcessName("/system/bin/traced_probes");
+  ASSERT_GT(target_pid, 0) << "failed to find pid for target process";
+
+  // Construct config.
+  TraceConfig trace_config;
+  trace_config.add_buffers()->set_size_kb(20 * 1024);
+  trace_config.set_duration_ms(3000);
+  trace_config.set_data_source_stop_timeout_ms(8000);
+  trace_config.set_unique_session_name(RandomSessionName().c_str());
+
+  // process.stats to cause work in traced_probes
+  protos::gen::ProcessStatsConfig ps_config;
+  ps_config.set_proc_stats_poll_ms(100);
+  ps_config.set_record_thread_names(true);
+
+  auto* ds_config = trace_config.add_data_sources()->mutable_config();
+  ds_config->set_name("linux.process_stats");
+  ds_config->set_process_stats_config_raw(ps_config.SerializeAsString());
+
+  // profile native heap of traced_probes
+  protos::gen::HeapprofdConfig heapprofd_config;
+  heapprofd_config.set_sampling_interval_bytes(kTestSamplingInterval);
+  heapprofd_config.add_pid(static_cast<uint64_t>(target_pid));
+  heapprofd_config.set_block_client(true);
+
+  ds_config = trace_config.add_data_sources()->mutable_config();
+  ds_config->set_name("android.heapprofd");
+  ds_config->set_heapprofd_config_raw(heapprofd_config.SerializeAsString());
+
+  // Collect trace.
+  base::TestTaskRunner task_runner;
+  TestHelper helper(&task_runner);
+  helper.ConnectConsumer();
+  helper.WaitForConsumerConnect();
+
+  helper.StartTracing(trace_config);
+  helper.WaitForTracingDisabled(15000 /*ms*/);
+  helper.ReadData();
+  helper.WaitForReadData();
+  auto packets = helper.trace();
+
+  int target_pid_after = PidForProcessName("/system/bin/traced_probes");
+  ASSERT_EQ(target_pid, target_pid_after) << "traced_probes died during test";
+
+  if (IsUserBuild())
+    AssertNoProfileContents(packets);
+  else
+    AssertHasSampledAllocs(packets);
 }
 
 }  // namespace

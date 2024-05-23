@@ -16,11 +16,19 @@
 import argparse
 
 from collections import namedtuple
-from google.protobuf import descriptor, descriptor_pb2, message_factory, descriptor_pool
+from google.protobuf import descriptor_pb2, message_factory, descriptor_pool
 
 CLONE_THREAD = 0x00010000
 CLONE_VFORK = 0x00004000
 CLONE_VM = 0x00000100
+
+
+# For compatibility with older pb module versions.
+def get_message_class(pool, msg):
+  if hasattr(message_factory, "GetMessageClass"):
+    return message_factory.GetMessageClass(msg)
+  else:
+    return message_factory.MessageFactory(pool).GetPrototype(msg)
 
 
 def ms_to_ns(time_in_ms):
@@ -102,7 +110,7 @@ class Trace(object):
         ss.prev_state = 0
       elif prev_state == 'S':
         ss.prev_state = 1
-      elif prev_state == 'U':
+      elif prev_state == 'U' or prev_state == 'D':
         ss.prev_state = 2
       else:
         raise Exception('Invalid prev state {}'.format(prev_state))
@@ -186,6 +194,9 @@ class Trace(object):
 
   def add_atrace_async_end(self, ts, tid, pid, buf):
     self.add_print(ts, tid, 'F|{}|{}|0'.format(pid, buf))
+
+  def add_atrace_instant(self, ts, tid, pid, buf):
+    self.add_print(ts, tid, 'I|{}|{}'.format(pid, buf))
 
   def add_process(self, pid, ppid, cmdline, uid=None):
     process = self.packet.process_tree.processes.add()
@@ -273,6 +284,16 @@ class Trace(object):
     pinfo.name = name
     pinfo.uid = uid
     pinfo.version_code = version_code
+
+  def add_debuggable_package_list(self, ts, name, uid, version_code):
+    packet = self.add_packet()
+    packet.timestamp = ts
+    plist = packet.packages_list
+    pinfo = plist.packages.add()
+    pinfo.name = name
+    pinfo.uid = uid
+    pinfo.version_code = version_code
+    pinfo.debuggable = True
 
   def add_profile_packet(self, ts):
     packet = self.add_packet()
@@ -477,9 +498,15 @@ class Trace(object):
       track_descriptor.parent_uuid = parent
     return packet
 
-  def add_process_track_descriptor(self, process_track, pid=None):
+  def add_process_track_descriptor(self,
+                                   process_track,
+                                   pid=None,
+                                   process_name=None):
     packet = self.add_track_descriptor(process_track)
-    packet.track_descriptor.process.pid = pid
+    if pid is not None:
+      packet.track_descriptor.process.pid = pid
+    if process_name is not None:
+      packet.track_descriptor.process.process_name = process_name
     return packet
 
   def add_chrome_process_track_descriptor(
@@ -504,11 +531,17 @@ class Trace(object):
                                   thread_track,
                                   trusted_packet_sequence_id=None,
                                   pid=None,
-                                  tid=None):
+                                  tid=None,
+                                  thread_name=None):
     packet = self.add_track_descriptor(thread_track, parent=process_track)
-    packet.trusted_packet_sequence_id = trusted_packet_sequence_id
-    packet.track_descriptor.thread.pid = pid
-    packet.track_descriptor.thread.tid = tid
+    if trusted_packet_sequence_id is not None:
+      packet.trusted_packet_sequence_id = trusted_packet_sequence_id
+    if pid is not None:
+      packet.track_descriptor.thread.pid = pid
+    if tid is not None:
+      packet.track_descriptor.thread.tid = tid
+    if thread_name is not None:
+      packet.track_descriptor.thread.thread_name = thread_name
     return packet
 
   def add_chrome_thread_track_descriptor(self,
@@ -645,6 +678,7 @@ class Trace(object):
                             track=None,
                             trusted_sequence_id=None,
                             trace_id=None,
+                            step=None,
                             flow_ids=[],
                             terminating_flow_ids=[]):
     packet = self.add_track_event_slice(
@@ -655,6 +689,8 @@ class Trace(object):
         trusted_sequence_id=trusted_sequence_id)
     if trace_id is not None:
       packet.track_event.chrome_latency_info.trace_id = trace_id
+    if step is not None:
+      packet.track_event.chrome_latency_info.step = step
     for flow_id in flow_ids:
       packet.track_event.flow_ids.append(flow_id)
     for flow_id in terminating_flow_ids:
@@ -668,18 +704,24 @@ class Trace(object):
                                     track=None,
                                     trace_id=None,
                                     gesture_scroll_id=None,
+                                    touch_id=None,
                                     is_coalesced=None,
                                     gets_to_gpu=True):
     packet = self.add_track_event_slice(
         "InputLatency::" + name, ts=ts, dur=dur, track=track)
-    packet.track_event.chrome_latency_info.trace_id = trace_id
-    packet.track_event.chrome_latency_info.gesture_scroll_id = gesture_scroll_id
+    latency_info = packet.track_event.chrome_latency_info
+    latency_info.trace_id = trace_id
+    if gesture_scroll_id is not None:
+      latency_info.gesture_scroll_id = gesture_scroll_id
+    if touch_id is not None:
+      latency_info.touch_id = touch_id
     if gets_to_gpu:
-      component = packet.track_event.chrome_latency_info.component_info.add()
-      # 13 is id of COMPONENT_INPUT_EVENT_GPU_SWAP_BUFFER
-      component.component_type = 13
+      component = latency_info.component_info.add()
+      component.component_type = self.prototypes \
+          .ChromeLatencyInfo.ComponentType \
+          .COMPONENT_INPUT_EVENT_GPU_SWAP_BUFFER
     if is_coalesced is not None:
-      packet.track_event.chrome_latency_info.is_coalesced = is_coalesced
+      latency_info.is_coalesced = is_coalesced
     return packet
 
   def add_chrome_metadata(self, os_name=None):
@@ -729,11 +771,19 @@ class Trace(object):
       event.pid = pid
       event.layer_name = layer_name
 
-  def add_actual_surface_frame_start_event(self, ts, cookie, token,
-                                           display_frame_token, pid, layer_name,
-                                           present_type, on_time_finish,
-                                           gpu_composition, jank_type,
-                                           prediction_type):
+  def add_actual_surface_frame_start_event(self,
+                                           ts,
+                                           cookie,
+                                           token,
+                                           display_frame_token,
+                                           pid,
+                                           layer_name,
+                                           present_type,
+                                           on_time_finish,
+                                           gpu_composition,
+                                           jank_type,
+                                           prediction_type,
+                                           jank_severity_type=None):
     packet = self.add_packet()
     packet.timestamp = ts
     event = packet.frame_timeline_event.actual_surface_frame_start
@@ -747,6 +797,12 @@ class Trace(object):
       event.on_time_finish = on_time_finish
       event.gpu_composition = gpu_composition
       event.jank_type = jank_type
+      # jank severity type is not available on every trace.
+      # When not set, default to none if no jank; otherwise default to unknown
+      if jank_severity_type is None:
+        event.jank_severity_type = 1 if event.jank_type == 1 else 0
+      else:
+        event.jank_severity_type = jank_severity_type
       event.prediction_type = prediction_type
 
   def add_frame_end_event(self, ts, cookie):
@@ -783,9 +839,8 @@ def create_trace():
   args = parser.parse_args()
 
   pool = create_pool(args)
-  factory = message_factory.MessageFactory(pool)
-  ProtoTrace = factory.GetPrototype(
-      pool.FindMessageTypeByName('perfetto.protos.Trace'))
+  ProtoTrace = get_message_class(
+      pool, pool.FindMessageTypeByName('perfetto.protos.Trace'))
 
   class EnumPrototype(object):
 
@@ -795,24 +850,42 @@ def create_trace():
         setattr(res, desc.name, desc.number)
       return res
 
+  ChromeLatencyInfo = namedtuple('ChromeLatencyInfo', [
+      'ComponentType',
+      'Step',
+  ])
+
   Prototypes = namedtuple('Prototypes', [
       'TrackEvent',
       'ChromeRAILMode',
-      'ThreadDescriptor',
+      'ChromeLatencyInfo',
       'ChromeProcessDescriptor',
       'CounterDescriptor',
+      'ThreadDescriptor',
   ])
+
+  chrome_latency_info_prototypes = ChromeLatencyInfo(
+      ComponentType=EnumPrototype.from_descriptor(
+          pool.FindEnumTypeByName(
+              'perfetto.protos.ChromeLatencyInfo.LatencyComponentType')),
+      Step=EnumPrototype.from_descriptor(
+          pool.FindEnumTypeByName('perfetto.protos.ChromeLatencyInfo.Step')),
+  )
+
   prototypes = Prototypes(
-      TrackEvent=factory.GetPrototype(
-          pool.FindMessageTypeByName('perfetto.protos.TrackEvent')),
+      TrackEvent=get_message_class(
+          pool, pool.FindMessageTypeByName('perfetto.protos.TrackEvent')),
       ChromeRAILMode=EnumPrototype.from_descriptor(
           pool.FindEnumTypeByName('perfetto.protos.ChromeRAILMode')),
-      ThreadDescriptor=factory.GetPrototype(
-          pool.FindMessageTypeByName('perfetto.protos.ThreadDescriptor')),
-      ChromeProcessDescriptor=factory.GetPrototype(
+      ChromeLatencyInfo=chrome_latency_info_prototypes,
+      ChromeProcessDescriptor=get_message_class(
+          pool,
           pool.FindMessageTypeByName(
               'perfetto.protos.ChromeProcessDescriptor')),
-      CounterDescriptor=factory.GetPrototype(
+      CounterDescriptor=get_message_class(
+          pool,
           pool.FindMessageTypeByName('perfetto.protos.CounterDescriptor')),
+      ThreadDescriptor=get_message_class(
+          pool, pool.FindMessageTypeByName('perfetto.protos.ThreadDescriptor')),
   )
   return Trace(ProtoTrace(), prototypes)

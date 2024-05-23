@@ -8,14 +8,14 @@ developing, debugging and performance analysis.
 Dependencies:
 
 - [CMake](https://cmake.org/)
-- C++11
+- C++17
 
 ## Building
 
 First, check out the latest Perfetto release:
 
 ```bash
-git clone https://android.googlesource.com/platform/external/perfetto -b v17.0
+git clone https://android.googlesource.com/platform/external/perfetto -b v45.0
 ```
 
 Then, build using CMake:
@@ -25,6 +25,11 @@ cd perfetto/examples/sdk
 cmake -B build
 cmake --build build
 ```
+
+Note: If amalgamated source files are not present, generate them using
+`cd perfetto ; tools/gen_amalgamated --output sdk/perfetto`.
+[Learn more](https://perfetto.dev/docs/contributing/sdk-releasing#building-and-tagging-the-release)
+at the release section.
 
 ## Track event example
 
@@ -62,6 +67,10 @@ To build:
 ```bash
 export NDK=/path/to/ndk
 cmake -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+      -DANDROID_ABI=arm64-v8a \
+      -DANDROID_PLATFORM=android-21 \
+      -DANDROID_LD=lld \
+      -DCMAKE_BUILD_TYPE=Release \
       -B build_android
 cmake --build build_android
 ```
@@ -111,11 +120,11 @@ build/example_custom_data_source
 ```
 
 The program generates a trace file in `example_custom_data_source.perfetto-trace`,
-which we can examine using Perfetto's `trace_to_text` tool to show the trace
+which we can examine using Perfetto's `traceconv` tool to show the trace
 packet written by the custom data source:
 
 ```bash
-trace_to_text text example_custom_data_source.perfetto-trace
+traceconv text example_custom_data_source.perfetto-trace
 ...
 packet {
   trusted_uid: 0

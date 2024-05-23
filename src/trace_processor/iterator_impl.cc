@@ -18,23 +18,20 @@
 
 #include "perfetto/base/time.h"
 #include "perfetto/trace_processor/trace_processor_storage.h"
+#include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
+#include "src/trace_processor/sqlite/scoped_db.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/trace_processor_impl.h"
 
 namespace perfetto {
 namespace trace_processor {
 
-IteratorImpl::IteratorImpl(TraceProcessorImpl* trace_processor,
-                           sqlite3* db,
-                           ScopedStmt stmt,
-                           uint32_t column_count,
-                           util::Status status,
-                           uint32_t sql_stats_row)
+IteratorImpl::IteratorImpl(
+    TraceProcessorImpl* trace_processor,
+    base::StatusOr<PerfettoSqlEngine::ExecutionResult> result,
+    uint32_t sql_stats_row)
     : trace_processor_(trace_processor),
-      db_(db),
-      stmt_(std::move(stmt)),
-      column_count_(column_count),
-      status_(std::move(status)),
+      result_(std::move(result)),
       sql_stats_row_(sql_stats_row) {}
 
 IteratorImpl::~IteratorImpl() {
@@ -58,7 +55,7 @@ Iterator::Iterator(std::unique_ptr<IteratorImpl> iterator)
 Iterator::~Iterator() = default;
 
 Iterator::Iterator(Iterator&&) noexcept = default;
-Iterator& Iterator::operator=(Iterator&&) = default;
+Iterator& Iterator::operator=(Iterator&&) noexcept = default;
 
 bool Iterator::Next() {
   return iterator_->Next();
@@ -76,8 +73,20 @@ uint32_t Iterator::ColumnCount() {
   return iterator_->ColumnCount();
 }
 
-util::Status Iterator::Status() {
+base::Status Iterator::Status() {
   return iterator_->Status();
+}
+
+uint32_t Iterator::StatementCount() {
+  return iterator_->StatementCount();
+}
+
+uint32_t Iterator::StatementWithOutputCount() {
+  return iterator_->StatementCountWithOutput();
+}
+
+std::string Iterator::LastStatementSql() {
+  return iterator_->LastStatementSql();
 }
 
 }  // namespace trace_processor

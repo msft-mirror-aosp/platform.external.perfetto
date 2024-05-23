@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdint>
+#include <limits>
 #include <random>
+#include <vector>
 
 #include <benchmark/benchmark.h>
 
+#include "perfetto/base/logging.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/containers/bit_vector_iterators.h"
 
 namespace {
 
@@ -44,6 +47,15 @@ void BitVectorArgs(benchmark::internal::Benchmark* b) {
       b->Args({123456, percentage});
       b->Args({1234567, percentage});
     }
+  }
+}
+
+void UpdateSetBitsSelectBitsArgs(benchmark::internal::Benchmark* b) {
+  if (IsBenchmarkFunctionalOnly()) {
+    b->Args({64, 50, 50});
+  } else {
+    std::vector<int64_t> set_percentages{1, 5, 50, 95, 99};
+    b->ArgsProduct({{1234567}, set_percentages, set_percentages});
   }
 }
 
@@ -142,9 +154,11 @@ static void BM_BitVectorIndexOfNthSet(benchmark::State& state) {
   BitVector bv = BvWithSizeAndSetPercentage(size, set_percentage);
   static constexpr uint32_t kPoolSize = 1024 * 1024;
   std::vector<uint32_t> row_pool(kPoolSize);
-  uint32_t set_bit_count = bv.GetNumBitsSet();
-  if (set_bit_count == 0)
+  uint32_t set_bit_count = bv.CountSetBits();
+  if (set_bit_count == 0) {
+    state.SkipWithError("Cannot find set bit in all zeros bitvector");
     return;
+  }
 
   for (uint32_t i = 0; i < kPoolSize; ++i) {
     row_pool[i] = rnd_engine() % set_bit_count;
@@ -158,7 +172,7 @@ static void BM_BitVectorIndexOfNthSet(benchmark::State& state) {
 }
 BENCHMARK(BM_BitVectorIndexOfNthSet)->Apply(BitVectorArgs);
 
-static void BM_BitVectorGetNumBitsSet(benchmark::State& state) {
+static void BM_BitVectorCountSetBits(benchmark::State& state) {
   static constexpr uint32_t kRandomSeed = 42;
   std::minstd_rand0 rnd_engine(kRandomSeed);
 
@@ -181,11 +195,34 @@ static void BM_BitVectorGetNumBitsSet(benchmark::State& state) {
 
   uint32_t res = count;
   for (auto _ : state) {
-    benchmark::DoNotOptimize(res &= bv.GetNumBitsSet());
+    benchmark::DoNotOptimize(res &= bv.CountSetBits());
   }
   PERFETTO_CHECK(res == count);
 }
-BENCHMARK(BM_BitVectorGetNumBitsSet)->Apply(BitVectorArgs);
+BENCHMARK(BM_BitVectorCountSetBits)->Apply(BitVectorArgs);
+
+static void BM_BitVectorGetSetBitIndices(benchmark::State& state) {
+  static constexpr uint32_t kRandomSeed = 42;
+  std::minstd_rand0 rnd_engine(kRandomSeed);
+
+  auto size = static_cast<uint32_t>(state.range(0));
+  auto set_percentage = static_cast<uint32_t>(state.range(1));
+
+  BitVector bv;
+  for (uint32_t i = 0; i < size; ++i) {
+    bool value = rnd_engine() % 100 < set_percentage;
+    if (value) {
+      bv.AppendTrue();
+    } else {
+      bv.AppendFalse();
+    }
+  }
+
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(bv.GetSetBitIndices());
+  }
+}
+BENCHMARK(BM_BitVectorGetSetBitIndices)->Apply(BitVectorArgs);
 
 static void BM_BitVectorResize(benchmark::State& state) {
   static constexpr uint32_t kRandomSeed = 42;
@@ -211,34 +248,13 @@ static void BM_BitVectorResize(benchmark::State& state) {
 }
 BENCHMARK(BM_BitVectorResize);
 
-static void BM_BitVectorRangeFixedSize(benchmark::State& state) {
-  static constexpr uint32_t kRandomSeed = 42;
-  std::minstd_rand0 rnd_engine(kRandomSeed);
-
-  uint32_t size = static_cast<uint32_t>(state.range(0));
-  uint32_t set_percentage = static_cast<uint32_t>(state.range(1));
-
-  std::vector<uint32_t> resize_fill_pool(size);
-  for (uint32_t i = 0; i < size; ++i) {
-    resize_fill_pool[i] = rnd_engine() % 100 < set_percentage ? 90 : 100;
-  }
-
-  for (auto _ : state) {
-    auto filler = [&resize_fill_pool](uint32_t i) PERFETTO_ALWAYS_INLINE {
-      return resize_fill_pool[i] < 95;
-    };
-    BitVector bv = BitVector::Range(0, size, filler);
-    benchmark::ClobberMemory();
-  }
-}
-BENCHMARK(BM_BitVectorRangeFixedSize)->Apply(BitVectorArgs);
-
 static void BM_BitVectorUpdateSetBits(benchmark::State& state) {
   static constexpr uint32_t kRandomSeed = 42;
   std::minstd_rand0 rnd_engine(kRandomSeed);
 
   uint32_t size = static_cast<uint32_t>(state.range(0));
   uint32_t set_percentage = static_cast<uint32_t>(state.range(1));
+  uint32_t picker_set_percentage = static_cast<uint32_t>(state.range(2));
 
   BitVector bv;
   BitVector picker;
@@ -247,7 +263,7 @@ static void BM_BitVectorUpdateSetBits(benchmark::State& state) {
     if (value) {
       bv.AppendTrue();
 
-      bool picker_value = rnd_engine() % 2;
+      bool picker_value = rnd_engine() % 100 < picker_set_percentage;
       if (picker_value) {
         picker.AppendTrue();
       } else {
@@ -258,26 +274,77 @@ static void BM_BitVectorUpdateSetBits(benchmark::State& state) {
     }
   }
 
+  uint32_t set_bit_count = bv.CountSetBits();
+  uint32_t picker_set_bit_count = picker.CountSetBits();
+
   for (auto _ : state) {
-    state.PauseTiming();
     BitVector copy = bv.Copy();
-    state.ResumeTiming();
-
     copy.UpdateSetBits(picker);
-    benchmark::ClobberMemory();
+    benchmark::DoNotOptimize(copy);
   }
+
+  state.counters["s/set bit"] = benchmark::Counter(
+      set_bit_count, benchmark::Counter::kIsIterationInvariantRate |
+                         benchmark::Counter::kInvert);
+  state.counters["s/set picker bit"] = benchmark::Counter(
+      picker_set_bit_count, benchmark::Counter::kIsIterationInvariantRate |
+                                benchmark::Counter::kInvert);
 }
-BENCHMARK(BM_BitVectorUpdateSetBits)->Apply(BitVectorArgs);
+BENCHMARK(BM_BitVectorUpdateSetBits)->Apply(UpdateSetBitsSelectBitsArgs);
 
-static void BM_BitVectorSetBitsIterator(benchmark::State& state) {
-  uint32_t size = static_cast<uint32_t>(state.range(0));
-  uint32_t set_percentage = static_cast<uint32_t>(state.range(1));
+static void BM_BitVectorSelectBits(benchmark::State& state) {
+  static constexpr uint32_t kRandomSeed = 42;
+  std::minstd_rand0 rnd_engine(kRandomSeed);
 
-  BitVector bv = BvWithSizeAndSetPercentage(size, set_percentage);
-  for (auto _ : state) {
-    for (auto it = bv.IterateSetBits(); it; it.Next()) {
-      benchmark::DoNotOptimize(it.index());
+  auto size = static_cast<uint32_t>(state.range(0));
+  auto set_percentage = static_cast<uint32_t>(state.range(1));
+  auto mask_set_percentage = static_cast<uint32_t>(state.range(2));
+
+  BitVector bv;
+  BitVector mask;
+  for (uint32_t i = 0; i < size; ++i) {
+    bool value = rnd_engine() % 100 < set_percentage;
+    if (value) {
+      bv.AppendTrue();
+    } else {
+      bv.AppendFalse();
+    }
+    bool mask_value = rnd_engine() % 100 < mask_set_percentage;
+    if (mask_value) {
+      mask.AppendTrue();
+    } else {
+      mask.AppendFalse();
     }
   }
+
+  uint32_t set_bit_count = bv.CountSetBits();
+  uint32_t mask_set_bit_count = mask.CountSetBits();
+
+  for (auto _ : state) {
+    BitVector copy = bv.Copy();
+    copy.SelectBits(mask);
+    benchmark::DoNotOptimize(copy);
+  }
+
+  state.counters["s/set bit"] = benchmark::Counter(
+      set_bit_count, benchmark::Counter::kIsIterationInvariantRate |
+                         benchmark::Counter::kInvert);
+  state.counters["s/mask bit"] = benchmark::Counter(
+      mask_set_bit_count, benchmark::Counter::kIsIterationInvariantRate |
+                              benchmark::Counter::kInvert);
 }
-BENCHMARK(BM_BitVectorSetBitsIterator)->Apply(BitVectorArgs);
+BENCHMARK(BM_BitVectorSelectBits)->Apply(UpdateSetBitsSelectBitsArgs);
+
+static void BM_BitVectorFromIndexVector(benchmark::State& state) {
+  std::vector<int64_t> indices;
+  for (int64_t i = 0; i < 1024l * 1024l; i++) {
+    indices.push_back(i);
+  }
+
+  indices.push_back(std::numeric_limits<uint32_t>::max() >> 5);
+
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(BitVector::FromSortedIndexVector(indices));
+  }
+}
+BENCHMARK(BM_BitVectorFromIndexVector);

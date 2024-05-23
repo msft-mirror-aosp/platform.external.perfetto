@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as puppeteer from 'puppeteer';
+import fs from 'fs';
+import path from 'path';
+import {Browser, Page} from 'puppeteer';
 
 import {assertExists} from '../base/logging';
 
@@ -22,16 +22,17 @@ import {
   compareScreenshots,
   failIfTraceProcessorHttpdIsActive,
   getTestTracePath,
-  waitForPerfettoIdle
+  waitForPerfettoIdle,
 } from './perfetto_ui_test_helper';
 
-declare var global: {__BROWSER__: puppeteer.Browser;};
+declare let global: {__BROWSER__: Browser};
 const browser = assertExists(global.__BROWSER__);
 const expectedScreenshotPath = path.join('test', 'data', 'ui-screenshots');
+const tmpDir = path.resolve('./ui-test-artifacts');
+const reportPath = path.join(tmpDir, 'report.txt');
 
-
-async function getPage(): Promise<puppeteer.Page> {
-  const pages = (await browser.pages());
+async function getPage(): Promise<Page> {
+  const pages = await browser.pages();
   expect(pages.length).toBe(1);
   return pages[pages.length - 1];
 }
@@ -42,7 +43,9 @@ beforeAll(async () => {
   jest.setTimeout(60000);
   const page = await getPage();
   await page.setViewport({width: 1920, height: 1080});
-  await page.goto('http://localhost:10000/#!/?testing=1');
+
+  // Empty the file with collected screenshot diffs
+  fs.writeFileSync(reportPath, '');
 });
 
 // After each test (regardless of nesting) capture a screenshot named after the
@@ -50,13 +53,9 @@ beforeAll(async () => {
 // /test/data/ui-screenshots.
 afterEach(async () => {
   let testName = expect.getState().currentTestName;
-  testName = testName.replace(/[^a-z0-9-]/gmi, '_').toLowerCase();
+  testName = testName.replace(/[^a-z0-9-]/gim, '_').toLowerCase();
   const page = await getPage();
 
-  // cwd() is set to //out/ui when running tests, just create a subdir in there.
-  // The CI picks up this directory and uploads to GCS after every failed run.
-  const tmpDir = path.resolve('./ui-test-artifacts');
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
   const screenshotName = `ui-${testName}.png`;
   const actualFilename = path.join(tmpDir, screenshotName);
   const expectedFilename = path.join(expectedScreenshotPath, screenshotName);
@@ -66,13 +65,20 @@ afterEach(async () => {
     console.log('Saving reference screenshot into', expectedFilename);
     fs.copyFileSync(actualFilename, expectedFilename);
   } else {
-    await compareScreenshots(actualFilename, expectedFilename);
+    await compareScreenshots(reportPath, actualFilename, expectedFilename);
   }
 });
 
 describe('android_trace_30s', () => {
+  let page: Page;
+
+  beforeAll(async () => {
+    page = await getPage();
+    await page.goto('http://localhost:10000/?testing=1');
+    await waitForPerfettoIdle(page);
+  });
+
   test('load', async () => {
-    const page = await getPage();
     const file = await page.waitForSelector('input.trace_file');
     const tracePath = getTestTracePath('example_android_trace_30s.pb');
     assertExists(file).uploadFile(tracePath);
@@ -80,45 +86,24 @@ describe('android_trace_30s', () => {
   });
 
   test('expand_camera', async () => {
-    const page = await getPage();
-    await page.click('.main-canvas');
+    await page.click('.pf-overlay');
     await page.click('h1[title="com.google.android.GoogleCamera 5506"]');
     await page.evaluate(() => {
       document.querySelector('.scrolling-panel-container')!.scrollTo(0, 400);
     });
     await waitForPerfettoIdle(page);
   });
-
-  test('search', async () => {
-    const page = await getPage();
-    const searchInput = '.omnibox input';
-    await page.focus(searchInput);
-    await page.keyboard.type('TrimMaps');
-    await waitForPerfettoIdle(page);
-    for (let i = 0; i < 10; i++) {
-      await page.keyboard.type('\n');
-    }
-    await waitForPerfettoIdle(page);
-  });
 });
-
-describe('navigation', () => {
-  beforeAll(async () => {
-    const page = await getPage();
-    // go to blank page, to allow page reloading when only the fragment changes
-    await page.goto('about:blank');
-  });
-
-  test('trace_from_url', async () => {
-    const page = await getPage();
-    await page.goto(
-        'http://localhost:10000/#!/?testing=1&url=http://localhost:10000/test/data/chrome_scroll_without_vsync.pftrace');
-    await waitForPerfettoIdle(page);
-  });
-});
-
 
 describe('chrome_rendering_desktop', () => {
+  let page: Page;
+
+  beforeAll(async () => {
+    page = await getPage();
+    await page.goto('http://localhost:10000/?testing=1');
+    await waitForPerfettoIdle(page);
+  });
+
   test('load', async () => {
     const page = await getPage();
     const file = await page.waitForSelector('input.trace_file');
@@ -129,7 +114,7 @@ describe('chrome_rendering_desktop', () => {
 
   test('expand_browser_proc', async () => {
     const page = await getPage();
-    await page.click('.main-canvas');
+    await page.click('.pf-overlay');
     await page.click('h1[title="Browser 12685"]');
     await waitForPerfettoIdle(page);
   });
@@ -145,7 +130,202 @@ describe('chrome_rendering_desktop', () => {
     }
     await waitForPerfettoIdle(page);
     await page.focus('canvas');
-    await page.keyboard.type('f');  // Zoom to selection
+    await page.keyboard.type('f'); // Zoom to selection
+    await waitForPerfettoIdle(page);
+  });
+});
+
+// Tests that chrome traces with missing process/thread names still open
+// correctly in the UI.
+describe('chrome_missing_track_names', () => {
+  let page: Page;
+
+  beforeAll(async () => {
+    page = await getPage();
+    await page.goto('http://localhost:10000/?testing=1');
+    await waitForPerfettoIdle(page);
+  });
+
+  test('load', async () => {
+    const page = await getPage();
+    const file = await page.waitForSelector('input.trace_file');
+    const tracePath = getTestTracePath('chrome_missing_track_names.pb.gz');
+    assertExists(file).uploadFile(tracePath);
+    await waitForPerfettoIdle(page);
+  });
+});
+
+describe('routing', () => {
+  describe('open_two_traces_then_go_back', () => {
+    let page: Page;
+
+    beforeAll(async () => {
+      page = await getPage();
+      await page.goto('http://localhost:10000/?testing=1');
+      await waitForPerfettoIdle(page);
+    });
+
+    test('open_first_trace_from_url', async () => {
+      await page.goto(
+        'http://localhost:10000/?testing=1/#!/?url=http://localhost:10000/test/data/chrome_memory_snapshot.pftrace',
+      );
+      await waitForPerfettoIdle(page);
+    });
+
+    test('open_second_trace_from_url', async () => {
+      await page.goto(
+        'http://localhost:10000/?testing=1#!/?url=http://localhost:10000/test/data/chrome_scroll_without_vsync.pftrace',
+      );
+      await waitForPerfettoIdle(page);
+    });
+
+    test('access_subpage_then_go_back', async () => {
+      await waitForPerfettoIdle(page);
+      await page.goto(
+        'http://localhost:10000/?testing=1/#!/metrics?local_cache_key=76c25a80-25dd-1eb7-2246-d7b3c7a10f91',
+      );
+      await page.goBack();
+      await waitForPerfettoIdle(page);
+    });
+  });
+
+  describe('start_from_no_trace', () => {
+    let page: Page;
+
+    beforeAll(async () => {
+      page = await getPage();
+      await page.goto('about:blank');
+    });
+
+    test('go_to_page_with_no_trace', async () => {
+      await page.goto('http://localhost:10000/?testing=1#!/info');
+      await waitForPerfettoIdle(page);
+    });
+
+    test('open_trace ', async () => {
+      await page.goto(
+        'http://localhost:10000/?testing=1#!/viewer?local_cache_key=76c25a80-25dd-1eb7-2246-d7b3c7a10f91',
+      );
+      await waitForPerfettoIdle(page);
+    });
+
+    test('refresh', async () => {
+      await page.reload();
+      await waitForPerfettoIdle(page);
+    });
+
+    test('open_second_trace', async () => {
+      await page.goto(
+        'http://localhost:10000/?testing=1#!/viewer?local_cache_key=00000000-0000-0000-e13c-bd7db4ff646f',
+      );
+      await waitForPerfettoIdle(page);
+
+      // click on the 'Continue' button in the interstitial
+      await page.click('[id="trace_id_open"]');
+      await waitForPerfettoIdle(page);
+    });
+
+    test('go_back_to_first_trace', async () => {
+      await page.goBack();
+      await waitForPerfettoIdle(page);
+      // click on the 'Continue' button in the interstitial
+      await page.click('[id="trace_id_open"]');
+      await waitForPerfettoIdle(page);
+    });
+
+    test('open_invalid_trace', async () => {
+      await page.goto(
+        'http://localhost:10000/?testing=1#!/viewer?local_cache_key=invalid',
+      );
+      await waitForPerfettoIdle(page);
+    });
+  });
+
+  describe('navigate', () => {
+    let page: Page;
+
+    beforeAll(async () => {
+      page = await getPage();
+      await page.goto('http://localhost:10000/?testing=1');
+      await waitForPerfettoIdle(page);
+    });
+
+    test('open_trace_from_url', async () => {
+      await page.goto(
+        'http://localhost:10000/?testing=1/#!/?url=http://localhost:10000/test/data/chrome_memory_snapshot.pftrace',
+      );
+      await waitForPerfettoIdle(page);
+    });
+
+    test('navigate_back_and_forward', async () => {
+      await page.click('[id="info_and_stats"]');
+      await waitForPerfettoIdle(page);
+      await page.click('[id="metrics"]');
+      await waitForPerfettoIdle(page);
+      await page.goBack();
+      await waitForPerfettoIdle(page);
+      await page.goBack();
+      await waitForPerfettoIdle(page);
+      await page.goForward();
+      await waitForPerfettoIdle(page);
+      await page.goForward();
+      await waitForPerfettoIdle(page);
+    });
+  });
+
+  test('open_trace_and_go_back_to_landing_page', async () => {
+    const page = await getPage();
+    await page.goto('http://localhost:10000/?testing=1');
+    await page.goto(
+      'http://localhost:10000/?testing=1#!/viewer?local_cache_key=76c25a80-25dd-1eb7-2246-d7b3c7a10f91',
+    );
+    await waitForPerfettoIdle(page);
+    await page.goBack();
+    await waitForPerfettoIdle(page);
+  });
+
+  test('open_invalid_trace_from_blank_page', async () => {
+    const page = await getPage();
+    await page.goto('about:blank');
+    await page.goto(
+      'http://localhost:10000/?testing=1#!/viewer?local_cache_key=invalid',
+    );
+    await waitForPerfettoIdle(page);
+  });
+});
+
+// Regression test for b/235335853.
+describe('modal_dialog', () => {
+  let page: Page;
+
+  beforeAll(async () => {
+    page = await getPage();
+    await page.goto('http://localhost:10000/?testing=1');
+    await waitForPerfettoIdle(page);
+  });
+
+  test('show_dialog_1', async () => {
+    await page.click('#keyboard_shortcuts');
+    await waitForPerfettoIdle(page);
+  });
+
+  test('dismiss_1', async () => {
+    await page.keyboard.press('Escape');
+    await waitForPerfettoIdle(page);
+  });
+
+  test('switch_page_no_dialog', async () => {
+    await page.click('#record_new_trace');
+    await waitForPerfettoIdle(page);
+  });
+
+  test('show_dialog_2', async () => {
+    await page.click('#keyboard_shortcuts');
+    await waitForPerfettoIdle(page);
+  });
+
+  test('dismiss_2', async () => {
+    await page.keyboard.press('Escape');
     await waitForPerfettoIdle(page);
   });
 });

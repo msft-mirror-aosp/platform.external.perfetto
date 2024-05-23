@@ -19,7 +19,6 @@
 
 #include <stddef.h>
 
-#include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/types/variadic.h"
 
 namespace perfetto {
@@ -29,29 +28,37 @@ namespace metadata {
 // Compile time list of metadata items.
 // clang-format off
 #define PERFETTO_TP_METADATA(F)                                               \
+  F(all_data_source_flushed_ns,        KeyType::kMulti,   Variadic::kInt),    \
+  F(all_data_source_started_ns,        KeyType::kSingle,  Variadic::kInt),    \
+  F(android_build_fingerprint,         KeyType::kSingle,  Variadic::kString), \
+  F(android_sdk_version,               KeyType::kSingle,  Variadic::kInt),    \
   F(benchmark_description,             KeyType::kSingle,  Variadic::kString), \
-  F(benchmark_name,                    KeyType::kSingle,  Variadic::kString), \
-  F(benchmark_start_time_us,           KeyType::kSingle,  Variadic::kInt),    \
   F(benchmark_had_failures,            KeyType::kSingle,  Variadic::kInt),    \
   F(benchmark_label,                   KeyType::kSingle,  Variadic::kString), \
+  F(benchmark_name,                    KeyType::kSingle,  Variadic::kString), \
+  F(benchmark_start_time_us,           KeyType::kSingle,  Variadic::kInt),    \
   F(benchmark_story_name,              KeyType::kSingle,  Variadic::kString), \
   F(benchmark_story_run_index,         KeyType::kSingle,  Variadic::kInt),    \
   F(benchmark_story_run_time_us,       KeyType::kSingle,  Variadic::kInt),    \
   F(benchmark_story_tags,              KeyType::kMulti,   Variadic::kString), \
+  F(ftrace_setup_errors,               KeyType::kMulti,   Variadic::kString), \
+  F(ftrace_latest_data_start_ns,       KeyType::kSingle,  Variadic::kInt),    \
+  F(range_of_interest_start_us,        KeyType::kSingle,  Variadic::kInt),    \
   F(statsd_triggering_subscription_id, KeyType::kSingle,  Variadic::kInt),    \
-  F(trace_uuid,                        KeyType::kSingle,  Variadic::kString), \
-  F(unique_session_name,               KeyType::kSingle,  Variadic::kString), \
-  F(system_name,                       KeyType::kSingle,  Variadic::kString), \
-  F(system_version,                    KeyType::kSingle,  Variadic::kString), \
-  F(system_release,                    KeyType::kSingle,  Variadic::kString), \
   F(system_machine,                    KeyType::kSingle,  Variadic::kString), \
-  F(android_build_fingerprint,         KeyType::kSingle,  Variadic::kString), \
-  F(trace_size_bytes,                  KeyType::kSingle,  Variadic::kInt),    \
-  F(all_data_source_started_ns,        KeyType::kSingle,  Variadic::kInt),    \
-  F(tracing_started_ns,                KeyType::kSingle,  Variadic::kInt),    \
-  F(tracing_disabled_ns,               KeyType::kSingle,  Variadic::kInt),    \
+  F(system_name,                       KeyType::kSingle,  Variadic::kString), \
+  F(system_release,                    KeyType::kSingle,  Variadic::kString), \
+  F(system_version,                    KeyType::kSingle,  Variadic::kString), \
+  F(timezone_off_mins,                 KeyType::kSingle,  Variadic::kInt),    \
   F(trace_config_pbtxt,                KeyType::kSingle,  Variadic::kString), \
-  F(ui_state,                          KeyType::kSingle,  Variadic::kString)
+  F(trace_size_bytes,                  KeyType::kSingle,  Variadic::kInt),    \
+  F(trace_time_clock_id,               KeyType::kSingle,  Variadic::kInt),    \
+  F(trace_type,                        KeyType::kSingle,  Variadic::kString), \
+  F(trace_uuid,                        KeyType::kSingle,  Variadic::kString), \
+  F(tracing_disabled_ns,               KeyType::kSingle,  Variadic::kInt),    \
+  F(tracing_started_ns,                KeyType::kSingle,  Variadic::kInt),    \
+  F(ui_state,                          KeyType::kSingle,  Variadic::kString), \
+  F(unique_session_name,               KeyType::kSingle,  Variadic::kString)
 // clang-format on
 
 // Compile time list of metadata items.

@@ -170,6 +170,10 @@ template("proto_library") {
       ]
     }
 
+    metadata = {
+      proto_import_dirs = import_dirs
+    }
+
     if (generate_cc) {
       cc_generator_options_ = ""
       if (defined(invoker.cc_generator_options)) {
@@ -261,10 +265,13 @@ template("proto_library") {
         public_configs = []
       }
 
-      public_configs += [
-        "//gn:protobuf_gen_config",
-        ":$config_name",
-      ]
+      public_configs += [ ":$config_name" ]
+
+      # Only include the protobuf_gen_config when generating .pb.cc files.
+      # Note that |generate_cc| is false for .{pbzero,ipc,gen etc.}.cc
+      if (generate_cc) {
+        public_configs += [ "//gn:protobuf_gen_config" ]
+      }
 
       # By default, propagate the config for |include_dirs| to dependent
       # targets, so that public imports can be resolved to corresponding header

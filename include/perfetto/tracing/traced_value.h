@@ -27,6 +27,8 @@
 #include "perfetto/tracing/traced_value_forward.h"
 
 #include <memory>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -39,6 +41,7 @@ class DebugAnnotation;
 }  // namespace protos
 
 class DebugAnnotation;
+class EventContext;
 
 // These classes provide a JSON-inspired way to write structed data into traces.
 //
@@ -65,7 +68,7 @@ class DebugAnnotation;
 //   about tracing).
 //
 //
-// After definiting a conversion method, the object can be used directly as a
+// After defining a conversion method, the object can be used directly as a
 // TRACE_EVENT argument:
 //
 // Foo foo;
@@ -116,17 +119,21 @@ class DebugAnnotation;
 //   }
 // }
 namespace internal {
-PERFETTO_EXPORT TracedValue
-CreateTracedValueFromProto(protos::pbzero::DebugAnnotation*);
+// TODO(altimin): Currently EventContext can be null due the need to support
+// TracedValue-based serialisation with the Chrome's TraceLog. After this is
+// gone, the second parameter should be changed to EventContext&.
+PERFETTO_EXPORT_COMPONENT TracedValue
+CreateTracedValueFromProto(protos::pbzero::DebugAnnotation*,
+                           EventContext* = nullptr);
 }
 
-class PERFETTO_EXPORT TracedValue {
+class PERFETTO_EXPORT_COMPONENT TracedValue {
  public:
   TracedValue(const TracedValue&) = delete;
   TracedValue& operator=(const TracedValue&) = delete;
   TracedValue& operator=(TracedValue&&) = delete;
-  TracedValue(TracedValue&&) = default;
-  ~TracedValue() = default;
+  TracedValue(TracedValue&&);
+  ~TracedValue();
 
   // TracedValue represents a context into which a single value can be written
   // (either by writing it directly for primitive types, or by creating a
@@ -140,14 +147,17 @@ class PERFETTO_EXPORT TracedValue {
   void WriteString(const char*) &&;
   void WriteString(const char*, size_t len) &&;
   void WriteString(const std::string&) &&;
+  void WriteString(std::string_view) &&;
   void WritePointer(const void* value) &&;
+  template <typename MessageType>
+  TracedProto<MessageType> WriteProto() &&;
 
   // Rules for writing nested dictionaries and arrays:
   // - Only one scope (TracedArray, TracedDictionary or TracedValue) can be
   // active at the same time. It's only allowed to call methods on the active
   // scope.
   // - When a scope creates a nested scope, the new scope becomes active.
-  // - When a scope is destroyed, it's parent scope becomes active again.
+  // - When a scope is destroyed, its parent scope becomes active again.
   //
   // Typically users will have to create a scope only at the beginning of a
   // conversion function and this scope should be destroyed at the end of it.
@@ -164,26 +174,44 @@ class PERFETTO_EXPORT TracedValue {
   friend class TracedArray;
   friend class TracedDictionary;
   friend TracedValue internal::CreateTracedValueFromProto(
-      protos::pbzero::DebugAnnotation*);
+      protos::pbzero::DebugAnnotation*,
+      EventContext*);
 
-  static TracedValue CreateFromProto(protos::pbzero::DebugAnnotation*);
+  static TracedValue CreateFromProto(protos::pbzero::DebugAnnotation* proto,
+                                     EventContext* event_context = nullptr);
 
-  inline explicit TracedValue(protos::pbzero::DebugAnnotation* context,
-                              internal::CheckedScope* parent_scope)
-      : context_(context), checked_scope_(parent_scope) {}
+  inline TracedValue(protos::pbzero::DebugAnnotation* annotation,
+                     EventContext* event_context,
+                     internal::CheckedScope* parent_scope)
+      : annotation_(annotation),
+        event_context_(event_context),
+        checked_scope_(parent_scope) {}
+
+  protozero::Message* WriteProtoInternal(const char* name);
 
   // Temporary support for perfetto::DebugAnnotation C++ class before it's going
   // to be replaced by TracedValue.
   // TODO(altimin): Convert v8 to use TracedValue directly and delete it.
   friend class DebugAnnotation;
 
-  protos::pbzero::DebugAnnotation* const context_ = nullptr;
+  protos::pbzero::DebugAnnotation* const annotation_ = nullptr;
+  EventContext* const event_context_ = nullptr;
 
   internal::CheckedScope checked_scope_;
 };
 
-class PERFETTO_EXPORT TracedArray {
+template <typename MessageType>
+TracedProto<MessageType> TracedValue::WriteProto() && {
+  return TracedProto<MessageType>(
+      static_cast<MessageType*>(WriteProtoInternal(MessageType::GetName())),
+      event_context_);
+}
+
+class PERFETTO_EXPORT_COMPONENT TracedArray {
  public:
+  // implicit
+  TracedArray(TracedValue);
+
   TracedArray(const TracedArray&) = delete;
   TracedArray& operator=(const TracedArray&) = delete;
   TracedArray& operator=(TracedArray&&) = delete;
@@ -203,17 +231,24 @@ class PERFETTO_EXPORT TracedArray {
  private:
   friend class TracedValue;
 
-  inline explicit TracedArray(protos::pbzero::DebugAnnotation* context,
-                              internal::CheckedScope* parent_scope)
-      : context_(context), checked_scope_(parent_scope) {}
+  inline TracedArray(protos::pbzero::DebugAnnotation* annotation,
+                     EventContext* event_context,
+                     internal::CheckedScope* parent_scope)
+      : annotation_(annotation),
+        event_context_(event_context),
+        checked_scope_(parent_scope) {}
 
-  protos::pbzero::DebugAnnotation* context_;
+  protos::pbzero::DebugAnnotation* annotation_;
+  EventContext* const event_context_;
 
   internal::CheckedScope checked_scope_;
 };
 
-class PERFETTO_EXPORT TracedDictionary {
+class PERFETTO_EXPORT_COMPONENT TracedDictionary {
  public:
+  // implicit
+  TracedDictionary(TracedValue);
+
   TracedDictionary(const TracedDictionary&) = delete;
   TracedDictionary& operator=(const TracedDictionary&) = delete;
   TracedDictionary& operator=(TracedDictionary&&) = delete;
@@ -254,12 +289,13 @@ class PERFETTO_EXPORT TracedDictionary {
   // Create a |TracedDictionary| which will populate the given field of the
   // given |message|.
   template <typename MessageType, typename FieldMetadata>
-  inline explicit TracedDictionary(
-      MessageType* message,
-      protozero::proto_utils::internal::FieldMetadataHelper<FieldMetadata>,
-      internal::CheckedScope* parent_scope)
+  inline TracedDictionary(MessageType* message,
+                          FieldMetadata,
+                          EventContext* event_context,
+                          internal::CheckedScope* parent_scope)
       : message_(message),
         field_id_(FieldMetadata::kFieldId),
+        event_context_(event_context),
         checked_scope_(parent_scope) {
     static_assert(std::is_base_of<protozero::Message, MessageType>::value,
                   "Message should be a subclass of protozero::Message");
@@ -281,6 +317,7 @@ class PERFETTO_EXPORT TracedDictionary {
 
   protozero::Message* const message_;
   const uint32_t field_id_;
+  EventContext* event_context_;
 
   internal::CheckedScope checked_scope_;
 };
@@ -567,11 +604,37 @@ struct TraceFormatTraits<char[N]> {
   }
 };
 
+// Specialization for Perfetto strings.
+template <>
+struct TraceFormatTraits<perfetto::StaticString> {
+  inline static void WriteIntoTrace(TracedValue context,
+                                    perfetto::StaticString str) {
+    std::move(context).WriteString(str.value);
+  }
+};
+
+template <>
+struct TraceFormatTraits<perfetto::DynamicString> {
+  inline static void WriteIntoTrace(TracedValue context,
+                                    perfetto::DynamicString str) {
+    std::move(context).WriteString(str.value, str.length);
+  }
+};
+
 // Specialisation for C++ strings.
 template <>
 struct TraceFormatTraits<std::string> {
   inline static void WriteIntoTrace(TracedValue context,
                                     const std::string& value) {
+    std::move(context).WriteString(value);
+  }
+};
+
+// Specialisation for C++ string_views.
+template <>
+struct TraceFormatTraits<std::string_view> {
+  inline static void WriteIntoTrace(TracedValue context,
+                                    std::string_view value) {
     std::move(context).WriteString(value);
   }
 };
@@ -599,6 +662,12 @@ struct TraceFormatTraits<std::unique_ptr<T>, check_traced_value_support_t<T>> {
                                     const std::unique_ptr<T>& value) {
     ::perfetto::WriteIntoTracedValue(std::move(context), value.get());
   }
+
+  template <typename MessageType>
+  inline static void WriteIntoTrace(TracedProto<MessageType> message,
+                                    const std::unique_ptr<T>& value) {
+    ::perfetto::WriteIntoTracedProto(std::move(message), value.get());
+  }
 };
 
 // Specialisation for raw pointer, which writes either nullptr or the object it
@@ -612,6 +681,18 @@ struct TraceFormatTraits<T*, check_traced_value_support_t<T>> {
     }
     ::perfetto::WriteIntoTracedValue(std::move(context), *value);
   }
+
+  template <typename MessageType>
+  inline static void WriteIntoTrace(TracedProto<MessageType> message,
+                                    T* value) {
+    if (!value) {
+      // Start the message, but do not write anything. TraceProcessor will emit
+      // a NULL value.
+      return;
+    }
+
+    ::perfetto::WriteIntoTracedProto(std::move(message), *value);
+  }
 };
 
 // Specialisation for nullptr.
@@ -619,6 +700,12 @@ template <>
 struct TraceFormatTraits<std::nullptr_t> {
   inline static void WriteIntoTrace(TracedValue context, std::nullptr_t) {
     std::move(context).WritePointer(nullptr);
+  }
+
+  template <typename MessageType>
+  inline static void WriteIntoTrace(TracedProto<MessageType>, std::nullptr_t) {
+    // Start the message, but do not write anything. TraceProcessor will emit a
+    // NULL value.
   }
 };
 

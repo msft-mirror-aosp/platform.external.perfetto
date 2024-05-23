@@ -23,10 +23,19 @@ namespace perfetto {
 PlatformThreadLocalObject::~PlatformThreadLocalObject() = default;
 Platform::~Platform() = default;
 
+void Platform::Shutdown() {}
+
+base::PlatformThreadId Platform::GetCurrentThreadId() {
+  return base::GetThreadId();
+}
+
 // static
 std::unique_ptr<PlatformThreadLocalObject>
 PlatformThreadLocalObject::CreateInstance() {
   return std::unique_ptr<PlatformThreadLocalObject>(new internal::TracingTLS());
 }
+
+// static
+base::PlatformProcessId Platform::process_id_ = 0;
 
 }  // namespace perfetto

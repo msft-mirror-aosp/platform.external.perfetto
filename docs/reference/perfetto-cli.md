@@ -62,9 +62,14 @@ mode.
 :     Prints out help text for the `perfetto` tool.
 
 
-## LIGHTWEIGHT MODE
+## SIMPLE MODE
 
-The general syntax for using `perfetto` in *lightweight mode* is as follows:
+For ease of use, the `perfetto` command includes support for a subset of
+configurations via command line arguments. On-device, these
+configurations behave equivalently to the same configurations provided
+by a *CONFIG_FILE* (see below).
+
+The general syntax for using `perfetto` in *simple mode* is as follows:
 
 ```
  adb shell perfetto [ --time TIMESPEC ] [ --buffer SIZE ] [ --size SIZE ]
@@ -73,7 +78,7 @@ The general syntax for using `perfetto` in *lightweight mode* is as follows:
 
 
 The following table lists the available options when using `perfetto` in
-*lightweight mode*.
+*simple mode*.
 
 `-t`, `--time` _TIME[s|m|h]_
 :    Specifies the trace duration in seconds, minutes, or hours.
@@ -94,8 +99,9 @@ This is followed by a list of event specifiers:
 `ATRACE_CAT`
 :    Specifies the atrace categories you want to record a trace for.
      For example, the following command traces Window Manager using atrace:
-     `adb shell perfetto --out FILE wm`. To record other categories, see this
-     [list of atrace categories](https://android.googlesource.com/platform/frameworks/native/+/refs/tags/android-q-preview-5/cmds/atrace/atrace.cpp#100).
+     `adb shell perfetto --out FILE wm`. To record other categories, see the
+     [list of atrace categories](https://cs.android.com/android/platform/superproject/main/+/main:frameworks/native/cmds/atrace/atrace.cpp).
+     Note: Available categories are Android version dependent.
 
 `FTRACE_GROUP/FTRACE_NAME`
 :    Specifies the ftrace events you want to record a trace for.

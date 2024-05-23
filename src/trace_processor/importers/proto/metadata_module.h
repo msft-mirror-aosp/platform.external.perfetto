@@ -17,12 +17,12 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_METADATA_MODULE_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_PROTO_METADATA_MODULE_H_
 
-#include "perfetto/base/build_config.h"
+#include "src/trace_processor/importers/common/trace_parser.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
-#include "src/trace_processor/timestamped_trace_piece.h"
 
-#include "protos/perfetto/trace/profiling/deobfuscation.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
+#include "src/trace_processor/storage/trace_storage.h"
 
 namespace perfetto {
 namespace trace_processor {
@@ -36,19 +36,24 @@ class MetadataModule : public ProtoImporterModule {
       const protos::pbzero::TracePacket::Decoder& decoder,
       TraceBlobView* packet,
       int64_t packet_timestamp,
-      PacketSequenceState* state,
+      RefPtr<PacketSequenceStateGeneration> state,
       uint32_t field_id) override;
 
-  void ParsePacket(const protos::pbzero::TracePacket::Decoder& decoder,
-                   const TimestampedTracePiece& ttp,
-                   uint32_t field_id) override;
+  void ParseTracePacketData(const protos::pbzero::TracePacket::Decoder& decoder,
+                            int64_t ts,
+                            const TracePacketData&,
+                            uint32_t field_id) override;
+
+  void ParseTraceConfig(const protos::pbzero::TraceConfig_Decoder&) override;
 
  private:
-  void ParseChromeBenchmarkMetadata(ConstBytes);
-  void ParseChromeMetadataPacket(ConstBytes);
   void ParseTrigger(int64_t ts, ConstBytes);
+  void ParseChromeTrigger(int64_t ts, ConstBytes);
+  void ParseTraceUuid(ConstBytes);
 
   TraceProcessorContext* context_;
+  StringId producer_name_key_id_ = kNullStringId;
+  StringId trusted_producer_uid_key_id_ = kNullStringId;
 };
 
 }  // namespace trace_processor

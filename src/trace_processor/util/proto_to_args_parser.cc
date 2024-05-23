@@ -16,6 +16,11 @@
 
 #include "src/trace_processor/util/proto_to_args_parser.h"
 
+#include <stdint.h>
+
+#include "perfetto/base/status.h"
+#include "perfetto/protozero/proto_decoder.h"
+#include "perfetto/protozero/proto_utils.h"
 #include "protos/perfetto/common/descriptor.pbzero.h"
 #include "src/trace_processor/util/descriptors.h"
 #include "src/trace_processor/util/status_macros.h"
@@ -25,6 +30,9 @@ namespace trace_processor {
 namespace util {
 
 namespace {
+
+template <protozero::proto_utils::ProtoWireType wire_type, typename cpp_type>
+using PRFI = protozero::PackedRepeatedFieldIterator<wire_type, cpp_type>;
 
 void AppendProtoType(std::string& target, const std::string& value) {
   if (!target.empty())
@@ -46,12 +54,12 @@ ProtoToArgsParser::ScopedNestedKeyContext::ScopedNestedKeyContext(Key& key)
       old_key_length_(key.key.length()) {}
 
 ProtoToArgsParser::ScopedNestedKeyContext::ScopedNestedKeyContext(
-    ProtoToArgsParser::ScopedNestedKeyContext&& other)
+    ProtoToArgsParser::ScopedNestedKeyContext&& other) noexcept
     : key_(other.key_),
       old_flat_key_length_(other.old_flat_key_length_),
       old_key_length_(other.old_key_length_) {
-  other.old_flat_key_length_ = base::nullopt;
-  other.old_key_length_ = base::nullopt;
+  other.old_flat_key_length_ = std::nullopt;
+  other.old_key_length_ = std::nullopt;
 }
 
 ProtoToArgsParser::ScopedNestedKeyContext::~ScopedNestedKeyContext() {
@@ -63,8 +71,8 @@ void ProtoToArgsParser::ScopedNestedKeyContext::RemoveFieldSuffix() {
     key_.flat_key.resize(old_flat_key_length_.value());
   if (old_key_length_)
     key_.key.resize(old_key_length_.value());
-  old_flat_key_length_ = base::nullopt;
-  old_key_length_ = base::nullopt;
+  old_flat_key_length_ = std::nullopt;
+  old_key_length_ = std::nullopt;
 }
 
 ProtoToArgsParser::Delegate::~Delegate() = default;
@@ -78,18 +86,21 @@ ProtoToArgsParser::ProtoToArgsParser(const DescriptorPool& pool) : pool_(pool) {
 base::Status ProtoToArgsParser::ParseMessage(
     const protozero::ConstBytes& cb,
     const std::string& type,
-    const std::vector<uint16_t>* allowed_fields,
-    Delegate& delegate) {
+    const std::vector<uint32_t>* allowed_fields,
+    Delegate& delegate,
+    int* unknown_extensions) {
   ScopedNestedKeyContext key_context(key_prefix_);
-  return ParseMessageInternal(key_context, cb, type, allowed_fields, delegate);
+  return ParseMessageInternal(key_context, cb, type, allowed_fields, delegate,
+                              unknown_extensions);
 }
 
 base::Status ProtoToArgsParser::ParseMessageInternal(
     ScopedNestedKeyContext& key_context,
     const protozero::ConstBytes& cb,
     const std::string& type,
-    const std::vector<uint16_t>* allowed_fields,
-    Delegate& delegate) {
+    const std::vector<uint32_t>* allowed_fields,
+    Delegate& delegate,
+    int* unknown_extensions) {
   if (auto override_result =
           MaybeApplyOverrideForType(type, key_context, cb, delegate)) {
     return override_result.value();
@@ -103,12 +114,16 @@ base::Status ProtoToArgsParser::ParseMessageInternal(
   auto& descriptor = pool_.descriptors()[*idx];
 
   std::unordered_map<size_t, int> repeated_field_index;
-
+  bool empty_message = true;
   protozero::ProtoDecoder decoder(cb);
   for (protozero::Field f = decoder.ReadField(); f.valid();
        f = decoder.ReadField()) {
+    empty_message = false;
     auto field = descriptor.FindFieldByTag(f.id());
     if (!field) {
+      if (unknown_extensions != nullptr) {
+        (*unknown_extensions)++;
+      }
       // Unknown field, possibly an unknown extension.
       continue;
     }
@@ -124,11 +139,23 @@ base::Status ProtoToArgsParser::ParseMessageInternal(
       // reflected.
       continue;
     }
-    RETURN_IF_ERROR(
-        ParseField(*field, repeated_field_index[f.id()], f, delegate));
+
+    // Packed fields need to be handled specially because
+    if (field->is_packed()) {
+      RETURN_IF_ERROR(ParsePackedField(*field, repeated_field_index, f,
+                                       delegate, unknown_extensions));
+      continue;
+    }
+
+    RETURN_IF_ERROR(ParseField(*field, repeated_field_index[f.id()], f,
+                               delegate, unknown_extensions));
     if (field->is_repeated()) {
       repeated_field_index[f.id()]++;
     }
+  }
+
+  if (empty_message) {
+    delegate.AddNull(key_prefix_);
   }
 
   return base::OkStatus();
@@ -138,7 +165,8 @@ base::Status ProtoToArgsParser::ParseField(
     const FieldDescriptor& field_descriptor,
     int repeated_field_number,
     protozero::Field field,
-    Delegate& delegate) {
+    Delegate& delegate,
+    int* unknown_extensions) {
   std::string prefix_part = field_descriptor.name();
   if (field_descriptor.is_repeated()) {
     std::string number = std::to_string(repeated_field_number);
@@ -157,7 +185,7 @@ base::Status ProtoToArgsParser::ParseField(
 
   // If we have an override parser then use that instead and move onto the
   // next loop.
-  if (base::Optional<base::Status> status =
+  if (std::optional<base::Status> status =
           MaybeApplyOverrideForField(field, delegate)) {
     return *status;
   }
@@ -169,10 +197,68 @@ base::Status ProtoToArgsParser::ParseField(
       protos::pbzero::FieldDescriptorProto::TYPE_MESSAGE) {
     return ParseMessageInternal(key_context, field.as_bytes(),
                                 field_descriptor.resolved_type_name(), nullptr,
-                                delegate);
+                                delegate, unknown_extensions);
+  }
+  return ParseSimpleField(field_descriptor, field, delegate);
+}
+
+base::Status ProtoToArgsParser::ParsePackedField(
+    const FieldDescriptor& field_descriptor,
+    std::unordered_map<size_t, int>& repeated_field_index,
+    protozero::Field field,
+    Delegate& delegate,
+    int* unknown_extensions) {
+  using FieldDescriptorProto = protos::pbzero::FieldDescriptorProto;
+  using PWT = protozero::proto_utils::ProtoWireType;
+
+  if (!field_descriptor.is_repeated()) {
+    return base::ErrStatus("Packed field %s must be repeated",
+                           field_descriptor.name().c_str());
+  }
+  if (field.type() != PWT::kLengthDelimited) {
+    return base::ErrStatus(
+        "Packed field %s must have a length delimited wire type",
+        field_descriptor.name().c_str());
   }
 
-  return ParseSimpleField(field_descriptor, field, delegate);
+  auto parse = [&](uint64_t new_value, PWT wire_type) {
+    protozero::Field f;
+    f.initialize(field.id(), static_cast<uint8_t>(wire_type), new_value, 0);
+    return ParseField(field_descriptor, repeated_field_index[field.id()]++, f,
+                      delegate, unknown_extensions);
+  };
+
+  const uint8_t* data = field.as_bytes().data;
+  size_t size = field.as_bytes().size;
+  bool perr = false;
+  switch (field_descriptor.type()) {
+    case FieldDescriptorProto::TYPE_INT32:
+    case FieldDescriptorProto::TYPE_INT64:
+    case FieldDescriptorProto::TYPE_UINT32:
+    case FieldDescriptorProto::TYPE_UINT64:
+    case FieldDescriptorProto::TYPE_ENUM:
+      for (PRFI<PWT::kVarInt, uint64_t> it(data, size, &perr); it; ++it) {
+        parse(*it, PWT::kVarInt);
+      }
+      break;
+    case FieldDescriptorProto::TYPE_FIXED32:
+    case FieldDescriptorProto::TYPE_SFIXED32:
+    case FieldDescriptorProto::TYPE_FLOAT:
+      for (PRFI<PWT::kFixed32, uint32_t> it(data, size, &perr); it; ++it) {
+        parse(*it, PWT::kFixed32);
+      }
+      break;
+    case FieldDescriptorProto::TYPE_FIXED64:
+    case FieldDescriptorProto::TYPE_SFIXED64:
+    case FieldDescriptorProto::TYPE_DOUBLE:
+      for (PRFI<PWT::kFixed64, uint64_t> it(data, size, &perr); it; ++it) {
+        parse(*it, PWT::kFixed64);
+      }
+      break;
+    default:
+      return base::ErrStatus("Unsupported packed repeated field");
+  }
+  return base::OkStatus();
 }
 
 void ProtoToArgsParser::AddParsingOverrideForField(
@@ -186,23 +272,23 @@ void ProtoToArgsParser::AddParsingOverrideForType(const std::string& type,
   type_overrides_[type] = std::move(func);
 }
 
-base::Optional<base::Status> ProtoToArgsParser::MaybeApplyOverrideForField(
+std::optional<base::Status> ProtoToArgsParser::MaybeApplyOverrideForField(
     const protozero::Field& field,
     Delegate& delegate) {
   auto it = field_overrides_.find(key_prefix_.flat_key);
   if (it == field_overrides_.end())
-    return base::nullopt;
+    return std::nullopt;
   return it->second(field, delegate);
 }
 
-base::Optional<base::Status> ProtoToArgsParser::MaybeApplyOverrideForType(
+std::optional<base::Status> ProtoToArgsParser::MaybeApplyOverrideForType(
     const std::string& message_type,
     ScopedNestedKeyContext& key,
     const protozero::ConstBytes& data,
     Delegate& delegate) {
   auto it = type_overrides_.find(message_type);
   if (it == type_overrides_.end())
-    return base::nullopt;
+    return std::nullopt;
   return it->second(key, data, delegate);
 }
 
@@ -214,7 +300,6 @@ base::Status ProtoToArgsParser::ParseSimpleField(
   switch (descriptor.type()) {
     case FieldDescriptorProto::TYPE_INT32:
     case FieldDescriptorProto::TYPE_SFIXED32:
-    case FieldDescriptorProto::TYPE_FIXED32:
       delegate.AddInteger(key_prefix_, field.as_int32());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_SINT32:
@@ -222,16 +307,17 @@ base::Status ProtoToArgsParser::ParseSimpleField(
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_INT64:
     case FieldDescriptorProto::TYPE_SFIXED64:
-    case FieldDescriptorProto::TYPE_FIXED64:
       delegate.AddInteger(key_prefix_, field.as_int64());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_SINT64:
       delegate.AddInteger(key_prefix_, field.as_sint64());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_UINT32:
+    case FieldDescriptorProto::TYPE_FIXED32:
       delegate.AddUnsignedInteger(key_prefix_, field.as_uint32());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_UINT64:
+    case FieldDescriptorProto::TYPE_FIXED64:
       delegate.AddUnsignedInteger(key_prefix_, field.as_uint64());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_BOOL:
@@ -242,6 +328,9 @@ base::Status ProtoToArgsParser::ParseSimpleField(
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_FLOAT:
       delegate.AddDouble(key_prefix_, static_cast<double>(field.as_float()));
+      return base::OkStatus();
+    case FieldDescriptorProto::TYPE_BYTES:
+      delegate.AddBytes(key_prefix_, field.as_bytes());
       return base::OkStatus();
     case FieldDescriptorProto::TYPE_STRING:
       delegate.AddString(key_prefix_, field.as_string());
@@ -277,14 +366,14 @@ base::Status ProtoToArgsParser::ParseSimpleField(
 
 ProtoToArgsParser::ScopedNestedKeyContext ProtoToArgsParser::EnterArray(
     size_t index) {
-  auto context = ScopedNestedKeyContext(key_prefix_);
+  ScopedNestedKeyContext context(key_prefix_);
   key_prefix_.key += "[" + std::to_string(index) + "]";
   return context;
 }
 
 ProtoToArgsParser::ScopedNestedKeyContext ProtoToArgsParser::EnterDictionary(
     const std::string& name) {
-  auto context = ScopedNestedKeyContext(key_prefix_);
+  ScopedNestedKeyContext context(key_prefix_);
   AppendProtoType(key_prefix_.key, name);
   AppendProtoType(key_prefix_.flat_key, name);
   return context;

@@ -31,20 +31,33 @@ using ::testing::SaveArg;
 class MockSliceTracker : public SliceTracker {
  public:
   MockSliceTracker(TraceProcessorContext* context) : SliceTracker(context) {}
-  virtual ~MockSliceTracker() = default;
+  ~MockSliceTracker() override = default;
 
-  MOCK_METHOD5(Begin,
-               base::Optional<SliceId>(int64_t timestamp,
-                                       TrackId track_id,
-                                       StringId cat,
-                                       StringId name,
-                                       SetArgsCallback args_callback));
-  MOCK_METHOD5(End,
-               base::Optional<SliceId>(int64_t timestamp,
-                                       TrackId track_id,
-                                       StringId cat,
-                                       StringId name,
-                                       SetArgsCallback args_callback));
+  MOCK_METHOD(std::optional<SliceId>,
+              Begin,
+              (int64_t timestamp,
+               TrackId track_id,
+               StringId cat,
+               StringId name,
+               SetArgsCallback args_callback),
+              (override));
+  MOCK_METHOD(std::optional<SliceId>,
+              End,
+              (int64_t timestamp,
+               TrackId track_id,
+               StringId cat,
+               StringId name,
+               SetArgsCallback args_callback),
+              (override));
+  MOCK_METHOD(std::optional<SliceId>,
+              Scoped,
+              (int64_t timestamp,
+               TrackId track_id,
+               StringId cat,
+               StringId name,
+               int64_t duration,
+               SetArgsCallback args_callback),
+              (override));
 };
 
 class SyscallTrackerTest : public ::testing::Test {
@@ -68,9 +81,9 @@ TEST_F(SyscallTrackerTest, ReportUnknownSyscalls) {
   StringId begin_name = kNullStringId;
   StringId end_name = kNullStringId;
   EXPECT_CALL(*slice_tracker, Begin(100, track, kNullStringId, _, _))
-      .WillOnce(DoAll(SaveArg<3>(&begin_name), Return(base::nullopt)));
+      .WillOnce(DoAll(SaveArg<3>(&begin_name), Return(std::nullopt)));
   EXPECT_CALL(*slice_tracker, End(110, track, kNullStringId, _, _))
-      .WillOnce(DoAll(SaveArg<3>(&end_name), Return(base::nullopt)));
+      .WillOnce(DoAll(SaveArg<3>(&end_name), Return(std::nullopt)));
 
   SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(&context);
   syscall_tracker->Enter(100 /*ts*/, 42 /*utid*/, 57 /*sys_read*/);
@@ -79,27 +92,25 @@ TEST_F(SyscallTrackerTest, ReportUnknownSyscalls) {
   EXPECT_EQ(context.storage->GetString(end_name), "sys_57");
 }
 
-TEST_F(SyscallTrackerTest, IgnoreWriteSyscalls) {
-  SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(&context);
-  syscall_tracker->SetArchitecture(kAarch64);
-  EXPECT_CALL(*slice_tracker, Begin(_, _, _, _, _)).Times(0);
-  EXPECT_CALL(*slice_tracker, End(_, _, _, _, _)).Times(0);
+TEST_F(SyscallTrackerTest, ReportSysreturn) {
+  EXPECT_CALL(*slice_tracker, Scoped(_, _, _, _, _, _)).Times(1);
 
-  syscall_tracker->Enter(100 /*ts*/, 42 /*utid*/, 64 /*sys_write*/);
-  syscall_tracker->Exit(110 /*ts*/, 42 /*utid*/, 64 /*sys_write*/);
+  SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(&context);
+  syscall_tracker->SetArchitecture(Architecture::kArm64);
+  syscall_tracker->Enter(100 /*ts*/, 42 /*utid*/, 139);
 }
 
-TEST_F(SyscallTrackerTest, Aarch64) {
+TEST_F(SyscallTrackerTest, Arm64) {
   constexpr TrackId track{0u};
   StringId begin_name = kNullStringId;
   StringId end_name = kNullStringId;
   EXPECT_CALL(*slice_tracker, Begin(100, track, kNullStringId, _, _))
-      .WillOnce(DoAll(SaveArg<3>(&begin_name), Return(base::nullopt)));
+      .WillOnce(DoAll(SaveArg<3>(&begin_name), Return(std::nullopt)));
   EXPECT_CALL(*slice_tracker, End(110, track, kNullStringId, _, _))
-      .WillOnce(DoAll(SaveArg<3>(&end_name), Return(base::nullopt)));
+      .WillOnce(DoAll(SaveArg<3>(&end_name), Return(std::nullopt)));
 
   SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(&context);
-  syscall_tracker->SetArchitecture(kAarch64);
+  syscall_tracker->SetArchitecture(Architecture::kArm64);
   syscall_tracker->Enter(100 /*ts*/, 42 /*utid*/, 63 /*sys_read*/);
   syscall_tracker->Exit(110 /*ts*/, 42 /*utid*/, 63 /*sys_read*/);
   EXPECT_EQ(context.storage->GetString(begin_name), "sys_read");
@@ -111,12 +122,12 @@ TEST_F(SyscallTrackerTest, x8664) {
   StringId begin_name = kNullStringId;
   StringId end_name = kNullStringId;
   EXPECT_CALL(*slice_tracker, Begin(100, track, kNullStringId, _, _))
-      .WillOnce(DoAll(SaveArg<3>(&begin_name), Return(base::nullopt)));
+      .WillOnce(DoAll(SaveArg<3>(&begin_name), Return(std::nullopt)));
   EXPECT_CALL(*slice_tracker, End(110, track, kNullStringId, _, _))
-      .WillOnce(DoAll(SaveArg<3>(&end_name), Return(base::nullopt)));
+      .WillOnce(DoAll(SaveArg<3>(&end_name), Return(std::nullopt)));
 
   SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(&context);
-  syscall_tracker->SetArchitecture(kX86_64);
+  syscall_tracker->SetArchitecture(Architecture::kX86_64);
   syscall_tracker->Enter(100 /*ts*/, 42 /*utid*/, 0 /*sys_read*/);
   syscall_tracker->Exit(110 /*ts*/, 42 /*utid*/, 0 /*sys_read*/);
   EXPECT_EQ(context.storage->GetString(begin_name), "sys_read");
@@ -128,7 +139,7 @@ TEST_F(SyscallTrackerTest, SyscallNumberTooLarge) {
   EXPECT_CALL(*slice_tracker, End(_, _, _, _, _)).Times(0);
 
   SyscallTracker* syscall_tracker = SyscallTracker::GetOrCreate(&context);
-  syscall_tracker->SetArchitecture(kAarch64);
+  syscall_tracker->SetArchitecture(Architecture::kArm64);
   syscall_tracker->Enter(100 /*ts*/, 42 /*utid*/, 9999);
   syscall_tracker->Exit(110 /*ts*/, 42 /*utid*/, 9999);
 }

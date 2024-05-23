@@ -20,6 +20,11 @@
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/traced/traced.h"
 #include "src/perfetto_cmd/perfetto_cmd.h"
+#include "src/websocket_bridge/websocket_bridge.h"
+
+#if PERFETTO_BUILDFLAG(PERFETTO_TRACED_PERF)
+#include "src/profiling/perf/traced_perf.h"
+#endif
 
 #include <stdio.h>
 
@@ -37,8 +42,12 @@ struct Applet {
 const Applet g_applets[]{
     {"traced", ServiceMain},
     {"traced_probes", ProbesMain},
+#if PERFETTO_BUILDFLAG(PERFETTO_TRACED_PERF)
+    {"traced_perf", TracedPerfMain},
+#endif
     {"perfetto", PerfettoCmdMain},
     {"trigger_perfetto", TriggerPerfettoMain},
+    {"websocket_bridge", WebsocketBridgeMain},
 };
 
 void PrintUsage() {
@@ -136,9 +145,9 @@ int TraceboxMain(int argc, char** argv) {
   // traced will write "1" and close the FD when the IPC socket is listening
   // (or traced crashed).
   base::Pipe traced_sync_pipe = base::Pipe::Create();
-  int wr_fd = *traced_sync_pipe.wr;
-  base::SetEnv("TRACED_NOTIFY_FD", std::to_string(wr_fd));
-  traced.args.preserve_fds.emplace_back(wr_fd);
+  int traced_fd = *traced_sync_pipe.wr;
+  base::SetEnv("TRACED_NOTIFY_FD", std::to_string(traced_fd));
+  traced.args.preserve_fds.emplace_back(traced_fd);
   // Create a new process group so CTRL-C is delivered only to the cmdline
   // process (the tracebox one) and not to traced. traced will still exit once
   // the main process exits, but this allows graceful stopping of the trace
@@ -161,9 +170,50 @@ int TraceboxMain(int argc, char** argv) {
   // Put traced_probes in the same process group as traced. Same reason (CTRL+C)
   // but it's not worth creating a new group.
   traced_probes.args.posix_proc_group_id = traced.pid();
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  // |traced_probes_sync_pipe| is used to synchronize with traced socket
+  // creation. traced will write "1" and close the FD when the IPC socket is
+  // listening (or traced crashed).
+  base::Pipe traced_probes_sync_pipe = base::Pipe::Create();
+  int traced_probes_fd = *traced_probes_sync_pipe.wr;
+  base::SetEnv("TRACED_PROBES_NOTIFY_FD", std::to_string(traced_probes_fd));
+  traced_probes.args.preserve_fds.emplace_back(traced_probes_fd);
+#endif
   traced_probes.Start();
 
-  perfetto_cmd.ConnectToServiceAndRun();
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  traced_probes_sync_pipe.wr.reset();
+
+  std::string traced_probes_notify_msg;
+  base::ReadPlatformHandle(*traced_probes_sync_pipe.rd,
+                           &traced_probes_notify_msg);
+  if (traced_probes_notify_msg != "1")
+    PERFETTO_FATAL(
+        "The traced_probes service failed unexpectedly. Check the logs");
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_TRACED_PERF)
+  base::Subprocess traced_perf({self_path, "traced_perf"});
+  // Put traced_perf in the same process group as traced. Same reason (CTRL+C)
+  // but it's not worth creating a new group.
+  traced_perf.args.posix_proc_group_id = traced.pid();
+
+  base::Pipe traced_perf_sync_pipe = base::Pipe::Create();
+  int traced_perf_fd = *traced_perf_sync_pipe.wr;
+  base::SetEnv("TRACED_PERF_NOTIFY_FD", std::to_string(traced_perf_fd));
+  traced_perf.args.preserve_fds.emplace_back(traced_perf_fd);
+  traced_perf.Start();
+  traced_perf_sync_pipe.wr.reset();
+
+  std::string traced_perf_notify_msg;
+  base::ReadPlatformHandle(*traced_perf_sync_pipe.rd,
+                           &traced_perf_notify_msg);
+  if (traced_perf_notify_msg != "1")
+    PERFETTO_FATAL(
+        "The traced_perf service failed unexpectedly. Check the logs");
+#endif
+
+  perfetto_cmd.ConnectToServiceRunAndMaybeNotify();
   return 0;
 }
 

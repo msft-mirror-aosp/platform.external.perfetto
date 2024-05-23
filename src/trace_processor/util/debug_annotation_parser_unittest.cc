@@ -18,14 +18,21 @@
 
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
+#include "perfetto/trace_processor/trace_blob.h"
+#include "perfetto/trace_processor/trace_blob_view.h"
 #include "protos/perfetto/common/descriptor.pbzero.h"
+#include "protos/perfetto/trace/interned_data/interned_data.pbzero.h"
+#include "protos/perfetto/trace/profiling/profile_common.pbzero.h"
+#include "protos/perfetto/trace/test_event.pbzero.h"
 #include "protos/perfetto/trace/track_event/debug_annotation.pbzero.h"
 #include "protos/perfetto/trace/track_event/source_location.pbzero.h"
 #include "src/protozero/test/example_proto/test_messages.pbzero.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/test_messages.descriptor.h"
+#include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/util/interned_message_view.h"
 #include "src/trace_processor/util/proto_to_args_parser.h"
-#include "src/trace_processor/util/trace_blob_view.h"
 #include "test/gtest_and_gmock.h"
 
 #include <sstream>
@@ -47,9 +54,13 @@ base::Status ParseDebugAnnotation(
 class DebugAnnotationParserTest : public ::testing::Test,
                                   public ProtoToArgsParser::Delegate {
  protected:
-  DebugAnnotationParserTest() {}
+  DebugAnnotationParserTest() : sequence_state_(&context_) {
+    context_.storage.reset(new TraceStorage());
+  }
 
   const std::vector<std::string>& args() const { return args_; }
+
+  PacketSequenceState* mutable_seq_state() { return &sequence_state_; }
 
  private:
   using Key = ProtoToArgsParser::Key;
@@ -69,6 +80,12 @@ class DebugAnnotationParserTest : public ::testing::Test,
   void AddString(const Key& key, const protozero::ConstChars& value) override {
     std::stringstream ss;
     ss << key.flat_key << " " << key.key << " " << value.ToStdString();
+    args_.push_back(ss.str());
+  }
+
+  void AddString(const Key& key, const std::string& value) override {
+    std::stringstream ss;
+    ss << key.flat_key << " " << key.key << " " << value;
     args_.push_back(ss.str());
   }
 
@@ -99,6 +116,12 @@ class DebugAnnotationParserTest : public ::testing::Test,
     return true;
   }
 
+  void AddNull(const Key& key) override {
+    std::stringstream ss;
+    ss << key.flat_key << " " << key.key << " [NULL]";
+    args_.push_back(ss.str());
+  }
+
   size_t GetArrayEntryIndex(const std::string& array_key) final {
     return array_indices_[array_key];
   }
@@ -107,12 +130,25 @@ class DebugAnnotationParserTest : public ::testing::Test,
     return ++array_indices_[array_key];
   }
 
-  InternedMessageView* GetInternedMessageView(uint32_t, uint64_t) override {
-    return nullptr;
+  InternedMessageView* GetInternedMessageView(uint32_t field_id,
+                                              uint64_t iid) override {
+    if (field_id !=
+        protos::pbzero::InternedData::kDebugAnnotationStringValuesFieldNumber) {
+      return nullptr;
+    }
+    return sequence_state_.current_generation()->GetInternedMessageView(
+        field_id, iid);
+  }
+
+  PacketSequenceStateGeneration* seq_state() final {
+    return sequence_state_.current_generation().get();
   }
 
   std::vector<std::string> args_;
   std::map<std::string, size_t> array_indices_;
+
+  TraceProcessorContext context_;
+  PacketSequenceState sequence_state_;
 };
 
 // This test checks that in when an array is nested inside a dict which is
@@ -229,6 +265,60 @@ TEST_F(DebugAnnotationParserTest, NestedArrays) {
   EXPECT_THAT(args(),
               testing::ElementsAre("root root[0][0] 1", "root root[0][1] 2",
                                    "root root[1][0] 3", "root root[1][1] 4"));
+}
+
+TEST_F(DebugAnnotationParserTest, TypedMessageInsideUntyped) {
+  protozero::HeapBuffered<protos::pbzero::DebugAnnotation> msg;
+  msg->set_name("root");
+
+  protozero::HeapBuffered<protozero::test::protos::pbzero::EveryField> message;
+  message->set_field_string("value");
+
+  msg->set_proto_type_name(message->GetName());
+  msg->set_proto_value(message.SerializeAsString());
+
+  DescriptorPool pool;
+  auto status = pool.AddFromFileDescriptorSet(kTestMessagesDescriptor.data(),
+                                              kTestMessagesDescriptor.size());
+  EXPECT_TRUE(status.ok()) << "Failed to parse kTestMessagesDescriptor: "
+                           << status.message();
+
+  ProtoToArgsParser args_parser(pool);
+  DebugAnnotationParser parser(args_parser);
+
+  status = ParseDebugAnnotation(parser, msg, *this);
+  EXPECT_TRUE(status.ok()) << "DebugAnnotationParser::Parse failed with error: "
+                           << status.message();
+
+  EXPECT_THAT(args(), testing::ElementsAre(
+                          "root.field_string root.field_string value"));
+}
+
+TEST_F(DebugAnnotationParserTest, InternedString) {
+  protozero::HeapBuffered<protos::pbzero::DebugAnnotation> msg;
+  msg->set_name("root");
+
+  protozero::HeapBuffered<protos::pbzero::InternedString> string;
+  string->set_iid(1);
+  string->set_str("foo");
+  std::vector<uint8_t> data_serialized = string.SerializeAsArray();
+
+  mutable_seq_state()->InternMessage(
+      protos::pbzero::InternedData::kDebugAnnotationStringValuesFieldNumber,
+      TraceBlobView(
+          TraceBlob::CopyFrom(data_serialized.data(), data_serialized.size())));
+
+  msg->set_string_value_iid(1);
+
+  DescriptorPool pool;
+  ProtoToArgsParser args_parser(pool);
+  DebugAnnotationParser parser(args_parser);
+
+  auto status = ParseDebugAnnotation(parser, msg, *this);
+  EXPECT_TRUE(status.ok()) << "DebugAnnotationParser::Parse failed with error: "
+                           << status.message();
+
+  EXPECT_THAT(args(), testing::ElementsAre("root root foo"));
 }
 
 }  // namespace

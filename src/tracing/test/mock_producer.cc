@@ -16,10 +16,13 @@
 
 #include "src/tracing/test/mock_producer.h"
 
+#include "perfetto/ext/tracing/core/client_identity.h"
 #include "perfetto/ext/tracing/core/trace_writer.h"
 #include "perfetto/ext/tracing/core/tracing_service.h"
+#include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/tracing/core/data_source_config.h"
 #include "perfetto/tracing/core/data_source_descriptor.h"
+#include "protos/perfetto/common/track_event_descriptor.pbzero.h"
 #include "src/base/test/test_task_runner.h"
 
 using ::testing::_;
@@ -29,6 +32,26 @@ using ::testing::InvokeWithoutArgs;
 using ::testing::Property;
 
 namespace perfetto {
+
+namespace {
+
+static DataSourceDescriptor CreateDataSourceDescriptor(
+    const std::initializer_list<std::string>& categories,
+    uint32_t id) {
+  DataSourceDescriptor ds_desc;
+  ds_desc.set_name("track_event");
+  ds_desc.set_id(id);
+
+  protozero::HeapBuffered<protos::pbzero::TrackEventDescriptor> ted;
+  for (auto c : categories) {
+    auto cat = ted->add_available_categories();
+    cat->set_name(c);
+  }
+  ds_desc.set_track_event_descriptor_raw(ted.SerializeAsString());
+  return ds_desc;
+}
+
+}  // anonymous namespace
 
 MockProducer::MockProducer(base::TestTaskRunner* task_runner)
     : task_runner_(task_runner) {}
@@ -47,12 +70,14 @@ MockProducer::~MockProducer() {
 void MockProducer::Connect(TracingService* svc,
                            const std::string& producer_name,
                            uid_t uid,
+                           pid_t pid,
                            size_t shared_memory_size_hint_bytes,
                            size_t shared_memory_page_size_hint_bytes,
                            std::unique_ptr<SharedMemory> shm) {
   producer_name_ = producer_name;
   service_endpoint_ = svc->ConnectProducer(
-      this, uid, producer_name, shared_memory_size_hint_bytes,
+      this, ClientIdentity(uid, pid), producer_name,
+      shared_memory_size_hint_bytes,
       /*in_process=*/true, TracingService::ProducerSMBScrapingMode::kDefault,
       shared_memory_page_size_hint_bytes, std::move(shm));
   auto checkpoint_name = "on_producer_connect_" + producer_name;
@@ -64,17 +89,33 @@ void MockProducer::Connect(TracingService* svc,
 void MockProducer::RegisterDataSource(const std::string& name,
                                       bool ack_stop,
                                       bool ack_start,
-                                      bool handle_incremental_state_clear) {
+                                      bool handle_incremental_state_clear,
+                                      bool no_flush) {
   DataSourceDescriptor ds_desc;
   ds_desc.set_name(name);
   ds_desc.set_will_notify_on_stop(ack_stop);
   ds_desc.set_will_notify_on_start(ack_start);
   ds_desc.set_handles_incremental_state_clear(handle_incremental_state_clear);
+  ds_desc.set_no_flush(no_flush);
   service_endpoint_->RegisterDataSource(ds_desc);
 }
 
 void MockProducer::UnregisterDataSource(const std::string& name) {
   service_endpoint_->UnregisterDataSource(name);
+}
+
+void MockProducer::RegisterTrackEventDataSource(
+    const std::initializer_list<std::string>& categories,
+    uint32_t id) {
+  service_endpoint_->RegisterDataSource(
+      CreateDataSourceDescriptor(categories, id));
+}
+
+void MockProducer::UpdateTrackEventDataSource(
+    const std::initializer_list<std::string>& categories,
+    uint32_t id) {
+  service_endpoint_->UpdateDataSource(
+      CreateDataSourceDescriptor(categories, id));
 }
 
 void MockProducer::RegisterTraceWriter(uint32_t writer_id,
@@ -155,23 +196,32 @@ std::unique_ptr<TraceWriter> MockProducer::CreateTraceWriter(
   return service_endpoint_->CreateTraceWriter(buf_id);
 }
 
-void MockProducer::WaitForFlush(TraceWriter* writer_to_flush, bool reply) {
+void MockProducer::ExpectFlush(TraceWriter* writer_to_flush,
+                               bool reply,
+                               FlushFlags expected_flags) {
   std::vector<TraceWriter*> writers;
   if (writer_to_flush)
     writers.push_back(writer_to_flush);
-  WaitForFlush(writers, reply);
+  ExpectFlush(writers, reply, expected_flags);
 }
 
-void MockProducer::WaitForFlush(std::vector<TraceWriter*> writers_to_flush,
-                                bool reply) {
-  auto& expected_call = EXPECT_CALL(*this, Flush(_, _, _));
-  expected_call.WillOnce(Invoke(
-      [this, writers_to_flush, reply](FlushRequestID flush_req_id,
-                                      const DataSourceInstanceID*, size_t) {
-        for (auto* writer : writers_to_flush)
+void MockProducer::ExpectFlush(std::vector<TraceWriter*> writers_to_flush,
+                               bool reply,
+                               FlushFlags expected_flags) {
+  auto& expected_call = EXPECT_CALL(*this, Flush(_, _, _, _));
+  expected_call.WillOnce(
+      Invoke([this, writers_to_flush, reply, expected_flags](
+                 FlushRequestID flush_req_id, const DataSourceInstanceID*,
+                 size_t, FlushFlags actual_flags) {
+        if (expected_flags.flags()) {
+          EXPECT_EQ(actual_flags, expected_flags);
+        }
+        for (auto* writer : writers_to_flush) {
           writer->Flush();
-        if (reply)
+        }
+        if (reply) {
           service_endpoint_->NotifyFlushComplete(flush_req_id);
+        }
       }));
 }
 

@@ -36,7 +36,7 @@ dependencies, and then build the standalone library:
 ```
 $ cd perfetto
 perfetto/ $ tools/install-build-deps --android
-perfetto/ $ tools/build_all_configs.py --android
+perfetto/ $ tools/setup_all_configs.py --android
 perfetto/ $ ninja -C out/android_release_incl_heapprofd_arm64 \
 libheapprofd_standalone_client.so
 ```
@@ -100,11 +100,11 @@ your app.
 ## Profile your App
 
 Then, use the [heap_profile](
-https://raw.githubusercontent.com/google/perfetto/master/tools/heap_profile)
+https://raw.githubusercontent.com/google/perfetto/main/tools/heap_profile)
 script to get a profile to generate textpb of the config.
 To convert to a binary proto, you additionally need to download
 [`perfetto_trace.proto`](
-https://raw.githubusercontent.com/google/perfetto/master/protos/perfetto/trace/perfetto_trace.proto)
+https://raw.githubusercontent.com/google/perfetto/main/protos/perfetto/trace/perfetto_trace.proto)
 and have recent version of the protoc compiler installed.
 [Learn how to install protoc](https://grpc.io/docs/protoc-installation).
 

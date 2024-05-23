@@ -7,7 +7,7 @@ instrumentation via atrace and all other data sources listed in this site).
 ## Starting the tracing services
 
 Perfetto is based on [platform services](/docs/concepts/service-model.md)
-that are avilable since Android 9 (P) but are enabled by default only since
+that are available since Android 9 (P) but are enabled by default only since
 Android 11 (R).
 On Android 9 (P) and 10 (Q) you need to do the following to ensure that the
 tracing services are enabled before getting started:
@@ -80,19 +80,19 @@ support a systrace-equivalent syntax:
 On Linux and Mac:
 
 ```bash
-curl -O https://raw.githubusercontent.com/google/perfetto/master/tools/record_android_trace
+curl -O https://raw.githubusercontent.com/google/perfetto/main/tools/record_android_trace
 chmod u+x record_android_trace
 
 # See ./record_android_trace --help for more
-./record_android_trace -o trace_file.perfetto-trace -t 10s -b 32mb \
+./record_android_trace -o trace_file.perfetto-trace -t 30s -b 64mb \
 sched freq idle am wm gfx view binder_driver hal dalvik camera input res memory
 ```
 
 On Windows:
 
 ```bash
-curl -O https://raw.githubusercontent.com/google/perfetto/master/tools/record_android_trace
-python3 record_android_trace -o trace_file.perfetto-trace -t 10s -b 32mb \
+curl -O https://raw.githubusercontent.com/google/perfetto/main/tools/record_android_trace
+python3 record_android_trace -o trace_file.perfetto-trace -t 30s -b 64mb \
 sched freq idle am wm gfx view binder_driver hal dalvik camera input res memory
 ```
 

@@ -25,6 +25,7 @@
 #include "perfetto/base/time.h"
 #include "perfetto/ext/tracing/core/commit_data_request.h"
 #include "perfetto/ext/tracing/core/shared_memory.h"
+#include "perfetto/ext/tracing/core/shared_memory_abi.h"
 #include "src/tracing/core/null_trace_writer.h"
 #include "src/tracing/core/trace_writer_impl.h"
 
@@ -53,61 +54,53 @@ SharedMemoryABI::PageLayout SharedMemoryArbiterImpl::default_page_layout =
     SharedMemoryABI::PageLayout::kPageDiv1;
 
 // static
-constexpr BufferID SharedMemoryArbiterImpl::kInvalidBufferId;
-
-// static
 std::unique_ptr<SharedMemoryArbiter> SharedMemoryArbiter::CreateInstance(
     SharedMemory* shared_memory,
     size_t page_size,
+    ShmemMode mode,
     TracingService::ProducerEndpoint* producer_endpoint,
     base::TaskRunner* task_runner) {
-  return std::unique_ptr<SharedMemoryArbiterImpl>(
-      new SharedMemoryArbiterImpl(shared_memory->start(), shared_memory->size(),
-                                  page_size, producer_endpoint, task_runner));
+  return std::unique_ptr<SharedMemoryArbiterImpl>(new SharedMemoryArbiterImpl(
+      shared_memory->start(), shared_memory->size(), mode, page_size,
+      producer_endpoint, task_runner));
 }
 
 // static
 std::unique_ptr<SharedMemoryArbiter> SharedMemoryArbiter::CreateUnboundInstance(
     SharedMemory* shared_memory,
-    size_t page_size) {
+    size_t page_size,
+    ShmemMode mode) {
   return std::unique_ptr<SharedMemoryArbiterImpl>(new SharedMemoryArbiterImpl(
-      shared_memory->start(), shared_memory->size(), page_size,
+      shared_memory->start(), shared_memory->size(), mode, page_size,
       /*producer_endpoint=*/nullptr, /*task_runner=*/nullptr));
 }
 
 SharedMemoryArbiterImpl::SharedMemoryArbiterImpl(
     void* start,
     size_t size,
+    ShmemMode mode,
     size_t page_size,
     TracingService::ProducerEndpoint* producer_endpoint,
     base::TaskRunner* task_runner)
-    : initially_bound_(task_runner && producer_endpoint),
-      producer_endpoint_(producer_endpoint),
+    : producer_endpoint_(producer_endpoint),
+      use_shmem_emulation_(mode == ShmemMode::kShmemEmulation),
       task_runner_(task_runner),
-      shmem_abi_(reinterpret_cast<uint8_t*>(start), size, page_size),
+      shmem_abi_(reinterpret_cast<uint8_t*>(start), size, page_size, mode),
       active_writer_ids_(kMaxWriterID),
-      fully_bound_(initially_bound_),
+      fully_bound_(task_runner && producer_endpoint),
+      was_always_bound_(fully_bound_),
       weak_ptr_factory_(this) {}
 
 Chunk SharedMemoryArbiterImpl::GetNewChunk(
     const SharedMemoryABI::ChunkHeader& header,
-    BufferExhaustedPolicy buffer_exhausted_policy,
-    size_t size_hint) {
-  PERFETTO_DCHECK(size_hint == 0);  // Not implemented yet.
-  // If initially unbound, we do not support stalling. In theory, we could
-  // support stalling for TraceWriters created after the arbiter and startup
-  // buffer reservations were bound, but to avoid raciness between the creation
-  // of startup writers and binding, we categorically forbid kStall mode.
-  PERFETTO_DCHECK(initially_bound_ ||
-                  buffer_exhausted_policy == BufferExhaustedPolicy::kDrop);
-
+    BufferExhaustedPolicy buffer_exhausted_policy) {
   int stall_count = 0;
   unsigned stall_interval_us = 0;
   bool task_runner_runs_on_current_thread = false;
   static const unsigned kMaxStallIntervalUs = 100000;
   static const int kLogAfterNStalls = 3;
   static const int kFlushCommitsAfterEveryNStalls = 2;
-  static const int kAssertAtNStalls = 100;
+  static const int kAssertAtNStalls = 200;
 
   for (;;) {
     // TODO(primiano): Probably this lock is not really required and this code
@@ -115,6 +108,14 @@ Chunk SharedMemoryArbiterImpl::GetNewChunk(
     // SharedMemoryABI. But let's not be too adventurous for the moment.
     {
       std::unique_lock<std::mutex> scoped_lock(lock_);
+
+      // If ever unbound, we do not support stalling. In theory, we could
+      // support stalling for TraceWriters created after the arbiter and startup
+      // buffer reservations were bound, but to avoid raciness between the
+      // creation of startup writers and binding, we categorically forbid kStall
+      // mode.
+      PERFETTO_DCHECK(was_always_bound_ ||
+                      buffer_exhausted_policy == BufferExhaustedPolicy::kDrop);
 
       task_runner_runs_on_current_thread =
           task_runner_ && task_runner_->RunsTasksOnCurrentThread();
@@ -180,11 +181,12 @@ Chunk SharedMemoryArbiterImpl::GetNewChunk(
     }  // scoped_lock
 
     if (buffer_exhausted_policy == BufferExhaustedPolicy::kDrop) {
-      PERFETTO_DLOG("Shared memory buffer exhaused, returning invalid Chunk!");
+      PERFETTO_DLOG("Shared memory buffer exhausted, returning invalid Chunk!");
       return Chunk();
     }
 
-    PERFETTO_DCHECK(initially_bound_);
+    // Stalling is not supported if we were ever unbound (see earlier comment).
+    PERFETTO_CHECK(was_always_bound_);
 
     // All chunks are taken (either kBeingWritten by us or kBeingRead by the
     // Service).
@@ -269,12 +271,15 @@ void SharedMemoryArbiterImpl::UpdateCommitDataRequest(
       }
     }
 
+    CommitDataRequest::ChunksToMove* ctm = nullptr;  // Set if chunk is valid.
     // If a valid chunk is specified, return it and attach it to the request.
     if (chunk.is_valid()) {
       PERFETTO_DCHECK(chunk.writer_id() == writer_id);
       uint8_t chunk_idx = chunk.chunk_idx();
       bytes_pending_commit_ += chunk.size();
       size_t page_idx;
+
+      ctm = commit_data_req_->add_chunks_to_move();
       // If the chunk needs patching, it should not be marked as complete yet,
       // because this would indicate to the service that the producer will not
       // be writing to it anymore, while the producer might still apply patches
@@ -299,8 +304,6 @@ void SharedMemoryArbiterImpl::UpdateCommitDataRequest(
 
       // DO NOT access |chunk| after this point, it has been std::move()-d
       // above.
-      CommitDataRequest::ChunksToMove* ctm =
-          commit_data_req_->add_chunks_to_move();
       ctm->set_page(static_cast<uint32_t>(page_idx));
       ctm->set_chunk(chunk_idx);
       ctm->set_target_buffer(target_buffer);
@@ -529,7 +532,7 @@ void SharedMemoryArbiterImpl::FlushPendingCommitDataRequests(
       // Since we are about to notify the service of all batched chunks, it will
       // not be possible to apply any more patches to them and we need to move
       // them to kChunkComplete - otherwise the service won't look at them.
-      for (auto& ctm : commit_data_req_->chunks_to_move()) {
+      for (auto& ctm : *commit_data_req_->mutable_chunks_to_move()) {
         uint32_t layout = shmem_abi_.GetPageLayout(ctm.page());
         auto chunk_state =
             shmem_abi_.GetChunkStateFromLayout(layout, ctm.chunk());
@@ -537,12 +540,23 @@ void SharedMemoryArbiterImpl::FlushPendingCommitDataRequests(
         // patching is also the subset of chunks that are still being written
         // to. The rest of the chunks in |commit_data_req_| do not need patching
         // and have already been marked as complete.
-        if (chunk_state != SharedMemoryABI::kChunkBeingWritten)
-          continue;
+        if (chunk_state == SharedMemoryABI::kChunkBeingWritten) {
+          auto chunk =
+              shmem_abi_.GetChunkUnchecked(ctm.page(), layout, ctm.chunk());
+          shmem_abi_.ReleaseChunkAsComplete(std::move(chunk));
+        }
 
-        SharedMemoryABI::Chunk chunk =
-            shmem_abi_.GetChunkUnchecked(ctm.page(), layout, ctm.chunk());
-        shmem_abi_.ReleaseChunkAsComplete(std::move(chunk));
+        if (use_shmem_emulation_) {
+          // When running in the emulation mode:
+          // 1. serialize the chunk data to |ctm| as we won't modify the chunk
+          // anymore.
+          // 2. free the chunk as the service won't be able to do this.
+          auto chunk =
+              shmem_abi_.GetChunkUnchecked(ctm.page(), layout, ctm.chunk());
+          PERFETTO_CHECK(chunk.is_valid());
+          ctm.set_data(chunk.begin(), chunk.size());
+          shmem_abi_.ReleaseChunkAsFree(std::move(chunk));
+        }
       }
 
       req = std::move(commit_data_req_);
@@ -577,7 +591,6 @@ std::unique_ptr<TraceWriter> SharedMemoryArbiterImpl::CreateTraceWriter(
 
 std::unique_ptr<TraceWriter> SharedMemoryArbiterImpl::CreateStartupTraceWriter(
     uint16_t target_buffer_reservation_id) {
-  PERFETTO_CHECK(!initially_bound_);
   return CreateTraceWriterInternal(
       MakeTargetBufferIdForReservation(target_buffer_reservation_id),
       BufferExhaustedPolicy::kDrop);
@@ -588,7 +601,6 @@ void SharedMemoryArbiterImpl::BindToProducerEndpoint(
     base::TaskRunner* task_runner) {
   PERFETTO_DCHECK(producer_endpoint && task_runner);
   PERFETTO_DCHECK(task_runner->RunsTasksOnCurrentThread());
-  PERFETTO_CHECK(!initially_bound_);
 
   bool should_flush = false;
   std::function<void()> flush_callback;
@@ -631,12 +643,10 @@ void SharedMemoryArbiterImpl::BindStartupTargetBuffer(
     uint16_t target_buffer_reservation_id,
     BufferID target_buffer_id) {
   PERFETTO_DCHECK(target_buffer_id > 0);
-  PERFETTO_CHECK(!initially_bound_);
 
   std::unique_lock<std::mutex> scoped_lock(lock_);
 
-  // We should already be bound to an endpoint, but not fully bound.
-  PERFETTO_CHECK(!fully_bound_);
+  // We should already be bound to an endpoint.
   PERFETTO_CHECK(producer_endpoint_);
   PERFETTO_CHECK(task_runner_);
   PERFETTO_CHECK(task_runner_->RunsTasksOnCurrentThread());
@@ -647,8 +657,6 @@ void SharedMemoryArbiterImpl::BindStartupTargetBuffer(
 
 void SharedMemoryArbiterImpl::AbortStartupTracingForReservation(
     uint16_t target_buffer_reservation_id) {
-  PERFETTO_CHECK(!initially_bound_);
-
   std::unique_lock<std::mutex> scoped_lock(lock_);
 
   // If we are already bound to an arbiter, we may need to flush after aborting
@@ -668,8 +676,6 @@ void SharedMemoryArbiterImpl::AbortStartupTracingForReservation(
     return;
   }
 
-  PERFETTO_CHECK(!fully_bound_);
-
   // Bind the target buffer reservation to an invalid buffer (ID 0), so that
   // existing commits, as well as future commits (of currently acquired chunks),
   // will be released as free free by the service but otherwise ignored (i.e.
@@ -686,6 +692,10 @@ void SharedMemoryArbiterImpl::BindStartupTargetBufferImpl(
   // We should already be bound to an endpoint if the target buffer is valid.
   PERFETTO_DCHECK((producer_endpoint_ && task_runner_) ||
                   target_buffer_id == kInvalidBufferId);
+
+  PERFETTO_DLOG("Binding startup target buffer reservation %" PRIu16
+                " to buffer %" PRIu16,
+                target_buffer_reservation_id, target_buffer_id);
 
   MaybeUnboundBufferID reserved_id =
       MakeTargetBufferIdForReservation(target_buffer_reservation_id);
@@ -818,11 +828,21 @@ std::unique_ptr<TraceWriter> SharedMemoryArbiterImpl::CreateTraceWriterInternal(
       // Mark the arbiter as not fully bound, since we now have at least one
       // unbound trace writer / target buffer reservation.
       fully_bound_ = false;
+      was_always_bound_ = false;
     } else if (target_buffer != kInvalidBufferId) {
       // Trace writer is bound, so arbiter should be bound to an endpoint, too.
       PERFETTO_CHECK(producer_endpoint_ && task_runner_);
       task_runner_to_register_on = task_runner_;
     }
+
+    // All trace writers must use kDrop policy if the arbiter ever becomes
+    // unbound.
+    bool uses_drop_policy =
+        buffer_exhausted_policy == BufferExhaustedPolicy::kDrop;
+    all_writers_have_drop_policy_ &= uses_drop_policy;
+    PERFETTO_DCHECK(fully_bound_ || uses_drop_policy);
+    PERFETTO_CHECK(fully_bound_ || all_writers_have_drop_policy_);
+    PERFETTO_CHECK(was_always_bound_ || uses_drop_policy);
   }  // scoped_lock
 
   // We shouldn't post tasks while locked. |task_runner_to_register_on|
@@ -913,6 +933,8 @@ bool SharedMemoryArbiterImpl::UpdateFullyBoundLocked() {
       [](std::pair<MaybeUnboundBufferID, TargetBufferReservation> entry) {
         return !entry.second.resolved;
       });
+  if (!fully_bound_)
+    was_always_bound_ = false;
   return fully_bound_;
 }
 

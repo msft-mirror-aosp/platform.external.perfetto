@@ -22,9 +22,10 @@
 #include <memory>
 
 #include "src/trace_processor/importers/common/chunked_trace_reader.h"
+#include "src/trace_processor/importers/proto/multi_machine_trace_manager.h"
 #include "src/trace_processor/importers/proto/proto_incremental_state.h"
 #include "src/trace_processor/importers/proto/proto_trace_tokenizer.h"
-#include "src/trace_processor/util/trace_blob_view.h"
+#include "src/trace_processor/storage/trace_storage.h"
 
 namespace protozero {
 struct ConstBytes;
@@ -58,7 +59,7 @@ class ProtoTraceReader : public ChunkedTraceReader {
   ~ProtoTraceReader() override;
 
   // ChunkedTraceReader implementation.
-  util::Status Parse(std::unique_ptr<uint8_t[]>, size_t size) override;
+  util::Status Parse(TraceBlobView) override;
   void NotifyEndOfFile() override;
 
  private:
@@ -68,6 +69,7 @@ class ProtoTraceReader : public ChunkedTraceReader {
   util::Status ParseClockSnapshot(ConstBytes blob, uint32_t seq_id);
   void HandleIncrementalStateCleared(
       const protos::pbzero::TracePacket_Decoder&);
+  void HandleFirstPacketOnSequence(uint32_t packet_sequence_id);
   void HandlePreviousPacketDropped(const protos::pbzero::TracePacket_Decoder&);
   void ParseTracePacketDefaults(const protos::pbzero::TracePacket_Decoder&,
                                 TraceBlobView trace_packet_defaults);
@@ -75,7 +77,7 @@ class ProtoTraceReader : public ChunkedTraceReader {
                          TraceBlobView interned_data);
   void ParseTraceConfig(ConstBytes);
 
-  base::Optional<StringId> GetBuiltinClockNameOrNull(uint64_t clock_id);
+  std::optional<StringId> GetBuiltinClockNameOrNull(int64_t clock_id);
 
   PacketSequenceState* GetIncrementalStateForPacketSequence(
       uint32_t sequence_id) {
@@ -96,6 +98,9 @@ class ProtoTraceReader : public ChunkedTraceReader {
   // Stores incremental state and references to interned data, e.g. for track
   // event protos.
   std::unique_ptr<ProtoIncrementalState> incremental_state;
+
+  StringId skipped_packet_key_id_;
+  StringId invalid_incremental_state_key_id_;
 };
 
 }  // namespace trace_processor

@@ -18,6 +18,7 @@ syntax = "proto2";
 
 package perfetto.protos;
 
+import "protos/perfetto/common/ftrace_descriptor.proto";
 import "protos/perfetto/common/gpu_counter_descriptor.proto";
 import "protos/perfetto/common/track_event_descriptor.proto";
 
@@ -27,6 +28,13 @@ import "protos/perfetto/common/track_event_descriptor.proto";
 message DataSourceDescriptor {
   // e.g., "linux.ftrace", "chromium.tracing"
   optional string name = 1;
+
+  // When non-zero, this is a unique ID within the scope of the Producer for
+  // this data source (it is NOT globally unique). This is useful to
+  // differentiate between data sources with matching names when calling
+  // UpdateDataSource(). This field has been introduced in November 2021
+  // (v22, Android T) and is not supported on older versions.
+  optional uint64 id = 7;
 
   // When true the data source is expected to ack the stop request through the
   // NotifyDataSourceStopped() IPC. This field has been introduced after
@@ -43,8 +51,19 @@ message DataSourceDescriptor {
   // contents, and knows how to stop referring to the already-emitted data.
   optional bool handles_incremental_state_clear = 4;
 
+  // If true, indicates that the data source does nothing upon Flush. This
+  // allows the service to reduce the flush-related IPC traffic and better deal
+  // with frozen producers (see go/perfetto-frozen). This is usually the case
+  // for data sources like 'track_event' that don't have access to the various
+  // thread task runners to post a flush task and rely purely on server-side
+  // scraping.
+  // Introduced in v39 / Android V.
+  optional bool no_flush = 9;
+
   // Optional specification about available GPU counters.
   optional GpuCounterDescriptor gpu_counter_descriptor = 5 [lazy = true];
 
   optional TrackEventDescriptor track_event_descriptor = 6 [lazy = true];
+
+  optional FtraceDescriptor ftrace_descriptor = 8 [lazy = true];
 }

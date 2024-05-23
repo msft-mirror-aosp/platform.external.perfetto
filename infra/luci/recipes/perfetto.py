@@ -43,15 +43,7 @@ ARTIFACTS = [
         'name': 'trace_processor_shell'
     },
     {
-        'name':
-            'trace_to_text',
-
-        # trace_to_text is really a host exeutable, doesn't make sense to build
-        # it when cross-compiling .
-        'exclude_platforms': [
-            'android-arm', 'android-arm64', 'android-x86', 'android-x64',
-            'linux-arm', 'linux-arm64'
-        ]
+        'name': 'traceconv',
     },
     {
         'name': 'tracebox',
@@ -81,8 +73,8 @@ class BuildContext:
 def GnArgs(platform):
   (os, cpu) = platform.split('-')
   base_args = 'is_debug=false monolithic_binaries=true'
-  if os not in ('android', 'linux'):
-    return base_args  # No cross-compiling on Mac and Windows.
+  if os not in ('android', 'linux', 'mac'):
+    return base_args  # No cross-compiling on Windows.
   cpu = 'x64' if cpu == 'amd64' else cpu  # GN calls it "x64".
   return base_args + ' target_os="{}" target_cpu="{}"'.format(os, cpu)
 
@@ -104,6 +96,12 @@ def UploadArtifact(api, ctx, platform, out_dir, artifact):
   # Upload to GCS bucket.
   gcs_target_path = '{}/{}/{}'.format(gcs_upload_dir, platform, artifact_ext)
   api.gsutil.upload(source_path, 'perfetto-luci-artifacts', gcs_target_path)
+
+  # Uploads also the .pdb (debug symbols) to GCS.
+  pdb_path = exe_dir.join(artifact_ext + '.pdb')
+  if api.platform.is_win:
+    api.gsutil.upload(pdb_path, 'perfetto-luci-artifacts',
+                      gcs_target_path + '.pdb')
 
   # Create the CIPD package definition from the artifact path.
   cipd_pkg_name = 'perfetto/{}/{}'.format(artifact['name'], platform)
@@ -150,6 +148,7 @@ def BuildForPlatform(api, ctx, platform):
     args = GnArgs(platform)
     api.step('gn gen',
              ['python3', 'tools/gn', 'gen', out_dir, '--args={}'.format(args)])
+    api.step('gn clean', ['python3', 'tools/gn', 'clean', out_dir])
     api.step('ninja', ['python3', 'tools/ninja', '-C', out_dir] + targets)
 
   # Upload stripped artifacts using gsutil if we're on the official builder.
@@ -176,7 +175,7 @@ def RunSteps(api, repository):
       build_input = api.buildbucket.build_input
       ref = (
           build_input.gitiles_commit.ref
-          if build_input.gitiles_commit else 'refs/heads/master')
+          if build_input.gitiles_commit else 'refs/heads/main')
       # Fetch tags so `git describe` works.
       api.step('fetch', ['git', 'fetch', '--tags', repository, ref])
       api.step('checkout', ['git', 'checkout', 'FETCH_HEAD'])
@@ -184,7 +183,7 @@ def RunSteps(api, repository):
       # Store information about the git revision and the tag if available.
       ctx.git_revision = api.step(
           'rev-parse', ['git', 'rev-parse', 'HEAD'],
-          stdout=api.raw_io.output()).stdout.strip()
+          stdout=api.raw_io.output_text()).stdout.strip()
       ctx.maybe_git_tag = ref.replace(
           'refs/tags/', '') if ref.startswith('refs/tags/') else None
 
@@ -201,7 +200,10 @@ def RunSteps(api, repository):
   if api.platform.is_win:
     BuildForPlatform(api, ctx, 'windows-amd64')
   elif api.platform.is_mac:
-    BuildForPlatform(api, ctx, 'mac-amd64')
+    with api.step.nest('mac-amd64'):
+      BuildForPlatform(api, ctx, 'mac-amd64')
+    with api.step.nest('mac-arm64'):
+      BuildForPlatform(api, ctx, 'mac-arm64')
   elif 'android' in api.buildbucket.builder_id.builder:
     with api.step.nest('android-arm'):
       BuildForPlatform(api, ctx, 'android-arm')

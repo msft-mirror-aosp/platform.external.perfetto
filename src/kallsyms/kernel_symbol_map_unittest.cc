@@ -21,6 +21,7 @@
 #include <unordered_map>
 
 #include "perfetto/ext/base/file_utils.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/temp_file.h"
 
@@ -91,6 +92,7 @@ ffffff8f73e2fa60 t __si__x__
 ffffff8f73e2fa70 t ___se___v_e__n___
 ffffff8f73e2fa80 t _eight_omg_this_name_is_so_loooooooooooooooooooooooooooooooooooong_should_be_truncated_exactly_here_because_this_is_the_128_char_TRUNCATED_HERE
 ffffff8f73e2fa90 t NiNe
+ffffff8f73e2faa0 t tls_get.cfi_jt
 )";
   base::WriteAll(tmp.fd(), kContents, sizeof(kContents));
   base::FlushFile(tmp.fd());
@@ -99,14 +101,13 @@ ffffff8f73e2fa90 t NiNe
   EXPECT_EQ(kallsyms.Lookup(0x42), "");
 
   kallsyms.Parse(tmp.path().c_str());
-  EXPECT_EQ(kallsyms.num_syms(), 9u);
+  EXPECT_EQ(kallsyms.num_syms(), 10u);
 
   // Test first exact lookups.
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa10ULL), "one");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa20ULL), "two_");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa30LL), "_three");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa40ULL), "_fo_ur_");
-  EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa50ULL), "_five__");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa60ULL), "__si__x__");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa70ULL), "___se___v_e__n___");
   EXPECT_EQ(
@@ -122,6 +123,10 @@ ffffff8f73e2fa90 t NiNe
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa71ULL), "___se___v_e__n___");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa91ULL), "NiNe");
   EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa99ULL), "NiNe");
+
+  // We strip arm64 clang control flow integrity suffixes straight away.
+  EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2fa50ULL), "_five__");
+  EXPECT_EQ(kallsyms.Lookup(0xffffff8f73e2faa0ULL), "tls_get");
 
   // This is too far from the last symbol and should fail.
   EXPECT_EQ(kallsyms.Lookup(0xffffff8fffffffffULL), "");
@@ -143,10 +148,9 @@ TEST(KernelSymbolMapTest, GoldenTest) {
     for (size_t i = 0; i < sym_name_len; i++)
       sym_name[i] = kCharset[rng() % strlen(kCharset)];
     sym_name[sym_name_len] = '\0';
-    char line[kNameMax + 40];
-    sprintf(line, "%" PRIx64 " t %s\n", addr, sym_name);
+    base::StackString<128> line("%" PRIx64 " t %s\n", addr, sym_name);
     symbols[addr] = sym_name;
-    fake_kallsyms += line;
+    fake_kallsyms += line.ToStdString();
   }
   base::TempFile tmp = base::TempFile::Create();
   base::WriteAll(tmp.fd(), fake_kallsyms.data(), fake_kallsyms.size());

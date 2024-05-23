@@ -45,5 +45,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+        <activity
+          android:name="android.perfetto.cts.app.JavaAllocActivity"
+          android:exported="true">
+        </activity>
+        <activity-alias
+          android:name="android.perfetto.cts.app.debuggable.JavaAllocActivity"
+          android:targetActivity="android.perfetto.cts.app.JavaAllocActivity"
+          android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity
+          android:name="android.perfetto.cts.app.JavaOomActivity"
+          android:exported="true">
+        </activity>
+        <activity-alias
+          android:name="android.perfetto.cts.app.debuggable.JavaOomActivity"
+          android:targetActivity="android.perfetto.cts.app.JavaOomActivity"
+          android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <provider
+          android:name="android.perfetto.cts.app.FileContentProvider"
+          android:authorities="android.perfetto.cts.app.debuggable"
+          android:exported="true"
+          android:grantUriPermissions="true" />
     </application>
 </manifest>

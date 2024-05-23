@@ -20,10 +20,10 @@
 #include <sys/types.h>
 
 #include <cinttypes>
+#include <optional>
 #include <set>
 #include <vector>
 
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/scoped_file.h"
 
 namespace perfetto {
@@ -53,21 +53,31 @@ void ForEachPid(Fn callback) {
   }
 }
 
-base::Optional<std::vector<std::string>> NormalizeCmdlines(
-    const std::vector<std::string>& cmdlines);
-
-void FindAllProfilablePids(std::set<pid_t>* pids);
-void FindPidsForCmdlines(const std::vector<std::string>& cmdlines,
-                         std::set<pid_t>* pids);
-bool GetCmdlineForPID(pid_t pid, std::string* name);
-
-base::Optional<std::string> ReadStatus(pid_t pid);
-base::Optional<uint32_t> GetRssAnonAndSwap(const std::string&);
+std::optional<std::string> ReadStatus(pid_t pid);
+std::optional<uint32_t> GetRssAnonAndSwap(const std::string&);
 // Filters the list of pids (in-place), keeping only the
 // entries satisfying the minimum size criteria for anonymous memory.
 void RemoveUnderAnonThreshold(uint32_t min_size_kb, std::set<pid_t>* pids);
 
-base::Optional<Uids> GetUids(const std::string&);
+std::optional<Uids> GetUids(const std::string&);
+
+void FindAllProfilablePids(std::set<pid_t>* pids);
+
+// TODO(rsavitski): we're changing how the profilers treat proc cmdlines, the
+// newer semantics are implemented in proc_cmdline.h. Wrappers around those
+// implementations are placed in the "glob_aware" namespace here, until we
+// migrate to one implementation for all profilers.
+ssize_t NormalizeCmdLine(char** cmdline_ptr, size_t size);
+std::optional<std::vector<std::string>> NormalizeCmdlines(
+    const std::vector<std::string>& cmdlines);
+void FindPidsForCmdlines(const std::vector<std::string>& cmdlines,
+                         std::set<pid_t>* pids);
+bool GetCmdlineForPID(pid_t pid, std::string* name);
+
+namespace glob_aware {
+void FindPidsForCmdlinePatterns(const std::vector<std::string>& cmdlines,
+                                std::set<pid_t>* pids);
+}  // namespace glob_aware
 
 }  // namespace profiling
 }  // namespace perfetto

@@ -15,12 +15,12 @@
  */
 
 #include "src/traced/probes/android_log/android_log_data_source.h"
+#include <optional>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/task_runner.h"
 #include "perfetto/base/time.h"
 #include "perfetto/ext/base/file_utils.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/string_splitter.h"
 #include "perfetto/ext/base/string_view.h"
@@ -89,6 +89,7 @@ inline bool ReadAndAdvance(const char** ptr, const char* end, T* out) {
 const ProbesDataSource::Descriptor AndroidLogDataSource::descriptor = {
     /*name*/ "android.log",
     /*flags*/ Descriptor::kFlagsNone,
+    /*fill_descriptor_func*/ nullptr,
 };
 
 AndroidLogDataSource::AndroidLogDataSource(DataSourceConfig ds_config,
@@ -366,8 +367,6 @@ bool AndroidLogDataSource::ParseBinaryEvent(
   int32_t eid;
   if (!ReadAndAdvance(&buf, end, &eid))
     return false;
-
-  // TODO test events with 0 arguments. DNS.
 
   const EventFormat* fmt = GetEventFormat(eid);
   if (!fmt) {

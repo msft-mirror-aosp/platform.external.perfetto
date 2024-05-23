@@ -22,6 +22,7 @@
 #include "perfetto/base/task_runner.h"
 #include "perfetto/ext/ipc/host.h"
 #include "perfetto/ext/ipc/service.h"
+#include "perfetto/ext/tracing/core/client_identity.h"
 #include "perfetto/ext/tracing/core/commit_data_request.h"
 #include "perfetto/ext/tracing/core/tracing_service.h"
 #include "perfetto/tracing/core/data_source_config.h"
@@ -84,17 +85,6 @@ void ProducerIPCService::InitializeConnection(
       break;
   }
 
-#if PERFETTO_DCHECK_IS_ON()
-  if (req.build_flags() ==
-      protos::gen::InitializeConnectionRequest::BUILD_FLAGS_DCHECKS_OFF) {
-    PERFETTO_LOG(
-        "The producer is built with NDEBUG but the service binary was built "
-        "with the DEBUG flag. This will likely cause crashes.");
-    // The other way round (DEBUG producer with NDEBUG service) is expected to
-    // work.
-  }
-#endif
-
   // If the producer provided an SMB, tell the service to attempt to adopt it.
   std::unique_ptr<SharedMemory> shmem;
   if (req.producer_provided_shmem()) {
@@ -126,9 +116,12 @@ void ProducerIPCService::InitializeConnection(
 #endif
   }
 
+  // Copy the data fields to be emitted to trace packets into ClientIdentity.
+  ClientIdentity client_identity(client_info.uid(), client_info.pid(),
+                                 client_info.machine_id());
   // ConnectProducer will call OnConnect() on the next task.
   producer->service_endpoint = core_service_->ConnectProducer(
-      producer.get(), client_info.uid(), req.producer_name(),
+      producer.get(), client_identity, req.producer_name(),
       req.shared_memory_size_hint_bytes(),
       /*in_process=*/false, smb_scraping_mode,
       req.shared_memory_page_size_hint_bytes(), std::move(shmem),
@@ -140,7 +133,9 @@ void ProducerIPCService::InitializeConnection(
     return;
   }
 
+  bool use_shmem_emulation = ipc::Service::use_shmem_emulation();
   bool using_producer_shmem =
+      !use_shmem_emulation &&
       producer->service_endpoint->IsShmemProvidedByProducer();
 
   producers_.emplace(ipc_client_id, std::move(producer));
@@ -150,6 +145,7 @@ void ProducerIPCService::InitializeConnection(
       ipc::AsyncResult<protos::gen::InitializeConnectionResponse>::Create();
   async_res->set_using_shmem_provided_by_producer(using_producer_shmem);
   async_res->set_direct_smb_patching_supported(true);
+  async_res->set_use_shmem_emulation(use_shmem_emulation);
   response.Resolve(std::move(async_res));
 }
 
@@ -173,6 +169,29 @@ void ProducerIPCService::RegisterDataSource(
   if (response.IsBound()) {
     response.Resolve(
         ipc::AsyncResult<protos::gen::RegisterDataSourceResponse>::Create());
+  }
+}
+
+// Called by the remote Producer through the IPC channel.
+void ProducerIPCService::UpdateDataSource(
+    const protos::gen::UpdateDataSourceRequest& req,
+    DeferredUpdateDataSourceResponse response) {
+  RemoteProducer* producer = GetProducerForCurrentRequest();
+  if (!producer) {
+    PERFETTO_DLOG(
+        "Producer invoked UpdateDataSource() before InitializeConnection()");
+    if (response.IsBound())
+      response.Reject();
+    return;
+  }
+
+  const DataSourceDescriptor& dsd = req.data_source_descriptor();
+  GetProducerForCurrentRequest()->service_endpoint->UpdateDataSource(dsd);
+
+  // UpdateDataSource doesn't expect any meaningful response.
+  if (response.IsBound()) {
+    response.Resolve(
+        ipc::AsyncResult<protos::gen::UpdateDataSourceResponse>::Create());
   }
 }
 
@@ -491,7 +510,8 @@ void ProducerIPCService::RemoteProducer::SendSetupTracing() {
 void ProducerIPCService::RemoteProducer::Flush(
     FlushRequestID flush_request_id,
     const DataSourceInstanceID* data_source_ids,
-    size_t num_data_sources) {
+    size_t num_data_sources,
+    FlushFlags flush_flags) {
   if (!async_producer_commands.IsBound()) {
     PERFETTO_DLOG(
         "The Service tried to request a flush but the remote Producer has not "
@@ -503,6 +523,7 @@ void ProducerIPCService::RemoteProducer::Flush(
   for (size_t i = 0; i < num_data_sources; i++)
     cmd->mutable_flush()->add_data_source_ids(data_source_ids[i]);
   cmd->mutable_flush()->set_request_id(flush_request_id);
+  cmd->mutable_flush()->set_flags(flush_flags.flags());
   async_producer_commands.Resolve(std::move(cmd));
 }
 

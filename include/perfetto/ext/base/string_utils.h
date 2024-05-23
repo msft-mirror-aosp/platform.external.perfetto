@@ -17,19 +17,19 @@
 #ifndef INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
 #define INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
 
+#include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <cinttypes>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/string_view.h"
 
 namespace perfetto {
 namespace base {
-
-std::string QuoteAndEscapeControlCodes(const std::string& raw);
 
 inline char Lowercase(char c) {
   return ('A' <= c && c <= 'Z') ? static_cast<char>(c - ('A' - 'a')) : c;
@@ -39,59 +39,63 @@ inline char Uppercase(char c) {
   return ('a' <= c && c <= 'z') ? static_cast<char>(c + ('A' - 'a')) : c;
 }
 
-inline Optional<uint32_t> CStringToUInt32(const char* s, int base = 10) {
+inline std::optional<uint32_t> CStringToUInt32(const char* s, int base = 10) {
   char* endptr = nullptr;
   auto value = static_cast<uint32_t>(strtoul(s, &endptr, base));
-  return (*s && !*endptr) ? base::make_optional(value) : base::nullopt;
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
 }
 
-inline Optional<int32_t> CStringToInt32(const char* s, int base = 10) {
+inline std::optional<int32_t> CStringToInt32(const char* s, int base = 10) {
   char* endptr = nullptr;
   auto value = static_cast<int32_t>(strtol(s, &endptr, base));
-  return (*s && !*endptr) ? base::make_optional(value) : base::nullopt;
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
 }
 
 // Note: it saturates to 7fffffffffffffff if parsing a hex number >= 0x8000...
-inline Optional<int64_t> CStringToInt64(const char* s, int base = 10) {
+inline std::optional<int64_t> CStringToInt64(const char* s, int base = 10) {
   char* endptr = nullptr;
   auto value = static_cast<int64_t>(strtoll(s, &endptr, base));
-  return (*s && !*endptr) ? base::make_optional(value) : base::nullopt;
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
 }
 
-inline Optional<uint64_t> CStringToUInt64(const char* s, int base = 10) {
+inline std::optional<uint64_t> CStringToUInt64(const char* s, int base = 10) {
   char* endptr = nullptr;
   auto value = static_cast<uint64_t>(strtoull(s, &endptr, base));
-  return (*s && !*endptr) ? base::make_optional(value) : base::nullopt;
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
 }
 
 double StrToD(const char* nptr, char** endptr);
 
-inline Optional<double> CStringToDouble(const char* s) {
+inline std::optional<double> CStringToDouble(const char* s) {
   char* endptr = nullptr;
   double value = StrToD(s, &endptr);
-  Optional<double> result(base::nullopt);
+  std::optional<double> result(std::nullopt);
   if (*s != '\0' && *endptr == '\0')
     result = value;
   return result;
 }
 
-inline Optional<uint32_t> StringToUInt32(const std::string& s, int base = 10) {
+inline std::optional<uint32_t> StringToUInt32(const std::string& s,
+                                              int base = 10) {
   return CStringToUInt32(s.c_str(), base);
 }
 
-inline Optional<int32_t> StringToInt32(const std::string& s, int base = 10) {
+inline std::optional<int32_t> StringToInt32(const std::string& s,
+                                            int base = 10) {
   return CStringToInt32(s.c_str(), base);
 }
 
-inline Optional<uint64_t> StringToUInt64(const std::string& s, int base = 10) {
+inline std::optional<uint64_t> StringToUInt64(const std::string& s,
+                                              int base = 10) {
   return CStringToUInt64(s.c_str(), base);
 }
 
-inline Optional<int64_t> StringToInt64(const std::string& s, int base = 10) {
+inline std::optional<int64_t> StringToInt64(const std::string& s,
+                                            int base = 10) {
   return CStringToInt64(s.c_str(), base);
 }
 
-inline Optional<double> StringToDouble(const std::string& s) {
+inline std::optional<double> StringToDouble(const std::string& s) {
   return CStringToDouble(s.c_str());
 }
 
@@ -109,6 +113,7 @@ std::vector<std::string> SplitString(const std::string& text,
                                      const std::string& delimiter);
 std::string StripPrefix(const std::string& str, const std::string& prefix);
 std::string StripSuffix(const std::string& str, const std::string& suffix);
+std::string TrimWhitespace(const std::string& str);
 std::string ToLower(const std::string& str);
 std::string ToUpper(const std::string& str);
 std::string StripChars(const std::string& str,
@@ -124,8 +129,103 @@ std::string Uint64ToHexStringNoPrefix(uint64_t number);
 std::string ReplaceAll(std::string str,
                        const std::string& to_replace,
                        const std::string& replacement);
-std::string TrimLeading(const std::string& str);
-std::string Base64Encode(const void* raw, size_t size);
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+bool WideToUTF8(const std::wstring& source, std::string& output);
+bool UTF8ToWide(const std::string& source, std::wstring& output);
+#endif // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+
+// A BSD-style strlcpy without the return value.
+// Copies at most |dst_size|-1 characters. Unlike strncpy, it always \0
+// terminates |dst|, as long as |dst_size| is not 0.
+// Unlike strncpy and like strlcpy it does not zero-pad the rest of |dst|.
+// Returns nothing. The BSD strlcpy returns the size of |src|, which might
+// be > |dst_size|. Anecdotal experience suggests people assume the return value
+// is the number of bytes written in |dst|. That assumption can lead to
+// dangerous bugs.
+// In order to avoid being subtly uncompliant with strlcpy AND avoid misuse,
+// the choice here is to return nothing.
+inline void StringCopy(char* dst, const char* src, size_t dst_size) {
+  for (size_t i = 0; i < dst_size; ++i) {
+    if ((dst[i] = src[i]) == '\0') {
+      return;  // We hit and copied the null terminator.
+    }
+  }
+
+  // We were left off at dst_size. We over copied 1 byte. Null terminate.
+  if (PERFETTO_LIKELY(dst_size > 0))
+    dst[dst_size - 1] = 0;
+}
+
+// Like snprintf() but returns the number of chars *actually* written (without
+// counting the null terminator) NOT "the number of chars which would have been
+// written to the final string if enough  space had been available".
+// This should be used in almost all cases when the caller uses the return value
+// of snprintf(). If the return value is not used, there is no benefit in using
+// this wrapper, as this just calls snprintf() and mangles the return value.
+// It always null-terminates |dst| (even in case of errors), unless
+// |dst_size| == 0.
+// Examples:
+//   SprintfTrunc(x, 4, "123whatever"): returns 3 and writes "123\0".
+//   SprintfTrunc(x, 4, "123"): returns 3 and writes "123\0".
+//   SprintfTrunc(x, 3, "123"): returns 2 and writes "12\0".
+//   SprintfTrunc(x, 2, "123"): returns 1 and writes "1\0".
+//   SprintfTrunc(x, 1, "123"): returns 0 and writes "\0".
+//   SprintfTrunc(x, 0, "123"): returns 0 and writes nothing.
+// NOTE: This means that the caller has no way to tell when truncation happens
+//   vs the edge case of *just* fitting in the buffer.
+size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...)
+    PERFETTO_PRINTF_FORMAT(3, 4);
+
+// Line number starts from 1
+struct LineWithOffset {
+  base::StringView line;
+  uint32_t line_offset;
+  uint32_t line_num;
+};
+
+// For given string and offset Pfinds a line with character for
+// which offset points, what number is this line (starts from 1), and the offset
+// inside this line. returns std::nullopt if the offset points to
+// line break character or exceeds string length.
+std::optional<LineWithOffset> FindLineWithOffset(base::StringView str,
+                                                 uint32_t offset);
+
+// A helper class to facilitate construction and usage of write-once stack
+// strings.
+// Example usage:
+//   StackString<32> x("format %d %s", 42, string_arg);
+//   TakeString(x.c_str() | x.string_view() | x.ToStdString());
+// Rather than char x[32] + sprintf.
+// Advantages:
+// - Avoids useless zero-fills caused by people doing `char buf[32] {}` (mainly
+//   by fearing unknown snprintf failure modes).
+// - Makes the code more robust in case of snprintf truncations (len() and
+//  string_view() will return the truncated length, unlike snprintf).
+template <size_t N>
+class StackString {
+ public:
+  explicit PERFETTO_PRINTF_FORMAT(/* 1=this */ 2, 3)
+      StackString(const char* fmt, ...) {
+    buf_[0] = '\0';
+    va_list args;
+    va_start(args, fmt);
+    int res = vsnprintf(buf_, sizeof(buf_), fmt, args);
+    va_end(args);
+    buf_[sizeof(buf_) - 1] = '\0';
+    len_ = res < 0 ? 0 : std::min(static_cast<size_t>(res), sizeof(buf_) - 1);
+  }
+
+  StringView string_view() const { return StringView(buf_, len_); }
+  std::string ToStdString() const { return std::string(buf_, len_); }
+  const char* c_str() const { return buf_; }
+  size_t len() const { return len_; }
+  char* mutable_data() { return buf_; }
+
+ private:
+  char buf_[N];
+  size_t len_ = 0;  // Does not include the \0.
+};
 
 }  // namespace base
 }  // namespace perfetto

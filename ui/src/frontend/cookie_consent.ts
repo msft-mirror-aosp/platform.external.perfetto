@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
+
+import {raf} from '../core/raf_scheduler';
 
 import {globals} from './globals';
 
@@ -23,8 +25,10 @@ export class CookieConsent implements m.ClassComponent {
 
   oninit() {
     this.showCookieConsent = true;
-    if (!globals.logging.isEnabled() ||
-        localStorage.getItem(COOKIE_ACK_KEY) === 'true') {
+    if (
+      !globals.logging.isEnabled() ||
+      localStorage.getItem(COOKIE_ACK_KEY) === 'true'
+    ) {
       this.showCookieConsent = false;
     }
   }
@@ -32,27 +36,37 @@ export class CookieConsent implements m.ClassComponent {
   view() {
     if (!this.showCookieConsent) return;
     return m(
-        '.cookie-consent',
-        m('.cookie-text',
-          `This site uses cookies from Google to deliver its services and to
-          analyze traffic.`),
-        m('.buttons',
-          m('button',
-            m('a',
-              {
-                href: 'https://policies.google.com/technologies/cookies',
-                target: '_blank'
-              },
-              'More details')),
-          m('button',
+      '.cookie-consent',
+      m(
+        '.cookie-text',
+        `This site uses cookies from Google to deliver its services and to
+          analyze traffic.`,
+      ),
+      m(
+        '.buttons',
+        m(
+          'button',
+          m(
+            'a',
             {
-              onclick: () => {
-                this.showCookieConsent = false;
-                localStorage.setItem(COOKIE_ACK_KEY, 'true');
-                globals.rafScheduler.scheduleFullRedraw();
-              }
+              href: 'https://policies.google.com/technologies/cookies',
+              target: '_blank',
             },
-            'OK')),
+            'More details',
+          ),
+        ),
+        m(
+          'button',
+          {
+            onclick: () => {
+              this.showCookieConsent = false;
+              localStorage.setItem(COOKIE_ACK_KEY, 'true');
+              raf.scheduleFullRedraw();
+            },
+          },
+          'OK',
+        ),
+      ),
     );
   }
 }

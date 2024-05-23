@@ -28,6 +28,7 @@
 
 // No perfetto headers (other than tracing/api and protozero) should be here.
 #include "perfetto/tracing/buffer_exhausted_policy.h"
+#include "perfetto/tracing/core/data_source_config.h"
 #include "perfetto/tracing/internal/basic_types.h"
 #include "perfetto/tracing/trace_writer_base.h"
 
@@ -59,7 +60,11 @@ struct DataSourceState {
   // Keep this flag as the first field. This allows the compiler to directly
   // dereference the DataSourceState* pointer in the trace fast-path without
   // doing extra pointr arithmetic.
-  bool trace_lambda_enabled = false;
+  std::atomic<bool> trace_lambda_enabled{false};
+
+  // The overall TracingMuxerImpl instance id, which gets incremented by
+  // ResetForTesting.
+  uint32_t muxer_id_for_testing = 0;
 
   // The central buffer id that all TraceWriter(s) created by this data source
   // must target.
@@ -81,10 +86,19 @@ struct DataSourceState {
   // Only the tuple (backend_id, data_source_instance_id) is globally unique.
   uint64_t data_source_instance_id = 0;
 
-  // A hash of the trace config used by this instance. This is used to
-  // de-duplicate instances for data sources with identical names (e.g., track
-  // event).
-  uint64_t config_hash = 0;
+  // Set to a non-0 target buffer reservation ID iff startup tracing is
+  // currently enabled for this data source.
+  std::atomic<uint16_t> startup_target_buffer_reservation{0};
+
+  // If the data source was originally started for startup tracing, this is set
+  // to the startup session's ID.
+  uint64_t startup_session_id = 0;
+
+  // The trace config used by this instance. This is used to de-duplicate
+  // instances for data sources with identical names (e.g., track event).
+  // We store it as a pointer to be able to free memory after the datasource
+  // is stopped.
+  std::unique_ptr<DataSourceConfig> config;
 
   // If this data source is being intercepted (see Interceptor), this field
   // contains the non-zero id of a registered interceptor which should receive
@@ -92,6 +106,11 @@ struct DataSourceState {
   // element of TracingMuxerImpl::interceptors_ with successive numbers using
   // the following slots.
   uint32_t interceptor_id = 0;
+
+  // This is set to true when the datasource is in the process of async stop.
+  // The flag is checked by the tracing muxer to avoid calling OnStop for the
+  // second time.
+  bool async_stop_in_progress = false;
 
   // This lock is not held to implement Trace() and it's used only if the trace
   // code wants to access its own data source state.
@@ -114,6 +133,9 @@ struct DataSourceStateStorage {
 
 // Per-DataSource-type global state.
 struct DataSourceStaticState {
+  // System-wide unique id of the data source.
+  uint64_t id = 0;
+
   // Unique index of the data source, assigned at registration time.
   uint32_t index = kMaxDataSources;
 
@@ -141,31 +163,33 @@ struct DataSourceStaticState {
     static_assert(sizeof(valid_instances.load()) * 8 >= kMaxDataSourceInstances,
                   "kMaxDataSourceInstances too high");
   }
+
+  void ResetForTesting() {
+    id = 0;
+    index = kMaxDataSources;
+    valid_instances.store(0, std::memory_order_release);
+    instances = {};
+    incremental_state_generation.store(0, std::memory_order_release);
+  }
 };
 
 // Per-DataSource-instance thread-local state.
 struct DataSourceInstanceThreadLocalState {
-  using IncrementalStatePointer = std::unique_ptr<void, void (*)(void*)>;
-
-  void Reset() {
-    trace_writer.reset();
-    incremental_state.reset();
-    backend_id = 0;
-    backend_connection_id = 0;
-    buffer_id = 0;
-    data_source_instance_id = 0;
-    incremental_state_generation = 0;
-    is_intercepted = false;
-  }
+  void Reset() { *this = DataSourceInstanceThreadLocalState{}; }
 
   std::unique_ptr<TraceWriterBase> trace_writer;
-  IncrementalStatePointer incremental_state = {nullptr, [](void*) {}};
-  uint32_t incremental_state_generation;
-  TracingBackendId backend_id;
-  uint32_t backend_connection_id;
-  BufferId buffer_id;
-  uint64_t data_source_instance_id;
-  bool is_intercepted;
+  using ObjectWithDeleter = std::unique_ptr<void, void (*)(void*)>;
+  ObjectWithDeleter incremental_state = {nullptr, [](void*) {}};
+  ObjectWithDeleter data_source_custom_tls = {nullptr, [](void*) {}};
+  uint32_t incremental_state_generation = 0;
+  uint32_t muxer_id_for_testing = 0;
+  TracingBackendId backend_id = 0;
+  uint32_t backend_connection_id = 0;
+  BufferId buffer_id = 0;
+  uint64_t data_source_instance_id = 0;
+  bool is_intercepted = false;
+  uint64_t last_empty_packet_position = 0;
+  uint16_t startup_target_buffer_reservation = 0;
 };
 
 // Per-DataSource-type thread-local state.

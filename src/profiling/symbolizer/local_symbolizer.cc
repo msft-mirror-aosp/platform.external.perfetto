@@ -19,7 +19,9 @@
 #include <fcntl.h>
 
 #include <cinttypes>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -28,11 +30,11 @@
 #include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/file_utils.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/scoped_file.h"
+#include "perfetto/ext/base/scoped_mmap.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "src/profiling/symbolizer/elf.h"
 #include "src/profiling/symbolizer/filesystem.h"
-#include "src/profiling/symbolizer/scoped_read_mmap.h"
 
 namespace perfetto {
 namespace profiling {
@@ -116,142 +118,6 @@ std::vector<std::string> GetLines(
 }
 
 namespace {
-// We cannot just include elf.h, as that only exists on Linux, and we want to
-// allow symbolization on other platforms as well. As we only need a small
-// subset, it is easiest to define the constants and structs ourselves.
-constexpr auto PT_LOAD = 1;
-constexpr auto PF_X = 1;
-constexpr auto SHT_NOTE = 7;
-constexpr auto NT_GNU_BUILD_ID = 3;
-constexpr auto ELFCLASS32 = 1;
-constexpr auto ELFCLASS64 = 2;
-constexpr auto ELFMAG0 = 0x7f;
-constexpr auto ELFMAG1 = 'E';
-constexpr auto ELFMAG2 = 'L';
-constexpr auto ELFMAG3 = 'F';
-constexpr auto EI_MAG0 = 0;
-constexpr auto EI_MAG1 = 1;
-constexpr auto EI_MAG2 = 2;
-constexpr auto EI_MAG3 = 3;
-constexpr auto EI_CLASS = 4;
-
-struct Elf32 {
-  using Addr = uint32_t;
-  using Half = uint16_t;
-  using Off = uint32_t;
-  using Sword = int32_t;
-  using Word = uint32_t;
-  struct Ehdr {
-    unsigned char e_ident[16];
-    Half e_type;
-    Half e_machine;
-    Word e_version;
-    Addr e_entry;
-    Off e_phoff;
-    Off e_shoff;
-    Word e_flags;
-    Half e_ehsize;
-    Half e_phentsize;
-    Half e_phnum;
-    Half e_shentsize;
-    Half e_shnum;
-    Half e_shstrndx;
-  };
-  struct Shdr {
-    Word sh_name;
-    Word sh_type;
-    Word sh_flags;
-    Addr sh_addr;
-    Off sh_offset;
-    Word sh_size;
-    Word sh_link;
-    Word sh_info;
-    Word sh_addralign;
-    Word sh_entsize;
-  };
-  struct Nhdr {
-    Word n_namesz;
-    Word n_descsz;
-    Word n_type;
-  };
-  struct Phdr {
-    uint32_t p_type;
-    Off p_offset;
-    Addr p_vaddr;
-    Addr p_paddr;
-    uint32_t p_filesz;
-    uint32_t p_memsz;
-    uint32_t p_flags;
-    uint32_t p_align;
-  };
-};
-
-struct Elf64 {
-  using Addr = uint64_t;
-  using Half = uint16_t;
-  using SHalf = int16_t;
-  using Off = uint64_t;
-  using Sword = int32_t;
-  using Word = uint32_t;
-  using Xword = uint64_t;
-  using Sxword = int64_t;
-  struct Ehdr {
-    unsigned char e_ident[16];
-    Half e_type;
-    Half e_machine;
-    Word e_version;
-    Addr e_entry;
-    Off e_phoff;
-    Off e_shoff;
-    Word e_flags;
-    Half e_ehsize;
-    Half e_phentsize;
-    Half e_phnum;
-    Half e_shentsize;
-    Half e_shnum;
-    Half e_shstrndx;
-  };
-  struct Shdr {
-    Word sh_name;
-    Word sh_type;
-    Xword sh_flags;
-    Addr sh_addr;
-    Off sh_offset;
-    Xword sh_size;
-    Word sh_link;
-    Word sh_info;
-    Xword sh_addralign;
-    Xword sh_entsize;
-  };
-  struct Nhdr {
-    Word n_namesz;
-    Word n_descsz;
-    Word n_type;
-  };
-  struct Phdr {
-    uint32_t p_type;
-    uint32_t p_flags;
-    Off p_offset;
-    Addr p_vaddr;
-    Addr p_paddr;
-    uint64_t p_filesz;
-    uint64_t p_memsz;
-    uint64_t p_align;
-  };
-};
-
-template <typename E>
-typename E::Shdr* GetShdr(void* mem, const typename E::Ehdr* ehdr, size_t i) {
-  return reinterpret_cast<typename E::Shdr*>(
-      static_cast<char*>(mem) + ehdr->e_shoff + i * sizeof(typename E::Shdr));
-}
-
-template <typename E>
-typename E::Phdr* GetPhdr(void* mem, const typename E::Ehdr* ehdr, size_t i) {
-  return reinterpret_cast<typename E::Phdr*>(
-      static_cast<char*>(mem) + ehdr->e_phoff + i * sizeof(typename E::Phdr));
-}
-
 bool InRange(const void* base,
              size_t total_size,
              const void* ptr,
@@ -261,17 +127,17 @@ bool InRange(const void* base,
 }
 
 template <typename E>
-base::Optional<uint64_t> GetLoadBias(void* mem, size_t size) {
+std::optional<uint64_t> GetLoadBias(void* mem, size_t size) {
   const typename E::Ehdr* ehdr = static_cast<typename E::Ehdr*>(mem);
   if (!InRange(mem, size, ehdr, sizeof(typename E::Ehdr))) {
     PERFETTO_ELOG("Corrupted ELF.");
-    return base::nullopt;
+    return std::nullopt;
   }
   for (size_t i = 0; i < ehdr->e_phnum; ++i) {
     typename E::Phdr* phdr = GetPhdr<E>(mem, ehdr, i);
     if (!InRange(mem, size, phdr, sizeof(typename E::Phdr))) {
       PERFETTO_ELOG("Corrupted ELF.");
-      return base::nullopt;
+      return std::nullopt;
     }
     if (phdr->p_type == PT_LOAD && phdr->p_flags & PF_X) {
       return phdr->p_vaddr - phdr->p_offset;
@@ -281,17 +147,17 @@ base::Optional<uint64_t> GetLoadBias(void* mem, size_t size) {
 }
 
 template <typename E>
-base::Optional<std::string> GetBuildId(void* mem, size_t size) {
+std::optional<std::string> GetBuildId(void* mem, size_t size) {
   const typename E::Ehdr* ehdr = static_cast<typename E::Ehdr*>(mem);
   if (!InRange(mem, size, ehdr, sizeof(typename E::Ehdr))) {
     PERFETTO_ELOG("Corrupted ELF.");
-    return base::nullopt;
+    return std::nullopt;
   }
   for (size_t i = 0; i < ehdr->e_shnum; ++i) {
     typename E::Shdr* shdr = GetShdr<E>(mem, ehdr, i);
     if (!InRange(mem, size, shdr, sizeof(typename E::Shdr))) {
       PERFETTO_ELOG("Corrupted ELF.");
-      return base::nullopt;
+      return std::nullopt;
     }
 
     if (shdr->sh_type != SHT_NOTE)
@@ -304,13 +170,13 @@ base::Optional<std::string> GetBuildId(void* mem, size_t size) {
 
       if (!InRange(mem, size, nhdr, sizeof(typename E::Nhdr))) {
         PERFETTO_ELOG("Corrupted ELF.");
-        return base::nullopt;
+        return std::nullopt;
       }
       if (nhdr->n_type == NT_GNU_BUILD_ID && nhdr->n_namesz == 4) {
         char* name = reinterpret_cast<char*>(nhdr) + sizeof(*nhdr);
         if (!InRange(mem, size, name, 4)) {
           PERFETTO_ELOG("Corrupted ELF.");
-          return base::nullopt;
+          return std::nullopt;
         }
         if (memcmp(name, "GNU", 3) == 0) {
           const char* value = reinterpret_cast<char*>(nhdr) + sizeof(*nhdr) +
@@ -318,7 +184,7 @@ base::Optional<std::string> GetBuildId(void* mem, size_t size) {
 
           if (!InRange(mem, size, value, nhdr->n_descsz)) {
             PERFETTO_ELOG("Corrupted ELF.");
-            return base::nullopt;
+            return std::nullopt;
           }
           return std::string(value, nhdr->n_descsz);
         }
@@ -327,7 +193,7 @@ base::Optional<std::string> GetBuildId(void* mem, size_t size) {
                 base::AlignUp<4>(nhdr->n_descsz);
     }
   }
-  return base::nullopt;
+  return std::nullopt;
 }
 
 std::string SplitBuildID(const std::string& hex_build_id) {
@@ -352,23 +218,23 @@ struct BuildIdAndLoadBias {
   uint64_t load_bias;
 };
 
-base::Optional<BuildIdAndLoadBias> GetBuildIdAndLoadBias(const char* fname,
-                                                         size_t size) {
+std::optional<BuildIdAndLoadBias> GetBuildIdAndLoadBias(const char* fname,
+                                                        size_t size) {
   static_assert(EI_CLASS > EI_MAG3, "mem[EI_MAG?] accesses are in range.");
   if (size <= EI_CLASS)
-    return base::nullopt;
-  ScopedReadMmap map(fname, size);
+    return std::nullopt;
+  base::ScopedMmap map = base::ReadMmapFilePart(fname, size);
   if (!map.IsValid()) {
-    PERFETTO_PLOG("mmap");
-    return base::nullopt;
+    PERFETTO_PLOG("Failed to mmap %s", fname);
+    return std::nullopt;
   }
-  char* mem = static_cast<char*>(*map);
+  char* mem = static_cast<char*>(map.data());
 
   if (!IsElf(mem, size))
-    return base::nullopt;
+    return std::nullopt;
 
-  base::Optional<std::string> build_id;
-  base::Optional<uint64_t> load_bias;
+  std::optional<std::string> build_id;
+  std::optional<uint64_t> load_bias;
   switch (mem[EI_CLASS]) {
     case ELFCLASS32:
       build_id = GetBuildId<Elf32>(mem, size);
@@ -379,12 +245,12 @@ base::Optional<BuildIdAndLoadBias> GetBuildIdAndLoadBias(const char* fname,
       load_bias = GetLoadBias<Elf64>(mem, size);
       break;
     default:
-      return base::nullopt;
+      return std::nullopt;
   }
   if (build_id && load_bias) {
     return BuildIdAndLoadBias{*build_id, *load_bias};
   }
-  return base::nullopt;
+  return std::nullopt;
 }
 
 std::map<std::string, FoundBinary> BuildIdIndex(std::vector<std::string> dirs) {
@@ -409,7 +275,7 @@ std::map<std::string, FoundBinary> BuildIdIndex(std::vector<std::string> dirs) {
         return;
       }
     }
-    base::Optional<BuildIdAndLoadBias> build_id_and_load_bias =
+    std::optional<BuildIdAndLoadBias> build_id_and_load_bias =
         GetBuildIdAndLoadBias(fname, size);
     if (build_id_and_load_bias) {
       result.emplace(build_id_and_load_bias->build_id,
@@ -433,7 +299,7 @@ bool ParseLlvmSymbolizerLine(const std::string& line,
   *file_name = line.substr(0, row_pos);
   auto line_no_str = line.substr(row_pos + 1, col_pos - row_pos - 1);
 
-  base::Optional<int32_t> opt_parsed_line_no = base::StringToInt32(line_no_str);
+  std::optional<int32_t> opt_parsed_line_no = base::StringToInt32(line_no_str);
   if (!opt_parsed_line_no || *opt_parsed_line_no < 0)
     return false;
   *line_no = static_cast<uint32_t>(*opt_parsed_line_no);
@@ -445,7 +311,7 @@ BinaryFinder::~BinaryFinder() = default;
 LocalBinaryIndexer::LocalBinaryIndexer(std::vector<std::string> roots)
     : buildid_to_file_(BuildIdIndex(std::move(roots))) {}
 
-base::Optional<FoundBinary> LocalBinaryIndexer::FindBinary(
+std::optional<FoundBinary> LocalBinaryIndexer::FindBinary(
     const std::string& abspath,
     const std::string& build_id) {
   auto it = buildid_to_file_.find(build_id);
@@ -453,7 +319,7 @@ base::Optional<FoundBinary> LocalBinaryIndexer::FindBinary(
     return it->second;
   PERFETTO_ELOG("Could not find Build ID: %s (file %s).",
                 base::ToHex(build_id).c_str(), abspath.c_str());
-  return base::nullopt;
+  return std::nullopt;
 }
 
 LocalBinaryIndexer::~LocalBinaryIndexer() = default;
@@ -461,14 +327,14 @@ LocalBinaryIndexer::~LocalBinaryIndexer() = default;
 LocalBinaryFinder::LocalBinaryFinder(std::vector<std::string> roots)
     : roots_(std::move(roots)) {}
 
-base::Optional<FoundBinary> LocalBinaryFinder::FindBinary(
+std::optional<FoundBinary> LocalBinaryFinder::FindBinary(
     const std::string& abspath,
     const std::string& build_id) {
-  auto p = cache_.emplace(abspath, base::nullopt);
+  auto p = cache_.emplace(abspath, std::nullopt);
   if (!p.second)
     return p.first->second;
 
-  base::Optional<FoundBinary>& cache_entry = p.first->second;
+  std::optional<FoundBinary>& cache_entry = p.first->second;
 
   for (const std::string& root_str : roots_) {
     cache_entry = FindBinaryInRoot(root_str, abspath, build_id);
@@ -480,30 +346,38 @@ base::Optional<FoundBinary> LocalBinaryFinder::FindBinary(
   return cache_entry;
 }
 
-base::Optional<FoundBinary> LocalBinaryFinder::IsCorrectFile(
+std::optional<FoundBinary> LocalBinaryFinder::IsCorrectFile(
     const std::string& symbol_file,
     const std::string& build_id) {
   if (!base::FileExists(symbol_file)) {
-    return base::nullopt;
+    return std::nullopt;
   }
   // Openfile opens the file with an exclusive lock on windows.
-  size_t size = GetFileSize(symbol_file);
-
-  if (size == 0) {
-    return base::nullopt;
+  std::optional<uint64_t> file_size = base::GetFileSize(symbol_file);
+  if (!file_size.has_value()) {
+    PERFETTO_PLOG("Failed to get file size %s", symbol_file.c_str());
+    return std::nullopt;
   }
 
-  base::Optional<BuildIdAndLoadBias> build_id_and_load_bias =
+  static_assert(sizeof(size_t) <= sizeof(uint64_t));
+  size_t size = static_cast<size_t>(
+      std::min<uint64_t>(std::numeric_limits<size_t>::max(), *file_size));
+
+  if (size == 0) {
+    return std::nullopt;
+  }
+
+  std::optional<BuildIdAndLoadBias> build_id_and_load_bias =
       GetBuildIdAndLoadBias(symbol_file.c_str(), size);
   if (!build_id_and_load_bias)
-    return base::nullopt;
+    return std::nullopt;
   if (build_id_and_load_bias->build_id != build_id) {
-    return base::nullopt;
+    return std::nullopt;
   }
   return FoundBinary{symbol_file, build_id_and_load_bias->load_bias};
 }
 
-base::Optional<FoundBinary> LocalBinaryFinder::FindBinaryInRoot(
+std::optional<FoundBinary> LocalBinaryFinder::FindBinaryInRoot(
     const std::string& root_str,
     const std::string& abspath,
     const std::string& build_id) {
@@ -539,7 +413,7 @@ base::Optional<FoundBinary> LocalBinaryFinder::FindBinaryInRoot(
   // * $ROOT/foo.so
   // * $ROOT/.build-id/ab/cd1234.debug
 
-  base::Optional<FoundBinary> result;
+  std::optional<FoundBinary> result;
 
   std::string symbol_file = root_str + "/" + dirname + "/" + filename;
   result = IsCorrectFile(symbol_file, build_id);
@@ -548,8 +422,8 @@ base::Optional<FoundBinary> LocalBinaryFinder::FindBinaryInRoot(
   }
 
   if (base::StartsWith(filename, kApkPrefix)) {
-    symbol_file =
-        root_str + "/" + dirname + "/" + filename.substr(sizeof(kApkPrefix));
+    symbol_file = root_str + "/" + dirname + "/" +
+                  filename.substr(sizeof(kApkPrefix) - 1);
     result = IsCorrectFile(symbol_file, build_id);
     if (result) {
       return result;
@@ -563,7 +437,7 @@ base::Optional<FoundBinary> LocalBinaryFinder::FindBinaryInRoot(
   }
 
   if (base::StartsWith(filename, kApkPrefix)) {
-    symbol_file = root_str + "/" + filename.substr(sizeof(kApkPrefix));
+    symbol_file = root_str + "/" + filename.substr(sizeof(kApkPrefix) - 1);
     result = IsCorrectFile(symbol_file, build_id);
     if (result) {
       return result;
@@ -581,7 +455,7 @@ base::Optional<FoundBinary> LocalBinaryFinder::FindBinaryInRoot(
     }
   }
 
-  return base::nullopt;
+  return std::nullopt;
 }
 
 LocalBinaryFinder::~LocalBinaryFinder() = default;
@@ -600,9 +474,9 @@ std::vector<SymbolizedFrame> LLVMSymbolizerProcess::Symbolize(
     const std::string& binary,
     uint64_t address) {
   std::vector<SymbolizedFrame> result;
-  char buffer[1024];
-  int size = sprintf(buffer, "\"%s\" 0x%" PRIx64 "\n", binary.c_str(), address);
-  if (subprocess_.Write(buffer, static_cast<size_t>(size)) < 0) {
+  base::StackString<1024> buffer("\"%s\" 0x%" PRIx64 "\n", binary.c_str(),
+                                 address);
+  if (subprocess_.Write(buffer.c_str(), buffer.len()) < 0) {
     PERFETTO_ELOG("Failed to write to llvm-symbolizer.");
     return result;
   }
@@ -642,7 +516,7 @@ std::vector<std::vector<SymbolizedFrame>> LocalSymbolizer::Symbolize(
     const std::string& build_id,
     uint64_t load_bias,
     const std::vector<uint64_t>& addresses) {
-  base::Optional<FoundBinary> binary =
+  std::optional<FoundBinary> binary =
       finder_->FindBinary(mapping_name, build_id);
   if (!binary)
     return {};

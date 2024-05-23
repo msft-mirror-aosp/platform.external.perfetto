@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "perfetto/ext/base/thread_checker.h"
+#include "perfetto/ext/base/weak_ptr.h"
 #include "perfetto/ext/ipc/client.h"
 #include "perfetto/ext/ipc/service_proxy.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
@@ -45,6 +46,8 @@ class SharedMemoryArbiter;
 // IPC channel to the remote Service. This class is the glue layer between the
 // generic Service interface exposed to the clients of the library and the
 // actual IPC transport.
+// If create_socket_async is set, it will be called to create and connect to a
+// socket to the service. If unset, the producer will create and connect itself.
 class ProducerIPCClientImpl : public TracingService::ProducerEndpoint,
                               public ipc::ServiceProxy::EventListener {
  public:
@@ -56,13 +59,16 @@ class ProducerIPCClientImpl : public TracingService::ProducerEndpoint,
                         size_t shared_memory_size_hint_bytes,
                         size_t shared_memory_page_size_hint_bytes,
                         std::unique_ptr<SharedMemory> shm,
-                        std::unique_ptr<SharedMemoryArbiter> shm_arbiter);
+                        std::unique_ptr<SharedMemoryArbiter> shm_arbiter,
+                        CreateSocketAsync create_socket_async);
   ~ProducerIPCClientImpl() override;
 
   // TracingService::ProducerEndpoint implementation.
   // These methods are invoked by the actual Producer(s) code by clients of the
   // tracing library, which know nothing about the IPC transport.
+  void Disconnect() override;
   void RegisterDataSource(const DataSourceDescriptor&) override;
+  void UpdateDataSource(const DataSourceDescriptor&) override;
   void UnregisterDataSource(const std::string& name) override;
   void RegisterTraceWriter(uint32_t writer_id, uint32_t target_buffer) override;
   void UnregisterTraceWriter(uint32_t writer_id) override;
@@ -90,10 +96,15 @@ class ProducerIPCClientImpl : public TracingService::ProducerEndpoint,
   ipc::Client* GetClientForTesting() { return ipc_channel_.get(); }
 
  private:
+  // Drops the provider connection if a protocol error was detected while
+  // processing an IPC command.
+  void ScheduleDisconnect();
+
   // Invoked soon after having established the connection with the service.
   void OnConnectionInitialized(bool connection_succeeded,
                                bool using_shmem_provided_by_producer,
-                               bool direct_smb_patching_supported);
+                               bool direct_smb_patching_supported,
+                               bool use_shmem_emulation);
 
   // Invoked when the remote Service sends an IPC to tell us to do something
   // (e.g. start/stop a data source).
@@ -103,12 +114,15 @@ class ProducerIPCClientImpl : public TracingService::ProducerEndpoint,
   Producer* const producer_;
   base::TaskRunner* const task_runner_;
 
+  // A callback used to receive the shmem region out of band of the socket.
+  std::function<int(void)> receive_shmem_fd_cb_fuchsia_;
+
   // The object that owns the client socket and takes care of IPC traffic.
   std::unique_ptr<ipc::Client> ipc_channel_;
 
   // The proxy interface for the producer port of the service. It is bound
   // to |ipc_channel_| and (de)serializes method invocations over the wire.
-  protos::gen::ProducerPortProxy producer_port_;
+  std::unique_ptr<protos::gen::ProducerPortProxy> producer_port_;
 
   std::unique_ptr<SharedMemory> shared_memory_;
   std::unique_ptr<SharedMemoryArbiter> shared_memory_arbiter_;
@@ -121,7 +135,9 @@ class ProducerIPCClientImpl : public TracingService::ProducerEndpoint,
   TracingService::ProducerSMBScrapingMode const smb_scraping_mode_;
   bool is_shmem_provided_by_producer_ = false;
   bool direct_smb_patching_supported_ = false;
+  bool use_shmem_emulation_ = false;
   std::vector<std::function<void()>> pending_sync_reqs_;
+  base::WeakPtrFactory<ProducerIPCClientImpl> weak_factory_{this};
   PERFETTO_THREAD_CHECKER(thread_checker_)
 };
 

@@ -19,8 +19,8 @@
 
 #include "perfetto/base/build_config.h"
 #include "src/trace_processor/importers/proto/android_probes_parser.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
-#include "src/trace_processor/timestamped_trace_piece.h"
 
 #include "protos/perfetto/config/trace_config.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
@@ -35,19 +35,26 @@ class AndroidProbesModule : public ProtoImporterModule {
   ModuleResult TokenizePacket(const protos::pbzero::TracePacket_Decoder&,
                               TraceBlobView* packet,
                               int64_t packet_timestamp,
-                              PacketSequenceState*,
+                              RefPtr<PacketSequenceStateGeneration>,
                               uint32_t field_id) override;
 
-  void ParsePacket(const protos::pbzero::TracePacket::Decoder& decoder,
-                   const TimestampedTracePiece& ttp,
-                   uint32_t field_id) override;
-
+  void ParseTracePacketData(const protos::pbzero::TracePacket_Decoder& decoder,
+                            int64_t ts,
+                            const TracePacketData&,
+                            uint32_t field_id) override;
   void ParseTraceConfig(
       const protos::pbzero::TraceConfig::Decoder& decoder) override;
+
+  ModuleResult ParseEnergyDescriptor(protozero::ConstBytes blob);
+  ModuleResult ParseAndroidPackagesList(protozero::ConstBytes blob);
+  void ParseEntityStateDescriptor(protozero::ConstBytes blob);
 
  private:
   AndroidProbesParser parser_;
   TraceProcessorContext* context_ = nullptr;
+
+  const StringId power_rail_raw_name_id_;
+  const StringId power_rail_subsys_name_arg_id_;
 };
 
 }  // namespace trace_processor

@@ -20,7 +20,7 @@
 #include <stddef.h>
 #include <type_traits>
 
-#include "perfetto/base/build_config.h"
+#include "perfetto/public/compiler.h"
 
 // __has_attribute is supported only by clang and recent versions of GCC.
 // Add a layer to wrap the __has_attribute macro.
@@ -31,17 +31,15 @@
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-#define PERFETTO_LIKELY(_x) __builtin_expect(!!(_x), 1)
-#define PERFETTO_UNLIKELY(_x) __builtin_expect(!!(_x), 0)
-#else
-#define PERFETTO_LIKELY(_x) (_x)
-#define PERFETTO_UNLIKELY(_x) (_x)
-#endif
-
-#if defined(__GNUC__) || defined(__clang__)
 #define PERFETTO_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
 #else
 #define PERFETTO_WARN_UNUSED_RESULT
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PERFETTO_UNUSED __attribute__((unused))
+#else
+#define PERFETTO_UNUSED
 #endif
 
 #if defined(__clang__)
@@ -74,16 +72,6 @@
   __attribute__((__format__(__printf__, x, y)))
 #else
 #define PERFETTO_PRINTF_FORMAT(x, y)
-#endif
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_IOS)
-// TODO(b/158814068): For iOS builds, thread_local is only supported since iOS
-// 8. We'd have to use pthread for thread local data instead here. For now, just
-// define it to nothing since we don't support running perfetto or the client
-// lib on iOS right now.
-#define PERFETTO_THREAD_LOCAL
-#else
-#define PERFETTO_THREAD_LOCAL thread_local
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -138,6 +126,13 @@ extern "C" void __asan_unpoison_memory_region(void const volatile*, size_t);
 #define PERFETTO_NO_THREAD_SAFETY_ANALYSIS
 #endif
 
+// Disables undefined behavior analysis for a function.
+#if defined(__clang__)
+#define PERFETTO_NO_SANITIZE_UNDEFINED __attribute__((no_sanitize("undefined")))
+#else
+#define PERFETTO_NO_SANITIZE_UNDEFINED
+#endif
+
 // Avoid calling the exit-time destructor on an object with static lifetime.
 #if PERFETTO_HAS_ATTRIBUTE(no_destroy)
 #define PERFETTO_HAS_NO_DESTROY() 1
@@ -146,6 +141,9 @@ extern "C" void __asan_unpoison_memory_region(void const volatile*, size_t);
 #define PERFETTO_HAS_NO_DESTROY() 0
 #define PERFETTO_NO_DESTROY
 #endif
+
+// Macro for telling -Wimplicit-fallthrough that a fallthrough is intentional.
+#define PERFETTO_FALLTHROUGH [[fallthrough]]
 
 namespace perfetto {
 namespace base {

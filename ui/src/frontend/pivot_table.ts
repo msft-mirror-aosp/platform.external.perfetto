@@ -1,236 +1,643 @@
-// Copyright (C) 2021 The Android Open Source Project
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright (C) 2022 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
+import m from 'mithril';
 
-import * as m from 'mithril';
-
+import {sqliteString} from '../base/string_utils';
 import {Actions} from '../common/actions';
-import {QueryResponse} from '../common/queries';
-import {Row} from '../common/query_result';
+import {DropDirection} from '../common/dragndrop_logic';
+import {COUNT_AGGREGATION} from '../common/empty_state';
+import {
+  Area,
+  PivotTableAreaState,
+  PivotTableResult,
+  SortDirection,
+} from '../common/state';
+import {raf} from '../core/raf_scheduler';
+import {ColumnType} from '../trace_processor/query_result';
 
-import {queryResponseToClipboard} from './clipboard';
 import {globals} from './globals';
-import {Panel} from './panel';
+import {
+  aggregationIndex,
+  areaFilters,
+  extractArgumentExpression,
+  sliceAggregationColumns,
+  tables,
+} from './pivot_table_query_generator';
+import {
+  Aggregation,
+  AggregationFunction,
+  columnKey,
+  PivotTree,
+  TableColumn,
+} from './pivot_table_types';
+import {PopupMenuButton, popupMenuIcon, PopupMenuItem} from './popup_menu';
+import {ReorderableCell, ReorderableCellGroup} from './reorderable_cells';
+import {addSqlTableTab} from './sql_table/tab';
+import {SqlTables} from './sql_table/well_known_tables';
+import {AttributeModalHolder} from './tables/attribute_modal_holder';
+import {DurationWidget} from './widgets/duration';
 
-interface PivotTableRowAttrs {
-  row: Row;
-  columns: string[];
-}
-
-class PivotTableRow implements m.ClassComponent<PivotTableRowAttrs> {
-  view(vnode: m.Vnode<PivotTableRowAttrs>) {
-    const cells = [];
-    const {row, columns} = vnode.attrs;
-    for (const col of columns) {
-      cells.push(m('td', row[col]));
-    }
-
-    return m('tr', cells);
-  }
+interface PathItem {
+  tree: PivotTree;
+  nextKey: ColumnType;
 }
 
 interface PivotTableAttrs {
-  pivotTableId: string;
+  selectionArea: PivotTableAreaState;
 }
 
-class ColumnPicker implements m.ClassComponent<PivotTableAttrs> {
-  view(vnode: m.Vnode<PivotTableAttrs>) {
-    const {pivotTableId} = vnode.attrs;
-    const availableColumns = globals.state.pivotTableConfig.availableColumns;
-    const availableColumnsCount =
-        globals.state.pivotTableConfig.totalColumnsCount;
-    const availableAggregations =
-        globals.state.pivotTableConfig.availableAggregations;
-    if (availableColumns === undefined || availableColumnsCount === undefined) {
-      return 'Loading columns...';
-    }
-    if (availableAggregations === undefined) {
-      return 'Loading aggregations...';
-    }
-    if (availableColumnsCount === 0) {
-      return 'No columns available';
-    }
-    if (availableAggregations.length === 0) {
-      return 'No aggregations available';
-    }
+interface DrillFilter {
+  column: TableColumn;
+  value: ColumnType;
+}
 
-    if (globals.state.pivotTable[pivotTableId].selectedColumnIndex ===
-        undefined) {
-      globals.state.pivotTable[pivotTableId].selectedColumnIndex = 0;
-    }
-    if (globals.state.pivotTable[pivotTableId].selectedAggregationIndex ===
-        undefined) {
-      globals.state.pivotTable[pivotTableId].selectedAggregationIndex = 0;
-    }
-
-    // Fills available aggregations options in aggregation select.
-    const aggregationOptions = [];
-    for (let i = 0; i < availableAggregations.length; ++i) {
-      aggregationOptions.push(
-          m('option',
-            {value: availableAggregations[i], key: availableAggregations[i]},
-            availableAggregations[i]));
-    }
-
-    // Fills available columns options divided according to their table in
-    // column select.
-    const columnOptionGroup = [];
-    for (let i = 0; i < availableColumns.length; ++i) {
-      const options = [];
-      for (let j = 0; j < availableColumns[i].columns.length; ++j) {
-        options.push(
-            m('option',
-              {
-                value: availableColumns[i].columns[j],
-                key: availableColumns[i].columns[j]
-              },
-              availableColumns[i].columns[j]));
-      }
-      columnOptionGroup.push(
-          m('optgroup', {label: availableColumns[i].tableName}, options));
-    }
-
-    return m('div', [
-      'Select a column: ',
-      // Pivot radio button.
-      m(`input[type=radio][name=type][id=pivot]`, {
-        checked: globals.state.pivotTable[pivotTableId].isPivot,
-        onchange: () =>
-            globals.dispatch(Actions.togglePivotSelection({pivotTableId}))
-      }),
-      m(`label[for=pivot]`, 'Pivot'),
-      // Aggregation radio button.
-      m(`input[type=radio][name=type][id=aggregation]`, {
-        checked: !globals.state.pivotTable[pivotTableId].isPivot,
-        onchange: () =>
-            globals.dispatch(Actions.togglePivotSelection({pivotTableId}))
-      }),
-      m(`label[for=aggregation]`, 'Aggregation'),
-      ' ',
-      // Aggregation select.
-      m('select',
-        {
-          disabled: (globals.state.pivotTable[pivotTableId].isPivot === true),
-          selectedIndex:
-              globals.state.pivotTable[pivotTableId].selectedAggregationIndex,
-          onchange: (e: InputEvent) => {
-            globals.dispatch(Actions.setSelectedPivotTableAggregationIndex({
-              pivotTableId,
-              index: (e.target as HTMLSelectElement).selectedIndex
-            }));
-          }
-        },
-        aggregationOptions),
-      ' ',
-      // Column select.
-      m('select',
-        {
-          selectedIndex:
-              globals.state.pivotTable[pivotTableId].selectedColumnIndex,
-          onchange: (e: InputEvent) => {
-            globals.dispatch(Actions.setSelectedPivotTableColumnIndex({
-              pivotTableId,
-              index: (e.target as HTMLSelectElement).selectedIndex
-            }));
-          }
-        },
-        columnOptionGroup),
-      ' ',
-      // Button to toggle selected column.
-      m('button.query-ctrl',
-        {
-          onclick: () => {
-            globals.dispatch(
-                Actions.setPivotTableRequest({pivotTableId, action: 'UPDATE'}));
-          }
-        },
-        'Add/Remove'),
-      // Button to execute query based on added/removed columns.
-      m('button.query-ctrl',
-        {
-          onclick: () => {
-            globals.dispatch(
-                Actions.setPivotTableRequest({pivotTableId, action: 'QUERY'}));
-          }
-        },
-        'Query'),
-      // Button to clear table and all selected columns.
-      m('button.query-ctrl',
-        {
-          onclick: () => {
-            globals.dispatch(Actions.clearPivotTableColumns({pivotTableId}));
-            globals.dispatch(
-                Actions.setPivotTableRequest({pivotTableId, action: 'QUERY'}));
-          }
-        },
-        'Clear'),
-    ]);
+function drillFilterColumnName(column: TableColumn): string {
+  switch (column.kind) {
+    case 'argument':
+      return extractArgumentExpression(column.argument, SqlTables.slice.name);
+    case 'regular':
+      return `${column.column}`;
   }
 }
 
-export class PivotTable extends Panel<PivotTableAttrs> {
-  view(vnode: m.CVnode<PivotTableAttrs>) {
-    const {pivotTableId} = vnode.attrs;
-    const resp = globals.queryResults.get(pivotTableId) as QueryResponse;
-    // Query resulting from query generator should always be valid.
-    if (resp !== undefined && resp.error) {
-      throw Error(`Pivot table query resulted in SQL error: ${resp.error}`);
-    }
-    const cols = [];
-    const rows = [];
-    let header;
+// Convert DrillFilter to SQL condition to be used in WHERE clause.
+function renderDrillFilter(filter: DrillFilter): string {
+  const column = drillFilterColumnName(filter.column);
+  if (filter.value === null) {
+    return `${column} IS NULL`;
+  } else if (typeof filter.value === 'number') {
+    return `${column} = ${filter.value}`;
+  } else if (filter.value instanceof Uint8Array) {
+    throw new Error(`BLOB as DrillFilter not implemented`);
+  } else if (typeof filter.value === 'bigint') {
+    return `${column} = ${filter.value}`;
+  }
+  return `${column} = ${sqliteString(filter.value)}`;
+}
 
-    if (resp !== undefined) {
-      for (const col of resp.columns) {
-        cols.push(m('td', col));
-      }
-      header = m('tr', cols);
+function readableColumnName(column: TableColumn) {
+  switch (column.kind) {
+    case 'argument':
+      return `Argument ${column.argument}`;
+    case 'regular':
+      return `${column.column}`;
+  }
+}
 
-      for (let i = 0; i < resp.rows.length; i++) {
-        rows.push(m(PivotTableRow, {row: resp.rows[i], columns: resp.columns}));
+export function markFirst(index: number) {
+  if (index === 0) {
+    return '.first';
+  }
+  return '';
+}
+
+export class PivotTable implements m.ClassComponent<PivotTableAttrs> {
+  constructor() {
+    this.attributeModalHolder = new AttributeModalHolder((arg) => {
+      globals.dispatch(
+        Actions.setPivotTablePivotSelected({
+          column: {kind: 'argument', argument: arg},
+          selected: true,
+        }),
+      );
+      globals.dispatch(
+        Actions.setPivotTableQueryRequested({queryRequested: true}),
+      );
+    });
+  }
+
+  get pivotState() {
+    return globals.state.nonSerializableState.pivotTable;
+  }
+  get constrainToArea() {
+    return globals.state.nonSerializableState.pivotTable.constrainToArea;
+  }
+
+  renderDrillDownCell(area: Area, filters: DrillFilter[]) {
+    return m(
+      'td',
+      m(
+        'button',
+        {
+          title: 'All corresponding slices',
+          onclick: () => {
+            const queryFilters = filters.map(renderDrillFilter);
+            if (this.constrainToArea) {
+              queryFilters.push(...areaFilters(area));
+            }
+            addSqlTableTab({
+              table: SqlTables.slice,
+              filters: queryFilters,
+            });
+          },
+        },
+        m('i.material-icons', 'arrow_right'),
+      ),
+    );
+  }
+
+  renderSectionRow(
+    area: Area,
+    path: PathItem[],
+    tree: PivotTree,
+    result: PivotTableResult,
+  ): m.Vnode {
+    const renderedCells = [];
+    for (let j = 0; j + 1 < path.length; j++) {
+      renderedCells.push(m('td', m('span.indent', ' '), `${path[j].nextKey}`));
+    }
+
+    const treeDepth = result.metadata.pivotColumns.length;
+    const colspan = treeDepth - path.length + 1;
+    const button = m(
+      'button',
+      {
+        onclick: () => {
+          tree.isCollapsed = !tree.isCollapsed;
+          raf.scheduleFullRedraw();
+        },
+      },
+      m('i.material-icons', tree.isCollapsed ? 'expand_more' : 'expand_less'),
+    );
+
+    renderedCells.push(
+      m('td', {colspan}, button, `${path[path.length - 1].nextKey}`),
+    );
+
+    for (let i = 0; i < result.metadata.aggregationColumns.length; i++) {
+      const renderedValue = this.renderCell(
+        result.metadata.aggregationColumns[i].column,
+        tree.aggregates[i],
+      );
+      renderedCells.push(m('td' + markFirst(i), renderedValue));
+    }
+
+    const drillFilters: DrillFilter[] = [];
+    for (let i = 0; i < path.length; i++) {
+      drillFilters.push({
+        value: `${path[i].nextKey}`,
+        column: result.metadata.pivotColumns[i],
+      });
+    }
+
+    renderedCells.push(this.renderDrillDownCell(area, drillFilters));
+    return m('tr', renderedCells);
+  }
+
+  renderCell(column: TableColumn, value: ColumnType): m.Children {
+    if (
+      column.kind === 'regular' &&
+      (column.column === 'dur' || column.column === 'thread_dur')
+    ) {
+      if (typeof value === 'bigint') {
+        return m(DurationWidget, {dur: value});
       }
     }
+    return `${value}`;
+  }
+
+  renderTree(
+    area: Area,
+    path: PathItem[],
+    tree: PivotTree,
+    result: PivotTableResult,
+    sink: m.Vnode[],
+  ) {
+    if (tree.isCollapsed) {
+      sink.push(this.renderSectionRow(area, path, tree, result));
+      return;
+    }
+    if (tree.children.size > 0) {
+      // Avoid rendering the intermediate results row for the root of tree
+      // and in case there's only one child subtree.
+      if (!tree.isCollapsed && path.length > 0 && tree.children.size !== 1) {
+        sink.push(this.renderSectionRow(area, path, tree, result));
+      }
+      for (const [key, childTree] of tree.children.entries()) {
+        path.push({tree: childTree, nextKey: key});
+        this.renderTree(area, path, childTree, result, sink);
+        path.pop();
+      }
+      return;
+    }
+
+    // Avoid rendering the intermediate results row if it has only one leaf
+    // row.
+    if (!tree.isCollapsed && path.length > 0 && tree.rows.length > 1) {
+      sink.push(this.renderSectionRow(area, path, tree, result));
+    }
+    for (const row of tree.rows) {
+      const renderedCells = [];
+      const drillFilters: DrillFilter[] = [];
+      const treeDepth = result.metadata.pivotColumns.length;
+      for (let j = 0; j < treeDepth; j++) {
+        const value = this.renderCell(result.metadata.pivotColumns[j], row[j]);
+        if (j < path.length) {
+          renderedCells.push(m('td', m('span.indent', ' '), value));
+        } else {
+          renderedCells.push(m(`td`, value));
+        }
+        drillFilters.push({
+          column: result.metadata.pivotColumns[j],
+          value: row[j],
+        });
+      }
+      for (let j = 0; j < result.metadata.aggregationColumns.length; j++) {
+        const value = row[aggregationIndex(treeDepth, j)];
+        const renderedValue = this.renderCell(
+          result.metadata.aggregationColumns[j].column,
+          value,
+        );
+        renderedCells.push(m('td.aggregation' + markFirst(j), renderedValue));
+      }
+
+      renderedCells.push(this.renderDrillDownCell(area, drillFilters));
+      sink.push(m('tr', renderedCells));
+    }
+  }
+
+  renderTotalsRow(queryResult: PivotTableResult) {
+    const overallValuesRow = [
+      m(
+        'td.total-values',
+        {colspan: queryResult.metadata.pivotColumns.length},
+        m('strong', 'Total values:'),
+      ),
+    ];
+    for (let i = 0; i < queryResult.metadata.aggregationColumns.length; i++) {
+      overallValuesRow.push(
+        m(
+          'td' + markFirst(i),
+          this.renderCell(
+            queryResult.metadata.aggregationColumns[i].column,
+            queryResult.tree.aggregates[i],
+          ),
+        ),
+      );
+    }
+    overallValuesRow.push(m('td'));
+    return m('tr', overallValuesRow);
+  }
+
+  sortingItem(aggregationIndex: number, order: SortDirection): PopupMenuItem {
+    return {
+      itemType: 'regular',
+      text: order === 'DESC' ? 'Highest first' : 'Lowest first',
+      callback() {
+        globals.dispatch(
+          Actions.setPivotTableSortColumn({aggregationIndex, order}),
+        );
+        globals.dispatch(
+          Actions.setPivotTableQueryRequested({queryRequested: true}),
+        );
+      },
+    };
+  }
+
+  readableAggregationName(aggregation: Aggregation) {
+    if (aggregation.aggregationFunction === 'COUNT') {
+      return 'Count';
+    }
+    return `${aggregation.aggregationFunction}(${readableColumnName(
+      aggregation.column,
+    )})`;
+  }
+
+  aggregationPopupItem(
+    aggregation: Aggregation,
+    index: number,
+    nameOverride?: string,
+  ): PopupMenuItem {
+    return {
+      itemType: 'regular',
+      text: nameOverride ?? readableColumnName(aggregation.column),
+      callback: () => {
+        globals.dispatch(
+          Actions.addPivotTableAggregation({aggregation, after: index}),
+        );
+        globals.dispatch(
+          Actions.setPivotTableQueryRequested({queryRequested: true}),
+        );
+      },
+    };
+  }
+
+  aggregationPopupTableGroup(
+    table: string,
+    columns: string[],
+    index: number,
+  ): PopupMenuItem | undefined {
+    const items = [];
+    for (const column of columns) {
+      const tableColumn: TableColumn = {kind: 'regular', table, column};
+      items.push(
+        this.aggregationPopupItem(
+          {aggregationFunction: 'SUM', column: tableColumn},
+          index,
+        ),
+      );
+    }
+
+    if (items.length === 0) {
+      return undefined;
+    }
+
+    return {
+      itemType: 'group',
+      itemId: `aggregations-${table}`,
+      text: `Add ${table} aggregation`,
+      children: items,
+    };
+  }
+
+  renderAggregationHeaderCell(
+    aggregation: Aggregation,
+    index: number,
+    removeItem: boolean,
+  ): ReorderableCell {
+    const popupItems: PopupMenuItem[] = [];
+    const state = globals.state.nonSerializableState.pivotTable;
+    if (aggregation.sortDirection === undefined) {
+      popupItems.push(
+        this.sortingItem(index, 'DESC'),
+        this.sortingItem(index, 'ASC'),
+      );
+    } else {
+      // Table is already sorted by the same column, return one item with
+      // opposite direction.
+      popupItems.push(
+        this.sortingItem(
+          index,
+          aggregation.sortDirection === 'DESC' ? 'ASC' : 'DESC',
+        ),
+      );
+    }
+    const otherAggs: AggregationFunction[] = ['SUM', 'MAX', 'MIN', 'AVG'];
+    if (aggregation.aggregationFunction !== 'COUNT') {
+      for (const otherAgg of otherAggs) {
+        if (aggregation.aggregationFunction === otherAgg) {
+          continue;
+        }
+
+        popupItems.push({
+          itemType: 'regular',
+          text: otherAgg,
+          callback() {
+            globals.dispatch(
+              Actions.setPivotTableAggregationFunction({
+                index,
+                function: otherAgg,
+              }),
+            );
+            globals.dispatch(
+              Actions.setPivotTableQueryRequested({queryRequested: true}),
+            );
+          },
+        });
+      }
+    }
+
+    if (removeItem) {
+      popupItems.push({
+        itemType: 'regular',
+        text: 'Remove',
+        callback: () => {
+          globals.dispatch(Actions.removePivotTableAggregation({index}));
+          globals.dispatch(
+            Actions.setPivotTableQueryRequested({queryRequested: true}),
+          );
+        },
+      });
+    }
+
+    let hasCount = false;
+    for (const agg of state.selectedAggregations.values()) {
+      if (agg.aggregationFunction === 'COUNT') {
+        hasCount = true;
+      }
+    }
+
+    if (!hasCount) {
+      popupItems.push(
+        this.aggregationPopupItem(
+          COUNT_AGGREGATION,
+          index,
+          'Add count aggregation',
+        ),
+      );
+    }
+
+    const sliceAggregationsItem = this.aggregationPopupTableGroup(
+      SqlTables.slice.name,
+      sliceAggregationColumns,
+      index,
+    );
+    if (sliceAggregationsItem !== undefined) {
+      popupItems.push(sliceAggregationsItem);
+    }
+
+    return {
+      extraClass: '.aggregation' + markFirst(index),
+      content: [
+        this.readableAggregationName(aggregation),
+        m(PopupMenuButton, {
+          icon: popupMenuIcon(aggregation.sortDirection),
+          items: popupItems,
+        }),
+      ],
+    };
+  }
+
+  attributeModalHolder: AttributeModalHolder;
+
+  renderPivotColumnHeader(
+    queryResult: PivotTableResult,
+    pivot: TableColumn,
+    selectedPivots: Set<string>,
+  ): ReorderableCell {
+    const items: PopupMenuItem[] = [
+      {
+        itemType: 'regular',
+        text: 'Add argument pivot',
+        callback: () => {
+          this.attributeModalHolder.start();
+        },
+      },
+    ];
+    if (queryResult.metadata.pivotColumns.length > 1) {
+      items.push({
+        itemType: 'regular',
+        text: 'Remove',
+        callback() {
+          globals.dispatch(
+            Actions.setPivotTablePivotSelected({
+              column: pivot,
+              selected: false,
+            }),
+          );
+          globals.dispatch(
+            Actions.setPivotTableQueryRequested({queryRequested: true}),
+          );
+        },
+      });
+    }
+
+    for (const table of tables) {
+      const group: PopupMenuItem[] = [];
+      for (const columnName of table.columns) {
+        const column: TableColumn = {
+          kind: 'regular',
+          table: table.name,
+          column: columnName,
+        };
+        if (selectedPivots.has(columnKey(column))) {
+          continue;
+        }
+
+        group.push({
+          itemType: 'regular',
+          text: columnName,
+          callback() {
+            globals.dispatch(
+              Actions.setPivotTablePivotSelected({column, selected: true}),
+            );
+            globals.dispatch(
+              Actions.setPivotTableQueryRequested({queryRequested: true}),
+            );
+          },
+        });
+      }
+      items.push({
+        itemType: 'group',
+        itemId: `pivot-${table.name}`,
+        text: `Add ${table.displayName} pivot`,
+        children: group,
+      });
+    }
+
+    return {
+      content: [
+        readableColumnName(pivot),
+        m(PopupMenuButton, {icon: 'more_horiz', items}),
+      ],
+    };
+  }
+
+  renderResultsTable(attrs: PivotTableAttrs) {
+    const state = globals.state.nonSerializableState.pivotTable;
+    if (state.queryResult === null) {
+      return m('div', 'Loading...');
+    }
+    const queryResult: PivotTableResult = state.queryResult;
+
+    const renderedRows: m.Vnode[] = [];
+    const tree = state.queryResult.tree;
+
+    if (tree.children.size === 0 && tree.rows.length === 0) {
+      // Empty result, render a special message
+      return m('.empty-result', 'No slices in the current selection.');
+    }
+
+    this.renderTree(
+      globals.state.areas[attrs.selectionArea.areaId],
+      [],
+      tree,
+      state.queryResult,
+      renderedRows,
+    );
+
+    const selectedPivots = new Set(
+      this.pivotState.selectedPivots.map(columnKey),
+    );
+    const pivotTableHeaders = state.selectedPivots.map((pivot) =>
+      this.renderPivotColumnHeader(queryResult, pivot, selectedPivots),
+    );
+
+    const removeItem = state.queryResult.metadata.aggregationColumns.length > 1;
+    const aggregationTableHeaders =
+      state.queryResult.metadata.aggregationColumns.map((aggregation, index) =>
+        this.renderAggregationHeaderCell(aggregation, index, removeItem),
+      );
 
     return m(
-        'div',
+      'table.pivot-table',
+      m(
+        'thead',
+        // First row of the table, containing names of pivot and aggregation
+        // columns, as well as popup menus to modify the columns. Last cell
+        // is empty because of an extra column with "drill down" button for
+        // each pivot table row.
         m(
-            'header.overview',
-            m(
-                'span.code',
-                m(ColumnPicker, {pivotTableId}),
-                ),
-            (resp === undefined || resp.error) ?
-                null :
-                m('button.query-ctrl',
-                  {
-                    onclick: () => {
-                      queryResponseToClipboard(resp);
-                    },
+          'tr.header',
+          m(ReorderableCellGroup, {
+            cells: pivotTableHeaders,
+            onReorder: (from: number, to: number, direction: DropDirection) => {
+              globals.dispatch(
+                Actions.changePivotTablePivotOrder({from, to, direction}),
+              );
+              globals.dispatch(
+                Actions.setPivotTableQueryRequested({queryRequested: true}),
+              );
+            },
+          }),
+          m(ReorderableCellGroup, {
+            cells: aggregationTableHeaders,
+            onReorder: (from: number, to: number, direction: DropDirection) => {
+              globals.dispatch(
+                Actions.changePivotTableAggregationOrder({from, to, direction}),
+              );
+              globals.dispatch(
+                Actions.setPivotTableQueryRequested({queryRequested: true}),
+              );
+            },
+          }),
+          m(
+            'td.menu',
+            m(PopupMenuButton, {
+              icon: 'menu',
+              items: [
+                {
+                  itemType: 'regular',
+                  text: state.constrainToArea
+                    ? 'Query data for the whole timeline'
+                    : 'Constrain to selected area',
+                  callback: () => {
+                    globals.dispatch(
+                      Actions.setPivotTableConstrainToArea({
+                        constrain: !state.constrainToArea,
+                      }),
+                    );
+                    globals.dispatch(
+                      Actions.setPivotTableQueryRequested({
+                        queryRequested: true,
+                      }),
+                    );
                   },
-                  'Copy as .tsv'),
-            m('button.query-ctrl',
-              {
-                onclick: () => {
-                  globals.frontendLocalState.togglePivotTable();
-                  globals.dispatch(Actions.deletePivotTable({pivotTableId}));
-                }
-              },
-              'Close'),
-            ),
-        m('query-table-container',
-          m('table.query-table', m('thead', header), m('tbody', rows))));
+                },
+              ],
+            }),
+          ),
+        ),
+      ),
+      m('tbody', this.renderTotalsRow(state.queryResult), renderedRows),
+    );
   }
 
-  renderCanvas() {}
+  view({attrs}: m.Vnode<PivotTableAttrs>): m.Children {
+    return m('.pivot-table', this.renderResultsTable(attrs));
+  }
 }

@@ -15,20 +15,23 @@
 import {binaryDecode} from '../base/string_utils';
 import {ChromeTracingController} from './chrome_tracing_controller';
 
-let chromeTraceController: ChromeTracingController|undefined = undefined;
+let chromeTraceController: ChromeTracingController | undefined = undefined;
 
 enableOnlyOnPerfettoHost();
 
 // Listen for messages from the perfetto ui.
+// eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
 if (window.chrome) {
-  chrome.runtime.onConnectExternal.addListener(port => {
+  chrome.runtime.onConnectExternal.addListener((port) => {
     chromeTraceController = new ChromeTracingController(port);
     port.onMessage.addListener(onUIMessage);
   });
 }
 
 function onUIMessage(
-    message: {method: string, requestData: string}, port: chrome.runtime.Port) {
+  message: {method: string; requestData: string},
+  port: chrome.runtime.Port,
+) {
   if (message.method === 'ExtensionVersion') {
     port.postMessage({version: chrome.runtime.getManifest().version});
     return;
@@ -37,25 +40,29 @@ function onUIMessage(
   if (!chromeTraceController) return;
   // ChromeExtensionConsumerPort sends the request data as string because
   // chrome.runtime.port doesn't support ArrayBuffers.
-  const requestDataArray: Uint8Array = message.requestData ?
-      binaryDecode(message.requestData) :
-      new Uint8Array();
+  const requestDataArray: Uint8Array = message.requestData
+    ? binaryDecode(message.requestData)
+    : new Uint8Array();
   chromeTraceController.handleCommand(message.method, requestDataArray);
 }
 
 function enableOnlyOnPerfettoHost() {
   function enableOnHostWithSuffix(suffix: string) {
     return {
-      conditions: [new chrome.declarativeContent.PageStateMatcher({
-        pageUrl: {hostSuffix: suffix},
-      })],
-      actions: [new chrome.declarativeContent.ShowPageAction()]
+      conditions: [
+        new chrome.declarativeContent.PageStateMatcher({
+          pageUrl: {hostSuffix: suffix},
+        }),
+      ],
+      actions: [new chrome.declarativeContent.ShowPageAction()],
     };
   }
   chrome.declarativeContent.onPageChanged.removeRules(undefined, () => {
     chrome.declarativeContent.onPageChanged.addRules([
       enableOnHostWithSuffix('localhost'),
+      enableOnHostWithSuffix('127.0.0.1'),
       enableOnHostWithSuffix('.perfetto.dev'),
+      enableOnHostWithSuffix('.storage.googleapis.com'),
     ]);
   });
 }

@@ -19,7 +19,9 @@
 
 #include <stdint.h>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
+#include "src/trace_processor/importers/common/slice_translation_table.h"
 #include "src/trace_processor/storage/trace_storage.h"
 
 namespace perfetto {
@@ -37,11 +39,11 @@ class SliceTracker {
   virtual ~SliceTracker();
 
   // virtual for testing
-  virtual base::Optional<SliceId> Begin(
+  virtual std::optional<SliceId> Begin(
       int64_t timestamp,
       TrackId track_id,
       StringId category,
-      StringId name,
+      StringId raw_name,
       SetArgsCallback args_callback = SetArgsCallback());
 
   // Unnestable slices are slices which do not have any concept of nesting so
@@ -54,56 +56,62 @@ class SliceTracker {
                              SetArgsCallback args_callback);
 
   template <typename Table>
-  base::Optional<SliceId> BeginTyped(
+  std::optional<SliceId> BeginTyped(
       Table* table,
       typename Table::Row row,
       SetArgsCallback args_callback = SetArgsCallback()) {
     // Ensure that the duration is pending for this row.
     row.dur = kPendingDuration;
+    if (row.name) {
+      row.name = context_->slice_translation_table->TranslateName(*row.name);
+    }
     return StartSlice(row.ts, row.track_id, args_callback,
                       [table, &row]() { return table->Insert(row).id; });
   }
 
   // virtual for testing
-  virtual base::Optional<SliceId> Scoped(
+  virtual std::optional<SliceId> Scoped(
       int64_t timestamp,
       TrackId track_id,
       StringId category,
-      StringId name,
+      StringId raw_name,
       int64_t duration,
       SetArgsCallback args_callback = SetArgsCallback());
 
   template <typename Table>
-  base::Optional<SliceId> ScopedTyped(
+  std::optional<SliceId> ScopedTyped(
       Table* table,
-      const typename Table::Row& row,
+      typename Table::Row row,
       SetArgsCallback args_callback = SetArgsCallback()) {
     PERFETTO_DCHECK(row.dur >= 0);
+    if (row.name) {
+      row.name = context_->slice_translation_table->TranslateName(*row.name);
+    }
     return StartSlice(row.ts, row.track_id, args_callback,
                       [table, &row]() { return table->Insert(row).id; });
   }
 
   // virtual for testing
-  virtual base::Optional<SliceId> End(
+  virtual std::optional<SliceId> End(
       int64_t timestamp,
       TrackId track_id,
       StringId opt_category = {},
-      StringId opt_name = {},
+      StringId opt_raw_name = {},
       SetArgsCallback args_callback = SetArgsCallback());
 
   // Usually args should be added in the Begin or End args_callback but this
   // method is for the situation where new args need to be added to an
   // in-progress slice.
-  base::Optional<uint32_t> AddArgs(TrackId track_id,
-                                   StringId category,
-                                   StringId name,
-                                   SetArgsCallback args_callback);
+  std::optional<uint32_t> AddArgs(TrackId track_id,
+                                  StringId category,
+                                  StringId name,
+                                  SetArgsCallback args_callback);
 
   void FlushPendingSlices();
 
   void SetOnSliceBeginCallback(OnSliceBeginCallback callback);
 
-  base::Optional<SliceId> GetTopmostSliceOnTrack(TrackId track_id) const;
+  std::optional<SliceId> GetTopmostSliceOnTrack(TrackId track_id) const;
 
  private:
   // Slices which have been opened but haven't been closed yet will be marked
@@ -111,7 +119,7 @@ class SliceTracker {
   static constexpr int64_t kPendingDuration = -1;
 
   struct SliceInfo {
-    uint32_t row;
+    tables::SliceTable::RowNumber row;
     ArgsTracker args_tracker;
   };
   using SlicesStack = std::vector<SliceInfo>;
@@ -124,32 +132,43 @@ class SliceTracker {
     uint32_t legacy_unnestable_begin_count = 0;
     int64_t legacy_unnestable_last_begin_ts = 0;
   };
-  using StackMap = std::unordered_map<TrackId, TrackInfo>;
+  using StackMap = base::FlatHashMap<TrackId, TrackInfo>;
+
+  // Args pending translation.
+  struct TranslatableArgs {
+    SliceId slice_id;
+    ArgsTracker::CompactArgSet compact_arg_set;
+  };
 
   // virtual for testing.
-  virtual base::Optional<SliceId> StartSlice(int64_t timestamp,
-                                             TrackId track_id,
-                                             SetArgsCallback args_callback,
-                                             std::function<SliceId()> inserter);
+  virtual std::optional<SliceId> StartSlice(int64_t timestamp,
+                                            TrackId track_id,
+                                            SetArgsCallback args_callback,
+                                            std::function<SliceId()> inserter);
 
-  base::Optional<SliceId> CompleteSlice(
+  std::optional<SliceId> CompleteSlice(
       int64_t timestamp,
       TrackId track_id,
       SetArgsCallback args_callback,
-      std::function<base::Optional<uint32_t>(const SlicesStack&)> finder);
+      std::function<std::optional<uint32_t>(const SlicesStack&)> finder);
 
-  void MaybeCloseStack(int64_t end_ts, SlicesStack*, TrackId track_id);
+  void MaybeCloseStack(int64_t end_ts, const SlicesStack&, TrackId track_id);
 
-  base::Optional<uint32_t> MatchingIncompleteSliceIndex(
-      const SlicesStack& stack,
-      StringId name,
-      StringId category);
+  std::optional<uint32_t> MatchingIncompleteSliceIndex(const SlicesStack& stack,
+                                                       StringId name,
+                                                       StringId category);
 
   int64_t GetStackHash(const SlicesStack&);
 
   void StackPop(TrackId track_id);
-  void StackPush(TrackId track_id, uint32_t slice_idx);
+  void StackPush(TrackId track_id, tables::SliceTable::RowReference);
   void FlowTrackerUpdate(TrackId track_id);
+
+  // If args need translation, adds them to a list of pending translatable args,
+  // so that they are translated at the end of the trace. Takes ownership of the
+  // arg set for the slice. Otherwise, this is a noop, and the args are added to
+  // the args table immediately when the slice is popped.
+  void MaybeAddTranslatableArgs(SliceInfo& slice_info);
 
   OnSliceBeginCallback on_slice_begin_callback_;
 
@@ -162,6 +181,7 @@ class SliceTracker {
 
   TraceProcessorContext* const context_;
   StackMap stacks_;
+  std::vector<TranslatableArgs> translatable_args_;
 };
 
 }  // namespace trace_processor

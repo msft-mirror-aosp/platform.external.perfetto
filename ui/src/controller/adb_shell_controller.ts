@@ -15,9 +15,9 @@
 import {_TextDecoder} from 'custom_utils';
 
 import {base64Encode} from '../base/string_utils';
-import {extractTraceConfig} from '../base/trace_config_utils';
+import {extractTraceConfig} from '../core/trace_config_utils';
 
-import {AdbAuthState, AdbBaseConsumerPort} from './adb_base_controller';
+import {AdbBaseConsumerPort, AdbConnectionState} from './adb_base_controller';
 import {Adb, AdbStream} from './adb_interfaces';
 import {ReadBuffersResponse} from './consumer_port_types';
 import {Consumer} from './record_controller_interfaces';
@@ -25,7 +25,7 @@ import {Consumer} from './record_controller_interfaces';
 enum AdbShellState {
   READY,
   RECORDING,
-  FETCHING
+  FETCHING,
 }
 const DEFAULT_DESTINATION_FILE = '/data/misc/perfetto-traces/trace-by-ui';
 const textDecoder = new _TextDecoder();
@@ -42,7 +42,7 @@ export class AdbConsumerPort extends AdbBaseConsumerPort {
 
   async invoke(method: string, params: Uint8Array) {
     // ADB connection & authentication is handled by the superclass.
-    console.assert(this.state === AdbAuthState.CONNECTED);
+    console.assert(this.state === AdbConnectionState.CONNECTED);
 
     switch (method) {
       case 'EnableTracing':
@@ -85,7 +85,7 @@ export class AdbConsumerPort extends AdbBaseConsumerPort {
     const recordCommand = this.generateStartTracingCommand(configProto);
     this.recordShell = await this.adb.shell(recordCommand);
     const output: string[] = [];
-    this.recordShell.onData = raw => output.push(textDecoder.decode(raw));
+    this.recordShell.onData = (raw) => output.push(textDecoder.decode(raw));
     this.recordShell.onClose = () => {
       const response = output.join();
       if (!this.tracingEndedSuccessfully(response)) {
@@ -107,23 +107,26 @@ export class AdbConsumerPort extends AdbBaseConsumerPort {
     console.assert(this.shellState === AdbShellState.RECORDING);
     this.shellState = AdbShellState.FETCHING;
 
-    const readTraceShell =
-        await this.adb.shell(this.generateReadTraceCommand());
-    readTraceShell.onData = raw =>
-        this.sendMessage(this.generateChunkReadResponse(raw));
+    const readTraceShell = await this.adb.shell(
+      this.generateReadTraceCommand(),
+    );
+    readTraceShell.onData = (raw) =>
+      this.sendMessage(this.generateChunkReadResponse(raw));
 
     readTraceShell.onClose = () => {
       this.sendMessage(
-          this.generateChunkReadResponse(new Uint8Array(), /* last */ true));
+        this.generateChunkReadResponse(new Uint8Array(), /* last */ true),
+      );
     };
   }
 
   async getPidFromShellAsString() {
-    const pidStr =
-        await this.adb.shellOutputAsString(`ps -u shell | grep perfetto`);
+    const pidStr = await this.adb.shellOutputAsString(
+      `ps -u shell | grep perfetto`,
+    );
     // We used to use awk '{print $2}' but older phones/Go phones don't have
     // awk installed. Instead we implement similar functionality here.
-    const awk = pidStr.split(' ').filter(str => str !== '');
+    const awk = pidStr.split(' ').filter((str) => str !== '');
     if (awk.length < 1) {
       throw Error(`Unabled to find perfetto pid in string "${pidStr}"`);
     }
@@ -144,8 +147,9 @@ export class AdbConsumerPort extends AdbBaseConsumerPort {
      recording. Command output: ${pid}`);
       }
       // Perfetto stops and finalizes the tracing session on SIGINT.
-      const killOutput =
-          await this.adb.shellOutputAsString(`kill -SIGINT ${pid}`);
+      const killOutput = await this.adb.shellOutputAsString(
+        `kill -SIGINT ${pid}`,
+      );
 
       if (killOutput.length !== 0) {
         throw Error(`Unable to kill perfetto: ${killOutput}`);
@@ -163,11 +167,13 @@ export class AdbConsumerPort extends AdbBaseConsumerPort {
     }
   }
 
-  generateChunkReadResponse(data: Uint8Array, last = false):
-      ReadBuffersResponse {
+  generateChunkReadResponse(
+    data: Uint8Array,
+    last = false,
+  ): ReadBuffersResponse {
     return {
       type: 'ReadBuffersResponse',
-      slices: [{data, lastSliceForPacket: last}]
+      slices: [{data, lastSliceForPacket: last}],
     };
   }
 

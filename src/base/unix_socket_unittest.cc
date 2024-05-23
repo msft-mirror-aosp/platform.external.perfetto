@@ -30,12 +30,26 @@
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/file_utils.h"
+#include "perfetto/ext/base/periodic_task.h"
 #include "perfetto/ext/base/pipe.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "perfetto/ext/base/utils.h"
 #include "src/base/test/test_task_runner.h"
 #include "src/ipc/test/test_socket.h"
 #include "test/gtest_and_gmock.h"
+
+#if (PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID))
+#define SKIP_IF_VSOCK_LOOPBACK_NOT_SUPPORTED()                                 \
+  do {                                                                         \
+    if (!UnixSocketRaw::CreateMayFail(SockFamily::kVsock, SockType::kStream)   \
+             .Bind("vsock://1:10000")) {                                       \
+      GTEST_SKIP() << "vsock testing skipped: loopback address unsupported.\n" \
+                   << "Please run sudo modprobe vsock-loopback";               \
+    }                                                                          \
+  } while (0)
+#endif
 
 namespace perfetto {
 namespace base {
@@ -51,10 +65,10 @@ ipc::TestSocket kTestSocket{"unix_socket_unittest"};
 
 class MockEventListener : public UnixSocket::EventListener {
  public:
-  MOCK_METHOD2(OnNewIncomingConnection, void(UnixSocket*, UnixSocket*));
-  MOCK_METHOD2(OnConnect, void(UnixSocket*, bool));
-  MOCK_METHOD1(OnDisconnect, void(UnixSocket*));
-  MOCK_METHOD1(OnDataAvailable, void(UnixSocket*));
+  MOCK_METHOD(void, OnNewIncomingConnection, (UnixSocket*, UnixSocket*));
+  MOCK_METHOD(void, OnConnect, (UnixSocket*, bool), (override));
+  MOCK_METHOD(void, OnDisconnect, (UnixSocket*), (override));
+  MOCK_METHOD(void, OnDataAvailable, (UnixSocket*), (override));
 
   // GMock doesn't support mocking methods with non-copiable args.
   void OnNewIncomingConnection(
@@ -131,8 +145,8 @@ TEST_F(UnixSocketTest, ConnectionImmediatelyDroppedByServer) {
 
   // On Windows the first send immediately after the disconnection succeeds, the
   // kernel will detect the disconnection only later.
-  cli->Send(".");
-  EXPECT_FALSE(cli->Send("should_fail_both_on_win_and_unix"));
+  cli->SendStr(".");
+  EXPECT_FALSE(cli->SendStr("should_fail_both_on_win_and_unix"));
   task_runner_.RunUntilCheckpoint("cli_disconnected");
 }
 
@@ -177,8 +191,8 @@ TEST_F(UnixSocketTest, ClientAndServerExchangeData) {
         ASSERT_EQ("cli>srv", s->ReceiveString());
         srv_did_recv();
       }));
-  ASSERT_TRUE(cli->Send("cli>srv"));
-  ASSERT_TRUE(srv_conn->Send("srv>cli"));
+  ASSERT_TRUE(cli->SendStr("cli>srv"));
+  ASSERT_TRUE(srv_conn->SendStr("srv>cli"));
   task_runner_.RunUntilCheckpoint("cli_did_recv");
   task_runner_.RunUntilCheckpoint("srv_did_recv");
 
@@ -192,8 +206,8 @@ TEST_F(UnixSocketTest, ClientAndServerExchangeData) {
   ASSERT_EQ("", cli->ReceiveString());
   ASSERT_EQ(0u, srv_conn->Receive(&msg, sizeof(msg)));
   ASSERT_EQ("", srv_conn->ReceiveString());
-  ASSERT_FALSE(cli->Send("foo"));
-  ASSERT_FALSE(srv_conn->Send("bar"));
+  ASSERT_FALSE(cli->SendStr("foo"));
+  ASSERT_FALSE(srv_conn->SendStr("bar"));
   srv->Shutdown(true);
   task_runner_.RunUntilCheckpoint("cli_disconnected");
   task_runner_.RunUntilCheckpoint("srv_disconnected");
@@ -250,7 +264,7 @@ TEST_F(UnixSocketTest, SeveralClients) {
         EXPECT_CALL(event_listener_, OnDataAvailable(s))
             .WillOnce(Invoke([](UnixSocket* t) {
               ASSERT_EQ("PING", t->ReceiveString());
-              ASSERT_TRUE(t->Send("PONG"));
+              ASSERT_TRUE(t->SendStr("PONG"));
             }));
       }));
 
@@ -261,7 +275,7 @@ TEST_F(UnixSocketTest, SeveralClients) {
     EXPECT_CALL(event_listener_, OnConnect(cli[i].get(), true))
         .WillOnce(Invoke([](UnixSocket* s, bool success) {
           ASSERT_TRUE(success);
-          ASSERT_TRUE(s->Send("PING"));
+          ASSERT_TRUE(s->SendStr("PING"));
         }));
 
     auto checkpoint = task_runner_.CreateCheckpoint(std::to_string(i));
@@ -318,10 +332,10 @@ TEST_F(UnixSocketTest, BlockingSend) {
     tx_task_runner.RunUntilCheckpoint("cli_connected");
 
     auto all_sent = tx_task_runner.CreateCheckpoint("all_sent");
-    char buf[1024 * 32] = {};
+    std::string buf(1024 * 32, '\0');
     tx_task_runner.PostTask([&cli, &buf, all_sent] {
-      for (size_t i = 0; i < kTotalBytes / sizeof(buf); i++)
-        cli->Send(buf, sizeof(buf));
+      for (size_t i = 0; i < kTotalBytes / buf.size(); i++)
+        cli->Send(buf.data(), buf.size());
       all_sent();
     });
     tx_task_runner.RunUntilCheckpoint("all_sent", kTimeoutMs);
@@ -405,7 +419,7 @@ TEST_F(UnixSocketTest, ReleaseSocket) {
   task_runner_.RunUntilCheckpoint("cli_connected");
   srv->Shutdown(true);
 
-  cli->Send("test");
+  cli->SendStr("test");
 
   ASSERT_NE(peer, nullptr);
   auto raw_sock = peer->ReleaseSocket();
@@ -413,27 +427,110 @@ TEST_F(UnixSocketTest, ReleaseSocket) {
   EXPECT_CALL(event_listener_, OnDataAvailable(_)).Times(0);
   task_runner_.RunUntilIdle();
 
-  char buf[sizeof("test")];
+  char buf[5];
   ASSERT_TRUE(raw_sock);
-  ASSERT_EQ(raw_sock.Receive(buf, sizeof(buf)),
-            static_cast<ssize_t>(sizeof(buf)));
+  ASSERT_EQ(raw_sock.Receive(buf, sizeof(buf)), 4);
+  buf[sizeof(buf) - 1] = '\0';
   ASSERT_STREQ(buf, "test");
 }
 
-TEST_F(UnixSocketTest, TcpStream) {
-  char host_and_port[32];
-  int attempt = 0;
-  std::unique_ptr<UnixSocket> srv;
-
-  // Try listening on a random port. Some ports might be taken by other syste
-  // services. Do a bunch of attempts on different ports before giving up.
-  do {
-    sprintf(host_and_port, "127.0.0.1:%d", 10000 + (rand() % 10000));
-    srv = UnixSocket::Listen(host_and_port, &event_listener_, &task_runner_,
-                             SockFamily::kInet, SockType::kStream);
-  } while ((!srv || !srv->is_listening()) && attempt++ < 10);
+// Tests that the return value of GetSockAddr() returns a well formatted address
+// that can be passed to UnixSocket::Connect().
+TEST_F(UnixSocketTest, GetSockAddrTcp4) {
+  auto srv = UnixSocket::Listen("127.0.0.1:0", &event_listener_, &task_runner_,
+                                SockFamily::kInet, SockType::kStream);
   ASSERT_TRUE(srv->is_listening());
 
+  auto cli =
+      UnixSocket::Connect(srv->GetSockAddr(), &event_listener_, &task_runner_,
+                          SockFamily::kInet, SockType::kStream);
+  EXPECT_CALL(event_listener_, OnConnect(cli.get(), true))
+      .WillOnce(InvokeWithoutArgs(task_runner_.CreateCheckpoint("connected")));
+  task_runner_.RunUntilCheckpoint("connected");
+}
+
+TEST_F(UnixSocketTest, GetSockAddrTcp6) {
+  auto srv = UnixSocket::Listen("[::1]:0", &event_listener_, &task_runner_,
+                                SockFamily::kInet6, SockType::kStream);
+  if (!srv)
+    GTEST_SKIP() << "This test requires IPv6 support in the OS. Skipping";
+
+  ASSERT_TRUE(srv->is_listening());
+  auto cli =
+      UnixSocket::Connect(srv->GetSockAddr(), &event_listener_, &task_runner_,
+                          SockFamily::kInet6, SockType::kStream);
+
+  EXPECT_CALL(event_listener_, OnConnect(cli.get(), true))
+      .WillOnce(InvokeWithoutArgs(task_runner_.CreateCheckpoint("connected")));
+  task_runner_.RunUntilCheckpoint("connected");
+}
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_MAC)
+TEST_F(UnixSocketTest, GetSockAddrUnixLinked) {
+  TempDir tmp_dir = TempDir::Create();
+  std::string sock_path = tmp_dir.path() + "/test.sock";
+  auto srv = UnixSocket::Listen(sock_path, &event_listener_, &task_runner_,
+                                SockFamily::kUnix, SockType::kStream);
+  ASSERT_TRUE(srv->is_listening());
+  EXPECT_EQ(sock_path, srv->GetSockAddr());
+  auto cli =
+      UnixSocket::Connect(srv->GetSockAddr(), &event_listener_, &task_runner_,
+                          SockFamily::kUnix, SockType::kStream);
+  EXPECT_CALL(event_listener_, OnConnect(cli.get(), true))
+      .WillOnce(InvokeWithoutArgs(task_runner_.CreateCheckpoint("connected")));
+  task_runner_.RunUntilCheckpoint("connected");
+  cli.reset();
+  srv.reset();
+  remove(sock_path.c_str());
+}
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+TEST_F(UnixSocketTest, GetSockAddrUnixAbstract) {
+  StackString<128> sock_name("@perfetto_sock_%d_%d", getpid(), rand() % 100000);
+
+  auto srv =
+      UnixSocket::Listen(sock_name.ToStdString(), &event_listener_,
+                         &task_runner_, SockFamily::kUnix, SockType::kStream);
+  ASSERT_TRUE(srv->is_listening());
+  EXPECT_EQ(sock_name.ToStdString(), srv->GetSockAddr());
+  auto cli =
+      UnixSocket::Connect(srv->GetSockAddr(), &event_listener_, &task_runner_,
+                          SockFamily::kUnix, SockType::kStream);
+  EXPECT_CALL(event_listener_, OnConnect(cli.get(), true))
+      .WillOnce(InvokeWithoutArgs(task_runner_.CreateCheckpoint("connected")));
+  task_runner_.RunUntilCheckpoint("connected");
+}
+#endif
+
+#if (PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID))
+TEST_F(UnixSocketTest, GetSockAddrVsock) {
+  SKIP_IF_VSOCK_LOOPBACK_NOT_SUPPORTED();
+
+  auto srv = UnixSocket::Listen("vsock://1:-1", &event_listener_, &task_runner_,
+                                SockFamily::kVsock, SockType::kStream);
+  ASSERT_TRUE(srv->is_listening());
+  auto cli =
+      UnixSocket::Connect(srv->GetSockAddr(), &event_listener_, &task_runner_,
+                          SockFamily::kVsock, SockType::kStream);
+
+  EXPECT_CALL(event_listener_, OnConnect(cli.get(), true))
+      .WillOnce(InvokeWithoutArgs(task_runner_.CreateCheckpoint("connected")));
+  task_runner_.RunUntilCheckpoint("connected");
+}
+#endif
+
+TEST_F(UnixSocketTest, TcpStream) {
+  // Listen on a random port.
+  std::unique_ptr<UnixSocket> srv =
+      UnixSocket::Listen("127.0.0.1:0", &event_listener_, &task_runner_,
+                         SockFamily::kInet, SockType::kStream);
+  ASSERT_TRUE(srv->is_listening());
+  std::string host_and_port = srv->GetSockAddr();
   constexpr size_t kNumClients = 3;
   std::unique_ptr<UnixSocket> cli[kNumClients];
   EXPECT_CALL(event_listener_, OnNewIncomingConnection(srv.get(), _))
@@ -445,7 +542,7 @@ TEST_F(UnixSocketTest, TcpStream) {
             .WillRepeatedly(Invoke([](UnixSocket* cli_sock) {
               cli_sock->ReceiveString();  // Read connection EOF;
             }));
-        ASSERT_TRUE(s->Send("welcome"));
+        ASSERT_TRUE(s->SendStr("welcome"));
       }));
 
   for (size_t i = 0; i < kNumClients; i++) {
@@ -717,7 +814,7 @@ TEST_F(UnixSocketTest, SharedMemory) {
 
           // Now change the shared memory and ping the other process.
           memcpy(mem, "rock more", 10);
-          ASSERT_TRUE(s->Send("change notify"));
+          ASSERT_TRUE(s->SendStr("change notify"));
           checkpoint();
         }));
     task_runner_.RunUntilCheckpoint("change_seen_by_client");
@@ -834,11 +931,11 @@ TEST_F(UnixSocketTest, PartialSendMsgAll) {
 
   // Send something larger than send + recv kernel buffers combined to make
   // sendmsg block.
-  char send_buf[8192];
+  std::string send_buf(8192, '\0');
   // Make MSAN happy.
-  for (size_t i = 0; i < sizeof(send_buf); ++i)
+  for (size_t i = 0; i < send_buf.size(); ++i)
     send_buf[i] = static_cast<char>(i % 256);
-  char recv_buf[sizeof(send_buf)];
+  std::string recv_buf(send_buf.size(), '\0');
 
   // Need to install signal handler to cause the interrupt to happen.
   // man 3 pthread_kill:
@@ -855,15 +952,15 @@ TEST_F(UnixSocketTest, PartialSendMsgAll) {
 
   auto blocked_thread = pthread_self();
   std::thread th([blocked_thread, &recv_sock, &recv_buf] {
-    ssize_t rd = PERFETTO_EINTR(read(recv_sock.fd(), recv_buf, 1));
+    ssize_t rd = PERFETTO_EINTR(read(recv_sock.fd(), &recv_buf[0], 1));
     ASSERT_EQ(rd, 1);
     // We are now sure the other thread is in sendmsg, interrupt send.
     ASSERT_EQ(pthread_kill(blocked_thread, SIGWINCH), 0);
     // Drain the socket to allow SendMsgAllPosix to succeed.
     size_t offset = 1;
-    while (offset < sizeof(recv_buf)) {
+    while (offset < recv_buf.size()) {
       rd = PERFETTO_EINTR(
-          read(recv_sock.fd(), recv_buf + offset, sizeof(recv_buf) - offset));
+          read(recv_sock.fd(), &recv_buf[offset], recv_buf.size() - offset));
       ASSERT_GE(rd, 0);
       offset += static_cast<size_t>(rd);
     }
@@ -873,25 +970,219 @@ TEST_F(UnixSocketTest, PartialSendMsgAll) {
   // more complicated code-paths of SendMsgAllPosix.
   struct msghdr hdr = {};
   struct iovec iov[4];
-  static_assert(sizeof(send_buf) % base::ArraySize(iov) == 0,
-                "Cannot split buffer into even pieces.");
-  constexpr size_t kChunkSize = sizeof(send_buf) / base::ArraySize(iov);
+  ASSERT_EQ(send_buf.size() % base::ArraySize(iov), 0u)
+      << "Cannot split buffer into even pieces.";
+  const size_t kChunkSize = send_buf.size() / base::ArraySize(iov);
   for (size_t i = 0; i < base::ArraySize(iov); ++i) {
-    iov[i].iov_base = send_buf + i * kChunkSize;
+    iov[i].iov_base = &send_buf[i * kChunkSize];
     iov[i].iov_len = kChunkSize;
   }
   hdr.msg_iov = iov;
   hdr.msg_iovlen = base::ArraySize(iov);
 
   ASSERT_EQ(send_sock.SendMsgAllPosix(&hdr),
-            static_cast<ssize_t>(sizeof(send_buf)));
+            static_cast<ssize_t>(send_buf.size()));
   send_sock.Shutdown();
   th.join();
   // Make sure the re-entry logic was actually triggered.
   ASSERT_EQ(hdr.msg_iov, nullptr);
-  ASSERT_EQ(memcmp(send_buf, recv_buf, sizeof(send_buf)), 0);
+  ASSERT_EQ(memcmp(&send_buf[0], &recv_buf[0], send_buf.size()), 0);
 }
+
+// Regression test for b/193234818. SO_SNDTIMEO is unreliable on most systems.
+// It doesn't guarantee that the whole send() call blocks for at most X, as the
+// kernel rearms the timeout if the send buffers frees up and allows a partial
+// send. This test reproduces the issue 100% on Mac. Unfortunately on Linux the
+// repro seem to happen only when a suspend happens in the middle.
+TEST_F(UnixSocketTest, BlockingSendTimeout) {
+  TestTaskRunner ttr;
+  UnixSocketRaw send_sock;
+  UnixSocketRaw recv_sock;
+  std::tie(send_sock, recv_sock) =
+      UnixSocketRaw::CreatePairPosix(kTestSocket.family(), SockType::kStream);
+
+  auto blocking_send_done = ttr.CreateCheckpoint("blocking_send_done");
+
+  std::thread tx_thread([&] {
+    // Fill the tx buffer in non-blocking mode.
+    send_sock.SetBlocking(false);
+    char buf[1024 * 16]{};
+    while (send_sock.Send(buf, sizeof(buf)) > 0) {
+    }
+
+    // Then do a blocking send. It should return a partial value within the tx
+    // timeout.
+    send_sock.SetBlocking(true);
+    send_sock.SetTxTimeout(10);
+    ASSERT_LT(send_sock.Send(buf, sizeof(buf)),
+              static_cast<ssize_t>(sizeof(buf)));
+    ttr.PostTask(blocking_send_done);
+  });
+
+  // This task needs to be slow enough so that doesn't unblock the send, but
+  // fast enough so that within a blocking cycle, the send re-attempts and
+  // re-arms the timeout.
+  PeriodicTask read_slowly_task(&ttr);
+  PeriodicTask::Args args;
+  args.period_ms = 1;  // Read 1 byte every ms (1 KiB/s).
+  args.task = [&] {
+    char rxbuf[1]{};
+    recv_sock.Receive(rxbuf, sizeof(rxbuf));
+  };
+  read_slowly_task.Start(args);
+
+  ttr.RunUntilCheckpoint("blocking_send_done");
+  read_slowly_task.Reset();
+  tx_thread.join();
+}
+
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
+TEST_F(UnixSocketTest, SetsCloexec) {
+  // CLOEXEC set when constructing sockets through helper:
+  {
+    auto raw = UnixSocketRaw::CreateMayFail(base::SockFamily::kUnix,
+                                            SockType::kStream);
+    int flags = fcntl(raw.fd(), F_GETFD, 0);
+    EXPECT_TRUE(flags & FD_CLOEXEC);
+  }
+  // CLOEXEC set when creating a UnixSocketRaw out of an existing fd:
+  {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int flags = fcntl(fd, F_GETFD, 0);
+    EXPECT_FALSE(flags & FD_CLOEXEC);
+
+    auto raw = UnixSocketRaw(ScopedSocketHandle(fd), base::SockFamily::kUnix,
+                             SockType::kStream);
+    flags = fcntl(raw.fd(), F_GETFD, 0);
+    EXPECT_TRUE(flags & FD_CLOEXEC);
+  }
+}
+#endif  // !OS_FUCHSIA
+
 #endif  // !OS_WIN
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_MAC)
+
+// Regression test for b/239725760.
+TEST_F(UnixSocketTest, Sockaddr_FilesystemLinked) {
+  TempDir tmp_dir = TempDir::Create();
+  std::string sock_path = tmp_dir.path() + "/test.sock";
+  auto srv = UnixSocket::Listen(sock_path, &event_listener_, &task_runner_,
+                                SockFamily::kUnix, SockType::kStream);
+  ASSERT_TRUE(srv && srv->is_listening());
+  ASSERT_TRUE(FileExists(sock_path));
+
+  // Create a raw socket and manually connect to that (to avoid getting affected
+  // by accidental future bugs in the logic that populates struct sockaddr_un).
+  auto cli = UnixSocketRaw::CreateMayFail(SockFamily::kUnix, SockType::kStream);
+  struct sockaddr_un addr {};
+  addr.sun_family = AF_UNIX;
+  StringCopy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path));
+  ASSERT_EQ(0, connect(cli.fd(), reinterpret_cast<struct sockaddr*>(&addr),
+                       sizeof(addr)));
+  cli.Shutdown();
+  remove(sock_path.c_str());
+}
+#endif  // OS_LINUX || OS_ANDROID || OS_MAC
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+// Regression test for b/239725760.
+// Abstract sockets are not supported on Mac OS.
+TEST_F(UnixSocketTest, Sockaddr_AbstractUnix) {
+  StackString<128> sock_name("@perfetto_test_%d_%d", getpid(), rand() % 100000);
+  auto srv =
+      UnixSocket::Listen(sock_name.ToStdString(), &event_listener_,
+                         &task_runner_, SockFamily::kUnix, SockType::kStream);
+  ASSERT_TRUE(srv && srv->is_listening());
+
+  auto cli = UnixSocketRaw::CreateMayFail(SockFamily::kUnix, SockType::kStream);
+  struct sockaddr_un addr {};
+  addr.sun_family = AF_UNIX;
+  StringCopy(addr.sun_path, sock_name.c_str(), sizeof(addr.sun_path));
+  addr.sun_path[0] = '\0';
+  auto addr_len = static_cast<socklen_t>(
+      __builtin_offsetof(sockaddr_un, sun_path) + sock_name.len());
+  ASSERT_EQ(0, connect(cli.fd(), reinterpret_cast<struct sockaddr*>(&addr),
+                       addr_len));
+}
+
+TEST_F(UnixSocketTest, VSockStream) {
+  SKIP_IF_VSOCK_LOOPBACK_NOT_SUPPORTED();
+
+  // Set up the server. Use the loopback CID (1) and a random port number.
+  auto srv = UnixSocket::Listen("vsock://1:-1", &event_listener_, &task_runner_,
+                                SockFamily::kVsock, SockType::kStream);
+  ASSERT_TRUE(srv && srv->is_listening());
+
+  std::unique_ptr<UnixSocket> prod;
+  EXPECT_CALL(event_listener_, OnNewIncomingConnection(srv.get(), _))
+      .WillOnce(Invoke([&](UnixSocket*, UnixSocket* s) {
+        // OnDisconnect() might spuriously happen depending on the dtor order.
+        EXPECT_CALL(event_listener_, OnDisconnect(s)).Times(AtLeast(0));
+        EXPECT_CALL(event_listener_, OnDataAvailable(s))
+            .WillRepeatedly(Invoke([](UnixSocket* prod_sock) {
+              prod_sock->ReceiveString();  // Read connection EOF;
+            }));
+        ASSERT_TRUE(s->SendStr("welcome"));
+      }));
+
+  // Set up the client.
+  prod =
+      UnixSocket::Connect(srv->GetSockAddr(), &event_listener_, &task_runner_,
+                          SockFamily::kVsock, SockType::kStream);
+  auto checkpoint = task_runner_.CreateCheckpoint("prod_connected");
+  EXPECT_CALL(event_listener_, OnDisconnect(prod.get())).Times(AtLeast(0));
+  EXPECT_CALL(event_listener_, OnConnect(prod.get(), true));
+  EXPECT_CALL(event_listener_, OnDataAvailable(prod.get()))
+      .WillRepeatedly(Invoke([checkpoint](UnixSocket* s) {
+        auto str = s->ReceiveString();
+        if (str.empty())
+          return;  // Connection EOF.
+        ASSERT_EQ("welcome", str);
+        checkpoint();
+      }));
+
+  task_runner_.RunUntilCheckpoint("prod_connected");
+  ASSERT_TRUE(Mock::VerifyAndClearExpectations(prod.get()));
+}
+#endif  // OS_LINUX || OS_ANDROID
+
+TEST_F(UnixSocketTest, GetSockFamily) {
+  ASSERT_EQ(GetSockFamily(""), SockFamily::kUnspec);
+  ASSERT_EQ(GetSockFamily("/path/to/sock"), SockFamily::kUnix);
+  ASSERT_EQ(GetSockFamily("local_dir_sock"), SockFamily::kUnix);
+  ASSERT_EQ(GetSockFamily("@abstract"), SockFamily::kUnix);
+  ASSERT_EQ(GetSockFamily("0.0.0.0:80"), SockFamily::kInet);
+  ASSERT_EQ(GetSockFamily("127.0.0.1:80"), SockFamily::kInet);
+  ASSERT_EQ(GetSockFamily("[effe::acca]:1234"), SockFamily::kInet6);
+  ASSERT_EQ(GetSockFamily("[::1]:123456"), SockFamily::kInet6);
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  ASSERT_EQ(GetSockFamily("vsock://-1:10000"), SockFamily::kVsock);
+#endif
+}
+
+TEST_F(UnixSocketTest, ShmemSupported) {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  ASSERT_EQ(SockShmemSupported(""), true);
+#else  // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  ASSERT_EQ(SockShmemSupported(""), false);
+  ASSERT_EQ(SockShmemSupported("/path/to/sock"), true);
+  ASSERT_EQ(SockShmemSupported("local_dir_sock"), true);
+  ASSERT_EQ(SockShmemSupported("@abstract"), true);
+  ASSERT_EQ(SockShmemSupported("0.0.0.0:80"), false);
+  ASSERT_EQ(SockShmemSupported("127.0.0.1:80"), false);
+  ASSERT_EQ(SockShmemSupported("[effe::acca]:1234"), false);
+  ASSERT_EQ(SockShmemSupported("[::1]:123456"), false);
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  ASSERT_EQ(SockShmemSupported("vsock://-1:10000"), false);
+#endif
+#endif  // !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+}
 
 }  // namespace
 }  // namespace base

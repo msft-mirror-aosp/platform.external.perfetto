@@ -23,27 +23,40 @@
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/unix_socket.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
+#include "perfetto/ext/tracing/core/tracing_service.h"
+#include "perfetto/tracing/default_socket.h"
 
 namespace perfetto {
 namespace base {
 class TaskRunner;
 }  // namespace base.
 
-class TracingService;
+namespace ipc {
+class Host;
+}  // namespace ipc
 
 // Creates an instance of the service (business logic + UNIX socket transport).
 // Exposed to:
 //   The code in the tracing client that will host the service e.g., traced.
 // Implemented in:
 //   src/tracing/ipc/service/service_ipc_host_impl.cc
-class PERFETTO_EXPORT ServiceIPCHost {
+class PERFETTO_EXPORT_COMPONENT ServiceIPCHost {
  public:
-  static std::unique_ptr<ServiceIPCHost> CreateInstance(base::TaskRunner*);
+  static std::unique_ptr<ServiceIPCHost> CreateInstance(
+      base::TaskRunner*,
+      TracingService::InitOpts = {});
   virtual ~ServiceIPCHost();
 
+  // The overload to wrap the multi-value producer socket name in the
+  // single-value variant for compatibility in tests.
+  bool Start(const char* producer_socket_name,
+             const char* consumer_socket_name) {
+    return Start(TokenizeProducerSockets(producer_socket_name),
+                 consumer_socket_name);
+  }
   // Start listening on the Producer & Consumer ports. Returns false in case of
   // failure (e.g., something else is listening on |socket_name|).
-  virtual bool Start(const char* producer_socket_name,
+  virtual bool Start(const std::vector<std::string>& producer_socket_names,
                      const char* consumer_socket_name) = 0;
 
   // Like the above, but takes two file descriptors to already bound sockets.
@@ -51,6 +64,10 @@ class PERFETTO_EXPORT ServiceIPCHost {
   // and binds the socket beore exec()-ing us.
   virtual bool Start(base::ScopedSocketHandle producer_socket_fd,
                      base::ScopedSocketHandle consumer_socket_fd) = 0;
+
+  // Allows callers to supply preconstructed Hosts.
+  virtual bool Start(std::unique_ptr<ipc::Host> producer_host,
+                     std::unique_ptr<ipc::Host> consumer_host) = 0;
 
   virtual TracingService* service() const = 0;
 

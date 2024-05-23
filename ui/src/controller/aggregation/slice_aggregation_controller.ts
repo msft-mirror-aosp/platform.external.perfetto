@@ -13,42 +13,39 @@
 // limitations under the License.
 
 import {ColumnDef} from '../../common/aggregation_data';
-import {Engine} from '../../common/engine';
 import {Area, Sorting} from '../../common/state';
-import {toNs} from '../../common/time';
-import {
-  ASYNC_SLICE_TRACK_KIND,
-  Config as AsyncSliceConfig
-} from '../../tracks/async_slices/common';
-import {
-  Config as SliceConfig,
-  SLICE_TRACK_KIND
-} from '../../tracks/chrome_slices/common';
-import {globals} from '../globals';
+import {globals} from '../../frontend/globals';
+import {Engine} from '../../trace_processor/engine';
+import {ASYNC_SLICE_TRACK_KIND} from '../../core_plugins/async_slices';
+import {SLICE_TRACK_KIND} from '../../core_plugins/chrome_slices/chrome_slice_track';
 
 import {AggregationController} from './aggregation_controller';
+
+export function getSelectedTrackKeys(area: Area): number[] {
+  const selectedTrackKeys: number[] = [];
+  for (const trackKey of area.tracks) {
+    const track = globals.state.tracks[trackKey];
+    // Track will be undefined for track groups.
+    if (track?.uri !== undefined) {
+      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
+      if (trackInfo?.kind === SLICE_TRACK_KIND) {
+        trackInfo.trackIds && selectedTrackKeys.push(...trackInfo.trackIds);
+      }
+      if (trackInfo?.kind === ASYNC_SLICE_TRACK_KIND) {
+        trackInfo.trackIds && selectedTrackKeys.push(...trackInfo.trackIds);
+      }
+    }
+  }
+  return selectedTrackKeys;
+}
 
 export class SliceAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
-    const selectedTrackIds = [];
-    for (const trackId of area.tracks) {
-      const track = globals.state.tracks[trackId];
-      // Track will be undefined for track groups.
-      if (track !== undefined) {
-        if (track.kind === SLICE_TRACK_KIND) {
-          selectedTrackIds.push((track.config as SliceConfig).trackId);
-        }
-        if (track.kind === ASYNC_SLICE_TRACK_KIND) {
-          const config = track.config as AsyncSliceConfig;
-          for (const id of config.trackIds) {
-            selectedTrackIds.push(id);
-          }
-        }
-      }
-    }
-    if (selectedTrackIds.length === 0) return false;
+    const selectedTrackKeys = getSelectedTrackKeys(area);
+
+    if (selectedTrackKeys.length === 0) return false;
 
     const query = `create view ${this.kind} as
         SELECT
@@ -57,9 +54,9 @@ export class SliceAggregationController extends AggregationController {
         sum(dur)/count(1) as avg_dur,
         count(1) as occurrences
         FROM slices
-        WHERE track_id IN (${selectedTrackIds}) AND
-        ts + dur > ${toNs(area.startSec)} AND
-        ts < ${toNs(area.endSec)} group by name`;
+        WHERE track_id IN (${selectedTrackKeys}) AND
+        ts + dur > ${area.start} AND
+        ts < ${area.end} group by name`;
 
     await engine.query(query);
     return true;
@@ -80,7 +77,7 @@ export class SliceAggregationController extends AggregationController {
       {
         title: 'Name',
         kind: 'STRING',
-        columnConstructor: Uint16Array,
+        columnConstructor: Uint32Array,
         columnId: 'name',
       },
       {
@@ -88,21 +85,21 @@ export class SliceAggregationController extends AggregationController {
         kind: 'TIMESTAMP_NS',
         columnConstructor: Float64Array,
         columnId: 'total_dur',
-        sum: true
+        sum: true,
       },
       {
         title: 'Avg Wall duration (ms)',
         kind: 'TIMESTAMP_NS',
         columnConstructor: Float64Array,
-        columnId: 'avg_dur'
+        columnId: 'avg_dur',
       },
       {
         title: 'Occurrences',
         kind: 'NUMBER',
-        columnConstructor: Uint16Array,
+        columnConstructor: Uint32Array,
         columnId: 'occurrences',
-        sum: true
-      }
+        sum: true,
+      },
     ];
   }
 }

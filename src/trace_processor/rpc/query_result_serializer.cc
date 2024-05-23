@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/rpc/query_result_serializer.h"
+#include "perfetto/ext/trace_processor/rpc/query_result_serializer.h"
 
 #include <vector>
 
@@ -62,9 +62,9 @@ bool QueryResultSerializer::Serialize(std::vector<uint8_t>* buf) {
 bool QueryResultSerializer::Serialize(protos::pbzero::QueryResult* res) {
   PERFETTO_CHECK(!eof_reached_);
 
-  if (!did_write_column_names_) {
-    SerializeColumnNames(res);
-    did_write_column_names_ = true;
+  if (!did_write_metadata_) {
+    SerializeMetadata(res);
+    did_write_metadata_ = true;
   }
 
   // In case of an error we still want to go through SerializeBatch(). That will
@@ -194,8 +194,10 @@ void QueryResultSerializer::SerializeBatch(protos::pbzero::QueryResult* res) {
   strings = nullptr;
 
   // Write the cells headers (1 byte per cell).
-  batch->AppendBytes(BatchProto::kCellsFieldNumber, cell_types.data(),
-                     cell_idx);
+  if (cell_idx > 0) {
+    batch->AppendBytes(BatchProto::kCellsFieldNumber, cell_types.data(),
+                       cell_idx);
+  }
 
   // Append the |varint_cells|, copying over the packed varint buffer.
   if (varints.size())
@@ -234,7 +236,9 @@ void QueryResultSerializer::SerializeBatch(protos::pbzero::QueryResult* res) {
   }  // if (doubles_size > 0)
 
   // Append the blobs.
-  batch->AppendRawProtoBytes(blobs.data(), blobs.size());
+  if (blobs.size() > 0) {
+    batch->AppendRawProtoBytes(blobs.data(), blobs.size());
+  }
 
   // If this is the last batch, write the EOF field.
   if (!batch_full) {
@@ -258,11 +262,14 @@ void QueryResultSerializer::MaybeSerializeError(
   res->set_error(err);
 }
 
-void QueryResultSerializer::SerializeColumnNames(
+void QueryResultSerializer::SerializeMetadata(
     protos::pbzero::QueryResult* res) {
-  PERFETTO_DCHECK(!did_write_column_names_);
+  PERFETTO_DCHECK(!did_write_metadata_);
   for (uint32_t c = 0; c < num_cols_; c++)
     res->add_column_names(iter_->GetColumnName(c));
+  res->set_statement_count(iter_->StatementCount());
+  res->set_statement_with_output_count(iter_->StatementCountWithOutput());
+  res->set_last_statement_sql(iter_->LastStatementSql());
 }
 
 }  // namespace trace_processor

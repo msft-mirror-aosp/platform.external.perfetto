@@ -20,7 +20,7 @@ chmod +x ./trace_processor
 ./trace_processor trace.perfetto-trace
 
 # Start a local trace processor instance to replace wasm module in the UI
-./trace_processor trace.perfetto-trace --http
+./trace_processor trace.perfetto-trace --httpd
 ```
 
 NOTE: In HTTP mode the trace will be loaded into the `trace_processor` and
@@ -334,7 +334,7 @@ more details on all available functions.
 #### Query
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 qr_it = tp.query('SELECT name FROM slice')
 for row in qr_it:
@@ -352,7 +352,7 @@ query
 #### Query as Pandas DataFrame
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 qr_it = tp.query('SELECT ts, name FROM slice')
 qr_df = qr_it.as_pandas_dataframe()
@@ -372,7 +372,7 @@ ts                   name
 #### Metric
 ```python
 from perfetto.trace_processor import TraceProcessor
-tp = TraceProcessor(file_path='trace.perfetto-trace')
+tp = TraceProcessor(trace='trace.perfetto-trace')
 
 cpu_metrics = tp.metric(['android_cpu'])
 print(cpu_metrics)

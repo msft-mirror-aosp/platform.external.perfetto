@@ -22,10 +22,13 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "perfetto/base/build_config.h"
+#include "perfetto/base/compiler.h"
 #include "perfetto/base/export.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/base/platform_handle.h"
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/base/weak_ptr.h"
@@ -35,23 +38,13 @@ struct msghdr;
 namespace perfetto {
 namespace base {
 
-// Define the SocketHandle and ScopedSocketHandle types.
-// On POSIX OSes, a SocketHandle is really just an int (a file descriptor).
-// On Windows, sockets are have their own type (SOCKET) which is neither a
-// HANDLE nor an int. However Windows SOCKET(s) can have a event HANDLE attached
-// to them (which in Perfetto is a PlatformHandle), and that can be used in
-// WaitForMultipleObjects, hence in base::TaskRunner.AddFileDescriptorWatch().
+// Define the ScopedSocketHandle type.
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-// uintptr_t really reads as SOCKET here (Windows headers typedef to that).
-// As usual we don't just use SOCKET here to avoid leaking Windows.h includes
-// in our headers.
-using SocketHandle = uintptr_t;  // SOCKET
 int CloseSocket(SocketHandle);   // A wrapper around ::closesocket().
 using ScopedSocketHandle =
     ScopedResource<SocketHandle, CloseSocket, static_cast<SocketHandle>(-1)>;
 #else
-using SocketHandle = int;
 using ScopedSocketHandle = ScopedFile;
 #endif
 
@@ -59,26 +52,54 @@ class TaskRunner;
 
 // Use arbitrarily high values to avoid that some code accidentally ends up
 // assuming that these enum values match the sysroot's SOCK_xxx defines rather
-// than using GetSockType() / GetSockFamily().
+// than using MkSockType() / MkSockFamily().
 enum class SockType { kStream = 100, kDgram, kSeqPacket };
-enum class SockFamily { kUnix = 200, kInet, kInet6 };
+enum class SockFamily { kUnspec = 0, kUnix = 200, kInet, kInet6, kVsock };
 
 // Controls the getsockopt(SO_PEERCRED) behavior, which allows to obtain the
 // peer credentials.
 enum class SockPeerCredMode {
-  // Obtain the peer credentials immediatley after connection and cache them.
+  // Obtain the peer credentials immediately after connection and cache them.
   kReadOnConnect = 0,
 
   // Don't read peer credentials at all. Calls to peer_uid()/peer_pid() will
   // hit a DCHECK and return kInvalidUid/Pid in release builds.
   kIgnore = 1,
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
   kDefault = kIgnore,
 #else
   kDefault = kReadOnConnect,
 #endif
 };
+
+// Returns the socket family from the full addres that perfetto uses.
+// Addr can be:
+// - /path/to/socket : for linked AF_UNIX sockets.
+// - @abstract_name  : for abstract AF_UNIX sockets.
+// - 1.2.3.4:8080    : for Inet sockets.
+// - [::1]:8080      : for Inet6 sockets.
+// - vsock://-1:3000 : for VM sockets.
+SockFamily GetSockFamily(const char* addr);
+
+// Returns whether inter-process shared memory is supported for the socket.
+inline bool SockShmemSupported(SockFamily sock_family) {
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  return sock_family == SockFamily::kUnix;
+#else
+  base::ignore_result(sock_family);
+  // On Windows shm is negotiated by sharing an unguessable token
+  // over TCP sockets. In theory works on any socket type, in practice
+  // we need to tell the difference between a local and a remote
+  // connection. For now we assume everything is local.
+  // See comments on r.android.com/2951909 .
+  return true;
+#endif
+}
+inline bool SockShmemSupported(const char* addr) {
+  return SockShmemSupported(GetSockFamily(addr));
+}
 
 // UnixSocketRaw is a basic wrapper around sockets. It exposes wrapper
 // methods that take care of most common pitfalls (e.g., marking fd as
@@ -115,7 +136,8 @@ class UnixSocketRaw {
   void Shutdown();
   void SetBlocking(bool);
   void DcheckIsBlocking(bool expected) const;  // No-op on release and Win.
-  void RetainOnExec();
+  void SetRetainOnExec(bool retain);
+  std::string GetSockAddr() const;
   SockType type() const { return type_; }
   SockFamily family() const { return family_; }
   SocketHandle fd() const { return *fd_; }
@@ -139,6 +161,10 @@ class UnixSocketRaw {
                size_t len,
                const int* send_fds = nullptr,
                size_t num_fds = 0);
+
+  ssize_t SendStr(const std::string& str) {
+    return Send(str.data(), str.size());
+  }
 
   // |fd_vec| and |max_files| are ignored on Windows.
   ssize_t Receive(void* msg,
@@ -171,6 +197,7 @@ class UnixSocketRaw {
 #endif
   SockFamily family_ = SockFamily::kUnix;
   SockType type_ = SockType::kStream;
+  uint32_t tx_timeout_ms_ = 0;
 };
 
 // A non-blocking UNIX domain socket. Allows also to transfer file descriptors.
@@ -212,13 +239,22 @@ class UnixSocketRaw {
 //                             | (failure or Shutdown())
 //                             V
 //                       OnDisconnect()
-class PERFETTO_EXPORT UnixSocket {
+class PERFETTO_EXPORT_COMPONENT UnixSocket {
  public:
   class EventListener {
    public:
+    EventListener() = default;
     virtual ~EventListener();
 
+    EventListener(const EventListener&) = delete;
+    EventListener& operator=(const EventListener&) = delete;
+
+    EventListener(EventListener&&) noexcept = default;
+    EventListener& operator=(EventListener&&) noexcept = default;
+
     // After Listen().
+    // |self| may be null if the connection was not accepted via a listen
+    // socket.
     virtual void OnNewIncomingConnection(
         UnixSocket* self,
         std::unique_ptr<UnixSocket> new_connection);
@@ -307,6 +343,9 @@ class PERFETTO_EXPORT UnixSocket {
   void SetRxTimeout(uint32_t timeout_ms) {
     PERFETTO_CHECK(sock_raw_.SetRxTimeout(timeout_ms));
   }
+
+  std::string GetSockAddr() const { return sock_raw_.GetSockAddr(); }
+
   // Returns true is the message was queued, false if there was no space in the
   // output buffer, in which case the client should retry or give up.
   // If any other error happens the socket will be shutdown and
@@ -321,8 +360,8 @@ class PERFETTO_EXPORT UnixSocket {
     return Send(msg, len, nullptr, 0);
   }
 
-  inline bool Send(const std::string& msg) {
-    return Send(msg.c_str(), msg.size() + 1, -1);
+  inline bool SendStr(const std::string& msg) {
+    return Send(msg.data(), msg.size(), -1);
   }
 
   // Returns the number of bytes (<= |len|) written in |msg| or 0 if there
@@ -346,11 +385,13 @@ class PERFETTO_EXPORT UnixSocket {
   bool is_connected() const { return state_ == State::kConnected; }
   bool is_listening() const { return state_ == State::kListening; }
   SocketHandle fd() const { return sock_raw_.fd(); }
+  SockFamily family() const { return sock_raw_.family(); }
 
   // User ID of the peer, as returned by the kernel. If the client disconnects
   // and the socket goes into the kDisconnected state, it retains the uid of
   // the last peer.
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
   uid_t peer_uid_posix(bool skip_check_for_testing = false) const {
     PERFETTO_DCHECK((!is_listening() && peer_uid_ != kInvalidUid) ||
                     skip_check_for_testing);
@@ -404,7 +445,8 @@ class PERFETTO_EXPORT UnixSocket {
   State state_ = State::kDisconnected;
   SockPeerCredMode peer_cred_mode_ = SockPeerCredMode::kDefault;
 
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
   uid_t peer_uid_ = kInvalidUid;
 #endif
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \

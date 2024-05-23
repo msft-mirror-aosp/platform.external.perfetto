@@ -129,8 +129,9 @@ void ConsumerIPCService::Flush(const protos::gen::FlushRequest& req,
     if (weak_this)
       weak_this->OnFlushCallback(success, std::move(it));
   };
-  GetConsumerForCurrentRequest()->service_endpoint->Flush(req.timeout_ms(),
-                                                          std::move(callback));
+  FlushFlags flags(req.flags());
+  GetConsumerForCurrentRequest()->service_endpoint->Flush(
+      req.timeout_ms(), std::move(callback), flags);
 }
 
 // Called by the IPC layer.
@@ -185,7 +186,7 @@ void ConsumerIPCService::ObserveEvents(
 
 // Called by the IPC layer.
 void ConsumerIPCService::QueryServiceState(
-    const protos::gen::QueryServiceStateRequest&,
+    const protos::gen::QueryServiceStateRequest& req,
     DeferredQueryServiceStateResponse resp) {
   RemoteConsumer* remote_consumer = GetConsumerForCurrentRequest();
   auto it = pending_query_service_responses_.insert(
@@ -196,7 +197,9 @@ void ConsumerIPCService::QueryServiceState(
     if (weak_this)
       weak_this->OnQueryServiceCallback(success, svc_state, std::move(it));
   };
-  remote_consumer->service_endpoint->QueryServiceState(callback);
+  ConsumerEndpoint::QueryServiceStateArgs args;
+  args.sessions_only = req.sessions_only();
+  remote_consumer->service_endpoint->QueryServiceState(args, callback);
 }
 
 // Called by the service in response to service_endpoint->QueryServiceState().
@@ -320,6 +323,18 @@ void ConsumerIPCService::SaveTraceForBugreport(
       weak_this->OnSaveTraceForBugreportCallback(success, msg, std::move(it));
   };
   remote_consumer->service_endpoint->SaveTraceForBugreport(callback);
+}
+
+void ConsumerIPCService::CloneSession(
+    const protos::gen::CloneSessionRequest& req,
+    DeferredCloneSessionResponse resp) {
+  RemoteConsumer* remote_consumer = GetConsumerForCurrentRequest();
+  remote_consumer->clone_session_response = std::move(resp);
+  ConsumerEndpoint::CloneSessionArgs args;
+  args.skip_trace_filter = req.skip_trace_filter();
+  args.for_bugreport = req.for_bugreport();
+  remote_consumer->service_endpoint->CloneSession(req.session_id(),
+                                                  std::move(args));
 }
 
 // Called by the service in response to
@@ -469,6 +484,19 @@ void ConsumerIPCService::RemoteConsumer::CloseObserveEventsResponseStream() {
   auto result = ipc::AsyncResult<protos::gen::ObserveEventsResponse>::Create();
   result.set_has_more(false);
   observe_events_response.Resolve(std::move(result));
+}
+
+void ConsumerIPCService::RemoteConsumer::OnSessionCloned(
+    const OnSessionClonedArgs& args) {
+  if (!clone_session_response.IsBound())
+    return;
+
+  auto resp = ipc::AsyncResult<protos::gen::CloneSessionResponse>::Create();
+  resp->set_success(args.success);
+  resp->set_error(args.error);
+  resp->set_uuid_msb(args.uuid.msb());
+  resp->set_uuid_lsb(args.uuid.lsb());
+  std::move(clone_session_response).Resolve(std::move(resp));
 }
 
 }  // namespace perfetto

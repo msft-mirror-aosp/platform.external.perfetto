@@ -19,8 +19,9 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/string_splitter.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "src/trace_processor/forwarding_trace_parser.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
-#include "src/trace_processor/trace_sorter.h"
+#include "src/trace_processor/sorter/trace_sorter.h"
 
 #include <cctype>
 #include <cinttypes>
@@ -64,13 +65,25 @@ SystraceTraceParser::SystraceTraceParser(TraceProcessorContext* ctx)
     : line_parser_(ctx), ctx_(ctx) {}
 SystraceTraceParser::~SystraceTraceParser() = default;
 
-util::Status SystraceTraceParser::Parse(std::unique_ptr<uint8_t[]> owned_buf,
-                                        size_t size) {
+util::Status SystraceTraceParser::Parse(TraceBlobView blob) {
   if (state_ == ParseState::kEndOfSystrace)
     return util::OkStatus();
-  partial_buf_.insert(partial_buf_.end(), &owned_buf[0], &owned_buf[size]);
+  partial_buf_.insert(partial_buf_.end(), blob.data(),
+                      blob.data() + blob.size());
 
   if (state_ == ParseState::kBeforeParse) {
+    // Remove anything before the TRACE:\n marker, which is emitted when
+    // obtaining traces via  `adb shell "atrace -t 1 sched" > out.txt`.
+    std::array<uint8_t, 7> kAtraceMarker = {'T', 'R', 'A', 'C', 'E', ':', '\n'};
+    auto search_end = partial_buf_.begin() +
+                      static_cast<int>(std::min(partial_buf_.size(),
+                                                kGuessTraceMaxLookahead));
+    auto it = std::search(partial_buf_.begin(), search_end,
+                          kAtraceMarker.begin(), kAtraceMarker.end());
+    if (it != search_end)
+      partial_buf_.erase(partial_buf_.begin(), it + kAtraceMarker.size());
+
+    // Deal with HTML traces.
     state_ = partial_buf_[0] == '<' ? ParseState::kHtmlBeforeSystrace
                                     : ParseState::kSystrace;
   }
@@ -130,9 +143,9 @@ util::Status SystraceTraceParser::Parse(std::unique_ptr<uint8_t[]> owned_buf,
                    tokens.size() >= 10) {
           // Format is:
           // user pid ppid vsz rss wchan pc s name my cmd line
-          const base::Optional<uint32_t> pid =
+          const std::optional<uint32_t> pid =
               base::StringToUInt32(tokens[1].ToStdString());
-          const base::Optional<uint32_t> ppid =
+          const std::optional<uint32_t> ppid =
               base::StringToUInt32(tokens[2].ToStdString());
           base::StringView name = tokens[8];
           // Command line may contain spaces, merge all remaining tokens:
@@ -150,9 +163,9 @@ util::Status SystraceTraceParser::Parse(std::unique_ptr<uint8_t[]> owned_buf,
                    tokens.size() >= 4) {
           // Format is:
           // username pid tid my cmd line
-          const base::Optional<uint32_t> tgid =
+          const std::optional<uint32_t> tgid =
               base::StringToUInt32(tokens[1].ToStdString());
-          const base::Optional<uint32_t> tid =
+          const std::optional<uint32_t> tid =
               base::StringToUInt32(tokens[2].ToStdString());
           // Command line may contain spaces, merge all remaining tokens:
           const char* cmd_start = tokens[3].data();

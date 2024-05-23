@@ -36,13 +36,21 @@ class UnsupportedProducerEndpoint : public ProducerEndpoint {
     // to connect successfully, but never start any sessions.
     auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
     task_runner_->PostTask([weak_ptr] {
-      if (weak_ptr)
+      if (weak_ptr && weak_ptr->connected_)
         weak_ptr->producer_->OnConnect();
     });
   }
-  ~UnsupportedProducerEndpoint() override { producer_->OnDisconnect(); }
+  ~UnsupportedProducerEndpoint() override { Disconnect(); }
+
+  void Disconnect() override {
+    if (!connected_)
+      return;
+    connected_ = false;
+    producer_->OnDisconnect();
+  }
 
   void RegisterDataSource(const DataSourceDescriptor&) override {}
+  void UpdateDataSource(const DataSourceDescriptor&) override {}
   void UnregisterDataSource(const std::string& /*name*/) override {}
 
   void RegisterTraceWriter(uint32_t /*writer_id*/,
@@ -50,8 +58,10 @@ class UnsupportedProducerEndpoint : public ProducerEndpoint {
   void UnregisterTraceWriter(uint32_t /*writer_id*/) override {}
 
   void CommitData(const CommitDataRequest&,
-                  CommitDataCallback callback = {}) override {
-    callback();
+                  CommitDataCallback callback) override {
+    if (connected_) {
+      callback();
+    }
   }
 
   SharedMemory* shared_memory() const override { return nullptr; }
@@ -59,7 +69,7 @@ class UnsupportedProducerEndpoint : public ProducerEndpoint {
 
   std::unique_ptr<TraceWriter> CreateTraceWriter(
       BufferID /*target_buffer*/,
-      BufferExhaustedPolicy = BufferExhaustedPolicy::kDefault) override {
+      BufferExhaustedPolicy) override {
     return nullptr;
   }
 
@@ -71,11 +81,16 @@ class UnsupportedProducerEndpoint : public ProducerEndpoint {
   void NotifyDataSourceStopped(DataSourceInstanceID) override {}
   void ActivateTriggers(const std::vector<std::string>&) override {}
 
-  void Sync(std::function<void()> callback) override { callback(); }
+  void Sync(std::function<void()> callback) override {
+    if (connected_) {
+      callback();
+    }
+  }
 
  private:
   Producer* const producer_;
   base::TaskRunner* const task_runner_;
+  bool connected_ = true;
   base::WeakPtrFactory<UnsupportedProducerEndpoint> weak_ptr_factory_{
       this};  // Keep last.
 };
@@ -94,14 +109,15 @@ class UnsupportedConsumerEndpoint : public ConsumerEndpoint {
   }
   ~UnsupportedConsumerEndpoint() override = default;
 
-  void EnableTracing(const TraceConfig&,
-                     base::ScopedFile = base::ScopedFile()) override {}
+  void EnableTracing(const TraceConfig&, base::ScopedFile) override {}
   void ChangeTraceConfig(const TraceConfig&) override {}
 
   void StartTracing() override {}
   void DisableTracing() override {}
 
-  void Flush(uint32_t /*timeout_ms*/, FlushCallback callback) override {
+  void Flush(uint32_t /*timeout_ms*/,
+             FlushCallback callback,
+             FlushFlags) override {
     callback(/*success=*/false);
   }
 
@@ -113,10 +129,12 @@ class UnsupportedConsumerEndpoint : public ConsumerEndpoint {
 
   void GetTraceStats() override {}
   void ObserveEvents(uint32_t /*events_mask*/) override {}
-  void QueryServiceState(QueryServiceStateCallback) override {}
+  void QueryServiceState(QueryServiceStateArgs,
+                         QueryServiceStateCallback) override {}
   void QueryCapabilities(QueryCapabilitiesCallback) override {}
 
   void SaveTraceForBugreport(SaveTraceForBugreportCallback) override {}
+  void CloneSession(TracingSessionID, CloneSessionArgs) override {}
 
  private:
   Consumer* const consumer_;

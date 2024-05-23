@@ -12,26 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Engine} from './engine';
-
-import {Row} from './query_result';
+import {EngineProxy} from '../trace_processor/engine';
+import {Row} from '../trace_processor/query_result';
 
 const MAX_DISPLAY_ROWS = 10000;
 
 export interface QueryResponse {
-  id: string;
   query: string;
   error?: string;
   totalRowCount: number;
   durationMs: number;
   columns: string[];
   rows: Row[];
+  statementCount: number;
+  statementWithOutputCount: number;
+  lastStatementSql: string;
+}
+
+export interface QueryRunParams {
+  // If true, replaces nulls with "NULL" string. Default is true.
+  convertNullsToString?: boolean;
 }
 
 export async function runQuery(
-    queryId: string, sqlQuery: string, engine: Engine): Promise<QueryResponse> {
+  sqlQuery: string,
+  engine: EngineProxy,
+  params?: QueryRunParams,
+): Promise<QueryResponse> {
   const startMs = performance.now();
-  const queryRes = engine.query(sqlQuery);
+  const queryRes = engine.execute(sqlQuery);
 
   // TODO(primiano): once the controller thread is gone we should pass down
   // the result objects directly to the frontend, iterate over the result
@@ -47,6 +56,8 @@ export async function runQuery(
     // errored, the frontend will show a graceful message instead.
   }
 
+  const convertNullsToString = params?.convertNullsToString ?? true;
+
   const durationMs = performance.now() - startMs;
   const rows: Row[] = [];
   const columns = queryRes.columns();
@@ -55,20 +66,22 @@ export async function runQuery(
     const row: Row = {};
     for (const colName of columns) {
       const value = iter.get(colName);
-      row[colName] = value === null ? 'NULL' : value;
+      row[colName] = value === null && convertNullsToString ? 'NULL' : value;
     }
     rows.push(row);
     if (++numRows >= MAX_DISPLAY_ROWS) break;
   }
 
   const result: QueryResponse = {
-    id: queryId,
     query: sqlQuery,
     durationMs,
     error: queryRes.error(),
     totalRowCount: queryRes.numRows(),
     columns,
     rows,
+    statementCount: queryRes.statementCount(),
+    statementWithOutputCount: queryRes.statementWithOutputCount(),
+    lastStatementSql: queryRes.lastStatementSql(),
   };
   return result;
 }

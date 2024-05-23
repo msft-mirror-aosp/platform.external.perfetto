@@ -51,7 +51,7 @@ template <typename T,
           T InvalidValue,
           bool CheckClose = true,
           class Checker = internal::DefaultValidityChecker<T, InvalidValue>>
-class PERFETTO_EXPORT ScopedResource {
+class ScopedResource {
  public:
   using ValidityChecker = Checker;
   static constexpr T kInvalid = InvalidValue;
@@ -91,7 +91,7 @@ class PERFETTO_EXPORT ScopedResource {
 };
 
 // Declared in file_utils.h. Forward declared to avoid #include cycles.
-int PERFETTO_EXPORT CloseFile(int fd);
+int PERFETTO_EXPORT_COMPONENT CloseFile(int fd);
 
 // Use this for file resources obtained via open() and similar APIs.
 using ScopedFile = ScopedResource<int, CloseFile, -1>;

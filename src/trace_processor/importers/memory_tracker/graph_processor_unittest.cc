@@ -18,8 +18,6 @@
 
 #include <stddef.h>
 
-#include <unordered_map>
-
 #include "perfetto/base/build_config.h"
 #include "test/gtest_and_gmock.h"
 
@@ -73,8 +71,8 @@ class GraphProcessorTest : public testing::Test {
     GraphProcessor::PropagateNumericsAndDiagnosticsRecursively(node);
   }
 
-  base::Optional<uint64_t> AggregateSizeForDescendantNode(Node* root,
-                                                          Node* descendant) {
+  std::optional<uint64_t> AggregateSizeForDescendantNode(Node* root,
+                                                         Node* descendant) {
     return GraphProcessor::AggregateSizeForDescendantNode(root, descendant);
   }
 

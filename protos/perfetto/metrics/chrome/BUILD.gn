@@ -15,19 +15,32 @@
 import("../../../../gn/proto_library.gni")
 
 perfetto_proto_library("@TYPE@") {
-  proto_generators = [ "source_set" ]
+  proto_generators = [
+    "lite",
+    "source_set",
+  ]
+  import_dirs = [ "${perfetto_protobuf_src_dir}" ]
   deps = [
     "..:@TYPE@",
     "..:custom_options_@TYPE@",
   ]
   sources = [
     "all_chrome_metrics.proto",
-    "blink_gc_metric.proto",
+    "args_class_names.proto",
+    "dropped_frames.proto",
     "frame_times.proto",
+    "histogram_hashes.proto",
+    "long_latency.proto",
     "media_metric.proto",
+    "performance_mark_hashes.proto",
     "reported_by_page.proto",
     "scroll_jank.proto",
+    "scroll_jank_v3.proto",
+    "slice_names.proto",
     "test_chrome_metric.proto",
+    "touch_jank.proto",
+    "unsymbolized_args.proto",
+    "user_event_hashes.proto",
   ]
 }
 

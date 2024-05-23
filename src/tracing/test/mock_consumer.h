@@ -47,35 +47,46 @@ class MockConsumer : public Consumer {
   explicit MockConsumer(base::TestTaskRunner*);
   ~MockConsumer() override;
 
+  void Connect(std::unique_ptr<TracingService::ConsumerEndpoint>);
   void Connect(TracingService* svc, uid_t = 0);
+  void ForceDisconnect();
   void EnableTracing(const TraceConfig&, base::ScopedFile = base::ScopedFile());
   void StartTracing();
   void ChangeTraceConfig(const TraceConfig&);
   void DisableTracing();
   void FreeBuffers();
   void WaitForTracingDisabled(uint32_t timeout_ms = 3000);
-  FlushRequest Flush(uint32_t timeout_ms = 10000);
+  FlushRequest Flush(
+      uint32_t timeout_ms = 10000,
+      FlushFlags = FlushFlags(FlushFlags::Initiator::kConsumerSdk,
+                              FlushFlags::Reason::kExplicit));
   std::vector<protos::gen::TracePacket> ReadBuffers();
   void GetTraceStats();
-  void WaitForTraceStats(bool success);
+  TraceStats WaitForTraceStats(bool success);
   TracingServiceState QueryServiceState();
   void ObserveEvents(uint32_t enabled_event_types);
   ObservableEvents WaitForObservableEvents();
+  void CloneSession(TracingSessionID);
 
   TracingService::ConsumerEndpoint* endpoint() {
     return service_endpoint_.get();
   }
 
   // Consumer implementation.
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD1(OnTracingDisabled, void(const std::string& /*error*/));
-  MOCK_METHOD2(OnTraceData,
-               void(std::vector<TracePacket>* /*packets*/, bool /*has_more*/));
-  MOCK_METHOD1(OnDetach, void(bool));
-  MOCK_METHOD2(OnAttach, void(bool, const TraceConfig&));
-  MOCK_METHOD2(OnTraceStats, void(bool, const TraceStats&));
-  MOCK_METHOD1(OnObservableEvents, void(const ObservableEvents&));
+  MOCK_METHOD(void, OnConnect, (), (override));
+  MOCK_METHOD(void, OnDisconnect, (), (override));
+  MOCK_METHOD(void,
+              OnTracingDisabled,
+              (const std::string& /*error*/),
+              (override));
+  MOCK_METHOD(void,
+              OnTraceData,
+              (std::vector<TracePacket>* /*packets*/, bool /*has_more*/));
+  MOCK_METHOD(void, OnDetach, (bool), (override));
+  MOCK_METHOD(void, OnAttach, (bool, const TraceConfig&), (override));
+  MOCK_METHOD(void, OnTraceStats, (bool, const TraceStats&), (override));
+  MOCK_METHOD(void, OnObservableEvents, (const ObservableEvents&), (override));
+  MOCK_METHOD(void, OnSessionCloned, (const OnSessionClonedArgs&), (override));
 
   // gtest doesn't support move-only types. This wrapper is here jut to pass
   // a pointer to the vector (rather than the vector itself) to the mock method.

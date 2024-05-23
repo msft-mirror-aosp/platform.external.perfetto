@@ -21,11 +21,25 @@ Continue with the appropriate section below.
 
 ## a) Creating a new major version
 
+Make sure that the current main branch builds on
+[LUCI](https://luci-scheduler.appspot.com/jobs/perfetto) by triggering all the
+builds and waiting for their success. If any of the builds fail, fix the failure
+on main before proceeding.
+
+Create an entry in CHANGELOG with the new major version: this usually involves
+renaming the "Unreleased" entry to the version number you chose earlier
+([example](https://r.android.com/2417175)).
+
+Test that the perfetto build tools can parse the CHANGELOG: after building,
+running `perfetto --version` should show your new version number.
+
+Upload the CHANGELOG change and submit it on the main branch.
+
 Create a release branch for the new major version ("v16.x" here):
 
 ```bash
 git fetch origin
-git push origin origin/master:refs/heads/releases/v16.x
+git push origin origin/main:refs/heads/releases/v16.x
 git fetch origin
 git checkout -b releases/v16.x -t origin/releases/v16.x
 ```
@@ -93,7 +107,7 @@ cmake --build build
 3. Upload the new release for review.
 
 ```bash
-git cl upload --no-squash
+git cl upload --no-squash --bypass-hooks -o banned-words~skip
 ```
 
 If you get an error about a missing Change-Id field (`remote: ERROR: commit
@@ -126,6 +140,31 @@ git push origin vX.Y
    - [docs/instrumentation/tracing-sdk.md](/docs/instrumentation/tracing-sdk.md)
    - [examples/sdk/README.md](/examples/sdk/README.md)
 
-6. Send an email with the CHANGELOG to perfetto-dev@ (internal) and perfetto-dev@googlegroups.com.
+6. Send an email with the CHANGELOG to perfetto-dev@ (internal) and to the
+   [public perfetto-dev](https://groups.google.com/forum/#!forum/perfetto-dev).
 
-Phew, you're done!
+## Creating a GitHub release with prebuilts
+
+7. Within few mins the LUCI scheduler will trigger builds of prebuilt binaries
+   on https://luci-scheduler.appspot.com/jobs/perfetto . Wait for all the bots
+   to have completed successfully and be back into the WAITING state.
+
+8. Run `tools/package-prebuilts-for-github-release vX.Y`. It will pull the
+   prebuilts under `/tmp/perfetto-prebuilts-vX.Y`.
+  - There must be 10 zips in total: linux-{arm,arm64,amd64},
+    android-{arm,arm64,x86,x64}, mac-{amd64,arm64}, win-amd64.
+  - If one or more are missing it means that one of the LUCI bots failed,
+    check the logs (follow the "Task URL: " link) from the invocation log.
+  - If this happens you'll need to respin a vX.(Y+1) release with the fix
+    (look at the history v20.1, where a Windows failure required a respin).
+
+9. Open https://github.com/google/perfetto/releases/new and
+  - Select "Choose Tag" -> vX.Y
+  - "Release title" -> "Perfetto vX.Y"
+  - "Describe release" -> Copy the CHANGELOG, wrapping it in triple backticks.
+  - "Attach binaries" -> Attach the ten .zip files from the previous step.
+
+10. Run `tools/roll-prebuilts vX.Y`. It will update the SHA256 into the various
+   scripts under `tools/`. Upload a CL with the changes.
+
+11. Phew, you're done!

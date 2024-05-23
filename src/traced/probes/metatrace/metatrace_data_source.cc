@@ -22,7 +22,7 @@
 #include "perfetto/base/task_runner.h"
 #include "perfetto/ext/tracing/core/trace_packet.h"
 #include "perfetto/ext/tracing/core/trace_writer.h"
-#include "src/tracing/core/metatrace_writer.h"
+#include "src/tracing/service/metatrace_writer.h"
 
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 
@@ -32,6 +32,7 @@ namespace perfetto {
 const ProbesDataSource::Descriptor MetatraceDataSource::descriptor = {
     /*name*/ MetatraceWriter::kDataSourceName,
     /*flags*/ Descriptor::kFlagsNone,
+    /*fill_descriptor_func*/ nullptr,
 };
 
 MetatraceDataSource::MetatraceDataSource(base::TaskRunner* task_runner,

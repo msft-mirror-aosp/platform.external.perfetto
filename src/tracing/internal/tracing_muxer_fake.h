@@ -54,7 +54,11 @@ class TracingMuxerFake : public TracingMuxer {
   // TracingMuxer implementation.
   bool RegisterDataSource(const DataSourceDescriptor&,
                           DataSourceFactory,
+                          DataSourceParams,
+                          bool,
                           DataSourceStaticState*) override;
+  void UpdateDataSourceDescriptor(const DataSourceDescriptor&,
+                                  const DataSourceStaticState*) override;
   std::unique_ptr<TraceWriterBase> CreateTraceWriter(
       DataSourceStaticState*,
       uint32_t data_source_instance_index,
@@ -65,6 +69,7 @@ class TracingMuxerFake : public TracingMuxer {
                            InterceptorFactory,
                            InterceptorBase::TLSFactory,
                            InterceptorBase::TracePacketCallback) override;
+  void ActivateTriggers(const std::vector<std::string>&, uint32_t) override;
 
  private:
   static TracingMuxerFake instance;

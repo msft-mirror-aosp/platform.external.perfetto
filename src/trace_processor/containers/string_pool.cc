@@ -17,27 +17,13 @@
 #include "src/trace_processor/containers/string_pool.h"
 
 #include <limits>
+#include <tuple>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/utils.h"
 
 namespace perfetto {
 namespace trace_processor {
-
-// static
-constexpr size_t StringPool::kNumBlockIndexBits;
-// static
-constexpr size_t StringPool::kNumBlockOffsetBits;
-// static
-constexpr size_t StringPool::kLargeStringFlagBitMask;
-// static
-constexpr size_t StringPool::kBlockOffsetBitMask;
-// static
-constexpr size_t StringPool::kBlockIndexBitMask;
-// static
-constexpr size_t StringPool::kBlockSizeBytes;
-// static
-constexpr size_t StringPool::kMinLargeStringSizeBytes;
 
 StringPool::StringPool() {
   static_assert(
@@ -53,8 +39,8 @@ StringPool::StringPool() {
 
 StringPool::~StringPool() = default;
 
-StringPool::StringPool(StringPool&&) = default;
-StringPool& StringPool::operator=(StringPool&&) = default;
+StringPool::StringPool(StringPool&&) noexcept = default;
+StringPool& StringPool::operator=(StringPool&&) noexcept = default;
 
 StringPool::Id StringPool::InsertString(base::StringView str, uint64_t hash) {
   // Try and find enough space in the current block for the string and the
@@ -70,9 +56,8 @@ StringPool::Id StringPool::InsertString(base::StringView str, uint64_t hash) {
     // new block to store the string.
     if (str.size() + kMaxMetadataSize >= kMinLargeStringSizeBytes) {
       return InsertLargeString(str, hash);
-    } else {
-      blocks_.emplace_back(kBlockSizeBytes);
     }
+    blocks_.emplace_back(kBlockSizeBytes);
 
     // Try and reserve space again - this time we should definitely succeed.
     std::tie(success, offset) = blocks_.back().TryInsert(str);
@@ -82,7 +67,11 @@ StringPool::Id StringPool::InsertString(base::StringView str, uint64_t hash) {
   // Compute the id from the block index and offset and add a mapping from the
   // hash to the id.
   Id string_id = Id::BlockString(blocks_.size() - 1, offset);
-  string_index_.emplace(hash, string_id);
+
+  // Deliberately not adding |string_id| to |string_index_|. The caller
+  // (InternString()) must take care of this.
+  PERFETTO_DCHECK(string_index_.Find(hash));
+
   return string_id;
 }
 
@@ -91,7 +80,11 @@ StringPool::Id StringPool::InsertLargeString(base::StringView str,
   large_strings_.emplace_back(new std::string(str.begin(), str.size()));
   // Compute id from the index and add a mapping from the hash to the id.
   Id string_id = Id::LargeString(large_strings_.size() - 1);
-  string_index_.emplace(hash, string_id);
+
+  // Deliberately not adding |string_id| to |string_index_|. The caller
+  // (InternString()) must take care of this.
+  PERFETTO_DCHECK(string_index_.Find(hash));
+
   return string_id;
 }
 

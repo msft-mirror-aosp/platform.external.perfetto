@@ -68,8 +68,7 @@ bool FDMaps::Parse() {
     return false;
 
   unwindstack::SharedString name("");
-  unwindstack::MapInfo* prev_map = nullptr;
-  unwindstack::MapInfo* prev_real_map = nullptr;
+  std::shared_ptr<unwindstack::MapInfo> prev_map;
   return android::procinfo::ReadMapFileContent(
       &content[0], [&](const android::procinfo::MapInfo& mapinfo) {
         // Mark a device map in /dev/ and not in /dev/ashmem/ specially.
@@ -82,13 +81,9 @@ bool FDMaps::Parse() {
         if (name != mapinfo.name) {
           name = unwindstack::SharedString(mapinfo.name);
         }
-        maps_.emplace_back(new unwindstack::MapInfo(
-            prev_map, prev_real_map, mapinfo.start, mapinfo.end, mapinfo.pgoff,
-            flags, name));
-        prev_map = maps_.back().get();
-        if (!prev_map->IsBlank()) {
-          prev_real_map = prev_map;
-        }
+        maps_.emplace_back(unwindstack::MapInfo::Create(
+            prev_map, mapinfo.start, mapinfo.end, mapinfo.pgoff, flags, name));
+        prev_map = maps_.back();
       });
 }
 
@@ -115,7 +110,8 @@ void UnwindingMetadata::ReparseMaps() {
 }
 
 #if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
-unwindstack::JitDebug* UnwindingMetadata::GetJitDebug(unwindstack::ArchEnum arch) {
+unwindstack::JitDebug* UnwindingMetadata::GetJitDebug(
+    unwindstack::ArchEnum arch) {
   if (jit_debug.get() == nullptr) {
     std::vector<std::string> search_libs{"libart.so", "libartd.so"};
     jit_debug = unwindstack::CreateJitDebug(arch, fd_mem, search_libs);
@@ -123,7 +119,8 @@ unwindstack::JitDebug* UnwindingMetadata::GetJitDebug(unwindstack::ArchEnum arch
   return jit_debug.get();
 }
 
-unwindstack::DexFiles* UnwindingMetadata::GetDexFiles(unwindstack::ArchEnum arch) {
+unwindstack::DexFiles* UnwindingMetadata::GetDexFiles(
+    unwindstack::ArchEnum arch) {
   if (dex_files.get() == nullptr) {
     std::vector<std::string> search_libs{"libart.so", "libartd.so"};
     dex_files = unwindstack::CreateDexFiles(arch, fd_mem, search_libs);
@@ -134,10 +131,8 @@ unwindstack::DexFiles* UnwindingMetadata::GetDexFiles(unwindstack::ArchEnum arch
 
 const std::string& UnwindingMetadata::GetBuildId(
     const unwindstack::FrameData& frame) {
-  if (!frame.map_name.empty()) {
-    unwindstack::MapInfo* map_info = fd_maps.Find(frame.pc);
-    if (map_info)
-      return map_info->GetBuildID();
+  if (frame.map_info != nullptr && !frame.map_info->name().empty()) {
+    return frame.map_info->GetBuildID();
   }
 
   return empty_string_;
@@ -167,6 +162,14 @@ std::string StringifyLibUnwindstackError(unwindstack::ErrorCode e) {
       return "THREAD_DOES_NOT_EXIST";
     case unwindstack::ERROR_THREAD_TIMEOUT:
       return "THREAD_TIMEOUT";
+    case unwindstack::ERROR_BAD_ARCH:
+      return "BAD_ARCH";
+    case unwindstack::ERROR_MAPS_PARSE:
+      return "MAPS_PARSE";
+    case unwindstack::ERROR_INVALID_PARAMETER:
+      return "INVALID_PARAMETER";
+    case unwindstack::ERROR_PTRACE_CALL:
+      return "PTRACE_CALL";
   }
 }
 

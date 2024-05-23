@@ -20,6 +20,7 @@
 
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/scoped_file.h"
+#include "perfetto/ext/base/sys_types.h"
 #include "perfetto/ext/base/temp_file.h"
 #include "perfetto/ext/base/unix_socket.h"
 #include "perfetto/ext/base/utils.h"
@@ -33,10 +34,16 @@
 #include "protos/perfetto/ipc/wire_protocol.gen.h"
 #include "src/ipc/test/client_unittest_messages.gen.h"
 
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+#include <sys/socket.h>
+#endif
+
 namespace perfetto {
 namespace ipc {
 namespace {
 
+using ::perfetto::ipc::Frame;
 using ::perfetto::ipc::gen::ReplyProto;
 using ::perfetto::ipc::gen::RequestProto;
 using ::testing::_;
@@ -50,7 +57,7 @@ ipc::TestSocket kTestSocket{"host_impl_unittest"};
 
 class FakeService : public Service {
  public:
-  MOCK_METHOD2(OnFakeMethod1, void(const RequestProto&, DeferredBase*));
+  MOCK_METHOD(void, OnFakeMethod1, (const RequestProto&, DeferredBase*));
 
   static void Invoker(Service* service,
                       const ProtoMessage& req,
@@ -82,17 +89,31 @@ class FakeService : public Service {
 
 class FakeClient : public base::UnixSocket::EventListener {
  public:
-  MOCK_METHOD0(OnConnect, void());
-  MOCK_METHOD0(OnDisconnect, void());
-  MOCK_METHOD1(OnServiceBound, void(const Frame::BindServiceReply&));
-  MOCK_METHOD1(OnInvokeMethodReply, void(const Frame::InvokeMethodReply&));
-  MOCK_METHOD1(OnFileDescriptorReceived, void(int));
-  MOCK_METHOD0(OnRequestError, void());
+  MOCK_METHOD(void, OnConnect, ());
+  MOCK_METHOD(void, OnDisconnect, ());
+  MOCK_METHOD(void, OnServiceBound, (const Frame::BindServiceReply&));
+  MOCK_METHOD(void, OnInvokeMethodReply, (const Frame::InvokeMethodReply&));
+  MOCK_METHOD(void, OnFileDescriptorReceived, (int));
+  MOCK_METHOD(void, OnRequestError, ());
 
   explicit FakeClient(base::TaskRunner* task_runner) {
     sock_ = base::UnixSocket::Connect(kTestSocket.name(), this, task_runner,
                                       kTestSocket.family(),
                                       base::SockType::kStream);
+  }
+
+  FakeClient(const char* sock_name, base::TaskRunner* task_runner) {
+    auto sock_family = base::GetSockFamily(sock_name);
+    sock_ = base::UnixSocket::Connect(sock_name, this, task_runner, sock_family,
+                                      base::SockType::kStream);
+  }
+
+  FakeClient(base::ScopedSocketHandle connected_socket,
+             base::TaskRunner* task_runner) {
+    sock_ = base::UnixSocket::AdoptConnected(std::move(connected_socket), this,
+                                             task_runner, kTestSocket.family(),
+                                             base::SockType::kStream);
+    task_runner->PostTask([this]() { OnConnect(); });
   }
 
   ~FakeClient() override = default;
@@ -105,6 +126,21 @@ class FakeClient : public base::UnixSocket::EventListener {
     frame.mutable_msg_bind_service()->set_service_name(service_name);
     SendFrame(frame);
   }
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  void SetPeerIdentity(uid_t uid,
+                       pid_t pid,
+                       const std::string& machine_id_hint) {
+    Frame ipc_frame;
+    ipc_frame.set_request_id(0);
+    auto* set_peer_identity = ipc_frame.mutable_set_peer_identity();
+    set_peer_identity->set_pid(pid);
+    set_peer_identity->set_uid(static_cast<int32_t>(uid));
+    set_peer_identity->set_machine_id_hint(machine_id_hint);
+    SendFrame(ipc_frame);
+  }
+#endif
 
   void InvokeMethod(ServiceID service_id,
                     MethodID method_id,
@@ -170,11 +206,23 @@ class HostImplTest : public ::testing::Test {
   void SetUp() override {
     kTestSocket.Destroy();
     task_runner_.reset(new base::TestTaskRunner());
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
+    Host* host = Host::CreateInstance_Fuchsia(task_runner_.get()).release();
+    auto socket_pair = base::UnixSocketRaw::CreatePairPosix(
+        base::SockFamily::kUnix, base::SockType::kStream);
+    host->AdoptConnectedSocket_Fuchsia(
+        base::ScopedSocketHandle(socket_pair.first.ReleaseFd()),
+        [](int) { return false; });
+    cli_.reset(
+        new FakeClient(base::ScopedSocketHandle(socket_pair.second.ReleaseFd()),
+                       task_runner_.get()));
+#else
     Host* host =
         Host::CreateInstance(kTestSocket.name(), task_runner_.get()).release();
+    cli_.reset(new FakeClient(task_runner_.get()));
+#endif
     ASSERT_NE(nullptr, host);
     host_.reset(static_cast<HostImpl*>(host));
-    cli_.reset(new FakeClient(task_runner_.get()));
     auto on_connect = task_runner_->CreateCheckpoint("on_connect");
     EXPECT_CALL(*cli_, OnConnect()).WillOnce(Invoke(on_connect));
     task_runner_->RunUntilCheckpoint("on_connect");
@@ -321,7 +369,8 @@ TEST_F(HostImplTest, InvokeMethodDropReply) {
   task_runner_->RunUntilCheckpoint("on_reply_received");
 }
 
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA)
 // File descriptor sending over IPC is not supported on Windows.
 TEST_F(HostImplTest, SendFileDescriptor) {
   FakeService* fake_service = new FakeService("FakeService");
@@ -477,6 +526,131 @@ TEST_F(HostImplTest, MoveReplyObjectAndReplyAsynchronously) {
           }));
   task_runner_->RunUntilCheckpoint("on_reply_received");
 }
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+// Check ClientInfo of the service.
+TEST_F(HostImplTest, ServiceClientInfo) {
+  FakeService* fake_service = new FakeService("FakeService");
+  ASSERT_TRUE(host_->ExposeService(std::unique_ptr<Service>(fake_service)));
+  auto on_bind = task_runner_->CreateCheckpoint("on_bind");
+  cli_->BindService("FakeService");
+  EXPECT_CALL(*cli_, OnServiceBound(_)).WillOnce(InvokeWithoutArgs(on_bind));
+  task_runner_->RunUntilCheckpoint("on_bind");
+
+  RequestProto req_args;
+  req_args.set_data("foo");
+  cli_->InvokeMethod(cli_->last_bound_service_id_, 1, req_args);
+  EXPECT_CALL(*fake_service, OnFakeMethod1(_, _))
+      .WillOnce(
+          Invoke([fake_service](const RequestProto& req, DeferredBase* reply) {
+            ASSERT_EQ("foo", req.data());
+            std::unique_ptr<ReplyProto> reply_args(new ReplyProto());
+            reply_args->set_data("bar");
+            reply->Resolve(AsyncResult<ProtoMessage>(
+                std::unique_ptr<ProtoMessage>(reply_args.release())));
+            // Verifies the pid() and uid() values in ClientInfo.
+            const auto& client_info = fake_service->client_info();
+            ASSERT_EQ(client_info.uid(), getuid());
+            ASSERT_EQ(client_info.pid(), getpid());
+          }));
+
+  EXPECT_CALL(*cli_, OnInvokeMethodReply(_)).WillOnce(Return());
+  task_runner_->RunUntilIdle();
+}
+
+TEST_F(HostImplTest, SetPeerIdentityUnixSocket) {
+  FakeService* fake_service = new FakeService("FakeService");
+  ASSERT_TRUE(host_->ExposeService(std::unique_ptr<Service>(fake_service)));
+  // SetPeerIdentity must be the first message. Use getpid()+1/geteuid+1 to
+  // check that this message doesn't take effect for Unix socket.
+  cli_->SetPeerIdentity(geteuid() + 1, getpid() + 1, "test_machine_id_hint");
+
+  auto on_bind = task_runner_->CreateCheckpoint("on_bind");
+  cli_->BindService("FakeService");
+  EXPECT_CALL(*cli_, OnServiceBound(_)).WillOnce(InvokeWithoutArgs(on_bind));
+  task_runner_->RunUntilCheckpoint("on_bind");
+
+  RequestProto req_args;
+  req_args.set_data("foo");
+  cli_->InvokeMethod(cli_->last_bound_service_id_, 1, req_args);
+  EXPECT_CALL(*fake_service, OnFakeMethod1(_, _))
+      .WillOnce(
+          Invoke([fake_service](const RequestProto& req, DeferredBase* reply) {
+            ASSERT_EQ("foo", req.data());
+            std::unique_ptr<ReplyProto> reply_args(new ReplyProto());
+            reply_args->set_data("bar");
+            reply->Resolve(AsyncResult<ProtoMessage>(
+                std::unique_ptr<ProtoMessage>(reply_args.release())));
+            // Verifies the pid() and uid() values in ClientInfo.
+            const auto& client_info = fake_service->client_info();
+            ASSERT_EQ(client_info.uid(), getuid());
+            ASSERT_EQ(client_info.pid(), getpid());
+            ASSERT_EQ(client_info.machine_id(), base::kDefaultMachineID);
+          }));
+
+  EXPECT_CALL(*cli_, OnInvokeMethodReply(_)).WillOnce(Return());
+  task_runner_->RunUntilIdle();
+}
+
+TEST(HostImpl, SetPeerIdentityTcpSocket) {
+  std::unique_ptr<base::TestTaskRunner> task_runner(new base::TestTaskRunner());
+  std::unique_ptr<HostImpl> host_impl;
+  std::unique_ptr<FakeClient> cli;
+
+  auto tear_down = base::OnScopeExit([&]() {
+    task_runner->RunUntilIdle();
+    cli.reset();
+    host_impl.reset();
+    task_runner->RunUntilIdle();
+    task_runner.reset();
+  });
+
+  Host* host = Host::CreateInstance("127.0.0.1:0", task_runner.get()).release();
+  ASSERT_NE(nullptr, host);
+  host_impl.reset(static_cast<HostImpl*>(host));
+
+  auto sock_name = host_impl->sock()->GetSockAddr();
+  cli.reset(new FakeClient(sock_name.c_str(), task_runner.get()));
+
+  auto on_connect = task_runner->CreateCheckpoint("on_connect");
+  EXPECT_CALL(*cli, OnConnect()).WillOnce(Invoke(on_connect));
+  task_runner->RunUntilCheckpoint("on_connect");
+
+  FakeService* fake_service = new FakeService("FakeService");
+  ASSERT_TRUE(host->ExposeService(std::unique_ptr<Service>(fake_service)));
+  // Set peer identity with fake values.
+  cli->SetPeerIdentity(123, 456, "test_machine_id_hint");
+
+  auto on_bind = task_runner->CreateCheckpoint("on_bind");
+  cli->BindService("FakeService");
+  EXPECT_CALL(*cli, OnServiceBound(_)).WillOnce(InvokeWithoutArgs(on_bind));
+  task_runner->RunUntilCheckpoint("on_bind");
+
+  RequestProto req_args;
+  req_args.set_data("foo");
+  cli->InvokeMethod(cli->last_bound_service_id_, 1, req_args);
+  EXPECT_CALL(*fake_service, OnFakeMethod1(_, _))
+      .WillOnce(
+          Invoke([fake_service](const RequestProto& req, DeferredBase* reply) {
+            ASSERT_EQ("foo", req.data());
+            std::unique_ptr<ReplyProto> reply_args(new ReplyProto());
+            reply_args->set_data("bar");
+            reply->Resolve(AsyncResult<ProtoMessage>(
+                std::unique_ptr<ProtoMessage>(reply_args.release())));
+            // Verify peer identity.
+            const auto& client_info = fake_service->client_info();
+            ASSERT_EQ(client_info.uid(), 123u);
+            ASSERT_EQ(client_info.pid(), 456);
+            // ClientInfo contains non-default raw machine ID.
+            ASSERT_NE(client_info.machine_id(), base::kDefaultMachineID);
+          }));
+
+  EXPECT_CALL(*cli, OnInvokeMethodReply(_)).WillOnce(Return());
+  task_runner->RunUntilIdle();
+}
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||
+        // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 
 // TODO(primiano): add the tests below in next CLs.
 // TEST(HostImplTest, ManyClients) {}

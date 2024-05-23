@@ -17,64 +17,31 @@
 #include <stdio.h>
 #include <algorithm>
 
+#include "perfetto/base/status.h"
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/getopt.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/unix_socket.h"
 #include "perfetto/ext/base/unix_task_runner.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/base/version.h"
 #include "perfetto/ext/base/watchdog.h"
 #include "perfetto/ext/traced/traced.h"
-#include "perfetto/ext/tracing/ipc/default_socket.h"
+#include "perfetto/ext/tracing/core/tracing_service.h"
 #include "perfetto/ext/tracing/ipc/service_ipc_host.h"
+#include "perfetto/tracing/default_socket.h"
 #include "src/traced/service/builtin_producer.h"
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-#define PERFETTO_SET_SOCKET_PERMISSIONS
-#include <fcntl.h>
-#include <grp.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+#include <sys/system_properties.h>
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ZLIB)
+#include "src/tracing/service/zlib_compressor.h"
 #endif
 
 namespace perfetto {
 namespace {
-#if defined(PERFETTO_SET_SOCKET_PERMISSIONS)
-void SetSocketPermissions(const std::string& socket_name,
-                          const std::string& group_name,
-                          const std::string& mode_bits) {
-  PERFETTO_CHECK(!socket_name.empty());
-  PERFETTO_CHECK(!group_name.empty());
-  struct group* socket_group = nullptr;
-  // Query the group ID of |group|.
-  do {
-    socket_group = getgrnam(group_name.c_str());
-  } while (socket_group == nullptr && errno == EINTR);
-  if (socket_group == nullptr) {
-    PERFETTO_FATAL("Failed to get group information of %s ",
-                   group_name.c_str());
-  }
-
-  if (PERFETTO_EINTR(
-          chown(socket_name.c_str(), geteuid(), socket_group->gr_gid))) {
-    PERFETTO_FATAL("Failed to chown %s ", socket_name.c_str());
-  }
-
-  // |mode| accepts values like "0660" as "rw-rw----" mode bits.
-  auto mode_value = base::StringToInt32(mode_bits, 8);
-  if (!(mode_bits.size() == 4 && mode_value.has_value())) {
-    PERFETTO_FATAL(
-        "The chmod option must be a 4-digit octal number, e.g. 0660");
-  }
-  if (PERFETTO_EINTR(chmod(socket_name.c_str(),
-                           static_cast<mode_t>(mode_value.value())))) {
-    PERFETTO_FATAL("Failed to chmod %s", socket_name.c_str());
-  }
-}
-#endif  // defined(PERFETTO_SET_SOCKET_PERMISSIONS)
-
 void PrintUsage(const char* prog_name) {
   fprintf(stderr, R"(
 Usage: %s [option] ...
@@ -88,6 +55,9 @@ Options and arguments
         <prod_mode> is the mode bits (e.g. 0660) for chmod the produce socket,
         <cons_group> is the group name for chgrp the consumer socket, and
         <cons_mode> is the mode bits (e.g. 0660) for chmod the consumer socket.
+    --enable-relay-endpoint : enables the relay endpoint on producer socket(s)
+        for traced_relay to communicate with traced in a multiple-machine
+        tracing session.
 
 Example:
     %s --set-socket-permissions traced-producer:0660:traced-consumer:0660
@@ -104,15 +74,19 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
     OPT_VERSION = 1000,
     OPT_SET_SOCKET_PERMISSIONS = 1001,
     OPT_BACKGROUND,
+    OPT_ENABLE_RELAY_ENDPOINT
   };
 
   bool background = false;
+  bool enable_relay_endpoint = false;
 
   static const option long_options[] = {
       {"background", no_argument, nullptr, OPT_BACKGROUND},
       {"version", no_argument, nullptr, OPT_VERSION},
       {"set-socket-permissions", required_argument, nullptr,
        OPT_SET_SOCKET_PERMISSIONS},
+      {"enable-relay-endpoint", no_argument, nullptr,
+       OPT_ENABLE_RELAY_ENDPOINT},
       {nullptr, 0, nullptr, 0}};
 
   std::string producer_socket_group, consumer_socket_group,
@@ -142,6 +116,9 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
         consumer_socket_mode = parts[3];
         break;
       }
+      case OPT_ENABLE_RELAY_ENDPOINT:
+        enable_relay_endpoint = true;
+        break;
       default:
         PrintUsage(argv[0]);
         return 1;
@@ -149,12 +126,18 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
   }
 
   if (background) {
-    base::Daemonize();
+    base::Daemonize([] { return 0; });
   }
 
   base::UnixTaskRunner task_runner;
   std::unique_ptr<ServiceIPCHost> svc;
-  svc = ServiceIPCHost::CreateInstance(&task_runner);
+  TracingService::InitOpts init_opts = {};
+#if PERFETTO_BUILDFLAG(PERFETTO_ZLIB)
+  init_opts.compressor_fn = &ZlibCompressFn;
+#endif
+  if (enable_relay_endpoint)
+    init_opts.enable_relay_endpoint = true;
+  svc = ServiceIPCHost::CreateInstance(&task_runner, init_opts);
 
   // When built as part of the Android tree, the two socket are created and
   // bound by init and their fd number is passed in two env variables.
@@ -172,21 +155,34 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
     started = svc->Start(std::move(producer_fd), std::move(consumer_fd));
 #endif
   } else {
-    remove(GetProducerSocket());
+    auto producer_sockets = TokenizeProducerSockets(GetProducerSocket());
+    for (const auto& producer_socket : producer_sockets) {
+      remove(producer_socket.c_str());
+    }
     remove(GetConsumerSocket());
-    started = svc->Start(GetProducerSocket(), GetConsumerSocket());
+    started = svc->Start(producer_sockets, GetConsumerSocket());
 
     if (!producer_socket_group.empty()) {
-#if defined(PERFETTO_SET_SOCKET_PERMISSIONS)
-      SetSocketPermissions(GetProducerSocket(), producer_socket_group,
-                           producer_socket_mode);
-      SetSocketPermissions(GetConsumerSocket(), consumer_socket_group,
-                           consumer_socket_mode);
-#else
-      PERFETTO_ELOG(
-          "Setting socket permissions is not supported on this platform");
-      return 1;
-#endif
+      auto status = base::OkStatus();
+      for (const auto& producer_socket : producer_sockets) {
+        if (base::GetSockFamily(producer_socket.c_str()) !=
+            base::SockFamily::kUnix) {
+          // Socket permissions is only available to unix sockets.
+          continue;
+        }
+        status = base::SetFilePermissions(
+            producer_socket, producer_socket_group, producer_socket_mode);
+        if (!status.ok()) {
+          PERFETTO_ELOG("%s", status.c_message());
+          return 1;
+        }
+      }
+      status = base::SetFilePermissions(
+          GetConsumerSocket(), consumer_socket_group, consumer_socket_mode);
+      if (!status.ok()) {
+        PERFETTO_ELOG("%s", status.c_message());
+        return 1;
+      }
     }
   }
 
@@ -195,8 +191,13 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
     return 1;
   }
 
+  // Advertise builtin producers only on in-tree builds. These producers serve
+  // only to dynamically start heapprofd and other services via sysprops, but
+  // that can only ever happen in in-tree builds.
+#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
   BuiltinProducer builtin_producer(&task_runner, /*lazy_stop_delay_ms=*/30000);
   builtin_producer.ConnectInProcess(svc->service());
+#endif
 
   // Set the CPU limit and start the watchdog running. The memory limit will
   // be set inside the service code as it relies on the size of buffers.
@@ -215,6 +216,17 @@ int PERFETTO_EXPORT_ENTRYPOINT ServiceMain(int argc, char** argv) {
     PERFETTO_CHECK(base::WriteAll(notif_fd, "1", 1) == 1);
     PERFETTO_CHECK(base::CloseFile(notif_fd) == 0);
   }
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD) && \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  // Notify init (perfetto.rc) that traced has been started. Used only by
+  // the perfetto_trace_on_boot init service.
+  // This property can be set only in in-tree builds. shell.te doesn't have
+  // SELinux permissions to set sys.trace.* properties.
+  if (__system_property_set("sys.trace.traced_started", "1") != 0) {
+    PERFETTO_PLOG("Failed to set property sys.trace.traced_started");
+  }
+#endif
 
   PERFETTO_ILOG("Started traced, listening on %s %s", GetProducerSocket(),
                 GetConsumerSocket());

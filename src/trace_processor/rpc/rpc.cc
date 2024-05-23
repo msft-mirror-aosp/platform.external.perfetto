@@ -16,29 +16,36 @@
 
 #include "src/trace_processor/rpc/rpc.h"
 
-#include <string.h>
-
+#include <cinttypes>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/base/status.h"
 #include "perfetto/base/time.h"
-#include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/base/version.h"
+#include "perfetto/ext/protozero/proto_ring_buffer.h"
+#include "perfetto/ext/trace_processor/rpc/query_result_serializer.h"
+#include "perfetto/protozero/field.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
-#include "perfetto/protozero/scattered_stream_writer.h"
+#include "perfetto/trace_processor/basic_types.h"
+#include "perfetto/trace_processor/metatrace_config.h"
 #include "perfetto/trace_processor/trace_processor.h"
-#include "src/protozero/proto_ring_buffer.h"
-#include "src/trace_processor/rpc/query_result_serializer.h"
 #include "src/trace_processor/tp_metatrace.h"
 
+#include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
 #include "protos/perfetto/trace_processor/trace_processor.pbzero.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 namespace {
 // Writes a "Loading trace ..." update every N bytes.
-constexpr size_t kProgressUpdateBytes = 50 * 1000 * 1000;
+constexpr size_t kProgressUpdateBytes = 50ul * 1000 * 1000;
 using TraceProcessorRpcStream = protos::pbzero::TraceProcessorRpcStream;
 using RpcProto = protos::pbzero::TraceProcessorRpc;
 
@@ -91,14 +98,15 @@ void Response::Send(Rpc::RpcResponseFunction send_fn) {
 Rpc::Rpc(std::unique_ptr<TraceProcessor> preloaded_instance)
     : trace_processor_(std::move(preloaded_instance)) {
   if (!trace_processor_)
-    ResetTraceProcessor();
+    ResetTraceProcessorInternal(Config());
 }
 
 Rpc::Rpc() : Rpc(nullptr) {}
 Rpc::~Rpc() = default;
 
-void Rpc::ResetTraceProcessor() {
-  trace_processor_ = TraceProcessor::CreateInstance(Config());
+void Rpc::ResetTraceProcessorInternal(const Config& config) {
+  trace_processor_config_ = config;
+  trace_processor_ = TraceProcessor::CreateInstance(config);
   bytes_parsed_ = bytes_last_progress_ = 0;
   t_parse_started_ = base::GetWallTimeNs().count();
   // Deliberately not resetting the RPC channel state (rxbuf_, {tx,rx}_seq_id_).
@@ -125,6 +133,38 @@ void Rpc::OnRpcRequest(const void* data, size_t len) {
   }
 }
 
+namespace {
+
+using ProtoEnum = protos::pbzero::MetatraceCategories;
+TraceProcessor::MetatraceCategories MetatraceCategoriesToPublicEnum(
+    ProtoEnum categories) {
+  TraceProcessor::MetatraceCategories result =
+      TraceProcessor::MetatraceCategories::NONE;
+  if (categories & ProtoEnum::QUERY_TIMELINE) {
+    result = static_cast<TraceProcessor::MetatraceCategories>(
+        result | TraceProcessor::MetatraceCategories::QUERY_TIMELINE);
+  }
+  if (categories & ProtoEnum::QUERY_DETAILED) {
+    result = static_cast<TraceProcessor::MetatraceCategories>(
+        result | TraceProcessor::MetatraceCategories::QUERY_DETAILED);
+  }
+  if (categories & ProtoEnum::FUNCTION_CALL) {
+    result = static_cast<TraceProcessor::MetatraceCategories>(
+        result | TraceProcessor::MetatraceCategories::FUNCTION_CALL);
+  }
+  if (categories & ProtoEnum::DB) {
+    result = static_cast<TraceProcessor::MetatraceCategories>(
+        result | TraceProcessor::MetatraceCategories::DB);
+  }
+  if (categories & ProtoEnum::API_TIMELINE) {
+    result = static_cast<TraceProcessor::MetatraceCategories>(
+        result | TraceProcessor::MetatraceCategories::API_TIMELINE);
+  }
+  return result;
+}
+
+}  // namespace
+
 // [data, len] here is a tokenized TraceProcessorRpc proto message, without the
 // size header.
 void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
@@ -135,10 +175,10 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
   if (req.seq() != 0 && rx_seq_id_ != 0 && req.seq() != rx_seq_id_ + 1) {
     char err_str[255];
     // "(ERR:rpc_seq)" is intercepted by error_dialog.ts in the UI.
-    sprintf(err_str,
-            "RPC request out of order. Expected %" PRId64 ", got %" PRId64
-            " (ERR:rpc_seq)",
-            rx_seq_id_ + 1, req.seq());
+    snprintf(err_str, sizeof(err_str),
+             "RPC request out of order. Expected %" PRId64 ", got %" PRId64
+             " (ERR:rpc_seq)",
+             rx_seq_id_ + 1, req.seq());
     PERFETTO_ELOG("%s", err_str);
     protozero::HeapBuffered<TraceProcessorRpcStream> err_msg;
     err_msg->add_msg()->set_fatal_error(err_str);
@@ -160,7 +200,7 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
         result->set_error(kErrFieldNotSet);
       } else {
         protozero::ConstBytes byte_range = req.append_trace_data();
-        util::Status res = Parse(byte_range.data, byte_range.size);
+        base::Status res = Parse(byte_range.data, byte_range.size);
         if (!res.ok()) {
           result->set_error(res.message());
         }
@@ -192,18 +232,6 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       }
       break;
     }
-    case RpcProto::TPM_QUERY_RAW_DEPRECATED: {
-      Response resp(tx_seq_id_++, req_type);
-      auto* result = resp->set_raw_query_result();
-      if (!req.has_raw_query_args()) {
-        result->set_error(kErrFieldNotSet);
-      } else {
-        protozero::ConstBytes args = req.raw_query_args();
-        RawQueryInternal(args.data, args.size, result);
-      }
-      resp.Send(rpc_response_fn_);
-      break;
-    }
     case RpcProto::TPM_COMPUTE_METRIC: {
       Response resp(tx_seq_id_++, req_type);
       auto* result = resp->set_metric_result();
@@ -231,7 +259,10 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       break;
     }
     case RpcProto::TPM_ENABLE_METATRACE: {
-      trace_processor_->EnableMetatrace();
+      using protos::pbzero::MetatraceCategories;
+      protozero::ConstBytes args = req.enable_metatrace_args();
+      EnableMetatrace(args.data, args.size);
+
       Response resp(tx_seq_id_++, req_type);
       resp.Send(rpc_response_fn_);
       break;
@@ -249,6 +280,13 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       resp.Send(rpc_response_fn_);
       break;
     }
+    case RpcProto::TPM_RESET_TRACE_PROCESSOR: {
+      Response resp(tx_seq_id_++, req_type);
+      protozero::ConstBytes args = req.reset_trace_processor_args();
+      ResetTraceProcessor(args.data, args.size);
+      resp.Send(rpc_response_fn_);
+      break;
+    }
     default: {
       // This can legitimately happen if the client is newer. We reply with a
       // generic "unkown request" response, so the client can do feature
@@ -263,11 +301,14 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
   }  // switch(req_type)
 }
 
-util::Status Rpc::Parse(const uint8_t* data, size_t len) {
+base::Status Rpc::Parse(const uint8_t* data, size_t len) {
+  PERFETTO_TP_TRACE(
+      metatrace::Category::API_TIMELINE, "RPC_PARSE",
+      [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
   if (eof_) {
     // Reset the trace processor state if another trace has been previously
-    // loaded.
-    ResetTraceProcessor();
+    // loaded. Use the same TraceProcessor Config.
+    ResetTraceProcessorInternal(trace_processor_config_);
   }
 
   eof_ = false;
@@ -275,7 +316,7 @@ util::Status Rpc::Parse(const uint8_t* data, size_t len) {
   MaybePrintProgress();
 
   if (len == 0)
-    return util::OkStatus();
+    return base::OkStatus();
 
   // TraceProcessor needs take ownership of the memory chunk.
   std::unique_ptr<uint8_t[]> data_copy(new uint8_t[len]);
@@ -284,9 +325,41 @@ util::Status Rpc::Parse(const uint8_t* data, size_t len) {
 }
 
 void Rpc::NotifyEndOfFile() {
+  PERFETTO_TP_TRACE(metatrace::Category::API_TIMELINE,
+                    "RPC_NOTIFY_END_OF_FILE");
+
   trace_processor_->NotifyEndOfFile();
   eof_ = true;
   MaybePrintProgress();
+}
+
+void Rpc::ResetTraceProcessor(const uint8_t* args, size_t len) {
+  protos::pbzero::ResetTraceProcessorArgs::Decoder reset_trace_processor_args(
+      args, len);
+  Config config;
+  if (reset_trace_processor_args.has_drop_track_event_data_before()) {
+    config.drop_track_event_data_before =
+        reset_trace_processor_args.drop_track_event_data_before() ==
+                protos::pbzero::ResetTraceProcessorArgs::
+                    TRACK_EVENT_RANGE_OF_INTEREST
+            ? DropTrackEventDataBefore::kTrackEventRangeOfInterest
+            : DropTrackEventDataBefore::kNoDrop;
+  }
+  if (reset_trace_processor_args.has_ingest_ftrace_in_raw_table()) {
+    config.ingest_ftrace_in_raw_table =
+        reset_trace_processor_args.ingest_ftrace_in_raw_table();
+  }
+  if (reset_trace_processor_args.has_analyze_trace_proto_content()) {
+    config.analyze_trace_proto_content =
+        reset_trace_processor_args.analyze_trace_proto_content();
+  }
+  if (reset_trace_processor_args.has_ftrace_drop_until_all_cpus_valid()) {
+    config.soft_drop_ftrace_data_before =
+        reset_trace_processor_args.ftrace_drop_until_all_cpus_valid()
+            ? SoftDropFtraceDataBefore::kAllPerCpuBuffersValid
+            : SoftDropFtraceDataBefore::kNoDrop;
+  }
+  ResetTraceProcessorInternal(config);
 }
 
 void Rpc::MaybePrintProgress() {
@@ -305,7 +378,7 @@ void Rpc::MaybePrintProgress() {
 
 void Rpc::Query(const uint8_t* args,
                 size_t len,
-                QueryResultBatchCallback result_callback) {
+                const QueryResultBatchCallback& result_callback) {
   auto it = QueryInternal(args, len);
   QueryResultSerializer serializer(std::move(it));
 
@@ -318,147 +391,18 @@ void Rpc::Query(const uint8_t* args,
 }
 
 Iterator Rpc::QueryInternal(const uint8_t* args, size_t len) {
-  protos::pbzero::RawQueryArgs::Decoder query(args, len);
+  protos::pbzero::QueryArgs::Decoder query(args, len);
   std::string sql = query.sql_query().ToStdString();
   PERFETTO_DLOG("[RPC] Query < %s", sql.c_str());
-  PERFETTO_TP_TRACE("RPC_QUERY",
-                    [&](metatrace::Record* r) { r->AddArg("SQL", sql); });
+  PERFETTO_TP_TRACE(metatrace::Category::API_TIMELINE, "RPC_QUERY",
+                    [&](metatrace::Record* r) {
+                      r->AddArg("SQL", sql);
+                      if (query.has_tag()) {
+                        r->AddArg("tag", query.tag());
+                      }
+                    });
 
-  return trace_processor_->ExecuteQuery(sql.c_str());
-}
-
-std::vector<uint8_t> Rpc::RawQuery(const uint8_t* args, size_t len) {
-  protozero::HeapBuffered<protos::pbzero::RawQueryResult> result;
-  RawQueryInternal(args, len, result.get());
-  return result.SerializeAsArray();
-}
-
-void Rpc::RawQueryInternal(const uint8_t* args,
-                           size_t len,
-                           protos::pbzero::RawQueryResult* result) {
-  using ColumnValues = protos::pbzero::RawQueryResult::ColumnValues;
-  using ColumnDesc = protos::pbzero::RawQueryResult::ColumnDesc;
-
-  protos::pbzero::RawQueryArgs::Decoder query(args, len);
-  std::string sql = query.sql_query().ToStdString();
-  PERFETTO_DLOG("[RPC] RawQuery < %s", sql.c_str());
-  PERFETTO_TP_TRACE("RPC_RAW_QUERY",
-                    [&](metatrace::Record* r) { r->AddArg("SQL", sql); });
-
-  auto it = trace_processor_->ExecuteQuery(sql.c_str());
-
-  // This vector contains a standalone protozero message per column. The problem
-  // it's solving is the following: (i) sqlite iterators are row-based; (ii) the
-  // RawQueryResult proto is column-based (that was a poor design choice we
-  // should revisit at some point); (iii) the protozero API doesn't allow to
-  // begin a new nested message before the previous one is completed.
-  // In order to avoid the interleaved-writing, we write each column in a
-  // dedicated heap buffer and then we merge all the column data at the end,
-  // after having iterated all rows.
-  std::vector<protozero::HeapBuffered<ColumnValues>> cols(it.ColumnCount());
-
-  // This constexpr is to avoid ODR-use of protozero constants which are only
-  // declared but not defined. Putting directly UNKONWN in the vector ctor
-  // causes a linker error in the WASM toolchain.
-  static constexpr auto kUnknown = ColumnDesc::UNKNOWN;
-  std::vector<ColumnDesc::Type> col_types(it.ColumnCount(), kUnknown);
-  uint32_t rows = 0;
-
-  for (; it.Next(); ++rows) {
-    for (uint32_t col_idx = 0; col_idx < it.ColumnCount(); ++col_idx) {
-      auto& col = cols[col_idx];
-      auto& col_type = col_types[col_idx];
-
-      using SqlValue = trace_processor::SqlValue;
-      auto cell = it.Get(col_idx);
-      if (col_type == ColumnDesc::UNKNOWN) {
-        switch (cell.type) {
-          case SqlValue::Type::kLong:
-            col_type = ColumnDesc::LONG;
-            break;
-          case SqlValue::Type::kString:
-            col_type = ColumnDesc::STRING;
-            break;
-          case SqlValue::Type::kDouble:
-            col_type = ColumnDesc::DOUBLE;
-            break;
-          case SqlValue::Type::kBytes:
-            col_type = ColumnDesc::STRING;
-            break;
-          case SqlValue::Type::kNull:
-            break;
-        }
-      }
-
-      // If either the column type is null or we still don't know the type,
-      // just add null values to all the columns.
-      if (cell.type == SqlValue::Type::kNull ||
-          col_type == ColumnDesc::UNKNOWN) {
-        col->add_long_values(0);
-        col->add_string_values("[NULL]");
-        col->add_double_values(0);
-        col->add_is_nulls(true);
-        continue;
-      }
-
-      // Cast the sqlite value to the type of the column.
-      switch (col_type) {
-        case ColumnDesc::LONG:
-          PERFETTO_CHECK(cell.type == SqlValue::Type::kLong ||
-                         cell.type == SqlValue::Type::kDouble);
-          if (cell.type == SqlValue::Type::kLong) {
-            col->add_long_values(cell.long_value);
-          } else /* if (cell.type == SqlValue::Type::kDouble) */ {
-            col->add_long_values(static_cast<int64_t>(cell.double_value));
-          }
-          col->add_is_nulls(false);
-          break;
-        case ColumnDesc::STRING: {
-          if (cell.type == SqlValue::Type::kBytes) {
-            col->add_string_values("<bytes>");
-          } else {
-            PERFETTO_CHECK(cell.type == SqlValue::Type::kString);
-            col->add_string_values(cell.string_value);
-          }
-          col->add_is_nulls(false);
-          break;
-        }
-        case ColumnDesc::DOUBLE:
-          PERFETTO_CHECK(cell.type == SqlValue::Type::kLong ||
-                         cell.type == SqlValue::Type::kDouble);
-          if (cell.type == SqlValue::Type::kLong) {
-            col->add_double_values(static_cast<double>(cell.long_value));
-          } else /* if (cell.type == SqlValue::Type::kDouble) */ {
-            col->add_double_values(cell.double_value);
-          }
-          col->add_is_nulls(false);
-          break;
-        case ColumnDesc::UNKNOWN:
-          PERFETTO_FATAL("Handled in if statement above.");
-      }
-    }  // for(col)
-  }    // for(row)
-
-  // Write the column descriptors.
-  for (uint32_t col_idx = 0; col_idx < it.ColumnCount(); ++col_idx) {
-    auto* descriptor = result->add_column_descriptors();
-    std::string col_name = it.GetColumnName(col_idx);
-    descriptor->set_name(col_name.data(), col_name.size());
-    descriptor->set_type(col_types[col_idx]);
-  }
-
-  // Merge the column values.
-  for (uint32_t col_idx = 0; col_idx < it.ColumnCount(); ++col_idx) {
-    std::vector<uint8_t> col_data = cols[col_idx].SerializeAsArray();
-    result->AppendBytes(protos::pbzero::RawQueryResult::kColumnsFieldNumber,
-                        col_data.data(), col_data.size());
-  }
-
-  util::Status status = it.Status();
-  result->set_num_records(rows);
-  if (!status.ok())
-    result->set_error(status.c_message());
-  PERFETTO_DLOG("[RPC] RawQuery > %d rows (err: %d)", rows, !status.ok());
+  return trace_processor_->ExecuteQuery(sql);
 }
 
 void Rpc::RestoreInitialTables() {
@@ -480,12 +424,13 @@ void Rpc::ComputeMetricInternal(const uint8_t* data,
     metric_names.emplace_back(it->as_std_string());
   }
 
-  PERFETTO_TP_TRACE("RPC_COMPUTE_METRIC", [&](metatrace::Record* r) {
-    for (const auto& metric : metric_names) {
-      r->AddArg("Metric", metric);
-      r->AddArg("Format", std::to_string(args.format()));
-    }
-  });
+  PERFETTO_TP_TRACE(metatrace::Category::API_TIMELINE, "RPC_COMPUTE_METRIC",
+                    [&](metatrace::Record* r) {
+                      for (const auto& metric : metric_names) {
+                        r->AddArg("Metric", metric);
+                        r->AddArg("Format", std::to_string(args.format()));
+                      }
+                    });
 
   PERFETTO_DLOG("[RPC] ComputeMetrics(%zu, %s), format=%d", metric_names.size(),
                 metric_names.empty() ? "" : metric_names.front().c_str(),
@@ -493,7 +438,7 @@ void Rpc::ComputeMetricInternal(const uint8_t* data,
   switch (args.format()) {
     case protos::pbzero::ComputeMetricArgs::BINARY_PROTOBUF: {
       std::vector<uint8_t> metrics_proto;
-      util::Status status =
+      base::Status status =
           trace_processor_->ComputeMetric(metric_names, &metrics_proto);
       if (status.ok()) {
         result->set_metrics(metrics_proto.data(), metrics_proto.size());
@@ -504,7 +449,7 @@ void Rpc::ComputeMetricInternal(const uint8_t* data,
     }
     case protos::pbzero::ComputeMetricArgs::TEXTPROTO: {
       std::string metrics_string;
-      util::Status status = trace_processor_->ComputeMetricText(
+      base::Status status = trace_processor_->ComputeMetricText(
           metric_names, TraceProcessor::MetricResultFormat::kProtoText,
           &metrics_string);
       if (status.ok()) {
@@ -514,11 +459,28 @@ void Rpc::ComputeMetricInternal(const uint8_t* data,
       }
       break;
     }
+    case protos::pbzero::ComputeMetricArgs::JSON: {
+      std::string metrics_string;
+      base::Status status = trace_processor_->ComputeMetricText(
+          metric_names, TraceProcessor::MetricResultFormat::kJson,
+          &metrics_string);
+      if (status.ok()) {
+        result->set_metrics_as_json(metrics_string);
+      } else {
+        result->set_error(status.message());
+      }
+      break;
+    }
   }
 }
 
-void Rpc::EnableMetatrace() {
-  trace_processor_->EnableMetatrace();
+void Rpc::EnableMetatrace(const uint8_t* data, size_t len) {
+  using protos::pbzero::MetatraceCategories;
+  TraceProcessor::MetatraceConfig config;
+  protos::pbzero::EnableMetatraceArgs::Decoder args(data, len);
+  config.categories = MetatraceCategoriesToPublicEnum(
+      static_cast<MetatraceCategories>(args.categories()));
+  trace_processor_->EnableMetatrace(config);
 }
 
 std::vector<uint8_t> Rpc::DisableAndReadMetatrace() {
@@ -530,7 +492,7 @@ std::vector<uint8_t> Rpc::DisableAndReadMetatrace() {
 void Rpc::DisableAndReadMetatraceInternal(
     protos::pbzero::DisableAndReadMetatraceResult* result) {
   std::vector<uint8_t> trace_proto;
-  util::Status status = trace_processor_->DisableAndReadMetatrace(&trace_proto);
+  base::Status status = trace_processor_->DisableAndReadMetatrace(&trace_proto);
   if (status.ok()) {
     result->set_metatrace(trace_proto.data(), trace_proto.size());
   } else {
@@ -542,9 +504,11 @@ std::vector<uint8_t> Rpc::GetStatus() {
   protozero::HeapBuffered<protos::pbzero::StatusResult> status;
   status->set_loaded_trace_name(trace_processor_->GetCurrentTraceName());
   status->set_human_readable_version(base::GetVersionString());
+  if (const char* version_code = base::GetVersionCode(); version_code) {
+    status->set_version_code(version_code);
+  }
   status->set_api_version(protos::pbzero::TRACE_PROCESSOR_CURRENT_API_VERSION);
   return status.SerializeAsArray();
 }
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

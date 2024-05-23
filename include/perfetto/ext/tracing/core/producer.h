@@ -19,7 +19,9 @@
 
 #include "perfetto/base/export.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
+#include "perfetto/tracing/core/flush_flags.h"
 #include "perfetto/tracing/core/forward_decls.h"
+
 namespace perfetto {
 
 class SharedMemory;
@@ -41,7 +43,7 @@ class SharedMemory;
 // This interface is subclassed by:
 //  1. The actual producer code in the clients e.g., the ftrace reader process.
 //  2. The transport layer when interposing RPC between service and producers.
-class PERFETTO_EXPORT Producer {
+class PERFETTO_EXPORT_COMPONENT Producer {
  public:
   virtual ~Producer();
 
@@ -62,6 +64,10 @@ class PERFETTO_EXPORT Producer {
   // Called by the Service after OnConnect but before the first DataSource is
   // created. Can be used for any setup required before tracing begins.
   virtual void OnTracingSetup() = 0;
+
+  // Called by muxer once StartupTracing is started. It will be called before
+  // SetupStartupTracingBlocking is returned.
+  virtual void OnStartupTracingSetup() {}
 
   // The lifecycle methods below are always called in the following sequence:
   // SetupDataSource  -> StartDataSource -> StopDataSource.
@@ -102,7 +108,8 @@ class PERFETTO_EXPORT Producer {
   // flushes < N have also been committed.
   virtual void Flush(FlushRequestID,
                      const DataSourceInstanceID* data_source_ids,
-                     size_t num_data_sources) = 0;
+                     size_t num_data_sources,
+                     FlushFlags) = 0;
 
   // Called by the service to instruct the given data sources to stop referring
   // to any trace contents emitted so far. The intent is that after processing

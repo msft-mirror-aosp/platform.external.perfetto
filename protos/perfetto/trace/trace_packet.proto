@@ -19,16 +19,30 @@ syntax = "proto2";
 import "protos/perfetto/common/trace_stats.proto";
 import "protos/perfetto/config/trace_config.proto";
 import "protos/perfetto/trace/extension_descriptor.proto";
+import "protos/perfetto/trace/android/android_game_intervention_list.proto";
+import "protos/perfetto/trace/android/android_input_event.proto";
 import "protos/perfetto/trace/android/android_log.proto";
+import "protos/perfetto/trace/android/android_system_property.proto";
+import "protos/perfetto/trace/android/camera_event.proto";
 import "protos/perfetto/trace/android/frame_timeline_event.proto";
 import "protos/perfetto/trace/android/gpu_mem_event.proto";
 import "protos/perfetto/trace/android/graphics_frame_event.proto";
 import "protos/perfetto/trace/android/initial_display_state.proto";
+import "protos/perfetto/trace/android/network_trace.proto";
 import "protos/perfetto/trace/android/packages_list.proto";
+import "protos/perfetto/trace/android/pixel_modem_events.proto";
+import "protos/perfetto/trace/android/protolog.proto";
+import "protos/perfetto/trace/android/shell_transition.proto";
+import "protos/perfetto/trace/android/surfaceflinger_layers.proto";
+import "protos/perfetto/trace/android/surfaceflinger_transactions.proto";
+import "protos/perfetto/trace/android/winscope_extensions.proto";
 import "protos/perfetto/trace/chrome/chrome_benchmark_metadata.proto";
 import "protos/perfetto/trace/chrome/chrome_metadata.proto";
 import "protos/perfetto/trace/chrome/chrome_trace_event.proto";
+import "protos/perfetto/trace/chrome/chrome_trigger.proto";
+import "protos/perfetto/trace/chrome/v8.proto";
 import "protos/perfetto/trace/clock_snapshot.proto";
+import "protos/perfetto/trace/etw/etw_event_bundle.proto";
 import "protos/perfetto/trace/filesystem/inode_file_map.proto";
 import "protos/perfetto/trace/ftrace/ftrace_event_bundle.proto";
 import "protos/perfetto/trace/ftrace/ftrace_stats.proto";
@@ -42,8 +56,10 @@ import "protos/perfetto/trace/memory_graph.proto";
 import "protos/perfetto/trace/perfetto/perfetto_metatrace.proto";
 import "protos/perfetto/trace/perfetto/tracing_service_event.proto";
 import "protos/perfetto/trace/power/android_energy_estimation_breakdown.proto";
+import "protos/perfetto/trace/power/android_entity_state_residency.proto";
 import "protos/perfetto/trace/power/battery_counters.proto";
 import "protos/perfetto/trace/power/power_rails.proto";
+import "protos/perfetto/trace/statsd/statsd_atom.proto";
 import "protos/perfetto/trace/profiling/deobfuscation.proto";
 import "protos/perfetto/trace/profiling/heap_graph.proto";
 import "protos/perfetto/trace/profiling/profile_common.proto";
@@ -51,21 +67,25 @@ import "protos/perfetto/trace/profiling/profile_packet.proto";
 import "protos/perfetto/trace/profiling/smaps.proto";
 import "protos/perfetto/trace/ps/process_stats.proto";
 import "protos/perfetto/trace/ps/process_tree.proto";
+import "protos/perfetto/trace/remote_clock_sync.proto";
 import "protos/perfetto/trace/sys_stats/sys_stats.proto";
 import "protos/perfetto/trace/system_info.proto";
 import "protos/perfetto/trace/system_info/cpu_info.proto";
 import "protos/perfetto/trace/trace_packet_defaults.proto";
 import "protos/perfetto/trace/track_event/process_descriptor.proto";
+import "protos/perfetto/trace/track_event/range_of_interest.proto";
 import "protos/perfetto/trace/track_event/thread_descriptor.proto";
 import "protos/perfetto/trace/track_event/track_descriptor.proto";
 import "protos/perfetto/trace/track_event/track_event.proto";
+import "protos/perfetto/trace/translation/translation_table.proto";
+import "protos/perfetto/trace/trace_uuid.proto";
 import "protos/perfetto/trace/trigger.proto";
 import "protos/perfetto/trace/test_event.proto";
 import "protos/perfetto/trace/ui_state.proto";
 
 package perfetto.protos;
 
-// TracePacket is the root object of a Perfeto trace.
+// TracePacket is the root object of a Perfetto trace.
 // A Perfetto trace is a linear sequence of TracePacket(s).
 //
 // The tracing service guarantees that all TracePacket(s) written by a given
@@ -85,7 +105,7 @@ package perfetto.protos;
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 79.
+// Next id: 113.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -114,6 +134,7 @@ message TracePacket {
     // IDs up to 15 are reserved. They take only one byte to encode their
     // preamble so should be used for frequent events.
 
+    TraceUuid trace_uuid = 89;
     TraceConfig trace_config = 33;
     FtraceStats ftrace_stats = 34;
     TraceStats trace_stats = 35;
@@ -125,6 +146,7 @@ message TracePacket {
     AndroidLogPacket android_log = 39;
     SystemInfo system_info = 45;
     Trigger trigger = 46;
+    ChromeTrigger chrome_trigger = 109;
     PackagesList packages_list = 47;
     ChromeBenchmarkMetadata chrome_benchmark_metadata = 48;
     PerfettoMetatrace perfetto_metatrace = 49;
@@ -147,6 +169,13 @@ message TracePacket {
     FrameTimelineEvent frame_timeline_event = 76;
     AndroidEnergyEstimationBreakdown android_energy_estimation_breakdown = 77;
     UiState ui_state = 78;
+    AndroidCameraFrameEvent android_camera_frame_event = 80;
+    AndroidCameraSessionStats android_camera_session_stats = 81;
+    TranslationTable translation_table = 82;
+    AndroidGameInterventionList android_game_intervention_list = 83;
+    StatsdAtom statsd_atom = 84;
+    AndroidSystemProperty android_system_property = 86;
+    EntityStateResidency entity_state_residency = 91;
 
     // Only used in profile packets.
     ProfiledFrameSymbols profiled_frame_symbols = 55;
@@ -183,6 +212,43 @@ message TracePacket {
     // even if the extension proto is not checked in the Perfetto repo.
     ExtensionDescriptor extension_descriptor = 72;
 
+    // Represents a single packet sent or received by the network.
+    NetworkPacketEvent network_packet = 88;
+
+    // Represents one or more packets sent or received by the network.
+    NetworkPacketBundle network_packet_bundle = 92;
+
+    // The "range of interest" for track events. See the message definition
+    // comments for more details.
+    TrackEventRangeOfInterest track_event_range_of_interest = 90;
+
+    // Winscope traces
+    LayersSnapshotProto surfaceflinger_layers_snapshot = 93;
+    TransactionTraceEntry surfaceflinger_transactions = 94;
+    ShellTransition shell_transition = 96;
+    ShellHandlerMappings shell_handler_mappings = 97;
+    ProtoLogMessage protolog_message = 104;
+    ProtoLogViewerConfig protolog_viewer_config = 105;
+    WinscopeExtensions winscope_extensions = 112;
+
+    // Events from the Windows etw infrastructure.
+    EtwTraceEventBundle etw_events = 95;
+
+    V8JsCode v8_js_code = 99;
+    V8InternalCode v8_internal_code = 100;
+    V8WasmCode v8_wasm_code = 101;
+    V8RegExpCode v8_reg_exp_code = 102;
+    V8CodeMove v8_code_move = 103;
+
+    // InputFlinger traces
+    AndroidInputEvent android_input_event = 106;
+
+    // Clock synchronization with remote machines.
+    RemoteClockSync remote_clock_sync = 107;
+
+    PixelModemEvents pixel_modem_events = 110;
+    PixelModemTokenDatabase pixel_modem_token_database = 111;
+
     // This field is only used for testing.
     // In previous versions of this proto this field had the id 268435455
     // This caused many problems:
@@ -206,6 +272,10 @@ message TracePacket {
   oneof optional_trusted_packet_sequence_id {
     uint32 trusted_packet_sequence_id = 10;
   }
+
+  // Trusted process id of the producer which generated this packet, written by
+  // the service.
+  optional int32 trusted_pid = 79;
 
   // Incrementally emitted interned data, valid only on the packet's sequence
   // (packets with the same |trusted_packet_sequence_id|). The writer will
@@ -267,4 +337,24 @@ message TracePacket {
   // data) on the sequence should be considered invalid up until the next packet
   // with SEQ_INCREMENTAL_STATE_CLEARED set.
   optional bool previous_packet_dropped = 42;
+
+  // Flag set by a producer (starting from SDK v29) if, for the current packet
+  // sequence (see |trusted_packet_sequence_id|), this is the first packet.
+  //
+  // This flag can be used for distinguishing the two situations when
+  // processing the trace:
+  // 1. There are no prior events for the sequence because of data loss, e.g.
+  //    due to ring buffer wrapping.
+  // 2. There are no prior events for the sequence because it didn't start
+  //    before this packet (= there's definitely no preceding data loss).
+  //
+  // Given that older SDK versions do not support this flag, this flag not
+  // being present for a particular sequence does not necessarily imply data
+  // loss.
+  optional bool first_packet_on_sequence = 87;
+
+  // The machine ID for identifying trace packets in a multi-machine tracing
+  // session. Is emitted by the tracing service for producers running on a
+  // remote host (e.g. a VM guest). For more context: go/crosetto-vm-tracing.
+  optional uint32 machine_id = 98;
 }

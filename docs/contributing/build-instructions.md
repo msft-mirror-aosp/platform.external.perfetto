@@ -41,6 +41,10 @@ Web UI. See the [UI Development](#ui-development) section below for more.
 
 `--linux-arm` will pull the sysroots for cross-compiling for Linux ARM/64.
 
+WARNING: Note that if you're using an M1 or any later ARM Mac, your Python
+version should be at least 3.9.1 to work around
+[this Python Bug](https://bugs.python.org/issue42704).
+
 #### Generate the build files via GN
 
 Perfetto uses [GN](https://gn.googlesource.com/gn/+/HEAD/docs/quick_start.md)
@@ -48,7 +52,7 @@ as primary build system. See the [Build files](#build-files) section below for
 more.
 
 ```bash
-tools/gn args out/android` 
+tools/gn args out/android
 ```
 
 This will open an editor to customize the GN args. Enter:
@@ -80,7 +84,7 @@ tools/ninja -C out/android \
   traced_probes \          # Ftrace interop and /proc poller.
   perfetto \               # Cmdline client.
   trace_processor_shell \  # Trace parsing.
-  trace_to_text            # Trace conversion.
+  traceconv                # Trace conversion.
 ...
 ```
 
@@ -88,7 +92,7 @@ tools/ninja -C out/android \
 
 Follow these instructions if you are an AOSP contributor.
 
-The source code lives in [`external/perfetto` in the AOSP tree](https://cs.android.com/android/platform/superproject/+/master:external/perfetto/).
+The source code lives in [`external/perfetto` in the AOSP tree](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/).
 
 Follow the instructions on https://source.android.com/setup/build/building .
 
@@ -136,6 +140,55 @@ Navigate to http://localhost:10000/ to see the changes.
 The server supports live reloading of CSS and TS/JS contents. Whenever a ui
 source file is changed it, the script will automatically re-build it and show a
 prompt in the web page.
+
+UI unit tests are located next to the functionality being tested, and have
+`_unittest.ts` or `_jsdomtest.ts` suffixes. The following command runs all unit
+tests:
+
+```bash
+ui/run-unittests
+```
+
+This command will perform the build first; which is not necessary if you
+already have a development server running. In this case, to avoid interference
+with the rebuild done by development server and to get the results faster, you
+can use
+
+```bash
+ui/run-unittests --no-build
+```
+
+to skip the build steps.
+
+Script `ui/run-unittests` also supports `--watch` parameter, which would
+restart the testing when the underlying source files are changed. This can be
+used in conjunction with `--no-build`, and on its own as well.
+
+### Formatting & Linting
+
+We use `eslint` to lint TypeScript and JavaScript, and `prettier` to format
+TypeScript, JavaScript, and SCSS.
+
+Eslint has a `--fix` option which can auto-fix a lot of issues.
+
+```bash
+ui/eslint-all --fix # Fix all files
+# -- or --
+ui/eslint-all # Just report issues
+```
+
+To auto-format all source files, run:
+
+```bash
+ui/prettier-all
+```
+
+For VSCode users, we recommend using the eslint & prettier extensions to handle
+this entirely from within the IDE. See the
+[Useful Extensions](#useful-extensions) section on how to set this up.
+
+Presubmit checks require no formatting or linting issues, so fix all issues
+using the commands above before submitting a patch.
 
 ## Build files
 
@@ -190,7 +243,7 @@ chrome://tracing). The MSVC build is maintained best-effort.
 The following targets are supported on Windows:
 
 - `trace_processor_shell`: the trace importer and SQL query engine.
-- `trace_to_text`: the trace conversion tool.
+- `traceconv`: the trace conversion tool.
 - `traced` and `perfetto`: the tracing service and cmdline client. They use an
   alternative implementation of the [inter-process tracing protocol](/docs/design-docs/api-and-abi.md#tracing-protocol-abi)
   based on a TCP socket and named shared memory. This configuration is only for
@@ -278,7 +331,7 @@ below.
 
 ## Build configurations
 
-TIP: `tools/build_all_configs.py` can be used to generate out/XXX folders for
+TIP: `tools/setup_all_configs.py` can be used to generate out/XXX folders for
 most of the supported configurations.
 
 The following [GN args][gn-quickstart] are supported:
@@ -313,6 +366,12 @@ See also the [custom toolchain](#custom-toolchain) section below.
 `is_hermetic_clang = true | false`
 
 Use bundled toolchain from `buildtools/` rather than system-wide one.
+
+`non_hermetic_clang_stdlib = libc++ | libstdc++`
+
+If `is_hermetic_clang` is `false`, sets the `-stdlib` flag for clang
+invocations. `libstdc++` is default on Linux hosts and `libc++` is
+default everywhere else.
 
 `cc = "gcc" / cxx = "g++"`
 
@@ -453,6 +512,7 @@ If you are using VS Code we suggest the following extensions:
 - [GNFormat](https://marketplace.visualstudio.com/items?itemName=persidskiy.vscode-gnformat)
 - [ESlint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
 - [markdownlint](https://marketplace.visualstudio.com/items?itemName=DavidAnson.vscode-markdownlint)
+- [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
 
 #### Useful settings
 
@@ -471,6 +531,17 @@ In `.vscode/settings.json`:
     "--completion-style=detailed",
     "--header-insertion=never"
   ],
+  "eslint.workingDirectories": [
+    "./ui",
+  ],
+  "prettier.configPath": "ui/.prettierrc.yml",
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[scss]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
 }
 ```
 

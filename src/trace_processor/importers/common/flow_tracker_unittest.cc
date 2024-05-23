@@ -16,8 +16,10 @@
 
 #include <vector>
 
+#include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/flow_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
+#include "src/trace_processor/importers/common/slice_translation_table.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "test/gtest_and_gmock.h"
@@ -28,12 +30,24 @@ namespace {
 
 using ::testing::Eq;
 
-TEST(FlowTrackerTest, SingleFlowEventExplicitInSliceBinding) {
-  TraceProcessorContext context;
-  context.storage.reset(new TraceStorage());
-  context.slice_tracker.reset(new SliceTracker(&context));
-  auto& slice_tracker = context.slice_tracker;
-  FlowTracker tracker(&context);
+class FlowTrackerTest : public ::testing::Test {
+ public:
+  FlowTrackerTest() {
+    context_.storage = std::make_unique<TraceStorage>();
+    context_.args_translation_table =
+        std::make_unique<ArgsTranslationTable>(context_.storage.get());
+    context_.slice_translation_table =
+        std::make_unique<SliceTranslationTable>(context_.storage.get());
+    context_.slice_tracker = std::make_unique<SliceTracker>(&context_);
+  }
+
+ protected:
+  TraceProcessorContext context_;
+};
+
+TEST_F(FlowTrackerTest, SingleFlowEventExplicitInSliceBinding) {
+  auto& slice_tracker = context_.slice_tracker;
+  FlowTracker tracker(&context_);
   slice_tracker->SetOnSliceBeginCallback(
       [&tracker](TrackId track_id, SliceId slice_id) {
         tracker.ClosePendingEventsOnTrack(track_id, slice_id);
@@ -54,18 +68,15 @@ TEST(FlowTrackerTest, SingleFlowEventExplicitInSliceBinding) {
               /* close_flow = */ false);
   slice_tracker->End(160, track_2, StringId::Raw(2), StringId::Raw(2));
 
-  const auto& flows = context.storage->flow_table();
+  const auto& flows = context_.storage->flow_table();
   EXPECT_EQ(flows.row_count(), 1u);
   EXPECT_EQ(flows.slice_out()[0], out_slice_id);
   EXPECT_EQ(flows.slice_in()[0], in_slice_id);
 }
 
-TEST(FlowTrackerTest, SingleFlowEventWaitForNextSlice) {
-  TraceProcessorContext context;
-  context.storage.reset(new TraceStorage());
-  context.slice_tracker.reset(new SliceTracker(&context));
-  auto& slice_tracker = context.slice_tracker;
-  FlowTracker tracker(&context);
+TEST_F(FlowTrackerTest, SingleFlowEventWaitForNextSlice) {
+  auto& slice_tracker = context_.slice_tracker;
+  FlowTracker tracker(&context_);
   slice_tracker->SetOnSliceBeginCallback(
       [&tracker](TrackId track_id, SliceId slice_id) {
         tracker.ClosePendingEventsOnTrack(track_id, slice_id);
@@ -83,7 +94,7 @@ TEST(FlowTrackerTest, SingleFlowEventWaitForNextSlice) {
   tracker.End(track_2, flow_id, /* bind_enclosing = */ false,
               /* close_flow = */ false);
 
-  const auto& flows = context.storage->flow_table();
+  const auto& flows = context_.storage->flow_table();
 
   EXPECT_EQ(flows.row_count(), 0u);
 
@@ -96,12 +107,9 @@ TEST(FlowTrackerTest, SingleFlowEventWaitForNextSlice) {
   EXPECT_EQ(flows.slice_in()[0], in_slice_id);
 }
 
-TEST(FlowTrackerTest, SingleFlowEventWaitForNextSliceScoped) {
-  TraceProcessorContext context;
-  context.storage.reset(new TraceStorage());
-  context.slice_tracker.reset(new SliceTracker(&context));
-  auto& slice_tracker = context.slice_tracker;
-  FlowTracker tracker(&context);
+TEST_F(FlowTrackerTest, SingleFlowEventWaitForNextSliceScoped) {
+  auto& slice_tracker = context_.slice_tracker;
+  FlowTracker tracker(&context_);
   slice_tracker->SetOnSliceBeginCallback(
       [&tracker](TrackId track_id, SliceId slice_id) {
         tracker.ClosePendingEventsOnTrack(track_id, slice_id);
@@ -119,7 +127,7 @@ TEST(FlowTrackerTest, SingleFlowEventWaitForNextSliceScoped) {
   tracker.End(track_2, flow_id, /* bind_enclosing = */ false,
               /* close_flow = */ false);
 
-  const auto& flows = context.storage->flow_table();
+  const auto& flows = context_.storage->flow_table();
 
   EXPECT_EQ(flows.row_count(), 0u);
 
@@ -131,12 +139,9 @@ TEST(FlowTrackerTest, SingleFlowEventWaitForNextSliceScoped) {
   EXPECT_EQ(flows.slice_in()[0], in_slice_id);
 }
 
-TEST(FlowTrackerTest, TwoFlowEventsWaitForNextSlice) {
-  TraceProcessorContext context;
-  context.storage.reset(new TraceStorage());
-  context.slice_tracker.reset(new SliceTracker(&context));
-  auto& slice_tracker = context.slice_tracker;
-  FlowTracker tracker(&context);
+TEST_F(FlowTrackerTest, TwoFlowEventsWaitForNextSlice) {
+  auto& slice_tracker = context_.slice_tracker;
+  FlowTracker tracker(&context_);
   slice_tracker->SetOnSliceBeginCallback(
       [&tracker](TrackId track_id, SliceId slice_id) {
         tracker.ClosePendingEventsOnTrack(track_id, slice_id);
@@ -165,7 +170,7 @@ TEST(FlowTrackerTest, TwoFlowEventsWaitForNextSlice) {
               /* close_flow = */ false);
   slice_tracker->End(140, track_1, StringId::Raw(2), StringId::Raw(2));
 
-  const auto& flows = context.storage->flow_table();
+  const auto& flows = context_.storage->flow_table();
 
   EXPECT_EQ(flows.row_count(), 0u);
 
@@ -181,12 +186,9 @@ TEST(FlowTrackerTest, TwoFlowEventsWaitForNextSlice) {
   EXPECT_EQ(flows.slice_in()[1], in_slice_id);
 }
 
-TEST(FlowTrackerTest, TwoFlowEventsSliceInSlice) {
-  TraceProcessorContext context;
-  context.storage.reset(new TraceStorage());
-  context.slice_tracker.reset(new SliceTracker(&context));
-  auto& slice_tracker = context.slice_tracker;
-  FlowTracker tracker(&context);
+TEST_F(FlowTrackerTest, TwoFlowEventsSliceInSlice) {
+  auto& slice_tracker = context_.slice_tracker;
+  FlowTracker tracker(&context_);
   slice_tracker->SetOnSliceBeginCallback(
       [&tracker](TrackId track_id, SliceId slice_id) {
         tracker.ClosePendingEventsOnTrack(track_id, slice_id);
@@ -223,7 +225,7 @@ TEST(FlowTrackerTest, TwoFlowEventsSliceInSlice) {
 
   slice_tracker->End(170, track_2, StringId::Raw(3), StringId::Raw(3));
 
-  const auto& flows = context.storage->flow_table();
+  const auto& flows = context_.storage->flow_table();
   EXPECT_EQ(flows.row_count(), 2u);
   EXPECT_EQ(flows.slice_out()[0], out_slice2_id);
   EXPECT_EQ(flows.slice_in()[0], in_slice_id);
@@ -231,12 +233,9 @@ TEST(FlowTrackerTest, TwoFlowEventsSliceInSlice) {
   EXPECT_EQ(flows.slice_in()[1], in_slice_id);
 }
 
-TEST(FlowTrackerTest, FlowEventsWithStep) {
-  TraceProcessorContext context;
-  context.storage.reset(new TraceStorage());
-  context.slice_tracker.reset(new SliceTracker(&context));
-  auto& slice_tracker = context.slice_tracker;
-  FlowTracker tracker(&context);
+TEST_F(FlowTrackerTest, FlowEventsWithStep) {
+  auto& slice_tracker = context_.slice_tracker;
+  FlowTracker tracker(&context_);
   slice_tracker->SetOnSliceBeginCallback(
       [&tracker](TrackId track_id, SliceId slice_id) {
         tracker.ClosePendingEventsOnTrack(track_id, slice_id);
@@ -267,7 +266,7 @@ TEST(FlowTrackerTest, FlowEventsWithStep) {
               /* close_flow = */ false);
   slice_tracker->End(190, track_1, StringId::Raw(3), StringId::Raw(3));
 
-  const auto& flows = context.storage->flow_table();
+  const auto& flows = context_.storage->flow_table();
   EXPECT_EQ(flows.row_count(), 2u);
   EXPECT_EQ(flows.slice_out()[0], out_slice1_id);
   EXPECT_EQ(flows.slice_in()[0], inout_slice2_id);

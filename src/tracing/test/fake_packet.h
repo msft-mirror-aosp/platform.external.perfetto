@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
 
 namespace perfetto {
@@ -84,7 +85,9 @@ class FakeChunk {
   ChunkID chunk_id;
   uint8_t flags = 0;
   uint16_t num_packets = 0;
-  uid_t uid = kInvalidUid;
+  uid_t uid = base::kInvalidUid;
+  pid_t pid = base::kInvalidPid;
+
   std::vector<uint8_t> data;
 };
 

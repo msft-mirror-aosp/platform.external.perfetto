@@ -55,7 +55,7 @@ source_set("heapprofd_main") {
 # This builds only in the Android tree, when using the generated Android.bp.
 if (perfetto_build_with_android) {
   shared_library("heapprofd_client") {
-    configs -= [ "//gn/standalone:android_liblog" ]
+    configs -= [ "//gn/standalone:android_liblog" ]  # nogncheck
     cflags = [ "-DPERFETTO_ANDROID_ASYNC_SAFE_LOG" ]
     deps = [
       ":heapprofd_client_api",
@@ -94,7 +94,7 @@ source_set("client_api_standalone") {
     ":client_api",
     ":daemon",
     "../../../gn:default_deps",
-    "../../../include/perfetto/ext/tracing/ipc",
+    "../../../include/perfetto/tracing",
     "../../base",
     "../common:proc_utils",
   ]
@@ -125,12 +125,12 @@ shared_library("heapprofd_api_noop") {
 
   # This target does absolutely nothing, so we do not want to depend on
   # liblog.
-  configs -= [ "//gn/standalone:android_liblog" ]
+  configs -= [ "//gn/standalone:android_liblog" ]  # nogncheck
   sources = [ "client_api_noop.cc" ]
 }
 
 shared_library("heapprofd_client_api") {
-  configs -= [ "//gn/standalone:android_liblog" ]
+  configs -= [ "//gn/standalone:android_liblog" ]  # nogncheck
   if (perfetto_build_with_android) {
     cflags = [ "-DPERFETTO_ANDROID_ASYNC_SAFE_LOG" ]
   } else {
@@ -181,7 +181,6 @@ source_set("client_api") {
     ":wire_protocol",
     "../../../gn:default_deps",
     "../../base",
-    "../common:proc_utils",
   ]
   sources = [ "client_api.cc" ]
 }
@@ -257,6 +256,7 @@ source_set("daemon") {
     "../common:callstack_trie",
     "../common:interner",
     "../common:interning_output",
+    "../common:proc_cmdline",
     "../common:proc_utils",
     "../common:producer_support",
     "../common:profiler_guardrails",
@@ -296,7 +296,6 @@ source_set("client") {
     "../../../gn:default_deps",
     "../../base",
     "../../base:unix_socket",
-    "../common:proc_utils",
   ]
   public_deps = [ "../../../gn:libunwindstack" ]
   sources = [
@@ -320,6 +319,7 @@ perfetto_unittest_source_set("unittests") {
     "../../base",
     "../../base:test_support",
     "../../tracing/core",
+    "../../tracing/test:test_support",
     "../common:proc_utils",
     "../common:unwind_support",
   ]
@@ -358,15 +358,16 @@ source_set("end_to_end_tests") {
     "../../base",
     "../../base:test_support",
     "../../trace_processor:lib",
+    "../../tracing/test:test_support",
   ]
-  sources = [ "heapprofd_end_to_end_test.cc" ]
+  sources = [
+    "heapprofd_end_to_end_test.cc",
+    "heapprofd_producer_integrationtest.cc",
+  ]
   if (perfetto_build_with_android) {
     deps += [ ":heapprofd_client_api" ]
   } else {
     deps += [ ":heapprofd_standalone_client" ]
-  }
-  if (start_daemons_for_testing) {
-    defines = [ "PERFETTO_START_DAEMONS_FOR_TESTING" ]
   }
 }
 

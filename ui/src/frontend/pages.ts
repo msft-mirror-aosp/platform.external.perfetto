@@ -12,60 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as m from 'mithril';
+import m from 'mithril';
 
-import {Actions} from '../common/actions';
-
-import {onClickCopy} from './clipboard';
-import {CookieConsent} from './cookie_consent';
-import {globals} from './globals';
-import {Sidebar} from './sidebar';
-import {Topbar} from './topbar';
-
-function renderPermalink(): m.Children {
-  const permalink = globals.state.permalink;
-  if (!permalink.requestId || !permalink.hash) return null;
-  const url = `${self.location.origin}/#!/?s=${permalink.hash}`;
-  const linkProps = {title: 'Click to copy the URL', onclick: onClickCopy(url)};
-
-  return m('.alert-permalink', [
-    m('div', 'Permalink: ', m(`a[href=${url}]`, linkProps, url)),
-    m('button',
-      {
-        onclick: () => globals.dispatch(Actions.clearPermalink({})),
-      },
-      m('i.material-icons.disallow-selection', 'close')),
-  ]);
-}
-
-class Alerts implements m.ClassComponent {
-  view() {
-    return m('.alerts', renderPermalink());
-  }
-}
-
-/**
- * Wrap component with common UI elements (nav bar etc).
- */
-export function createPage(component: m.Component<PageAttrs>):
-    m.Component<PageAttrs> {
-  const pageComponent = {
-    view({attrs}: m.Vnode<PageAttrs>) {
-      const children = [
-        m(Sidebar),
-        m(Topbar),
-        m(Alerts),
-        m(component, attrs),
-        m(CookieConsent),
-      ];
-      if (globals.state.perfDebug) {
-        children.push(m('.perf-stats'));
-      }
-      return children;
-    },
-  };
-
-  return pageComponent;
+// Wrap component with common UI elements (nav bar etc).
+export function createPage(
+  component: m.Component<PageAttrs>,
+): m.Component<PageAttrs> {
+  return component;
 }
 
 export interface PageAttrs {

@@ -18,12 +18,13 @@
 
 #include <dirent.h>
 
+#include <memory>
+
 #include "perfetto/ext/base/file_utils.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/temp_file.h"
-#include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/tracing/core/data_source_config.h"
 #include "src/base/test/test_task_runner.h"
-#include "src/traced/probes/common/cpu_freq_info_for_testing.h"
 #include "src/tracing/core/trace_writer_for_testing.h"
 #include "test/gtest_and_gmock.h"
 
@@ -33,6 +34,7 @@
 
 using ::perfetto::protos::gen::ProcessStatsConfig;
 using ::testing::_;
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Invoke;
@@ -43,22 +45,40 @@ using ::testing::Truly;
 namespace perfetto {
 namespace {
 
+std::string ToProcStatString(uint64_t utime_ticks,
+                             uint64_t stime_ticks,
+                             uint64_t starttime_ticks) {
+  return base::StackString<512>{
+      "9346 (comm) S 9245 9245 9245 0 -1 4194304 1006608 10781 8130 5 %" PRIu64
+      " %" PRIu64 " 115 25 20 0 15 0 %" PRIu64
+      " 1206684979200 7065 18446744073709551615 94632071671808 94632198091600 "
+      "140725574671488 0 0 0 0 2 4608 0 0 0 17 3 0 0 0 0 0 94632203476992 "
+      "94632203968624 94632219561984 140725574677889 140725574678594 "
+      "140725574678594 140725574680553 0",
+      utime_ticks, stime_ticks, starttime_ticks}
+      .ToStdString();
+}
+
+uint64_t NsPerClockTick() {
+  int64_t tickrate = sysconf(_SC_CLK_TCK);
+  PERFETTO_CHECK(tickrate > 0);
+  return 1'000'000'000ULL / static_cast<uint64_t>(tickrate);
+}
+
 class TestProcessStatsDataSource : public ProcessStatsDataSource {
  public:
   TestProcessStatsDataSource(base::TaskRunner* task_runner,
                              TracingSessionID id,
                              std::unique_ptr<TraceWriter> writer,
-                             const DataSourceConfig& config,
-                             std::unique_ptr<CpuFreqInfo> cpu_freq_info)
-      : ProcessStatsDataSource(task_runner,
-                               id,
-                               std::move(writer),
-                               config,
-                               std::move(cpu_freq_info)) {}
+                             const DataSourceConfig& config)
+      : ProcessStatsDataSource(task_runner, id, std::move(writer), config) {}
 
-  MOCK_METHOD0(OpenProcDir, base::ScopedDir());
-  MOCK_METHOD2(ReadProcPidFile, std::string(int32_t pid, const std::string&));
-  MOCK_METHOD1(OpenProcTaskDir, base::ScopedDir(int32_t pid));
+  MOCK_METHOD(const char*, GetProcMountpoint, (), (override));
+  MOCK_METHOD(base::ScopedDir, OpenProcDir, (), (override));
+  MOCK_METHOD(std::string,
+              ReadProcPidFile,
+              (int32_t pid, const std::string&),
+              (override));
 };
 
 class ProcessStatsDataSourceTest : public ::testing::Test {
@@ -67,18 +87,14 @@ class ProcessStatsDataSourceTest : public ::testing::Test {
 
   std::unique_ptr<TestProcessStatsDataSource> GetProcessStatsDataSource(
       const DataSourceConfig& cfg) {
-    auto writer =
-        std::unique_ptr<TraceWriterForTesting>(new TraceWriterForTesting());
+    auto writer = std::make_unique<TraceWriterForTesting>();
     writer_raw_ = writer.get();
-    return std::unique_ptr<TestProcessStatsDataSource>(
-        new TestProcessStatsDataSource(
-            &task_runner_, 0, std::move(writer), cfg,
-            cpu_freq_info_for_testing.GetInstance()));
+    return std::make_unique<TestProcessStatsDataSource>(&task_runner_, 0,
+                                                        std::move(writer), cfg);
   }
 
   base::TestTaskRunner task_runner_;
   TraceWriterForTesting* writer_raw_;
-  CpuFreqInfoForTesting cpu_freq_info_for_testing;
 };
 
 TEST_F(ProcessStatsDataSourceTest, WriteOnceProcess) {
@@ -124,13 +140,13 @@ TEST_F(ProcessStatsDataSourceTest, NonNulTerminatedCmdline) {
 TEST_F(ProcessStatsDataSourceTest, DontRescanCachedPIDsAndTIDs) {
   // assertion helpers
   auto expected_process = [](int pid) {
-    return [pid](protos::gen::ProcessTree::Process process) {
+    return [pid](const protos::gen::ProcessTree::Process& process) {
       return process.pid() == pid && process.cmdline_size() > 0 &&
              process.cmdline()[0] == "proc_" + std::to_string(pid);
     };
   };
   auto expected_thread = [](int tid) {
-    return [tid](protos::gen::ProcessTree::Thread thread) {
+    return [tid](const protos::gen::ProcessTree::Thread& thread) {
       return thread.tid() == tid && thread.tgid() == tid / 10 * 10 &&
              thread.name() == "thread_" + std::to_string(tid);
     };
@@ -322,6 +338,8 @@ TEST_F(ProcessStatsDataSourceTest, ProcessStats) {
   DataSourceConfig ds_config;
   ProcessStatsConfig cfg;
   cfg.set_proc_stats_poll_ms(1);
+  cfg.set_resolve_process_fds(true);
+  cfg.set_record_process_runtime(true);
   cfg.add_quirks(ProcessStatsConfig::DISABLE_ON_DEMAND);
   ds_config.set_process_stats_config_raw(cfg.SerializeAsString());
   auto data_source = GetProcessStatsDataSource(ds_config);
@@ -329,30 +347,60 @@ TEST_F(ProcessStatsDataSourceTest, ProcessStats) {
   // Populate a fake /proc/ directory.
   auto fake_proc = base::TempDir::Create();
   const int kPids[] = {1, 2};
+  const uint64_t kFds[] = {5u, 7u};
+  const char kDevice[] = "/dev/dummy";
   std::vector<std::string> dirs_to_delete;
+  std::vector<std::string> links_to_delete;
   for (int pid : kPids) {
-    char path[256];
-    sprintf(path, "%s/%d", fake_proc.path().c_str(), pid);
-    dirs_to_delete.push_back(path);
-    mkdir(path, 0755);
+    base::StackString<256> path("%s/%d", fake_proc.path().c_str(), pid);
+    dirs_to_delete.push_back(path.ToStdString());
+    EXPECT_EQ(mkdir(path.c_str(), 0755), 0)
+        << "mkdir('" << path.c_str() << "') failed";
+
+    base::StackString<256> path_fd("%s/fd", path.c_str());
+    dirs_to_delete.push_back(path_fd.ToStdString());
+    EXPECT_EQ(mkdir(path_fd.c_str(), 0755), 0)
+        << "mkdir('" << path_fd.c_str() << "') failed";
+
+    for (auto fd : kFds) {
+      base::StackString<256> link("%s/%" PRIu64, path_fd.c_str(), fd);
+      links_to_delete.push_back(link.ToStdString());
+      EXPECT_EQ(symlink(kDevice, link.c_str()), 0)
+          << "symlink('" << kDevice << "','" << link.c_str() << "') failed";
+    }
   }
 
   auto checkpoint = task_runner_.CreateCheckpoint("all_done");
 
-  EXPECT_CALL(*data_source, OpenProcDir()).WillRepeatedly(Invoke([&fake_proc] {
-    return base::ScopedDir(opendir(fake_proc.path().c_str()));
-  }));
+  const std::string& fake_proc_path = fake_proc.path();
+  EXPECT_CALL(*data_source, OpenProcDir())
+      .WillRepeatedly(Invoke([&fake_proc_path] {
+        return base::ScopedDir(opendir(fake_proc_path.c_str()));
+      }));
+  EXPECT_CALL(*data_source, GetProcMountpoint())
+      .WillRepeatedly(
+          Invoke([&fake_proc_path] { return fake_proc_path.c_str(); }));
 
   const int kNumIters = 4;
   int iter = 0;
   for (int pid : kPids) {
     EXPECT_CALL(*data_source, ReadProcPidFile(pid, "status"))
-        .WillRepeatedly(Invoke([checkpoint, &iter](int32_t p,
-                                                   const std::string&) {
-          char ret[1024];
-          sprintf(ret, "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
-                  p * 100 + iter * 10 + 1, p * 100 + iter * 10 + 2);
-          return std::string(ret);
+        .WillRepeatedly(Invoke([&iter](int32_t p, const std::string&) {
+          return base::StackString<1024>{
+              "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
+              p * 100 + iter * 10 + 1, p * 100 + iter * 10 + 2}
+              .ToStdString();
+        }));
+
+    // By default scan_smaps_rollup is off and /proc/<pid>/smaps_rollup
+    // shouldn't be read.
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "smaps_rollup")).Times(0);
+
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "stat"))
+        .WillRepeatedly(Invoke([&iter](int32_t p, const std::string&) {
+          return ToProcStatString(static_cast<uint64_t>(p * 100 + iter * 10),
+                                  static_cast<uint64_t>(p * 200 + iter * 20),
+                                  /*starttime_ticks=*/0);
         }));
 
     EXPECT_CALL(*data_source, ReadProcPidFile(pid, "oom_score_adj"))
@@ -382,19 +430,33 @@ TEST_F(ProcessStatsDataSourceTest, ProcessStats) {
   iter = 0;
   for (const auto& proc_counters : processes) {
     int32_t pid = proc_counters.pid();
-    ASSERT_EQ(static_cast<int>(proc_counters.vm_size_kb()),
+    EXPECT_EQ(static_cast<int>(proc_counters.vm_size_kb()),
               pid * 100 + iter * 10 + 1);
-    ASSERT_EQ(static_cast<int>(proc_counters.vm_rss_kb()),
+    EXPECT_EQ(static_cast<int>(proc_counters.vm_rss_kb()),
               pid * 100 + iter * 10 + 2);
-    ASSERT_EQ(static_cast<int>(proc_counters.oom_score_adj()),
+    EXPECT_EQ(static_cast<int>(proc_counters.oom_score_adj()),
               pid * 100 + iter * 10 + 3);
-    if (pid == kPids[base::ArraySize(kPids) - 1])
+    EXPECT_EQ(proc_counters.fds().size(), base::ArraySize(kFds));
+    for (const auto& fd_path : proc_counters.fds()) {
+      EXPECT_THAT(kFds, Contains(fd_path.fd()));
+      EXPECT_EQ(fd_path.path(), kDevice);
+    }
+    EXPECT_EQ(proc_counters.runtime_user_mode(),
+              static_cast<uint64_t>(pid * 100 + iter * 10) * NsPerClockTick());
+    EXPECT_EQ(proc_counters.runtime_kernel_mode(),
+              static_cast<uint64_t>(pid * 200 + iter * 20) * NsPerClockTick());
+    if (pid == kPids[base::ArraySize(kPids) - 1]) {
       iter++;
+    }
   }
 
   // Cleanup |fake_proc|. TempDir checks that the directory is empty.
-  for (std::string& path : dirs_to_delete)
-    base::Rmdir(path);
+  for (auto path = links_to_delete.rbegin(); path != links_to_delete.rend();
+       path++)
+    unlink(path->c_str());
+  for (auto path = dirs_to_delete.rbegin(); path != dirs_to_delete.rend();
+       path++)
+    base::Rmdir(*path);
 }
 
 TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
@@ -410,9 +472,8 @@ TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
   auto fake_proc = base::TempDir::Create();
   const int kPid = 1;
 
-  char path[256];
-  sprintf(path, "%s/%d", fake_proc.path().c_str(), kPid);
-  mkdir(path, 0755);
+  base::StackString<256> path("%s/%d", fake_proc.path().c_str(), kPid);
+  mkdir(path.c_str(), 0755);
 
   auto checkpoint = task_runner_.CreateCheckpoint("all_done");
 
@@ -424,10 +485,10 @@ TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
   int iter = 0;
   EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "status"))
       .WillRepeatedly(Invoke([checkpoint](int32_t p, const std::string&) {
-        char ret[1024];
-        sprintf(ret, "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
-                p * 100 + 1, p * 100 + 2);
-        return std::string(ret);
+        base::StackString<1024> ret(
+            "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n", p * 100 + 1,
+            p * 100 + 2);
+        return ret.ToStdString();
       }));
 
   EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "oom_score_adj"))
@@ -462,195 +523,162 @@ TEST_F(ProcessStatsDataSourceTest, CacheProcessStats) {
   }
 
   // Cleanup |fake_proc|. TempDir checks that the directory is empty.
-  base::Rmdir(path);
+  base::Rmdir(path.ToStdString());
 }
 
-TEST_F(ProcessStatsDataSourceTest, ThreadTimeInState) {
+TEST_F(ProcessStatsDataSourceTest, NamespacedProcess) {
+  auto data_source = GetProcessStatsDataSource(DataSourceConfig());
+  EXPECT_CALL(*data_source, ReadProcPidFile(42, "status"))
+      .WillOnce(Return(
+          "Name: foo\nTgid:\t42\nPid:   42\nPPid:  17\nNSpid:\t42\t2\n"));
+  EXPECT_CALL(*data_source, ReadProcPidFile(42, "cmdline"))
+      .WillOnce(Return(std::string("foo\0bar\0baz\0", 12)));
+
+  EXPECT_CALL(*data_source, ReadProcPidFile(43, "status"))
+      .WillOnce(Return(
+          "Name: foo\nTgid:\t42\nPid:   43\nPPid:  17\nNSpid:\t43\t3\n"));
+
+  // It's possible that OnPids() is called with a non-main thread is seen before
+  // the main thread for a process. When this happens, the data source
+  // will WriteProcess(42) first and then WriteThread(43).
+  data_source->OnPids({43});
+  data_source->OnPids({42});  // This will be a no-op.
+
+  auto trace = writer_raw_->GetAllTracePackets();
+  ASSERT_EQ(trace.size(), 1u);
+  auto ps_tree = trace[0].process_tree();
+  ASSERT_EQ(ps_tree.processes_size(), 1);
+  auto first_process = ps_tree.processes()[0];
+  ASSERT_EQ(first_process.pid(), 42);
+  ASSERT_EQ(first_process.ppid(), 17);
+  auto nspid = first_process.nspid();
+  EXPECT_THAT(nspid, ElementsAre(2));
+
+  ASSERT_EQ(ps_tree.threads_size(), 1);
+  auto first_thread = ps_tree.threads()[0];
+  ASSERT_EQ(first_thread.tid(), 43);
+  ASSERT_EQ(first_thread.tgid(), 42);
+  auto nstid = first_thread.nstid();
+  EXPECT_THAT(nstid, ElementsAre(3));
+}
+
+TEST_F(ProcessStatsDataSourceTest, ScanSmapsRollupIsOn) {
   DataSourceConfig ds_config;
-  ProcessStatsConfig config;
-  // Do 2 ticks before cache clear.
-  config.set_proc_stats_poll_ms(100);
-  config.set_proc_stats_cache_ttl_ms(200);
-  config.add_quirks(ProcessStatsConfig::DISABLE_ON_DEMAND);
-  config.set_record_thread_time_in_state(true);
-  ds_config.set_process_stats_config_raw(config.SerializeAsString());
+  ProcessStatsConfig cfg;
+  cfg.set_proc_stats_poll_ms(1);
+  cfg.set_resolve_process_fds(true);
+  cfg.set_scan_smaps_rollup(true);
+  cfg.add_quirks(ProcessStatsConfig::DISABLE_ON_DEMAND);
+  ds_config.set_process_stats_config_raw(cfg.SerializeAsString());
   auto data_source = GetProcessStatsDataSource(ds_config);
 
-  std::vector<std::string> dirs_to_delete;
-  auto make_proc_path = [&dirs_to_delete](base::TempDir& temp_dir, int pid) {
-    char path[256];
-    sprintf(path, "%s/%d", temp_dir.path().c_str(), pid);
-    dirs_to_delete.push_back(path);
-    mkdir(path, 0755);
-  };
   // Populate a fake /proc/ directory.
   auto fake_proc = base::TempDir::Create();
-  const int kPid = 1;
-  make_proc_path(fake_proc, kPid);
-  const int kIgnoredPid = 5;
-  make_proc_path(fake_proc, kIgnoredPid);
-
-  // Populate a fake /proc/1/task directory.
-  auto fake_proc_task = base::TempDir::Create();
-  const int kTids[] = {1, 2};
-  for (int tid : kTids)
-    make_proc_path(fake_proc_task, tid);
-  // Populate a fake /proc/5/task directory.
-  auto fake_ignored_proc_task = base::TempDir::Create();
-  const int kIgnoredTid = 5;
-  make_proc_path(fake_ignored_proc_task, kIgnoredTid);
+  const int kPids[] = {1, 2};
+  std::vector<std::string> dirs_to_delete;
+  for (int pid : kPids) {
+    base::StackString<256> path("%s/%d", fake_proc.path().c_str(), pid);
+    dirs_to_delete.push_back(path.ToStdString());
+    EXPECT_EQ(mkdir(path.c_str(), 0755), 0)
+        << "mkdir('" << path.c_str() << "') failed";
+  }
 
   auto checkpoint = task_runner_.CreateCheckpoint("all_done");
+  const auto fake_proc_path = fake_proc.path();
+  EXPECT_CALL(*data_source, OpenProcDir())
+      .WillRepeatedly(Invoke([&fake_proc_path] {
+        return base::ScopedDir(opendir(fake_proc_path.c_str()));
+      }));
+  EXPECT_CALL(*data_source, GetProcMountpoint())
+      .WillRepeatedly(
+          Invoke([&fake_proc_path] { return fake_proc_path.c_str(); }));
 
-  EXPECT_CALL(*data_source, OpenProcDir()).WillRepeatedly(Invoke([&fake_proc] {
-    return base::ScopedDir(opendir(fake_proc.path().c_str()));
-  }));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "status"))
-      .WillRepeatedly(
-          Return("Name:	pid_1\nVmSize:	 100 kB\nVmRSS:\t100  kB\n"));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "oom_score_adj"))
-      .WillRepeatedly(Return("901"));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kPid, "stat"))
-      .WillOnce(Return("1 (pid_1) S 1 1 0 0 -1 4210944 2197 2451 0 1 54 117 4"))
-      // ctime++
-      .WillOnce(Return("1 (pid_1) S 1 1 0 0 -1 4210944 2197 2451 0 1 55 117 4"))
-      // stime++
-      .WillOnce(Return("1 (pid_1) S 1 1 0 0 -1 4210944 2197 2451 0 1 55 118 4"))
-      // ctime++, stime++
-      .WillOnce(
-          Return("1 (pid_1) S 1 1 0 0 -1 4210944 2197 2451 0 1 56 119 4"));
-  EXPECT_CALL(*data_source, OpenProcTaskDir(kPid))
-      .WillRepeatedly(Invoke([&fake_proc_task](int32_t) {
-        return base::ScopedDir(opendir(fake_proc_task.path().c_str()));
-      }));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kTids[0], "time_in_state"))
-      .Times(4)
-      .WillRepeatedly(Return("cpu0\n300000 1\n748800 1\ncpu1\n300000 5\n"));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kTids[1], "status"))
-      .WillRepeatedly(Return("Name: tid_2"));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kTids[1], "time_in_state"))
-      .WillOnce(
-          Return("cpu0\n300000 10\n748800 0\ncpu1\n300000 50\n652800 60\n"))
-      .WillOnce(Return("cpu0\n300000 20\n748800 0\n1324800 30\ncpu1\n300000 "
-                       "100\n652800 60\n"))
-      .WillOnce(Return("cpu0\n300000 200\n748800 0\n1324800 30\ncpu1\n300000 "
-                       "100\n652800 60\n"))
-      .WillOnce(Invoke([&checkpoint](int32_t, const std::string&) {
-        // Call checkpoint here to stop after the third tick.
-        checkpoint();
-        return "cpu0\n300000 300\n748800 0\n1324800 40\ncpu1\n300000 "
-               "200\n652800 70\n";
-      }));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kIgnoredPid, "status"))
-      .WillRepeatedly(
-          Return("Name:	pid_5\nVmSize:	 100 kB\nVmRSS:\t100  kB\n"));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kIgnoredPid, "oom_score_adj"))
-      .WillRepeatedly(Return("905"));
-  EXPECT_CALL(*data_source, OpenProcTaskDir(kIgnoredPid))
-      .WillRepeatedly(Invoke([&fake_ignored_proc_task](int32_t) {
-        return base::ScopedDir(opendir(fake_ignored_proc_task.path().c_str()));
-      }));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kIgnoredPid, "stat"))
-      .WillRepeatedly(
-          Return("5 (pid_5) S 1 5 0 0 -1 4210944 2197 2451 0 1 99 99 4"));
-  EXPECT_CALL(*data_source, ReadProcPidFile(kIgnoredTid, "time_in_state"))
-      .Times(2)
-      .WillRepeatedly(
-          Return("cpu0\n300000 10\n748800 0\ncpu1\n300000 00\n652800 20\n"));
+  const int kNumIters = 4;
+  int iter = 0;
+  for (int pid : kPids) {
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "status"))
+        .WillRepeatedly(
+            Invoke([checkpoint, &iter](int32_t p, const std::string&) {
+              base::StackString<1024> ret(
+                  "Name:	pid_10\nVmSize:	 %d kB\nVmRSS:\t%d  kB\n",
+                  p * 100 + iter * 10 + 1, p * 100 + iter * 10 + 2);
+              return ret.ToStdString();
+            }));
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "smaps_rollup"))
+        .WillRepeatedly(
+            Invoke([checkpoint, &iter](int32_t p, const std::string&) {
+              base::StackString<1024> ret(
+                  "Name:	pid_10\nRss:	 %d kB\nPss:\t%d  kB\n",
+                  p * 100 + iter * 10 + 4, p * 100 + iter * 10 + 5);
+              return ret.ToStdString();
+            }));
+
+    EXPECT_CALL(*data_source, ReadProcPidFile(pid, "oom_score_adj"))
+        .WillRepeatedly(Invoke(
+            [checkpoint, kPids, &iter](int32_t inner_pid, const std::string&) {
+              auto oom_score = inner_pid * 100 + iter * 10 + 3;
+              if (inner_pid == kPids[base::ArraySize(kPids) - 1]) {
+                if (++iter == kNumIters)
+                  checkpoint();
+              }
+              return std::to_string(oom_score);
+            }));
+  }
 
   data_source->Start();
   task_runner_.RunUntilCheckpoint("all_done");
   data_source->Flush(1 /* FlushRequestId */, []() {});
 
-  // Collect all process packets order by their timestamp and pid.
-  using TimestampPid = std::pair</* timestamp */ uint64_t, /* pid */ int32_t>;
-  std::map<TimestampPid, protos::gen::ProcessStats::Process> processes_map;
-  for (const auto& packet : writer_raw_->GetAllTracePackets())
-    for (const auto& process : packet.process_stats().processes())
-      processes_map.insert({{packet.timestamp(), process.pid()}, process});
   std::vector<protos::gen::ProcessStats::Process> processes;
-  for (auto it : processes_map)
-    processes.push_back(it.second);
+  auto trace = writer_raw_->GetAllTracePackets();
+  for (const auto& packet : trace) {
+    for (const auto& process : packet.process_stats().processes()) {
+      processes.push_back(process);
+    }
+  }
+  ASSERT_EQ(processes.size(), kNumIters * base::ArraySize(kPids));
+  iter = 0;
+  for (const auto& proc_counters : processes) {
+    int32_t pid = proc_counters.pid();
+    ASSERT_EQ(static_cast<int>(proc_counters.smr_rss_kb()),
+              pid * 100 + iter * 10 + 4);
+    ASSERT_EQ(static_cast<int>(proc_counters.smr_pss_kb()),
+              pid * 100 + iter * 10 + 5);
+    if (pid == kPids[base::ArraySize(kPids) - 1])
+      iter++;
+  }
+  for (auto path = dirs_to_delete.rbegin(); path != dirs_to_delete.rend();
+       path++)
+    base::Rmdir(*path);
+}
 
-  // 4 packets for pid=1, 2 packets for pid=5.
-  ASSERT_EQ(processes.size(), 6u);
+TEST_F(ProcessStatsDataSourceTest, WriteProcessStartFromBoot) {
+  DataSourceConfig ds_config;
+  ProcessStatsConfig cfg;
+  cfg.set_record_process_age(true);
+  ds_config.set_process_stats_config_raw(cfg.SerializeAsString());
+  auto data_source = GetProcessStatsDataSource(ds_config);
 
-  auto compare_tid = [](protos::gen::ProcessStats_Thread& l,
-                        protos::gen::ProcessStats_Thread& r) {
-    return l.tid() < r.tid();
-  };
+  const char* status =
+      "Name: foo\nTgid:\t42\nPid:   42\nPPid:  17\nUid:  43 44 45 56\n";
 
-  // First pull has all threads and all frequencies.
-  // Check pid = 1.
-  auto threads = processes[0].threads();
-  EXPECT_EQ(threads.size(), 2u);
-  std::sort(threads.begin(), threads.end(), compare_tid);
-  auto thread = threads[0];
-  EXPECT_EQ(thread.tid(), 1);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 3u, 10u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(1, 1, 5));
-  EXPECT_THAT(thread.cpu_freq_full(), true);
-  thread = threads[1];
-  EXPECT_EQ(thread.tid(), 2);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 10u, 11u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(10, 50, 60));
-  EXPECT_THAT(thread.cpu_freq_full(), true);
-  // Check pid = 5.
-  threads = processes[1].threads();
-  EXPECT_EQ(threads.size(), 1u);
-  thread = threads[0];
-  EXPECT_EQ(thread.tid(), 5);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 11u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(10, 20));
-  EXPECT_THAT(thread.cpu_freq_full(), true);
+  EXPECT_CALL(*data_source, ReadProcPidFile(42, "status"))
+      .WillOnce(Return(status));
+  EXPECT_CALL(*data_source, ReadProcPidFile(42, "stat"))
+      .WillOnce(Return(ToProcStatString(0, 0, 15842)));
+  EXPECT_CALL(*data_source, ReadProcPidFile(42, "cmdline"))
+      .WillOnce(Return(std::string("foo\0bar\0baz\0", 12)));
 
-  // Second pull has only one thread that changed.
-  threads = processes[2].threads();
-  EXPECT_EQ(threads.size(), 1u);
-  thread = threads[0];
-  EXPECT_EQ(thread.tid(), 2);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 6u, 10u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(20, 30, 100));
-  // Value for cpu_freq index 11 did not change.
-  EXPECT_THAT(thread.has_cpu_freq_full(), false);
+  data_source->OnPids({42});
 
-  // Third pull has all thread because cache was cleared.
-  // Check pid = 1.
-  threads = processes[3].threads();
-  EXPECT_EQ(threads.size(), 2u);
-  std::sort(threads.begin(), threads.end(), compare_tid);
-  thread = threads[0];
-  EXPECT_EQ(thread.tid(), 1);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 3u, 10u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(1, 1, 5));
-  EXPECT_THAT(thread.cpu_freq_full(), true);
-  thread = threads[1];
-  EXPECT_EQ(thread.tid(), 2);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 6u, 10u, 11u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(200, 30, 100, 60));
-  EXPECT_THAT(thread.cpu_freq_full(), true);
-  // Check pid = 5.
-  threads = processes[4].threads();
-  EXPECT_EQ(threads.size(), 1u);
-  thread = threads[0];
-  EXPECT_EQ(thread.tid(), 5);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 11u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(10, 20));
-  EXPECT_THAT(thread.cpu_freq_full(), true);
+  auto trace = writer_raw_->GetAllTracePackets();
+  ASSERT_EQ(trace.size(), 1u);
+  auto ps_tree = trace[0].process_tree();
+  ASSERT_EQ(ps_tree.processes_size(), 1);
+  auto first_process = ps_tree.processes()[0];
+  ASSERT_EQ(first_process.pid(), 42);
 
-  // Forth full has only one thread that changed.
-  threads = processes[5].threads();
-  EXPECT_EQ(threads.size(), 1u);
-  thread = threads[0];
-  EXPECT_EQ(thread.tid(), 2);
-  EXPECT_THAT(thread.cpu_freq_indices(), ElementsAre(1u, 6u, 10u, 11u));
-  EXPECT_THAT(thread.cpu_freq_ticks(), ElementsAre(300, 40, 200, 70));
-  // All non-zero values for all cpu_freq indices changed. It is an exhaustive
-  // snapshot.
-  EXPECT_THAT(thread.cpu_freq_full(), true);
-
-  for (const std::string& path : dirs_to_delete)
-    base::Rmdir(path);
+  EXPECT_EQ(first_process.process_start_from_boot(), 15842 * NsPerClockTick());
 }
 
 }  // namespace

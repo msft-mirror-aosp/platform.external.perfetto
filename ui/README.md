@@ -1,35 +1,50 @@
 # Perfetto UI
 
-Quick Start
------------
-Run:
+## Quick Start
 
 ```bash
 $ git clone https://android.googlesource.com/platform/external/perfetto/
 $ cd perfetto
-$ tools/install-build-deps --ui
-$ tools/gn gen out/debug --args='is_debug=true'
-$ tools/ninja -C out/debug ui
+
+# Install build dependencies
+tools/install-build-deps --ui
+
+# Will build into ./out/ui by default. Can be changed with --out path/
+# The final bundle will be available at ./ui/out/dist/.
+# The build script creates a symlink from ./ui/out to $OUT_PATH/ui/.
+ui/build
+
+# This will automatically build the UI. There is no need to manually run
+# ui/build before running ui/run-dev-server.
+ui/run-dev-server
 ```
 
-For more details on `gn` configs see
-[Build Instructions](../docs/contributing/build-instructions.md).
+Then navigate to `http://localhost:10000`.
 
-To run the tests:
+See also https://perfetto.dev/docs/contributing/build-instructions#ui-development
+
+## Unit tests
+
 ```bash
-$ out/debug/ui_unittests
-$ out/debug/ui_tests
+ui/run-unittests  # Add --watch to run them in watch mode.
 ```
 
-To run the tests in watch mode:
-```bash
-$ out/debug/ui_unittests --watch
-```
-
-Finally run:
+## Integration tests (browser screenshot difftests)
 
 ```bash
-$ ./ui/run-dev-server out/debug
+run-integrationtests
 ```
 
-and navigate to `localhost:10000`.
+To rebaseline screenshots after a UI change
+
+```bash
+ui/run-integrationtests --rebaseline
+
+tools/test_data upload
+
+git add -A
+
+git commit
+```
+
+See also https://perfetto.dev/docs/contributing/testing#ui-pixel-diff-tests

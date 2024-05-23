@@ -27,14 +27,14 @@
 
 #include "perfetto/base/build_config.h"
 
-#if defined(__GNUC__)  // GCC & clang
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wundef"
 #pragma GCC diagnostic ignored "-Wdeprecated"
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #pragma GCC diagnostic ignored "-Wfloat-equal"
-#endif  // __GNUC__
+#endif  // defined(__GNUC__) || defined(__clang__)
 
 #if defined(__clang__)
 #pragma GCC diagnostic ignored "-Wshift-sign-overflow"
@@ -44,12 +44,15 @@
 #pragma GCC diagnostic ignored "-Wcomma"
 #endif  // PERFETTO_OS_NACL
 
-#endif
+#endif  // defined(__clang__)
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include <gmock/gmock-matchers.h>       // IWYU pragma: export
+#include <gmock/gmock-more-matchers.h>  // IWYU pragma: export
+#include <gmock/gmock.h>                // IWYU pragma: export
+#include <gtest/gtest-matchers.h>       // IWYU pragma: export
+#include <gtest/gtest.h>                // IWYU pragma: export
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 

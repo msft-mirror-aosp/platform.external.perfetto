@@ -59,7 +59,9 @@ constexpr ProcessName kProcessNames[] = {
     {ChromeProcessDescriptor::PROCESS_SERVICE_PROXY_RESOLVER,
      "Service: proxy_resolver.mojom.ProxyResolverFactory"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_CDM,
-     "Service: media.mojom.CdmService"},
+     "Service: media.mojom.CdmServiceBroker"},
+    {ChromeProcessDescriptor::PROCESS_SERVICE_MEDIA_FOUNDATION,
+     "Service: media.mojom.MediaFoundationServiceBroker"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_VIDEO_CAPTURE,
      "Service: video_capture.mojom.VideoCaptureService"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_UNZIPPER,
@@ -97,7 +99,7 @@ constexpr ProcessName kProcessNames[] = {
     {ChromeProcessDescriptor::PROCESS_SERVICE_MEDIAPARSER,
      "Service: chrome.mojom.MediaParserFactory"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_QRCODEGENERATOR,
-     "Service: qrcode_generator.mojom.QRCodeGeneratorService"},
+     "Service: qrcode_generator.mojom.QRCodeService"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_PROFILEIMPORT,
      "Service: chrome.mojom.ProfileImport"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_IME,
@@ -106,6 +108,7 @@ constexpr ProcessName kProcessNames[] = {
      "Service: recording.mojom.RecordingService"},
     {ChromeProcessDescriptor::PROCESS_SERVICE_SHAPEDETECTION,
      "Service: shape_detection.mojom.ShapeDetectionService"},
+    {ChromeProcessDescriptor::PROCESS_RENDERER_EXTENSION, "Extension Renderer"},
 };
 
 struct ThreadName {
@@ -166,6 +169,7 @@ constexpr ThreadName kThreadNames[] = {
     {ChromeThreadDescriptor::THREAD_NETWORKCONFIGWATCHER,
      "NetworkConfigWatcher"},
     {ChromeThreadDescriptor::THREAD_WASAPI_RENDER, "wasapi_render_thread"},
+    {ChromeThreadDescriptor::THREAD_LOADER_LOCK_SAMPLER, "LoaderLockSampler"},
 };
 
 }  // namespace

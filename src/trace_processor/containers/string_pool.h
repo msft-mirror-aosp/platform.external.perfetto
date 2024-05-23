@@ -21,10 +21,11 @@
 #include <stdint.h>
 
 #include <limits>
-#include <unordered_map>
+#include <optional>
 #include <vector>
 
-#include "perfetto/ext/base/optional.h"
+#include "perfetto/ext/base/flat_hash_map.h"
+#include "perfetto/ext/base/hash.h"
 #include "perfetto/ext/base/paged_memory.h"
 #include "perfetto/protozero/proto_utils.h"
 #include "src/trace_processor/containers/null_term_string_view.h"
@@ -106,8 +107,8 @@ class StringPool {
   ~StringPool();
 
   // Allow std::move().
-  StringPool(StringPool&&);
-  StringPool& operator=(StringPool&&);
+  StringPool(StringPool&&) noexcept;
+  StringPool& operator=(StringPool&&) noexcept;
 
   // Disable implicit copy.
   StringPool(const StringPool&) = delete;
@@ -118,25 +119,30 @@ class StringPool {
       return Id::Null();
 
     auto hash = str.Hash();
-    auto id_it = string_index_.find(hash);
-    if (id_it != string_index_.end()) {
-      PERFETTO_DCHECK(Get(id_it->second) == str);
-      return id_it->second;
+
+    // Perform a hashtable insertion with a null ID just to check if the string
+    // is already inserted. If it's not, overwrite 0 with the actual Id.
+    auto it_and_inserted = string_index_.Insert(hash, Id());
+    Id* id = it_and_inserted.first;
+    if (!it_and_inserted.second) {
+      PERFETTO_DCHECK(Get(*id) == str);
+      return *id;
     }
-    return InsertString(str, hash);
+    *id = InsertString(str, hash);
+    return *id;
   }
 
-  base::Optional<Id> GetId(base::StringView str) const {
+  std::optional<Id> GetId(base::StringView str) const {
     if (str.data() == nullptr)
       return Id::Null();
 
     auto hash = str.Hash();
-    auto id_it = string_index_.find(hash);
-    if (id_it != string_index_.end()) {
-      PERFETTO_DCHECK(Get(id_it->second) == str);
-      return id_it->second;
+    Id* id = string_index_.Find(hash);
+    if (id) {
+      PERFETTO_DCHECK(Get(*id) == str);
+      return *id;
     }
-    return base::nullopt;
+    return std::nullopt;
   }
 
   NullTermStringView Get(Id id) const {
@@ -150,6 +156,14 @@ class StringPool {
   Iterator CreateIterator() const { return Iterator(this); }
 
   size_t size() const { return string_index_.size(); }
+
+  // Maximum Id of a small (not large) string in the string pool.
+  StringPool::Id MaxSmallStringId() const {
+    return Id::BlockString(blocks_.size() - 1, blocks_.back().pos());
+  }
+
+  // Returns whether there is at least one large string in a string pool
+  bool HasLargeString() const { return !large_strings_.empty(); }
 
  private:
   using StringHash = uint64_t;
@@ -286,9 +300,12 @@ class StringPool {
   std::vector<std::unique_ptr<std::string>> large_strings_;
 
   // Maps hashes of strings to the Id in the string pool.
-  // TODO(lalitm): At some point we should benchmark just using a static
-  // hashtable of 1M elements, we can afford paying a fixed 8MB here
-  std::unordered_map<StringHash, Id> string_index_;
+  base::FlatHashMap<StringHash,
+                    Id,
+                    base::AlreadyHashed<StringHash>,
+                    base::LinearProbe,
+                    /*AppendOnly=*/true>
+      string_index_{/*initial_capacity=*/4096u};
 };
 
 }  // namespace trace_processor

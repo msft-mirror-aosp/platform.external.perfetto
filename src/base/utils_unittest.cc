@@ -142,7 +142,7 @@ TEST(UtilsTest, ReadWritePlatformHandle) {
 }
 
 // Fuchsia doesn't currently support sigaction(), see
-// fuchsia.atlassian.net/browse/ZX-560.
+// https://fxbug.dev/42105390 .
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
@@ -200,6 +200,19 @@ TEST(UtilsTest, Align) {
   EXPECT_EQ(16u, AlignUp<16>(16));
   EXPECT_EQ(32u, AlignUp<16>(17));
   EXPECT_EQ(0xffffff00u, AlignUp<16>(0xffffff00 - 1));
+}
+
+TEST(UtilsTest, HexDump) {
+  char input[] = {0x00, 0x00, 'a', 'b', 'c', 'd', 'e', 'f', 'g',
+                  'h',  'i',  'j', 'k', 'l', 'm', 'n', 'o', 'p'};
+
+  std::string output = HexDump(input, sizeof(input));
+
+  EXPECT_EQ(
+      output,
+      R"(00000000: 00 00 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E   ..abcdefghijklmn
+00000010: 6F 70                                             op
+)");
 }
 
 }  // namespace

@@ -16,17 +16,22 @@
 
 #include "perfetto/tracing/event_context.h"
 
+#include "perfetto/tracing/internal/track_event_interned_fields.h"
 #include "protos/perfetto/trace/interned_data/interned_data.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_event.pbzero.h"
 
 namespace perfetto {
 
 EventContext::EventContext(
+    TraceWriterBase* trace_writer,
     EventContext::TracePacketHandle trace_packet,
-    internal::TrackEventIncrementalState* incremental_state)
-    : trace_packet_(std::move(trace_packet)),
+    internal::TrackEventIncrementalState* incremental_state,
+    internal::TrackEventTlsState* tls_state)
+    : trace_writer_(trace_writer),
+      trace_packet_(std::move(trace_packet)),
       event_(trace_packet_->set_track_event()),
-      incremental_state_(incremental_state) {}
+      incremental_state_(incremental_state),
+      tls_state_(tls_state) {}
 
 EventContext::~EventContext() {
   if (!trace_packet_)
@@ -38,16 +43,48 @@ EventContext::~EventContext() {
   // (|serialized_interned_data|). Here we just need to flush it to the main
   // trace.
   auto& serialized_interned_data = incremental_state_->serialized_interned_data;
-  if (PERFETTO_LIKELY(serialized_interned_data.empty()))
-    return;
+  if (PERFETTO_UNLIKELY(!serialized_interned_data.empty())) {
+    auto ranges = serialized_interned_data.GetRanges();
+    trace_packet_->AppendScatteredBytes(
+        perfetto::protos::pbzero::TracePacket::kInternedDataFieldNumber,
+        &ranges[0], ranges.size());
 
-  auto ranges = serialized_interned_data.GetRanges();
-  trace_packet_->AppendScatteredBytes(
-      perfetto::protos::pbzero::TracePacket::kInternedDataFieldNumber,
-      &ranges[0], ranges.size());
+    // Reset the message but keep one buffer allocated for future use.
+    serialized_interned_data.Reset();
+  }
+}
 
-  // Reset the message but keep one buffer allocated for future use.
-  serialized_interned_data.Reset();
+protos::pbzero::DebugAnnotation* EventContext::AddDebugAnnotation(
+    const char* name) {
+  auto annotation = event()->add_debug_annotations();
+  annotation->set_name_iid(
+      internal::InternedDebugAnnotationName::Get(this, name));
+  return annotation;
+}
+
+protos::pbzero::DebugAnnotation* EventContext::AddDebugAnnotation(
+    ::perfetto::DynamicString name) {
+  auto annotation = event()->add_debug_annotations();
+  annotation->set_name(name.value);
+  return annotation;
+}
+
+TrackEventTlsStateUserData* EventContext::GetTlsUserData(const void* key) {
+  PERFETTO_CHECK(tls_state_);
+  PERFETTO_CHECK(key);
+  auto it = tls_state_->user_data.find(key);
+  if (it != tls_state_->user_data.end()) {
+    return it->second.get();
+  }
+  return nullptr;
+}
+
+void EventContext::SetTlsUserData(
+    const void* key,
+    std::unique_ptr<TrackEventTlsStateUserData> data) {
+  PERFETTO_CHECK(tls_state_);
+  PERFETTO_CHECK(key);
+  tls_state_->user_data[key] = std::move(data);
 }
 
 }  // namespace perfetto

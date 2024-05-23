@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("//build_overrides/build.gni")
 import("../../gn/fuzzer.gni")
 import("../../gn/perfetto.gni")
 import("../../gn/test.gni")
@@ -92,7 +91,7 @@ source_set("client_api_without_backends") {
     "../../include/perfetto/tracing/core",
     "../../protos/perfetto/common:zero",
     "../../protos/perfetto/config:cpp",
-    "../../protos/perfetto/config/interceptors:zero",
+    "../../protos/perfetto/config/interceptors:cpp",
     "../../protos/perfetto/config/track_event:cpp",
     "../base",
     "core",
@@ -126,7 +125,7 @@ source_set("client_api_without_backends") {
     "track_event_state_tracker.cc",
     "virtual_destructors.cc",
   ]
-  assert_no_deps = [ "core:service" ]
+  assert_no_deps = [ "service" ]
   if (enable_perfetto_ipc) {
     assert_no_deps += [
       "../ipc:common",
@@ -135,9 +134,26 @@ source_set("client_api_without_backends") {
   }
 }
 
+# Separate target because the embedder might not want this.
+source_set("integrationtests") {
+  testonly = true
+  deps = [
+    "../../gn:default_deps",
+    "../../gn:gtest_and_gmock",
+    "../../include/perfetto/ext/tracing/ipc",
+    "../../include/perfetto/tracing",
+    "../../protos/perfetto/trace:cpp",
+    "../base",
+    "../base:test_support",
+  ]
+  sources = [ "internal/tracing_muxer_impl_integrationtest.cc" ]
+}
+
 perfetto_unittest_source_set("unittests") {
   testonly = true
   deps = [
+    "../../gn:default_deps",
+    "../../gn:gtest_and_gmock",
     "../../protos/perfetto/trace:lite",
     "../../protos/perfetto/trace/track_event:lite",
     "../base",
@@ -150,7 +166,7 @@ perfetto_unittest_source_set("unittests") {
   # TODO(primiano): remove the build_with_chromium conditional once the root
   # //BUILD.gn:libperfetto (in chromium) stops adding tracing:platform_fake.
   # The problem is the following: in chrome builds we end up with duplicate
-  # symbol definitions in the test because both platorm (impl and fake) are
+  # symbol definitions in the test because both platforms (impl and fake) are
   # present: impl added here and fake coming from chromium's base (full path:
   # perfetto_unittests -> //(chromium)base:test_support -> //(chromium)base
   # -> libperfetto -> platform_fake.
@@ -161,6 +177,7 @@ perfetto_unittest_source_set("unittests") {
     ]
 
     sources += [
+      "internal/interceptor_trace_writer_unittest.cc",
       "traced_proto_unittest.cc",
       "traced_value_unittest.cc",
     ]
@@ -177,10 +194,13 @@ if (enable_perfetto_ipc) {
       "../../gn:default_deps",
       "../../include/perfetto/tracing/core",
       "../base",
-      "ipc/consumer",
+      "ipc:common",
       "ipc/producer",
       "ipc/service",
     ]
+    if (enable_perfetto_system_consumer) {
+      deps += [ "ipc/consumer" ]
+    }
     sources = [ "internal/system_tracing_backend.cc" ]
   }
 } else {
@@ -204,7 +224,8 @@ source_set("in_process_backend") {
     "../../gn:default_deps",
     "../../include/perfetto/tracing/core",
     "../base",
-    "core:service",
+    "core",
+    "service",
   ]
   sources = [ "internal/in_process_tracing_backend.cc" ]
 }

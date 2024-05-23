@@ -16,185 +16,271 @@
 
 #include "src/trace_processor/db/table.h"
 
-namespace perfetto {
-namespace trace_processor {
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
 
-Table::Table() = default;
-Table::~Table() = default;
+#include "perfetto/base/logging.h"
+#include "perfetto/public/compiler.h"
+#include "perfetto/trace_processor/ref_counted.h"
+#include "src/trace_processor/containers/row_map.h"
+#include "src/trace_processor/containers/string_pool.h"
+#include "src/trace_processor/db/column.h"
+#include "src/trace_processor/db/column/arrangement_overlay.h"
+#include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/range_overlay.h"
+#include "src/trace_processor/db/column/selector_overlay.h"
+#include "src/trace_processor/db/column/types.h"
+#include "src/trace_processor/db/column_storage_overlay.h"
+#include "src/trace_processor/db/query_executor.h"
 
-Table::Table(StringPool* pool, const Table* parent) : string_pool_(pool) {
-  if (!parent)
-    return;
+namespace perfetto::trace_processor {
 
-  // If this table has a parent, then copy over all the columns pointing to
-  // empty RowMaps.
-  for (uint32_t i = 0; i < parent->row_maps_.size(); ++i)
-    row_maps_.emplace_back();
-  for (const Column& col : parent->columns_)
-    columns_.emplace_back(col, this, columns_.size(), col.row_map_idx_);
+namespace {
+using Indices = column::DataLayerChain::Indices;
 }
+
+Table::Table(StringPool* pool,
+             uint32_t row_count,
+             std::vector<ColumnLegacy> columns,
+             std::vector<ColumnStorageOverlay> overlays)
+    : string_pool_(pool),
+      row_count_(row_count),
+      overlays_(std::move(overlays)),
+      columns_(std::move(columns)) {
+  PERFETTO_DCHECK(string_pool_);
+}
+
+Table::~Table() = default;
 
 Table& Table::operator=(Table&& other) noexcept {
   row_count_ = other.row_count_;
   string_pool_ = other.string_pool_;
 
-  row_maps_ = std::move(other.row_maps_);
+  overlays_ = std::move(other.overlays_);
   columns_ = std::move(other.columns_);
-  for (Column& col : columns_) {
+
+  storage_layers_ = std::move(other.storage_layers_);
+  null_layers_ = std::move(other.null_layers_);
+  overlay_layers_ = std::move(other.overlay_layers_);
+  chains_ = std::move(other.chains_);
+
+  for (ColumnLegacy& col : columns_) {
     col.table_ = this;
   }
   return *this;
 }
 
 Table Table::Copy() const {
-  Table table = CopyExceptRowMaps();
-  for (const RowMap& rm : row_maps_) {
-    table.row_maps_.emplace_back(rm.Copy());
+  Table table = CopyExceptOverlays();
+  for (const ColumnStorageOverlay& overlay : overlays_) {
+    table.overlays_.emplace_back(overlay.Copy());
   }
+  table.OnConstructionCompleted(storage_layers_, null_layers_, overlay_layers_);
   return table;
 }
 
-Table Table::CopyExceptRowMaps() const {
-  Table table(string_pool_, nullptr);
-  table.row_count_ = row_count_;
-  for (const Column& col : columns_) {
-    table.columns_.emplace_back(col, &table, col.index_in_table(),
-                                col.row_map_idx_);
+Table Table::CopyExceptOverlays() const {
+  std::vector<ColumnLegacy> cols;
+  cols.reserve(columns_.size());
+  for (const ColumnLegacy& col : columns_) {
+    cols.emplace_back(col, col.index_in_table(), col.overlay_index());
   }
-  return table;
+  return {string_pool_, row_count_, std::move(cols), {}};
 }
 
-Table Table::Sort(const std::vector<Order>& od) const {
-  if (od.empty())
-    return Copy();
+RowMap Table::QueryToRowMap(const Query& q) const {
+  // We need to delay creation of the chains to this point because of Chrome
+  // does not want the binary size overhead of including the chain
+  // implementations. As they also don't query tables (instead just iterating)
+  // over them), using a combination of dead code elimination and linker
+  // stripping all chain related code be removed.
+  //
+  // From rough benchmarking, this has a negligible impact on peformance as this
+  // branch is almost never taken.
+  if (PERFETTO_UNLIKELY(chains_.size() != columns_.size())) {
+    CreateChains();
+  }
 
-  // Return a copy if there is a single constraint to sort the table
-  // by a column which is already sorted.
-  const auto& first_col = GetColumn(od.front().col_idx);
-  if (od.size() == 1 && first_col.IsSorted() && !od.front().desc)
-    return Copy();
+  // Apply the query constraints.
+  RowMap rm = QueryExecutor::FilterLegacy(this, q.constraints);
 
-  // Build an index vector with all the indices for the first |size_| rows.
-  std::vector<uint32_t> idx(row_count_);
+  if (q.order_type != Query::OrderType::kSort) {
+    ApplyDistinct(q, &rm);
+  }
 
-  if (od.size() == 1 && first_col.IsSorted()) {
-    // We special case a single constraint in descending order as this
-    // happens any time the |max| function is used in SQLite. We can be
-    // more efficient as this column is already sorted so we simply need
-    // to reverse the order of this column.
-    PERFETTO_DCHECK(od.front().desc);
-    std::iota(idx.rbegin(), idx.rend(), 0);
-  } else {
-    // As our data is columnar, it's always more efficient to sort one column
-    // at a time rather than try and sort lexiographically all at once.
-    // To preserve correctness, we need to stably sort the index vector once
-    // for each order by in *reverse* order. Reverse order is important as it
-    // preserves the lexiographical property.
-    //
-    // For example, suppose we have the following:
-    // Table {
-    //   Column x;
-    //   Column y
-    //   Column z;
-    // }
-    //
-    // Then, to sort "y asc, x desc", we could do one of two things:
-    //  1) sort the index vector all at once and on each index, we compare
-    //     y then z. This is slow as the data is columnar and we need to
-    //     repeatedly branch inside each column.
-    //  2) we can stably sort first on x desc and then sort on y asc. This will
-    //     first put all the x in the correct order such that when we sort on
-    //     y asc, we will have the correct order of x where y is the same (since
-    //     the sort is stable).
-    //
-    // TODO(lalitm): it is possible that we could sort the last constraint (i.e.
-    // the first constraint in the below loop) in a non-stable way. However,
-    // this is more subtle than it appears as we would then need special
-    // handling where there are order bys on a column which is already sorted
-    // (e.g. ts, id). Investigate whether the performance gains from this are
-    // worthwhile. This also needs changes to the constraint modification logic
-    // in DbSqliteTable which currently eliminates constraints on sorted
-    // columns.
-    std::iota(idx.begin(), idx.end(), 0);
-    for (auto it = od.rbegin(); it != od.rend(); ++it) {
-      columns_[it->col_idx].StableSort(it->desc, &idx);
+  // Fastpath for one sort, no distinct and limit 1. This type of query means we
+  // need to run Max/Min on orderby column and there is no need for sorting.
+  if (q.order_type == Query::OrderType::kSort && q.orders.size() == 1 &&
+      q.limit.has_value() && *q.limit == 1) {
+    Order o = q.orders.front();
+    std::vector<uint32_t> table_indices = std::move(rm).TakeAsIndexVector();
+    auto indices = Indices::Create(table_indices, Indices::State::kMonotonic);
+    std::optional<Token> ret_tok;
+
+    if (o.desc) {
+      ret_tok = ChainForColumn(o.col_idx).MaxElement(indices);
+    } else {
+      ret_tok = ChainForColumn(o.col_idx).MinElement(indices);
     }
+
+    if (!ret_tok.has_value()) {
+      return RowMap();
+    }
+
+    return RowMap(std::vector<uint32_t>{ret_tok->payload});
+  }
+
+  if (q.order_type != Query::OrderType::kDistinct && !q.orders.empty()) {
+    ApplySort(q, &rm);
+  }
+
+  if (!q.limit.has_value() && q.offset == 0) {
+    return rm;
+  }
+
+  uint32_t end = rm.size();
+  uint32_t start = std::min(q.offset, end);
+
+  if (q.limit) {
+    end = std::min(end, *q.limit + q.offset);
+  }
+
+  return rm.SelectRows(RowMap(start, end));
+}
+
+Table Table::Sort(const std::vector<Order>& ob) const {
+  if (ob.empty()) {
+    return Copy();
   }
 
   // Return a copy of this table with the RowMaps using the computed ordered
   // RowMap.
-  Table table = CopyExceptRowMaps();
-  RowMap rm(std::move(idx));
-  for (const RowMap& map : row_maps_) {
-    table.row_maps_.emplace_back(map.SelectRows(rm));
-    PERFETTO_DCHECK(table.row_maps_.back().size() == table.row_count());
+  Table table = CopyExceptOverlays();
+  Query q;
+  q.orders = ob;
+  RowMap rm = QueryToRowMap(q);
+  for (const ColumnStorageOverlay& overlay : overlays_) {
+    table.overlays_.emplace_back(overlay.SelectRows(rm));
+    PERFETTO_DCHECK(table.overlays_.back().size() == table.row_count());
   }
 
-  // Remove the sorted flag from all the columns.
+  // Remove the sorted and row set flags from all the columns.
   for (auto& col : table.columns_) {
-    col.flags_ &= ~Column::Flag::kSorted;
+    col.flags_ &= ~ColumnLegacy::Flag::kSorted;
+    col.flags_ &= ~ColumnLegacy::Flag::kSetId;
   }
 
   // For the first order by, make the column flag itself as sorted but
   // only if the sort was in ascending order.
-  if (!od.front().desc) {
-    table.columns_[od.front().col_idx].flags_ |= Column::Flag::kSorted;
+  if (!ob.front().desc) {
+    table.columns_[ob.front().col_idx].flags_ |= ColumnLegacy::Flag::kSorted;
   }
 
+  std::vector<RefPtr<column::DataLayer>> overlay_layers(table.overlays_.size());
+  for (uint32_t i = 0; i < table.overlays_.size(); ++i) {
+    if (table.overlays_[i].row_map().IsIndexVector()) {
+      overlay_layers[i].reset(new column::ArrangementOverlay(
+          table.overlays_[i].row_map().GetIfIndexVector(),
+          column::DataLayerChain::Indices::State::kNonmonotonic));
+    } else if (table.overlays_[i].row_map().IsBitVector()) {
+      overlay_layers[i].reset(new column::SelectorOverlay(
+          table.overlays_[i].row_map().GetIfBitVector()));
+    } else if (table.overlays_[i].row_map().IsRange()) {
+      overlay_layers[i].reset(
+          new column::RangeOverlay(table.overlays_[i].row_map().GetIfIRange()));
+    }
+  }
+  table.OnConstructionCompleted(storage_layers_, null_layers_,
+                                std::move(overlay_layers));
   return table;
 }
 
-Table Table::LookupJoin(JoinKey left, const Table& other, JoinKey right) {
-  // The join table will have the same size and RowMaps as the left (this)
-  // table because the left column is indexing the right table.
-  Table table(string_pool_, nullptr);
-  table.row_count_ = row_count_;
-  for (const RowMap& rm : row_maps_) {
-    table.row_maps_.emplace_back(rm.Copy());
+void Table::OnConstructionCompleted(
+    std::vector<RefPtr<column::DataLayer>> storage_layers,
+    std::vector<RefPtr<column::DataLayer>> null_layers,
+    std::vector<RefPtr<column::DataLayer>> overlay_layers) {
+  for (ColumnLegacy& col : columns_) {
+    col.BindToTable(this, string_pool_);
   }
-
-  for (const Column& col : columns_) {
-    // We skip id columns as they are misleading on join tables.
-    if (col.IsId())
-      continue;
-    table.columns_.emplace_back(col, &table, table.columns_.size(),
-                                col.row_map_idx_);
-  }
-
-  const Column& left_col = columns_[left.col_idx];
-  const Column& right_col = other.columns_[right.col_idx];
-
-  // For each index in the left column, retrieve the index of the row inside
-  // the RowMap of the right column. By getting the index of the row rather
-  // than the row number itself, we can call |Apply| on the other RowMaps
-  // in the right table.
-  std::vector<uint32_t> indices(row_count_);
-  for (uint32_t i = 0; i < row_count_; ++i) {
-    SqlValue val = left_col.Get(i);
-    PERFETTO_CHECK(val.type != SqlValue::Type::kNull);
-    indices[i] = right_col.IndexOf(val).value();
-  }
-
-  // Apply the computed RowMap to each of the right RowMaps, adding it to the
-  // join table as we go.
-  RowMap rm(std::move(indices));
-  for (const RowMap& ot : other.row_maps_) {
-    table.row_maps_.emplace_back(ot.SelectRows(rm));
-  }
-
-  uint32_t left_row_maps_size = static_cast<uint32_t>(row_maps_.size());
-  for (const Column& col : other.columns_) {
-    // We skip id columns as they are misleading on join tables.
-    if (col.IsId())
-      continue;
-
-    // Ensure that we offset the RowMap index by the number of RowMaps in the
-    // left table.
-    table.columns_.emplace_back(col, &table, table.columns_.size(),
-                                col.row_map_idx_ + left_row_maps_size);
-  }
-  return table;
+  PERFETTO_CHECK(storage_layers.size() == columns_.size());
+  PERFETTO_CHECK(null_layers.size() == columns_.size());
+  PERFETTO_CHECK(overlay_layers.size() == overlays_.size());
+  storage_layers_ = std::move(storage_layers);
+  null_layers_ = std::move(null_layers);
+  overlay_layers_ = std::move(overlay_layers);
 }
 
-}  // namespace trace_processor
-}  // namespace perfetto
+void Table::CreateChains() const {
+  chains_.resize(columns_.size());
+  for (uint32_t i = 0; i < columns_.size(); ++i) {
+    chains_[i] = storage_layers_[i]->MakeChain();
+    if (const auto& null_overlay = null_layers_[i]; null_overlay.get()) {
+      chains_[i] = null_overlay->MakeChain(std::move(chains_[i]));
+    }
+    const auto& oly_idx = columns_[i].overlay_index();
+    if (const auto& overlay = overlay_layers_[oly_idx]; overlay.get()) {
+      chains_[i] = overlay->MakeChain(
+          std::move(chains_[i]),
+          column::DataLayer::ChainCreationArgs{columns_[i].IsSorted()});
+    }
+  }
+}
+
+void Table::ApplyDistinct(const Query& q, RowMap* rm) const {
+  auto& ob = q.orders;
+  PERFETTO_DCHECK(!ob.empty());
+
+  // `q.orders` should be treated here only as information on what should we
+  // run distinct on, they should not be used for subsequent sorting.
+  // TODO(mayzner): Remove the check after we implement the multi column
+  // distinct.
+  PERFETTO_DCHECK(ob.size() == 1);
+
+  std::vector<uint32_t> table_indices = std::move(*rm).TakeAsIndexVector();
+  auto indices = Indices::Create(table_indices, Indices::State::kMonotonic);
+  ChainForColumn(ob.front().col_idx).Distinct(indices);
+  PERFETTO_DCHECK(indices.tokens.size() <= table_indices.size());
+
+  for (uint32_t i = 0; i < indices.tokens.size(); ++i) {
+    table_indices[i] = indices.tokens[i].payload;
+  }
+  table_indices.resize(indices.tokens.size());
+
+  // Sorting that happens later might require indices to preserve ordering.
+  // TODO(mayzner): Needs to be changed after implementing multi column
+  // distinct.
+  if (q.order_type == Query::OrderType::kDistinctAndSort) {
+    std::sort(table_indices.begin(), table_indices.end());
+  }
+
+  *rm = RowMap(std::move(table_indices));
+}
+
+void Table::ApplySort(const Query& q, RowMap* rm) const {
+  const auto& ob = q.orders;
+  // Return the RowMap directly if there is a single constraint to sort the
+  // table by a column which is already sorted.
+  const auto& first_col = columns_[ob.front().col_idx];
+  if (ob.size() == 1 && first_col.IsSorted() && !ob.front().desc)
+    return;
+
+  // Build an index vector with all the indices for the first |size_| rows.
+  std::vector<uint32_t> idx = std::move(*rm).TakeAsIndexVector();
+  if (ob.size() == 1 && first_col.IsSorted()) {
+    // We special case a single constraint in descending order as this
+    // happens any time the |max| function is used in SQLite. We can be
+    // more efficient as this column is already sorted so we simply need
+    // to reverse the order of this column.
+    PERFETTO_DCHECK(ob.front().desc);
+    std::reverse(idx.begin(), idx.end());
+  } else {
+    QueryExecutor::SortLegacy(this, ob, idx);
+  }
+
+  *rm = RowMap(std::move(idx));
+}
+
+}  // namespace perfetto::trace_processor

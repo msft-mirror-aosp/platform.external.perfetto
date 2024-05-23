@@ -20,12 +20,11 @@
 #include <time.h>
 
 #include <unwindstack/Regs.h>
+#include <optional>
 #include <vector>
 
 #include "perfetto/base/flat_set.h"
-#include "perfetto/ext/base/optional.h"
 #include "perfetto/ext/base/utils.h"
-#include "perfetto/profiling/normalize.h"
 #include "src/profiling/perf/regs_parsing.h"
 
 #include "protos/perfetto/common/perf_events.gen.h"
@@ -39,23 +38,6 @@ constexpr uint64_t kDefaultSamplingFrequencyHz = 10;
 constexpr uint32_t kDefaultDataPagesPerRingBuffer = 256;  // 1 MB: 256x 4k pages
 constexpr uint32_t kDefaultReadTickPeriodMs = 100;
 constexpr uint32_t kDefaultRemoteDescriptorTimeoutMs = 100;
-
-base::Optional<std::string> Normalize(const std::string& src) {
-  // Construct a null-terminated string that will be mutated by the normalizer.
-  std::vector<char> base(src.size() + 1);
-  memcpy(base.data(), src.data(), src.size());
-  base[src.size()] = '\0';
-
-  char* new_start = base.data();
-  ssize_t new_sz = NormalizeCmdLine(&new_start, base.size());
-  if (new_sz < 0) {
-    PERFETTO_ELOG("Failed to normalize config cmdline [%s], aborting",
-                  base.data());
-    return base::nullopt;
-  }
-  return base::make_optional<std::string>(new_start,
-                                          static_cast<size_t>(new_sz));
-}
 
 // Acceptable forms: "sched/sched_switch" or "sched:sched_switch".
 std::pair<std::string, std::string> SplitTracepointString(
@@ -74,7 +56,7 @@ std::pair<std::string, std::string> SplitTracepointString(
 }
 
 // If set, the returned id is guaranteed to be non-zero.
-base::Optional<uint32_t> ParseTracepointAndResolveId(
+std::optional<uint32_t> ParseTracepointAndResolveId(
     const protos::gen::PerfEvents::Tracepoint& tracepoint,
     EventConfig::tracepoint_id_fn_t tracepoint_id_lookup) {
   std::string full_name = tracepoint.name();
@@ -86,7 +68,7 @@ base::Optional<uint32_t> ParseTracepointAndResolveId(
         "Invalid tracepoint format: %s. Should be a full path like "
         "sched:sched_switch or sched/sched_switch.",
         full_name.c_str());
-    return base::nullopt;
+    return std::nullopt;
   }
 
   uint32_t tracepoint_id = tracepoint_id_lookup(tp_group, tp_name);
@@ -95,67 +77,59 @@ base::Optional<uint32_t> ParseTracepointAndResolveId(
         "Failed to resolve tracepoint %s to its id. Check that tracefs is "
         "accessible and the event exists.",
         full_name.c_str());
-    return base::nullopt;
+    return std::nullopt;
   }
-  return base::make_optional(tracepoint_id);
+  return std::make_optional(tracepoint_id);
 }
 
-// Returns |base::nullopt| if any of the input cmdlines couldn't be normalized.
 // |T| is either gen::PerfEventConfig or gen::PerfEventConfig::Scope.
+// Note: the semantics of target_cmdline and exclude_cmdline were changed since
+// their original introduction. They used to be put through a canonicalization
+// function that simplified them to the binary name alone. We no longer do this,
+// regardless of whether we're parsing an old-style config. The overall outcome
+// shouldn't change for almost all existing uses.
 template <typename T>
-base::Optional<TargetFilter> ParseTargetFilter(const T& cfg) {
+TargetFilter ParseTargetFilter(
+    const T& cfg,
+    std::optional<ProcessSharding> process_sharding) {
   TargetFilter filter;
   for (const auto& str : cfg.target_cmdline()) {
-    base::Optional<std::string> opt = Normalize(str);
-    if (!opt.has_value()) {
-      PERFETTO_ELOG("Failure normalizing cmdline: [%s]", str.c_str());
-      return base::nullopt;
-    }
-    filter.cmdlines.insert(std::move(opt.value()));
+    filter.cmdlines.push_back(str);
   }
-
   for (const auto& str : cfg.exclude_cmdline()) {
-    base::Optional<std::string> opt = Normalize(str);
-    if (!opt.has_value()) {
-      PERFETTO_ELOG("Failure normalizing cmdline: [%s]", str.c_str());
-      return base::nullopt;
-    }
-    filter.exclude_cmdlines.insert(std::move(opt.value()));
+    filter.exclude_cmdlines.push_back(str);
   }
-
   for (const int32_t pid : cfg.target_pid()) {
     filter.pids.insert(pid);
   }
-
   for (const int32_t pid : cfg.exclude_pid()) {
     filter.exclude_pids.insert(pid);
   }
-
   filter.additional_cmdline_count = cfg.additional_cmdline_count();
-
-  return base::make_optional(std::move(filter));
+  filter.process_sharding = process_sharding;
+  return filter;
 }
 
 constexpr bool IsPowerOfTwo(size_t v) {
   return (v != 0 && ((v & (v - 1)) == 0));
 }
 
-// returns |base::nullopt| if the input is invalid.
-base::Optional<uint32_t> ChooseActualRingBufferPages(uint32_t config_value) {
+// returns |std::nullopt| if the input is invalid.
+std::optional<uint32_t> ChooseActualRingBufferPages(uint32_t config_value) {
   if (!config_value) {
     static_assert(IsPowerOfTwo(kDefaultDataPagesPerRingBuffer), "");
-    return base::make_optional(kDefaultDataPagesPerRingBuffer);
+    return std::make_optional(kDefaultDataPagesPerRingBuffer);
   }
 
   if (!IsPowerOfTwo(config_value)) {
     PERFETTO_ELOG("kernel buffer size must be a power of two pages");
-    return base::nullopt;
+    return std::nullopt;
   }
 
-  return base::make_optional(config_value);
+  return std::make_optional(config_value);
 }
 
-base::Optional<PerfCounter> ToPerfCounter(
+std::optional<PerfCounter> ToPerfCounter(
     std::string name,
     protos::gen::PerfEvents::Counter pb_enum) {
   using protos::gen::PerfEvents;
@@ -168,6 +142,38 @@ base::Optional<PerfCounter> ToPerfCounter(
       return PerfCounter::BuiltinCounter(name, PerfEvents::SW_PAGE_FAULTS,
                                          PERF_TYPE_SOFTWARE,
                                          PERF_COUNT_SW_PAGE_FAULTS);
+    case PerfEvents::SW_TASK_CLOCK:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_TASK_CLOCK,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_TASK_CLOCK);
+    case PerfEvents::SW_CONTEXT_SWITCHES:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_CONTEXT_SWITCHES,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_CONTEXT_SWITCHES);
+    case PerfEvents::SW_CPU_MIGRATIONS:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_CPU_MIGRATIONS,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_CPU_MIGRATIONS);
+    case PerfEvents::SW_PAGE_FAULTS_MIN:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_PAGE_FAULTS_MIN,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_PAGE_FAULTS_MIN);
+    case PerfEvents::SW_PAGE_FAULTS_MAJ:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_PAGE_FAULTS_MAJ,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_PAGE_FAULTS_MAJ);
+    case PerfEvents::SW_ALIGNMENT_FAULTS:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_ALIGNMENT_FAULTS,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_ALIGNMENT_FAULTS);
+    case PerfEvents::SW_EMULATION_FAULTS:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::SW_EMULATION_FAULTS,
+                                         PERF_TYPE_SOFTWARE,
+                                         PERF_COUNT_SW_EMULATION_FAULTS);
+    case PerfEvents::SW_DUMMY:
+      return PerfCounter::BuiltinCounter(
+          name, PerfEvents::SW_DUMMY, PERF_TYPE_SOFTWARE, PERF_COUNT_SW_DUMMY);
+
     case PerfEvents::HW_CPU_CYCLES:
       return PerfCounter::BuiltinCounter(name, PerfEvents::HW_CPU_CYCLES,
                                          PERF_TYPE_HARDWARE,
@@ -176,10 +182,62 @@ base::Optional<PerfCounter> ToPerfCounter(
       return PerfCounter::BuiltinCounter(name, PerfEvents::HW_INSTRUCTIONS,
                                          PERF_TYPE_HARDWARE,
                                          PERF_COUNT_HW_INSTRUCTIONS);
+    case PerfEvents::HW_CACHE_REFERENCES:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::HW_CACHE_REFERENCES,
+                                         PERF_TYPE_HARDWARE,
+                                         PERF_COUNT_HW_CACHE_REFERENCES);
+    case PerfEvents::HW_CACHE_MISSES:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::HW_CACHE_MISSES,
+                                         PERF_TYPE_HARDWARE,
+                                         PERF_COUNT_HW_CACHE_MISSES);
+    case PerfEvents::HW_BRANCH_INSTRUCTIONS:
+      return PerfCounter::BuiltinCounter(
+          name, PerfEvents::HW_BRANCH_INSTRUCTIONS, PERF_TYPE_HARDWARE,
+          PERF_COUNT_HW_BRANCH_INSTRUCTIONS);
+    case PerfEvents::HW_BRANCH_MISSES:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::HW_BRANCH_MISSES,
+                                         PERF_TYPE_HARDWARE,
+                                         PERF_COUNT_HW_BRANCH_MISSES);
+    case PerfEvents::HW_BUS_CYCLES:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::HW_BUS_CYCLES,
+                                         PERF_TYPE_HARDWARE,
+                                         PERF_COUNT_HW_BUS_CYCLES);
+    case PerfEvents::HW_STALLED_CYCLES_FRONTEND:
+      return PerfCounter::BuiltinCounter(
+          name, PerfEvents::HW_STALLED_CYCLES_FRONTEND, PERF_TYPE_HARDWARE,
+          PERF_COUNT_HW_STALLED_CYCLES_FRONTEND);
+    case PerfEvents::HW_STALLED_CYCLES_BACKEND:
+      return PerfCounter::BuiltinCounter(
+          name, PerfEvents::HW_STALLED_CYCLES_BACKEND, PERF_TYPE_HARDWARE,
+          PERF_COUNT_HW_STALLED_CYCLES_BACKEND);
+    case PerfEvents::HW_REF_CPU_CYCLES:
+      return PerfCounter::BuiltinCounter(name, PerfEvents::HW_REF_CPU_CYCLES,
+                                         PERF_TYPE_HARDWARE,
+                                         PERF_COUNT_HW_REF_CPU_CYCLES);
+
     default:
       PERFETTO_ELOG("Unrecognised PerfEvents::Counter enum value: %zu",
                     static_cast<size_t>(pb_enum));
-      return base::nullopt;
+      return std::nullopt;
+  }
+}
+
+int32_t ToClockId(protos::gen::PerfEvents::PerfClock pb_enum) {
+  using protos::gen::PerfEvents;
+  switch (static_cast<int>(pb_enum)) {  // cast to pacify -Wswitch-enum
+    case PerfEvents::PERF_CLOCK_REALTIME:
+      return CLOCK_REALTIME;
+    case PerfEvents::PERF_CLOCK_MONOTONIC:
+      return CLOCK_MONOTONIC;
+    case PerfEvents::PERF_CLOCK_MONOTONIC_RAW:
+      return CLOCK_MONOTONIC_RAW;
+    case PerfEvents::PERF_CLOCK_BOOTTIME:
+      return CLOCK_BOOTTIME;
+    // Default to a monotonic clock since it should be compatible with all types
+    // of events. Whereas boottime cannot be used with hardware events due to
+    // potential access within non-maskable interrupts.
+    default:
+      return CLOCK_MONOTONIC_RAW;
   }
 }
 
@@ -236,20 +294,10 @@ PerfCounter PerfCounter::RawEvent(std::string name,
 }
 
 // static
-base::Optional<EventConfig> EventConfig::Create(
-    const DataSourceConfig& ds_config,
-    tracepoint_id_fn_t tracepoint_id_lookup) {
-  protos::gen::PerfEventConfig pb_config;
-  if (!pb_config.ParseFromString(ds_config.perf_event_config_raw()))
-    return base::nullopt;
-
-  return EventConfig::Create(pb_config, ds_config, tracepoint_id_lookup);
-}
-
-// static
-base::Optional<EventConfig> EventConfig::Create(
+std::optional<EventConfig> EventConfig::Create(
     const protos::gen::PerfEventConfig& pb_config,
     const DataSourceConfig& raw_ds_config,
+    std::optional<ProcessSharding> process_sharding,
     tracepoint_id_fn_t tracepoint_id_lookup) {
   // Timebase: sampling interval.
   uint64_t sampling_frequency = 0;
@@ -273,15 +321,15 @@ base::Optional<EventConfig> EventConfig::Create(
     auto maybe_counter =
         ToPerfCounter(timebase_name, pb_config.timebase().counter());
     if (!maybe_counter)
-      return base::nullopt;
+      return std::nullopt;
     timebase_event = *maybe_counter;
 
   } else if (pb_config.timebase().has_tracepoint()) {
     const auto& tracepoint_pb = pb_config.timebase().tracepoint();
-    base::Optional<uint32_t> maybe_id =
+    std::optional<uint32_t> maybe_id =
         ParseTracepointAndResolveId(tracepoint_pb, tracepoint_id_lookup);
     if (!maybe_id)
-      return base::nullopt;
+      return std::nullopt;
     timebase_event = PerfCounter::Tracepoint(
         timebase_name, tracepoint_pb.name(), tracepoint_pb.filter(), *maybe_id);
 
@@ -297,33 +345,53 @@ base::Optional<EventConfig> EventConfig::Create(
   }
 
   // Callstack sampling.
-  bool sample_callstacks = false;
+  bool user_frames = false;
   bool kernel_frames = false;
   TargetFilter target_filter;
   bool legacy_config = pb_config.all_cpus();  // all_cpus was mandatory before
   if (pb_config.has_callstack_sampling() || legacy_config) {
-    sample_callstacks = true;
+    user_frames = true;
 
-    // Process scoping.
-    auto maybe_filter =
+    // Userspace callstacks.
+    using protos::gen::PerfEventConfig;
+    switch (static_cast<int>(pb_config.callstack_sampling().user_frames())) {
+      case PerfEventConfig::UNWIND_UNKNOWN:
+        // default to true, both for backwards compatibility and because it's
+        // almost always what the user wants.
+        user_frames = true;
+        break;
+      case PerfEventConfig::UNWIND_SKIP:
+        user_frames = false;
+        break;
+      case PerfEventConfig::UNWIND_DWARF:
+        user_frames = true;
+        break;
+      default:
+        // enum value from the future that we don't yet know, refuse the config
+        // TODO(rsavitski): double-check that both pbzero and ::gen propagate
+        // unknown enum values.
+        return std::nullopt;
+    }
+
+    // Process scoping. Sharding parameter is supplied from outside as it is
+    // shared by all data sources within a tracing session.
+    target_filter =
         pb_config.callstack_sampling().has_scope()
-            ? ParseTargetFilter(pb_config.callstack_sampling().scope())
-            : ParseTargetFilter(pb_config);  // backwards compatibility
-    if (!maybe_filter.has_value())
-      return base::nullopt;
+            ? ParseTargetFilter(pb_config.callstack_sampling().scope(),
+                                process_sharding)
+            : ParseTargetFilter(pb_config,
+                                process_sharding);  // backwards compatibility
 
-    target_filter = std::move(maybe_filter.value());
-
-    // Inclusion of kernel callchains.
+    // Kernel callstacks.
     kernel_frames = pb_config.callstack_sampling().kernel_frames() ||
                     pb_config.kernel_frames();
   }
 
   // Ring buffer options.
-  base::Optional<uint32_t> ring_buffer_pages =
+  std::optional<uint32_t> ring_buffer_pages =
       ChooseActualRingBufferPages(pb_config.ring_buffer_pages());
   if (!ring_buffer_pages.has_value())
-    return base::nullopt;
+    return std::nullopt;
 
   uint32_t read_tick_period_ms = pb_config.ring_buffer_read_period_ms()
                                      ? pb_config.ring_buffer_read_period_ms()
@@ -348,12 +416,12 @@ base::Optional<EventConfig> EventConfig::Create(
     // TODO(rsavitski): for now, make an extremely conservative guess of an 8
     // byte sample (stack sampling samples can be up to 64KB). This is most
     // likely as good as no limit in practice.
-    samples_per_tick_limit = *ring_buffer_pages * (base::kPageSize / 8);
+    samples_per_tick_limit = *ring_buffer_pages * (base::GetSysPageSize() / 8);
   }
   PERFETTO_DLOG("Capping samples (not records) per tick to [%" PRIu64 "]",
                 samples_per_tick_limit);
   if (samples_per_tick_limit == 0)
-    return base::nullopt;
+    return std::nullopt;
 
   // Optional footprint controls.
   uint64_t max_enqueued_footprint_bytes =
@@ -385,12 +453,10 @@ base::Optional<EventConfig> EventConfig::Create(
   // What the samples will contain.
   pe.sample_type = PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_READ;
   // PERF_SAMPLE_TIME:
-  // We used to use CLOCK_BOOTTIME, but that is not nmi-safe, and therefore
-  // works only for software events.
-  pe.clockid = CLOCK_MONOTONIC_RAW;
+  pe.clockid = ToClockId(pb_config.timebase().timestamp_clock());
   pe.use_clockid = true;
 
-  if (sample_callstacks) {
+  if (user_frames) {
     pe.sample_type |= PERF_SAMPLE_STACK_USER | PERF_SAMPLE_REGS_USER;
     // PERF_SAMPLE_STACK_USER:
     // Needs to be < ((u16)(~0u)), and have bottom 8 bits clear.
@@ -401,18 +467,16 @@ base::Optional<EventConfig> EventConfig::Create(
     // PERF_SAMPLE_REGS_USER:
     pe.sample_regs_user =
         PerfUserRegsMaskForArch(unwindstack::Regs::CurrentArch());
-
-    // Optional kernel callchains:
-    if (kernel_frames) {
-      pe.sample_type |= PERF_SAMPLE_CALLCHAIN;
-      pe.exclude_callchain_user = true;
-    }
+  }
+  if (kernel_frames) {
+    pe.sample_type |= PERF_SAMPLE_CALLCHAIN;
+    pe.exclude_callchain_user = true;
   }
 
   return EventConfig(
-      raw_ds_config, pe, timebase_event, sample_callstacks,
-      std::move(target_filter), kernel_frames, ring_buffer_pages.value(),
-      read_tick_period_ms, samples_per_tick_limit, remote_descriptor_timeout_ms,
+      raw_ds_config, pe, timebase_event, user_frames, kernel_frames,
+      std::move(target_filter), ring_buffer_pages.value(), read_tick_period_ms,
+      samples_per_tick_limit, remote_descriptor_timeout_ms,
       pb_config.unwind_state_clear_period_ms(), max_enqueued_footprint_bytes,
       pb_config.target_installed_by());
 }
@@ -420,9 +484,9 @@ base::Optional<EventConfig> EventConfig::Create(
 EventConfig::EventConfig(const DataSourceConfig& raw_ds_config,
                          const perf_event_attr& pe,
                          const PerfCounter& timebase_event,
-                         bool sample_callstacks,
-                         TargetFilter target_filter,
+                         bool user_frames,
                          bool kernel_frames,
+                         TargetFilter target_filter,
                          uint32_t ring_buffer_pages,
                          uint32_t read_tick_period_ms,
                          uint64_t samples_per_tick_limit,
@@ -432,9 +496,9 @@ EventConfig::EventConfig(const DataSourceConfig& raw_ds_config,
                          std::vector<std::string> target_installed_by)
     : perf_event_attr_(pe),
       timebase_event_(timebase_event),
-      sample_callstacks_(sample_callstacks),
-      target_filter_(std::move(target_filter)),
+      user_frames_(user_frames),
       kernel_frames_(kernel_frames),
+      target_filter_(std::move(target_filter)),
       ring_buffer_pages_(ring_buffer_pages),
       read_tick_period_ms_(read_tick_period_ms),
       samples_per_tick_limit_(samples_per_tick_limit),

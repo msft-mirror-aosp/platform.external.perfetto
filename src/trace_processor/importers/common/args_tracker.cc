@@ -17,9 +17,15 @@
 #include "src/trace_processor/importers/common/args_tracker.h"
 
 #include <algorithm>
+#include <cstdint>
 
-namespace perfetto {
-namespace trace_processor {
+#include "src/trace_processor/db/column.h"
+#include "src/trace_processor/importers/common/args_translation_table.h"
+#include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/types/trace_processor_context.h"
+#include "src/trace_processor/types/variadic.h"
+
+namespace perfetto::trace_processor {
 
 ArgsTracker::ArgsTracker(TraceProcessorContext* context) : context_(context) {}
 
@@ -27,7 +33,7 @@ ArgsTracker::~ArgsTracker() {
   Flush();
 }
 
-void ArgsTracker::AddArg(Column* arg_set_id,
+void ArgsTracker::AddArg(ColumnLegacy* arg_set_id,
                          uint32_t row,
                          StringId flat_key,
                          StringId key,
@@ -67,38 +73,56 @@ void ArgsTracker::Flush() {
   std::stable_sort(args_.begin(), args_.end(), comparator);
 
   for (uint32_t i = 0; i < args_.size();) {
-    const auto& arg = args_[i];
-    Column* column = arg.column;
-    auto row = arg.row;
+    const GlobalArgsTracker::Arg& arg = args_[i];
+    auto* col = arg.column;
+    uint32_t row = arg.row;
 
     uint32_t next_rid_idx = i + 1;
-    while (next_rid_idx < args_.size() &&
-           column == args_[next_rid_idx].column &&
+    while (next_rid_idx < args_.size() && col == args_[next_rid_idx].column &&
            row == args_[next_rid_idx].row) {
       next_rid_idx++;
     }
 
     ArgSetId set_id =
-        context_->global_args_tracker->AddArgSet(args_, i, next_rid_idx);
-    column->Set(row, SqlValue::Long(set_id));
+        context_->global_args_tracker->AddArgSet(&args_[0], i, next_rid_idx);
+    if (col->IsNullable()) {
+      TypedColumn<std::optional<uint32_t>>::FromColumn(col)->Set(row, set_id);
+    } else {
+      TypedColumn<uint32_t>::FromColumn(col)->Set(row, set_id);
+    }
 
     i = next_rid_idx;
   }
   args_.clear();
 }
 
+ArgsTracker::CompactArgSet ArgsTracker::ToCompactArgSet(
+    const ColumnLegacy& column,
+    uint32_t row_number) && {
+  CompactArgSet compact_args;
+  for (const auto& arg : args_) {
+    PERFETTO_DCHECK(arg.column == &column);
+    PERFETTO_DCHECK(arg.row == row_number);
+    compact_args.emplace_back(arg.ToCompactArg());
+  }
+  args_.clear();
+  return compact_args;
+}
+
+bool ArgsTracker::NeedsTranslation(const ArgsTranslationTable& table) const {
+  return std::any_of(
+      args_.begin(), args_.end(), [&table](const GlobalArgsTracker::Arg& arg) {
+        return table.NeedsTranslation(arg.flat_key, arg.key, arg.value.type);
+      });
+}
+
 ArgsTracker::BoundInserter::BoundInserter(ArgsTracker* args_tracker,
-                                          Column* arg_set_id_column,
+                                          ColumnLegacy* arg_set_id_column,
                                           uint32_t row)
     : args_tracker_(args_tracker),
       arg_set_id_column_(arg_set_id_column),
       row_(row) {}
 
-ArgsTracker::BoundInserter::~BoundInserter() {}
+ArgsTracker::BoundInserter::~BoundInserter() = default;
 
-ArgsTracker::BoundInserter::BoundInserter(BoundInserter&&) = default;
-ArgsTracker::BoundInserter& ArgsTracker::BoundInserter::operator=(
-    BoundInserter&&) = default;
-
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

@@ -50,53 +50,78 @@ class TaskRunner;
 // to interact with this sporadically, only when they run out of space on their
 // current thread-local chunk.
 //
-// When the arbiter is created using CreateUnboundInstance(), the following
-// state transitions are possible:
+// The arbiter can become "unbound" as a consequence of:
+//  (a) being created without an endpoint
+//  (b) CreateStartupTraceWriter calls after creation (whether created with or
+//      without endpoint).
 //
-//   [ !fully_bound_, !endpoint_, 0 unbound buffer reservations ]
-//       |     |
-//       |     | CreateStartupTraceWriter(buf)
-//       |     |  buffer reservations += buf
-//       |     |
-//       |     |             ----
-//       |     |            |    | CreateStartupTraceWriter(buf)
-//       |     |            |    |  buffer reservations += buf
-//       |     V            |    V
-//       |   [ !fully_bound_, !endpoint_, >=1 unbound buffer reservations ]
-//       |                                                |
-//       |                       BindToProducerEndpoint() |
-//       |                                                |
-//       | BindToProducerEndpoint()                       |
-//       |                                                V
-//       |   [ !fully_bound_, endpoint_, >=1 unbound buffer reservations ]
-//       |   A    |    A                               |     A
-//       |   |    |    |                               |     |
-//       |   |     ----                                |     |
-//       |   |    CreateStartupTraceWriter(buf)        |     |
-//       |   |     buffer reservations += buf          |     |
-//       |   |                                         |     |
-//       |   | CreateStartupTraceWriter(buf)           |     |
-//       |   |  where buf is not yet bound             |     |
-//       |   |  buffer reservations += buf             |     | (yes)
-//       |   |                                         |     |
-//       |   |        BindStartupTargetBuffer(buf, id) |-----
-//       |   |           buffer reservations -= buf    | reservations > 0?
-//       |   |                                         |
-//       |   |                                         | (no)
-//       V   |                                         V
-//       [ fully_bound_, endpoint_, 0 unbound buffer reservations ]
-//          |    A
-//          |    | CreateStartupTraceWriter(buf)
-//          |    |  where buf is already bound
-//           ----
+// Entering the unbound state is only supported if all trace writers are created
+// in kDrop mode. In the unbound state, the arbiter buffers commit messages
+// until all trace writers are bound to a target buffer.
+//
+// The following state transitions are possible:
+//
+//   CreateInstance()
+//    |
+//    |  CreateUnboundInstance()
+//    |    |
+//    |    |
+//    |    V
+//    |  [ !fully_bound_, !endpoint_, 0 unbound buffer reservations ]
+//    |      |     |
+//    |      |     | CreateStartupTraceWriter(buf)
+//    |      |     |  buffer reservations += buf
+//    |      |     |
+//    |      |     |             ----
+//    |      |     |            |    | CreateStartupTraceWriter(buf)
+//    |      |     |            |    |  buffer reservations += buf
+//    |      |     V            |    V
+//    |      |   [ !fully_bound_, !endpoint_, >=1 unbound buffer reservations ]
+//    |      |                                                |
+//    |      |                       BindToProducerEndpoint() |
+//    |      |                                                |
+//    |      | BindToProducerEndpoint()                       |
+//    |      |                                                V
+//    |      |   [ !fully_bound_, endpoint_, >=1 unbound buffer reservations ]
+//    |      |   A    |    A                               |     A
+//    |      |   |    |    |                               |     |
+//    |      |   |     ----                                |     |
+//    |      |   |    CreateStartupTraceWriter(buf)        |     |
+//    |      |   |     buffer reservations += buf          |     |
+//    |      |   |                                         |     |
+//    |      |   | CreateStartupTraceWriter(buf)           |     |
+//    |      |   |  where buf is not yet bound             |     |
+//    |      |   |  buffer reservations += buf             |     | (yes)
+//    |      |   |                                         |     |
+//    |      |   |        BindStartupTargetBuffer(buf, id) |-----
+//    |      |   |           buffer reservations -= buf    | reservations > 0?
+//    |      |   |                                         |
+//    |      |   |                                         | (no)
+//    |      V   |                                         V
+//     --> [ fully_bound_, endpoint_, 0 unbound buffer reservations ]
+//              |    A
+//              |    | CreateStartupTraceWriter(buf)
+//              |    |  where buf is already bound
+//               ----
 class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
  public:
   // See SharedMemoryArbiter::CreateInstance(). |start|, |size| define the
   // boundaries of the shared memory buffer. ProducerEndpoint and TaskRunner may
   // be |nullptr| if created unbound, see
   // SharedMemoryArbiter::CreateUnboundInstance().
+
+  // SharedMemoryArbiterImpl(void* start,
+  //                         size_t size,
+  //                         size_t page_size,
+  //                         TracingService::ProducerEndpoint*
+  //                         producer_endpoint, base::TaskRunner* task_runner) :
+  //   SharedMemoryArbiterImpl(start, size, page_size, false, producer_endpoint,
+  //   task_runner) {
+  // }
+
   SharedMemoryArbiterImpl(void* start,
                           size_t size,
+                          ShmemMode mode,
                           size_t page_size,
                           TracingService::ProducerEndpoint*,
                           base::TaskRunner*);
@@ -105,8 +130,7 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
   // BufferExhaustedPolicy, this may return an invalid chunk if no valid free
   // chunk could be found in the SMB.
   SharedMemoryABI::Chunk GetNewChunk(const SharedMemoryABI::ChunkHeader&,
-                                     BufferExhaustedPolicy,
-                                     size_t size_hint = 0);
+                                     BufferExhaustedPolicy);
 
   // Puts back a Chunk that has been completed and sends a request to the
   // service to move it to the central tracing buffer. |target_buffer| is the
@@ -131,6 +155,10 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
 
   static void set_default_layout_for_testing(SharedMemoryABI::PageLayout l) {
     default_page_layout = l;
+  }
+
+  static SharedMemoryABI::PageLayout default_page_layout_for_testing() {
+    return default_page_layout;
   }
 
   // SharedMemoryArbiter implementation.
@@ -227,10 +255,12 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
   // state.
   bool UpdateFullyBoundLocked();
 
-  const bool initially_bound_;
-
   // Only accessed on |task_runner_| after the producer endpoint was bound.
   TracingService::ProducerEndpoint* producer_endpoint_ = nullptr;
+
+  // Set to true when this instance runs in a emulation mode for a producer
+  // endpoint that doesn't support shared memory (e.g. vsock).
+  const bool use_shmem_emulation_ = false;
 
   // --- Begin lock-protected members ---
 
@@ -249,6 +279,13 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
   // reservation is created by calling CreateStartupTraceWriter() with a new
   // reservation id.
   bool fully_bound_;
+
+  // Whether the arbiter was always bound. If false, the arbiter was unbound at
+  // one point in time.
+  bool was_always_bound_;
+
+  // Whether all created trace writers were created with kDrop policy.
+  bool all_writers_have_drop_policy_ = true;
 
   // IDs of writers and their assigned target buffers that should be registered
   // with the service after the arbiter and/or their startup target buffer is

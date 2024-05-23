@@ -24,16 +24,7 @@
 namespace perfetto {
 namespace trace_processor {
 
-enum TraceType {
-  kUnknownTraceType,
-  kProtoTraceType,
-  kJsonTraceType,
-  kFuchsiaTraceType,
-  kSystraceTraceType,
-  kGzipTraceType,
-  kCtraceTraceType,
-  kNinjaLogTraceType,
-};
+constexpr size_t kGuessTraceMaxLookahead = 64;
 
 TraceType GuessTraceType(const uint8_t* data, size_t size);
 
@@ -43,7 +34,7 @@ class ForwardingTraceParser : public ChunkedTraceReader {
   ~ForwardingTraceParser() override;
 
   // ChunkedTraceReader implementation
-  util::Status Parse(std::unique_ptr<uint8_t[]>, size_t) override;
+  util::Status Parse(TraceBlobView) override;
   void NotifyEndOfFile() override;
 
  private:

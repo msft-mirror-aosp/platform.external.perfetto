@@ -35,6 +35,11 @@ class TracingSession;
 
 namespace internal {
 
+struct DataSourceParams {
+  bool supports_multiple_instances;
+  bool requires_callbacks_under_lock;
+};
+
 struct DataSourceStaticState;
 
 // This class acts as a bridge between the public API methods and the
@@ -47,7 +52,7 @@ struct DataSourceStaticState;
 // and methods that are required to implement them should go into
 // src/tracing/internal/tracing_muxer_impl.h instead: that one can pull in
 // perfetto headers outside of public, this one cannot.
-class PERFETTO_EXPORT TracingMuxer {
+class PERFETTO_EXPORT_COMPONENT TracingMuxer {
  public:
   static TracingMuxer* Get() { return instance_; }
 
@@ -62,7 +67,13 @@ class PERFETTO_EXPORT TracingMuxer {
   using DataSourceFactory = std::function<std::unique_ptr<DataSourceBase>()>;
   virtual bool RegisterDataSource(const DataSourceDescriptor&,
                                   DataSourceFactory,
+                                  DataSourceParams,
+                                  bool no_flush,
                                   DataSourceStaticState*) = 0;
+
+  // Updates the DataSourceDescriptor for the DataSource.
+  virtual void UpdateDataSourceDescriptor(const DataSourceDescriptor&,
+                                          const DataSourceStaticState*) = 0;
 
   // It identifies the right backend and forwards the call to it.
   // The returned TraceWriter must be used within the same sequence (for most
@@ -83,6 +94,19 @@ class PERFETTO_EXPORT TracingMuxer {
                                    InterceptorFactory,
                                    InterceptorBase::TLSFactory,
                                    InterceptorBase::TracePacketCallback) = 0;
+
+  // Informs the tracing services to activate any of these triggers if any
+  // tracing session was waiting for them.
+  //
+  // Sends the trigger signal to all the initialized backends that are currently
+  // connected and that connect in the next `ttl_ms` milliseconds (but returns
+  // immediately anyway).
+  virtual void ActivateTriggers(const std::vector<std::string>&,
+                                uint32_t ttl_ms) = 0;
+
+  base::PlatformThreadId GetCurrentThreadId() {
+    return platform_->GetCurrentThreadId();
+  }
 
  protected:
   explicit TracingMuxer(Platform* platform) : platform_(platform) {}

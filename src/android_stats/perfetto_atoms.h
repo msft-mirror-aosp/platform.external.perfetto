@@ -32,9 +32,6 @@ enum class PerfettoStatsdAtom {
   // Guardrails inside perfetto_cmd before tracing is finished.
   kOnTimeout = 16,
   kCmdUserBuildTracingNotAllowed = 43,
-  kCmdFailedToInitGuardrailState = 44,
-  kCmdInvalidGuardrailState = 45,
-  kCmdHitUploadLimit = 46,
 
   // Checkpoints inside traced.
   kTracedEnableTracing = 37,
@@ -47,6 +44,7 @@ enum class PerfettoStatsdAtom {
   // they log the trigger name.
   kTracedTriggerStartTracing = 41,
   kTracedTriggerStopTracing = 42,
+  kTracedTriggerCloneSnapshot = 53,
 
   // Guardrails inside traced.
   kTracedEnableTracingExistingTraceSession = 18,
@@ -70,39 +68,50 @@ enum class PerfettoStatsdAtom {
   kTracedStartTracingInvalidSessionState = 36,
   kTracedEnableTracingInvalidFilter = 47,
   kTracedEnableTracingOobTargetBuffer = 48,
+  kTracedEnableTracingInvalidTriggerMode = 52,
+  kTracedEnableTracingInvalidBrFilename = 54,
 
   // Checkpoints inside perfetto_cmd after tracing has finished.
   kOnTracingDisabled = 4,
-  kUploadIncidentBegin = 8,
   kFinalizeTraceAndExit = 11,
+  kCmdFwReportBegin = 49,
+  // Will be removed once incidentd is no longer used.
+  kUploadIncidentBegin = 8,
   kNotUploadingEmptyTrace = 17,
 
   // Guardrails inside perfetto_cmd after tracing has finished.
+  kCmdFwReportEmptyTrace = 50,
+  // Will be removed once incidentd is no longer used.
   kUploadIncidentFailure = 10,
+
+  // "Successful" terminal states inside perfetto_cmd.
+  kCmdFwReportHandoff = 51,
 
   // Deprecated as "success" is misleading; it simply means we were
   // able to communicate with incidentd. Will be removed once
-  // incidentd is properly instrumented.
+  // incidentd is no longer used.
   kUploadIncidentSuccess = 9,
 
-  // Deprecated as has the potential to be too spammy. Will be
-  // replaced with a whole new atom proto which uses a count metric
-  // instead of the event metric used for this proto.
-  kTriggerBegin = 12,
-  kTriggerSuccess = 13,
-  kTriggerFailure = 14,
+  // Contained trigger begin/success/failure. Replaced by
+  // |PerfettoTriggerAtom| to allow aggregation using a count metric
+  // and reduce spam.
+  // reserved 12, 13, 14;
 
-  // Deprecated as too coarse grained to be useful. Will be replaced
-  // with better broken down atoms as we do with traced.
-  kHitGuardrails = 15,
+  // Contained that a guardrail in perfetto_cmd was hit. Replaced with
+  // kCmd* guardrails.
+  // reserved 15;
 
   // Contained status of Dropbox uploads. Removed as Perfetto no
   // longer supports uploading traces using Dropbox.
   // reserved 5, 6, 7;
+
+  // Contained status of guardrail state initalization and upload limit in
+  // perfetto_cmd. Removed as perfetto no longer manages stateful guardrails
+  // reserved 44, 45, 46;
 };
 
 // This must match the values of the PerfettoTrigger::TriggerType enum in:
-// frameworks/base/cmds/statsd/src/atoms.proto
+// frameworks/proto_logging/stats/atoms.proto
 enum PerfettoTriggerAtom {
   kUndefined = 0,
 

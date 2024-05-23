@@ -17,6 +17,7 @@ debian_sid_arm64-sysroot/
 debian_sid_armel-sysroot/
 emulator/
 googletest/
+grpc/src
 jsoncpp/
 libbacktrace/
 libbase/
@@ -27,6 +28,7 @@ libunwind/
 linenoise/
 linux/
 linux64/
+llvm-project/
 lzma/
 mac/
 ndk/
@@ -38,3 +40,4 @@ test_data/
 typefaces/
 win/
 zlib/
+zstd/

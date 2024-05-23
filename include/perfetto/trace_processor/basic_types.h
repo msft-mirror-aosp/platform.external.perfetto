@@ -20,9 +20,11 @@
 #include <assert.h>
 #include <math.h>
 #include <stdarg.h>
-#include <stdint.h>
-#include <functional>
+#include <cstdint>
+
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "perfetto/base/export.h"
@@ -31,20 +33,17 @@
 namespace perfetto {
 namespace trace_processor {
 
-// Various places in trace processor assume a max number of CPUs to keep code
-// simpler (e.g. use arrays instead of vectors).
-constexpr size_t kMaxCpus = 128;
-
 // All metrics protos are in this directory. When loading metric extensions, the
 // protos are mounted onto a virtual path inside this directory.
 constexpr char kMetricProtoRoot[] = "protos/perfetto/metrics/";
 
 // Enum which encodes how trace processor should try to sort the ingested data.
+// Note that these options are only applicable to proto traces; other trace
+// types (e.g. JSON, Fuchsia) use full sorts.
 enum class SortingMode {
   // This option allows trace processor to use built-in heuristics about how to
   // sort the data. Generally, this option is correct for most embedders as
-  // trace processor reads information from the trace (e.g. TraceConfig) to make
-  // the best decision.
+  // trace processor reads information from the trace to make the best decision.
   //
   // The exact heuristics are implementation details but will ensure that all
   // relevant tables are sorted by timestamp.
@@ -58,14 +57,19 @@ enum class SortingMode {
   // data to be skipped.
   kForceFullSort = 1,
 
-  // This option forces trace processor to use the |flush_period_ms| specified
-  // in the TraceConfig to perform a windowed sort of the data. The window size
-  // is not guaranteed to be exactly |flush_period_ms| but will be of the same
-  // order of magnitude; the exact value is an implementation detail and should
-  // not be relied upon.
+  // This option is deprecated in v18; trace processor will ignore it and
+  // use |kDefaultHeuristics|.
   //
-  // If a |flush_period_ms| is not specified in the TraceConfig, this mode will
-  // act the same as |SortingMode::kDefaultHeuristics|.
+  // Rationale for deprecation:
+  // The new windowed sorting logic in trace processor uses a combination of
+  // flush and buffer-read lifecycle events inside the trace instead of
+  // using time-periods from the config.
+  //
+  // Recommended migration:
+  // Users of this option should switch to using |kDefaultHeuristics| which
+  // will act very similarly to the pre-v20 behaviour of this option.
+  //
+  // This option is scheduled to be removed in v21.
   kForceFlushPeriodWindowedSort = 2
 };
 
@@ -74,7 +78,8 @@ enum class SortingMode {
 enum class DropFtraceDataBefore {
   // Drops ftrace data before timestmap specified by the
   // TracingServiceEvent::tracing_started packet. If this packet is not in the
-  // trace, no data is dropped.
+  // trace, no data is dropped. If preserve_ftrace_buffer (from the trace
+  // config) is set, no data is dropped.
   // Note: this event was introduced in S+ so no data will be dropped on R-
   // traces.
   // This is the default approach.
@@ -88,11 +93,41 @@ enum class DropFtraceDataBefore {
   // trace, no data is dropped.
   // This option can be used in cases where R- traces are being considered and
   // |kTracingStart| cannot be used because the event was not present.
-  kAllDataSourcesStarted = 2,
+  kAllDataSourcesStarted = 2
+};
+
+// Specifies whether the ftrace data should be "soft-dropped" until a given
+// global timestamp, meaning we'll still populate the |ftrace_events| table
+// and some other internal storage, but won't persist derived info such as
+// slices. See also |DropFtraceDataBefore| above.
+// Note: this might behave in surprising ways for traces using >1 tracefs
+// instances, but those aren't seen in practice at the time of writing.
+enum class SoftDropFtraceDataBefore {
+  // Drop until the earliest timestamp covered by all per-cpu event bundles.
+  // In other words, the maximum of all per-cpu "valid from" timestamps.
+  // Important for correct parsing of traces where the ftrace data is written
+  // into a central perfetto buffer in ring-buffer mode (as opposed to discard
+  // mode).
+  kAllPerCpuBuffersValid = 0,
+
+  // Keep all events (though DropFtraceDataBefore still applies).
+  kNoDrop = 1
+};
+
+// Enum which encodes which timestamp source (if any) should be used to drop
+// track event data before this timestamp.
+enum class DropTrackEventDataBefore {
+  // Retain all track events. This is the default approach.
+  kNoDrop = 0,
+
+  // Drops track events before the timestamp specified by the
+  // TrackEventRangeOfInterest trace packet. No data is dropped if this packet
+  // is not present in the trace.
+  kTrackEventRangeOfInterest = 1,
 };
 
 // Struct for configuring a TraceProcessor instance (see trace_processor.h).
-struct PERFETTO_EXPORT Config {
+struct PERFETTO_EXPORT_COMPONENT Config {
   // Indicates the sortinng mode that trace processor should use on the passed
   // trace packets. See the enum documentation for more details.
   SortingMode sorting_mode = SortingMode::kDefaultHeuristics;
@@ -108,17 +143,47 @@ struct PERFETTO_EXPORT Config {
   bool ingest_ftrace_in_raw_table = true;
 
   // Indicates the event which should be used as a marker to drop ftrace data in
-  // the trace before that event. See the ennu documenetation for more details.
+  // the trace before that event. See the enum documentation for more details.
   DropFtraceDataBefore drop_ftrace_data_before =
       DropFtraceDataBefore::kTracingStarted;
+
+  // Specifies whether the ftrace data should be "soft-dropped" until a given
+  // global timestamp.
+  SoftDropFtraceDataBefore soft_drop_ftrace_data_before =
+      SoftDropFtraceDataBefore::kAllPerCpuBuffersValid;
+
+  // Indicates the source of timestamp before which track events should be
+  // dropped. See the enum documentation for more details.
+  DropTrackEventDataBefore drop_track_event_data_before =
+      DropTrackEventDataBefore::kNoDrop;
 
   // Any built-in metric proto or sql files matching these paths are skipped
   // during trace processor metric initialization.
   std::vector<std::string> skip_builtin_metric_paths;
+
+  // When set to true, the trace processor analyzes trace proto content, and
+  // exports the field path -> total size mapping into an SQL table.
+  //
+  // The analysis feature is hidden behind the flag so that the users who don't
+  // need this feature don't pay the performance costs.
+  //
+  // The flag has no impact on non-proto traces.
+  bool analyze_trace_proto_content = false;
+
+  // When set to true, trace processor will be augmented with a bunch of helpful
+  // features for local development such as extra SQL fuctions.
+  //
+  // Note that the features behind this flag are subject to breakage without
+  // backward compability guarantees at any time.
+  bool enable_dev_features = false;
+
+  // Sets developer-only flags to the provided values. Does not have any affect
+  // unless |enable_dev_features| = true.
+  std::unordered_map<std::string, std::string> dev_flags;
 };
 
 // Represents a dynamically typed value returned by SQL.
-struct PERFETTO_EXPORT SqlValue {
+struct PERFETTO_EXPORT_COMPONENT SqlValue {
   // Represents the type of the value.
   enum Type {
     kNull = 0,
@@ -126,6 +191,7 @@ struct PERFETTO_EXPORT SqlValue {
     kDouble,
     kString,
     kBytes,
+    kLastType = kBytes,
   };
 
   SqlValue() = default;
@@ -190,6 +256,27 @@ struct PERFETTO_EXPORT SqlValue {
   // The size of bytes_value. Only valid when |type == kBytes|.
   size_t bytes_count = 0;
   Type type = kNull;
+};
+
+// Data used to register a new SQL module.
+struct SqlModule {
+  // Must be unique among modules, or can be used to override existing module if
+  // |allow_module_override| is set.
+  std::string name;
+
+  // Pairs of strings used for |IMPORT| with the contents of SQL files being
+  // run. Strings should only contain alphanumeric characters and '.', where
+  // string before the first dot has to be module name.
+  //
+  // It is encouraged that import key should be the path to the SQL file being
+  // run, with slashes replaced by dots and without the SQL extension. For
+  // example, 'android/camera/jank.sql' would be imported by
+  // 'android.camera.jank'.
+  std::vector<std::pair<std::string, std::string>> files;
+
+  // If true, SqlModule will override registered module with the same name. Can
+  // only be set if enable_dev_features is true, otherwise will throw an error.
+  bool allow_module_override = false;
 };
 
 }  // namespace trace_processor
