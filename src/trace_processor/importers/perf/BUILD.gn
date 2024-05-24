@@ -34,9 +34,27 @@ source_set("record") {
     "../../storage",
     "../../tables:tables_python",
     "../../types",
+    "../../util:build_id",
     "../common:parser_types",
   ]
 }
+
+source_set("tracker") {
+  sources = [
+    "dso_tracker.cc",
+    "dso_tracker.h",
+  ]
+  deps = [
+    "../../../../gn:default_deps",
+    "../../../../include/perfetto/ext/base:base",
+    "../../../../protos/third_party/simpleperf:zero",
+    "../..//storage:storage",
+    "../..//tables:tables",
+    "../..//types:types",
+    "../common:common",
+  ]
+}
+
 source_set("perf") {
   sources = [
     "attrs_section_reader.cc",
@@ -55,9 +73,11 @@ source_set("perf") {
   ]
   public_deps = [ ":record" ]
   deps = [
+    ":tracker",
     "../../../../gn:default_deps",
     "../../../../protos/perfetto/trace:zero",
     "../../../../protos/perfetto/trace/profiling:zero",
+    "../../../../protos/third_party/simpleperf:zero",
     "../../sorter",
     "../../storage",
     "../../tables:tables_python",

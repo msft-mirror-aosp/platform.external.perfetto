@@ -88,6 +88,7 @@ from diff_tests.parser.profiling.tests_heap_graph import ProfilingHeapGraph
 from diff_tests.parser.profiling.tests_heap_profiling import ProfilingHeapProfiling
 from diff_tests.parser.profiling.tests_llvm_symbolizer import ProfilingLlvmSymbolizer
 from diff_tests.parser.sched.tests import SchedParser
+from diff_tests.parser.simpleperf.tests import Simpleperf
 from diff_tests.parser.smoke.tests import Smoke
 from diff_tests.parser.smoke.tests_compute_metrics import SmokeComputeMetrics
 from diff_tests.parser.smoke.tests_json import SmokeJson
@@ -111,6 +112,7 @@ from diff_tests.stdlib.intervals.intersect_tests import IntervalsIntersect
 from diff_tests.stdlib.intervals.tests import StdlibIntervals
 from diff_tests.stdlib.linux.tests import LinuxStdlib
 from diff_tests.stdlib.memory.heap_graph_dominator_tree_tests import HeapGraphDominatorTree
+from diff_tests.stdlib.memory.tests import Memory
 from diff_tests.stdlib.pkvm.tests import Pkvm
 from diff_tests.stdlib.prelude.math_functions_tests import PreludeMathFunctions
 from diff_tests.stdlib.prelude.pprof_functions_tests import PreludePprofFunctions
@@ -182,6 +184,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ProfilingLlvmSymbolizer(index_path, 'parser/profiling',
                                'ProfilingLlvmSymbolizer').fetch(),
       *SchedParser(index_path, 'parser/sched', 'SchedParser').fetch(),
+      *Simpleperf(index_path, 'parser/simpleperf', 'Simpleperf').fetch(),
       *StdlibSched(index_path, 'stdlib/sched', 'StdlibSched').fetch(),
       *Smoke(index_path, 'parser/smoke', 'Smoke').fetch(),
       *SmokeComputeMetrics(index_path, 'parser/smoke',
@@ -271,6 +274,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *DynamicTables(index_path, 'stdlib/dynamic_tables',
                      'DynamicTables').fetch(),
       *LinuxStdlib(index_path, 'stdlib/linux', 'LinuxStdlib').fetch(),
+      *Memory(index_path, 'stdlib/memory', 'Memory').fetch(),
       *PreludeMathFunctions(index_path, 'stdlib/prelude',
                             'PreludeMathFunctions').fetch(),
       *HeapGraphDominatorTree(index_path, 'stdlib/memory',

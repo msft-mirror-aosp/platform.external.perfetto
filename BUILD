@@ -240,6 +240,7 @@ perfetto_cc_library(
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
         ":src_trace_processor_importers_perf_record",
+        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -345,6 +346,7 @@ perfetto_cc_library(
                ":protos_perfetto_trace_track_event_zero",
                ":protos_perfetto_trace_translation_zero",
                ":protos_third_party_pprof_zero",
+               ":protos_third_party_simpleperf_zero",
                ":protozero",
                ":src_base_base",
                ":src_base_version",
@@ -1738,6 +1740,15 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/importers/perf:tracker
+perfetto_filegroup(
+    name = "src_trace_processor_importers_perf_tracker",
+    srcs = [
+        "src/trace_processor/importers/perf/dso_tracker.cc",
+        "src/trace_processor/importers/perf/dso_tracker.h",
+    ],
+)
+
 # GN target: //src/trace_processor/importers/proto/winscope:full
 perfetto_filegroup(
     name = "src_trace_processor_importers_proto_winscope_full",
@@ -2605,6 +2616,15 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/memory/linux:linux
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_memory_linux_linux",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/memory/linux/high_watermark.sql",
+        "src/trace_processor/perfetto_sql/stdlib/memory/linux/process.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/memory:memory
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_memory_memory",
@@ -2720,6 +2740,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
         ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
         ":src_trace_processor_perfetto_sql_stdlib_linux_linux",
+        ":src_trace_processor_perfetto_sql_stdlib_memory_linux_linux",
         ":src_trace_processor_perfetto_sql_stdlib_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
         ":src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
@@ -5557,6 +5578,25 @@ perfetto_cc_protozero_library(
     ],
 )
 
+# GN target: //protos/third_party/simpleperf:source_set
+perfetto_proto_library(
+    name = "protos_third_party_simpleperf_protos",
+    srcs = [
+        "protos/third_party/simpleperf/record_file.proto",
+    ],
+    visibility = [
+        PERFETTO_CONFIG.proto_library_visibility,
+    ],
+)
+
+# GN target: //protos/third_party/simpleperf:zero
+perfetto_cc_protozero_library(
+    name = "protos_third_party_simpleperf_zero",
+    deps = [
+        ":protos_third_party_simpleperf_protos",
+    ],
+)
+
 # GN target: //protos/third_party/statsd:config_source_set
 perfetto_proto_library(
     name = "protos_third_party_statsd_config_protos",
@@ -5933,6 +5973,7 @@ perfetto_cc_library(
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
         ":src_trace_processor_importers_perf_record",
+        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6038,6 +6079,7 @@ perfetto_cc_library(
                ":protos_perfetto_trace_track_event_zero",
                ":protos_perfetto_trace_translation_zero",
                ":protos_third_party_pprof_zero",
+               ":protos_third_party_simpleperf_zero",
                ":protozero",
                ":src_base_base",
                ":src_trace_processor_containers_containers",
@@ -6109,6 +6151,7 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
         ":src_trace_processor_importers_perf_record",
+        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6203,6 +6246,7 @@ perfetto_cc_binary(
                ":protos_perfetto_trace_track_event_zero",
                ":protos_perfetto_trace_translation_zero",
                ":protos_third_party_pprof_zero",
+               ":protos_third_party_simpleperf_zero",
                ":protozero",
                ":src_base_base",
                ":src_base_http_http",
@@ -6345,6 +6389,7 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_ninja_ninja",
         ":src_trace_processor_importers_perf_perf",
         ":src_trace_processor_importers_perf_record",
+        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6439,6 +6484,7 @@ perfetto_cc_binary(
                ":protos_perfetto_trace_track_event_zero",
                ":protos_perfetto_trace_translation_zero",
                ":protos_third_party_pprof_zero",
+               ":protos_third_party_simpleperf_zero",
                ":protozero",
                ":src_base_base",
                ":src_base_version",
