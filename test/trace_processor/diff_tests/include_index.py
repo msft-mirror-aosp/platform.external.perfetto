@@ -96,6 +96,7 @@ from diff_tests.parser.smoke.tests_sched_events import SmokeSchedEvents
 from diff_tests.parser.track_event.tests import TrackEvent
 from diff_tests.parser.translated_args.tests import TranslatedArgs
 from diff_tests.parser.ufs.tests import Ufs
+from diff_tests.parser.zip.tests import Zip
 from diff_tests.stdlib.android.frames_tests import Frames
 from diff_tests.stdlib.android.startups_tests import Startups
 from diff_tests.stdlib.android.tests import AndroidStdlib
@@ -105,6 +106,7 @@ from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.counters.tests import StdlibCounterIntervals
 from diff_tests.stdlib.cpu.tests import Cpu
 from diff_tests.stdlib.dynamic_tables.tests import DynamicTables
+from diff_tests.stdlib.gpu.tests import Gpu
 from diff_tests.stdlib.graphs.dominator_tree_tests import DominatorTree
 from diff_tests.stdlib.graphs.partition_tests import GraphPartitionTests
 from diff_tests.stdlib.graphs.search_tests import GraphSearchTests
@@ -219,6 +221,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *FtraceCrop(index_path, 'parser/ftrace', 'FtraceCrop').fetch(),
       *ParsingTracedStats(index_path, 'parser/parsing',
                           'ParsingTracedStats').fetch(),
+      *Zip(index_path, 'parser/zip', 'Zip').fetch(),
   ]
 
   metrics_tests = [
@@ -265,6 +268,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *Cpu(index_path, 'stdlib/cpu', 'Cpu').fetch(),
       *DominatorTree(index_path, 'stdlib/graphs', 'DominatorTree').fetch(),
       *Frames(index_path, 'stdlib/android', 'Frames').fetch(),
+      *Gpu(index_path, 'stdlib/gpu', 'Gpu').fetch(),
       *GraphSearchTests(index_path, 'stdlib/graphs',
                         'GraphSearchTests').fetch(),
       *GraphPartitionTests(index_path, 'stdlib/graphs',

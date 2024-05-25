@@ -217,6 +217,7 @@ perfetto_cc_library(
         ":src_kernel_utils_syscall_table",
         ":src_protozero_proto_ring_buffer",
         ":src_trace_processor_db_column_column",
+        ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
@@ -250,6 +251,7 @@ perfetto_cc_library(
         ":src_trace_processor_importers_systrace_full",
         ":src_trace_processor_importers_systrace_systrace_line",
         ":src_trace_processor_importers_systrace_systrace_parser",
+        ":src_trace_processor_importers_zip_full",
         ":src_trace_processor_lib",
         ":src_trace_processor_metatrace",
         ":src_trace_processor_metrics_metrics",
@@ -1425,6 +1427,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/db:compare
+perfetto_filegroup(
+    name = "src_trace_processor_db_compare",
+    srcs = [
+        "src/trace_processor/db/compare.h",
+    ],
+)
+
 # GN target: //src/trace_processor/db:db
 perfetto_filegroup(
     name = "src_trace_processor_db_db",
@@ -2001,6 +2011,15 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/importers/systrace/systrace_parser.cc",
         "src/trace_processor/importers/systrace/systrace_parser.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/zip:full
+perfetto_filegroup(
+    name = "src_trace_processor_importers_zip_full",
+    srcs = [
+        "src/trace_processor/importers/zip/zip_trace_reader.cc",
+        "src/trace_processor/importers/zip/zip_trace_reader.h",
     ],
 )
 
@@ -2589,6 +2608,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/gpu:gpu
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_gpu_gpu",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/gpu/frequency.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/graphs:graphs
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
@@ -2616,10 +2643,19 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/memory/android:android
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_memory_android_android",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/memory/android/gpu.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/memory/linux:linux
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_memory_linux_linux",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/memory/linux/general.sql",
         "src/trace_processor/perfetto_sql/stdlib/memory/linux/high_watermark.sql",
         "src/trace_processor/perfetto_sql/stdlib/memory/linux/process.sql",
     ],
@@ -2737,9 +2773,11 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_cpu_cpu",
         ":src_trace_processor_perfetto_sql_stdlib_cpu_utilization_utilization",
         ":src_trace_processor_perfetto_sql_stdlib_deprecated_v42_common_common",
+        ":src_trace_processor_perfetto_sql_stdlib_gpu_gpu",
         ":src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
         ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
         ":src_trace_processor_perfetto_sql_stdlib_linux_linux",
+        ":src_trace_processor_perfetto_sql_stdlib_memory_android_android",
         ":src_trace_processor_perfetto_sql_stdlib_memory_linux_linux",
         ":src_trace_processor_perfetto_sql_stdlib_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
@@ -5950,6 +5988,7 @@ perfetto_cc_library(
     srcs = [
         ":src_kernel_utils_syscall_table",
         ":src_trace_processor_db_column_column",
+        ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
@@ -5983,6 +6022,7 @@ perfetto_cc_library(
         ":src_trace_processor_importers_systrace_full",
         ":src_trace_processor_importers_systrace_systrace_line",
         ":src_trace_processor_importers_systrace_systrace_parser",
+        ":src_trace_processor_importers_zip_full",
         ":src_trace_processor_lib",
         ":src_trace_processor_metatrace",
         ":src_trace_processor_metrics_metrics",
@@ -6128,6 +6168,7 @@ perfetto_cc_binary(
         ":src_profiling_symbolizer_symbolizer",
         ":src_protozero_proto_ring_buffer",
         ":src_trace_processor_db_column_column",
+        ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
@@ -6161,6 +6202,7 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_systrace_full",
         ":src_trace_processor_importers_systrace_systrace_line",
         ":src_trace_processor_importers_systrace_systrace_parser",
+        ":src_trace_processor_importers_zip_full",
         ":src_trace_processor_lib",
         ":src_trace_processor_metatrace",
         ":src_trace_processor_metrics_metrics",
@@ -6366,6 +6408,7 @@ perfetto_cc_binary(
         ":src_profiling_symbolizer_symbolizer",
         ":src_protozero_proto_ring_buffer",
         ":src_trace_processor_db_column_column",
+        ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
@@ -6399,6 +6442,7 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_systrace_full",
         ":src_trace_processor_importers_systrace_systrace_line",
         ":src_trace_processor_importers_systrace_systrace_parser",
+        ":src_trace_processor_importers_zip_full",
         ":src_trace_processor_lib",
         ":src_trace_processor_metatrace",
         ":src_trace_processor_metrics_metrics",
