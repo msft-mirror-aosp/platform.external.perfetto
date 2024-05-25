@@ -106,7 +106,7 @@ std::string_view InternTable::Find(size_t index) const {
 // collection of ftrace event messages) because data in a sched_switch message
 // is needed in order to know if the event should be added to the bundle.
 
-SchedSwitchTransform::~SchedSwitchTransform() = default;
+RedactSchedSwitchHarness::Modifier::~Modifier() = default;
 
 base::Status RedactSchedSwitchHarness::Transform(const Context& context,
                                                  std::string* packet) const {
@@ -188,14 +188,29 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEvent(
 
   for (auto field = decoder.ReadField(); field.valid();
        field = decoder.ReadField()) {
-    if (field.id() == protos::pbzero::FtraceEvent::kSchedSwitchFieldNumber) {
-      protos::pbzero::SchedSwitchFtraceEvent::Decoder sched_switch(
-          field.as_bytes());
-      RETURN_IF_ERROR(TransformFtraceEventSchedSwitch(
-          context, ts.as_uint64(), cpu, sched_switch, &scratch_str,
-          message->set_sched_switch()));
-    } else {
-      proto_util::AppendField(field, message);
+    switch (field.id()) {
+      case protos::pbzero::FtraceEvent::kSchedSwitchFieldNumber: {
+        protos::pbzero::SchedSwitchFtraceEvent::Decoder sched_switch(
+            field.as_bytes());
+        RETURN_IF_ERROR(TransformFtraceEventSchedSwitch(
+            context, ts.as_uint64(), cpu, sched_switch, &scratch_str,
+            message->set_sched_switch()));
+        break;
+      }
+
+      case protos::pbzero::FtraceEvent::kSchedWakingFieldNumber: {
+        protos::pbzero::SchedWakingFtraceEvent::Decoder sched_waking(
+            field.as_bytes());
+        RETURN_IF_ERROR(TransformFtraceEventSchedWaking(
+            context, ts.as_uint64(), cpu, sched_waking, &scratch_str,
+            message->set_sched_waking()));
+        break;
+      }
+
+      default: {
+        proto_util::AppendField(field, message);
+        break;
+      }
     }
   }
 
@@ -209,6 +224,10 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
     protos::pbzero::SchedSwitchFtraceEvent::Decoder& sched_switch,
     std::string* scratch_str,
     protos::pbzero::SchedSwitchFtraceEvent* message) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(scratch_str);
+  PERFETTO_DCHECK(message);
+
   auto has_fields = {
       sched_switch.has_prev_comm(), sched_switch.has_prev_pid(),
       sched_switch.has_prev_prio(), sched_switch.has_prev_state(),
@@ -233,10 +252,7 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
 
   scratch_str->assign(prev_comm.data, prev_comm.size);
 
-  for (const auto& transform : transforms_) {
-    RETURN_IF_ERROR(
-        transform->Transform(context, ts, cpu, &prev_pid, scratch_str));
-  }
+  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &prev_pid, scratch_str));
 
   message->set_prev_comm(*scratch_str);                // FieldNumber = 1
   message->set_prev_pid(prev_pid);                     // FieldNumber = 2
@@ -245,14 +261,52 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
 
   scratch_str->assign(next_comm.data, next_comm.size);
 
-  for (const auto& transform : transforms_) {
-    RETURN_IF_ERROR(
-        transform->Transform(context, ts, cpu, &next_pid, scratch_str));
-  }
+  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &next_pid, scratch_str));
 
   message->set_next_comm(*scratch_str);              // FieldNumber = 5
   message->set_next_pid(next_pid);                   // FieldNumber = 6
   message->set_next_prio(sched_switch.next_prio());  // FieldNumber = 7
+
+  return base::OkStatus();
+}
+
+base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedWaking(
+    const Context& context,
+    uint64_t ts,
+    int32_t cpu,
+    protos::pbzero::SchedWakingFtraceEvent::Decoder& sched_waking,
+    std::string* scratch_str,
+    protos::pbzero::SchedWakingFtraceEvent* message) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(scratch_str);
+  PERFETTO_DCHECK(message);
+
+  auto has_fields = {sched_waking.has_comm(), sched_waking.has_pid(),
+                     sched_waking.has_prio(), sched_waking.has_success(),
+                     sched_waking.has_target_cpu()};
+
+  if (!std::all_of(has_fields.begin(), has_fields.end(), IsTrue)) {
+    return base::ErrStatus(
+        "RedactSchedSwitchHarness: missing required SchedWakingFtraceEvent "
+        "field.");
+  }
+
+  auto pid = sched_waking.pid();
+  auto comm = sched_waking.comm();
+
+  // There are 5 values in a sched switch message. Since 2 of the 5 can be
+  // replaced, it is easier/cleaner to go value-by-value. Go in proto-defined
+  // order.
+
+  scratch_str->assign(comm.data, comm.size);
+
+  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, scratch_str));
+
+  message->set_comm(*scratch_str);                     // FieldNumber = 1
+  message->set_pid(pid);                               // FieldNumber = 2
+  message->set_prio(sched_waking.prio());              // FieldNumber = 3
+  message->set_success(sched_waking.success());        // FieldNumber = 4
+  message->set_target_cpu(sched_waking.target_cpu());  // FieldNumber = 5
 
   return base::OkStatus();
 }
@@ -314,6 +368,9 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
     protos::pbzero::FtraceEventBundle::CompactSched::Decoder& comp_sched,
     InternTable* intern_table,
     protos::pbzero::FtraceEventBundle::CompactSched* message) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(message);
+
   auto has_fields = {
       comp_sched.has_intern_table(),
       comp_sched.has_switch_timestamp(),
@@ -359,9 +416,7 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
     scratch_str.assign(comm);
 
-    for (const auto& transform : transforms_) {
-      transform->Transform(context, ts, cpu, &pid, &scratch_str);
-    }
+    RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, &scratch_str));
 
     auto found = intern_table->Push(scratch_str.data(), scratch_str.size());
 
@@ -429,11 +484,11 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
 // Switch event transformation: Clear the comm value if the thread/process is
 // not part of the target packet.
-base::Status ClearComms::Transform(const Context& context,
-                                   uint64_t ts,
-                                   int32_t,
-                                   int32_t* pid,
-                                   std::string* comm) const {
+base::Status ClearComms::Modify(const Context& context,
+                                uint64_t ts,
+                                int32_t,
+                                int32_t* pid,
+                                std::string* comm) const {
   PERFETTO_DCHECK(pid);
   PERFETTO_DCHECK(comm);
 
