@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {EngineProxy, TrackContext} from '../public';
+import {Engine, TrackContext} from '../public';
 import {BaseCounterTrack, CounterOptions} from './base_counter_track';
 import {CounterColumns, SqlDataSource} from './debug_tracks';
 import {Disposable, DisposableCallback} from '../base/disposable';
@@ -30,7 +30,7 @@ export class SimpleCounterTrack extends BaseCounterTrack {
   private sqlTableName: string;
 
   constructor(
-    engine: EngineProxy,
+    engine: Engine,
     ctx: TrackContext,
     config: SimpleCounterTrackConfig,
   ) {
@@ -74,8 +74,6 @@ export class SimpleCounterTrack extends BaseCounterTrack {
   }
 
   private async dropTrackTable(): Promise<void> {
-    if (this.engine.isAlive) {
-      await this.engine.query(`drop table if exists ${this.sqlTableName}`);
-    }
+    await this.engine.tryQuery(`drop table if exists ${this.sqlTableName}`);
   }
 }

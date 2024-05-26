@@ -110,11 +110,13 @@ const cfg = {
   outDistDir: '',
   outExtDir: '',
   outBigtraceDistDir: '',
+  outOpenPerfettoTraceDistDir: '',
 };
 
 const RULES = [
   {r: /ui\/src\/assets\/index.html/, f: copyIndexHtml},
   {r: /ui\/src\/assets\/bigtrace.html/, f: copyBigtraceHtml},
+  {r: /ui\/src\/open_perfetto_trace\/index.html/, f: copyOpenPerfettoTraceHtml},
   {r: /ui\/src\/assets\/((.*)[.]png)/, f: copyAssets},
   {r: /buildtools\/typefaces\/(.+[.]woff2)/, f: copyAssets},
   {r: /buildtools\/catapult_trace_viewer\/(.+(js|html))/, f: copyAssets},
@@ -125,7 +127,7 @@ const RULES = [
     f: copyUiTestArtifactsAssets,
   },
   {r: /.*\/dist\/.+\/(?!manifest\.json).*/, f: genServiceWorkerManifestJson},
-  {r: /.*\/dist\/.*/, f: notifyLiveServer},
+  {r: /.*\/dist\/.*[.](js|html|css|wasm)$/, f: notifyLiveServer},
 ];
 
 const tasks = [];
@@ -149,6 +151,7 @@ async function main() {
   parser.add_argument('--run-integrationtests', '-T', {action: 'store_true'});
   parser.add_argument('--debug', '-d', {action: 'store_true'});
   parser.add_argument('--bigtrace', {action: 'store_true'});
+  parser.add_argument('--open-perfetto-trace', {action: 'store_true'});
   parser.add_argument('--interactive', '-i', {action: 'store_true'});
   parser.add_argument('--rebaseline', '-r', {action: 'store_true'});
   parser.add_argument('--no-depscheck', {action: 'store_true'});
@@ -175,10 +178,15 @@ async function main() {
   cfg.verbose = !!args.verbose;
   cfg.debug = !!args.debug;
   cfg.bigtrace = !!args.bigtrace;
+  cfg.openPerfettoTrace = !!args.open_perfetto_trace;
   cfg.startHttpServer = args.serve;
   cfg.noOverrideGnArgs = !!args.no_override_gn_args;
   if (args.bigtrace) {
     cfg.outBigtraceDistDir = ensureDir(pjoin(cfg.outDistDir, 'bigtrace'));
+  }
+  if (cfg.openPerfettoTrace) {
+    cfg.outOpenPerfettoTraceDistDir = ensureDir(pjoin(cfg.outDistRootDir,
+                                                      'open_perfetto_trace'));
   }
   if (args.serve_host) {
     cfg.httpServerListenHost = args.serve_host;
@@ -243,21 +251,29 @@ async function main() {
     scanDir('ui/src/test/diff_viewer');
     scanDir('buildtools/typefaces');
     scanDir('buildtools/catapult_trace_viewer');
-    generateImports('ui/src/tracks', 'all_tracks.ts');
+    generateImports('ui/src/core_plugins', 'all_core_plugins.ts');
     generateImports('ui/src/plugins', 'all_plugins.ts');
     compileProtos();
     genVersion();
-    transpileTsProject('ui');
-    transpileTsProject('ui/src/service_worker');
-    if (cfg.bigtrace) {
-      transpileTsProject('ui/src/bigtrace');
+
+    const tsProjects = [
+      'ui',
+      'ui/src/service_worker'
+    ];
+    if (cfg.bigtrace) tsProjects.push('ui/src/bigtrace');
+    if (cfg.openPerfettoTrace) {
+      scanDir('ui/src/open_perfetto_trace');
+      tsProjects.push('ui/src/open_perfetto_trace');
+    }
+
+
+    for (const prj of tsProjects) {
+      transpileTsProject(prj);
     }
 
     if (cfg.watch) {
-      transpileTsProject('ui', {watch: cfg.watch});
-      transpileTsProject('ui/src/service_worker', {watch: cfg.watch});
-      if (cfg.bigtrace) {
-        transpileTsProject('ui/src/bigtrace', {watch: cfg.watch});
+      for (const prj of tsProjects) {
+        transpileTsProject(prj, {watch: cfg.watch});
       }
     }
 
@@ -350,6 +366,12 @@ function copyBigtraceHtml(src) {
   }
 }
 
+function copyOpenPerfettoTraceHtml(src) {
+  if (cfg.openPerfettoTrace) {
+    addTask(cp, [src, pjoin(cfg.outOpenPerfettoTraceDistDir, 'index.html')]);
+  }
+}
+
 function copyAssets(src, dst) {
   addTask(cp, [src, pjoin(cfg.outDistDir, 'assets', dst)]);
   if (cfg.bigtrace) {
@@ -390,10 +412,7 @@ function compileProtos() {
     'protos/perfetto/config/perfetto_config.proto',
     'protos/perfetto/ipc/consumer_port.proto',
     'protos/perfetto/ipc/wire_protocol.proto',
-    'protos/perfetto/metrics/metrics.proto',
     'protos/perfetto/trace/perfetto/perfetto_metatrace.proto',
-    'protos/perfetto/trace/trace.proto',
-    'protos/perfetto/trace/trace_packet.proto',
     'protos/perfetto/trace_processor/trace_processor.proto',
   ];
   // Can't put --no-comments here - The comments are load bearing for
@@ -518,6 +537,9 @@ function bundleJs(cfgName) {
   const args = ['-c', rcfg, '--no-indent'];
   if (cfg.bigtrace) {
     args.push('--environment', 'ENABLE_BIGTRACE:true');
+  }
+  if (cfg.openPerfettoTrace) {
+    args.push('--environment', 'ENABLE_OPEN_PERFETTO_TRACE:true');
   }
   args.push(...(cfg.verbose ? [] : ['--silent']));
   if (cfg.watch) {

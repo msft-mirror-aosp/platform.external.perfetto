@@ -198,7 +198,8 @@ int ReadIdxStrAndUpdateCursor(DbSqliteModule::Cursor* cursor,
   }
 
   // DISTINCT
-  q.distinct = static_cast<Query::OrderType>(ReadLetterAndInt('D', &splitter));
+  q.order_type =
+      static_cast<Query::OrderType>(ReadLetterAndInt('D', &splitter));
 
   // LIMIT
   if (ReadLetterAndInt('L', &splitter)) {
@@ -570,7 +571,7 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
 
   // Distinct:
   idx_str += "D";
-  if (ob_idxes.size() == 1) {
+  if (ob_idxes.size() == 1 && PERFETTO_POPCOUNT(info->colUsed) == 1) {
     switch (sqlite3_vtab_distinct(info)) {
       case 0:
       case 1:

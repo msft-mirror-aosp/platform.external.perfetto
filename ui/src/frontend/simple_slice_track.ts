@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {EngineProxy, TrackContext} from '../public';
+import {Engine, TrackContext} from '../public';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
-} from '../tracks/custom_sql_table_slices';
+} from './tracks/custom_sql_table_slice_track';
 import {NamedSliceTrackTypes} from './named_slice_track';
 import {ARG_PREFIX, SliceColumns, SqlDataSource} from './debug_tracks';
 import {uuidv4Sql} from '../base/uuid';
 import {DisposableCallback} from '../base/disposable';
-import {DebugSliceDetailsTab} from '../tracks/debug/details_tab';
+import {DebugSliceDetailsTab} from '../core_plugins/debug/details_tab';
 
 export interface SimpleSliceTrackConfig {
   data: SqlDataSource;
@@ -35,7 +35,7 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
   private sqlTableName: string;
 
   constructor(
-    engine: EngineProxy,
+    engine: Engine,
     ctx: TrackContext,
     config: SimpleSliceTrackConfig,
   ) {
@@ -108,8 +108,6 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
   }
 
   private async destroyTrackTable() {
-    if (this.engine.isAlive) {
-      await this.engine.query(`DROP TABLE IF EXISTS ${this.sqlTableName}`);
-    }
+    await this.engine.tryQuery(`DROP TABLE IF EXISTS ${this.sqlTableName}`);
   }
 }

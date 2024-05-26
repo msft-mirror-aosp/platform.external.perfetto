@@ -44,7 +44,7 @@ import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {TrackManager} from '../common/track_cache';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
-import {Engine} from '../trace_processor/engine';
+import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 
 import {Analytics, initAnalytics} from './analytics';
@@ -56,6 +56,7 @@ import {SliceSqlId} from './sql_types';
 import {PxSpan, TimeScale} from './time_scale';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
 import {exists} from '../base/utils';
+import {OmniboxManager} from './omnibox_manager';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -221,6 +222,40 @@ export interface LegacySelectionArgs {
   pendingScrollId: number | undefined;
 }
 
+export interface TraceContext {
+  readonly start: time;
+  readonly end: time;
+
+  // This is the ts value at the time of the Unix epoch.
+  // Normally some large negative value, because the unix epoch is normally in
+  // the past compared to ts=0.
+  readonly realtimeOffset: time;
+
+  // This is the timestamp that we should use for our offset when in UTC mode.
+  // Usually the most recent UTC midnight compared to the trace start time.
+  readonly utcOffset: time;
+
+  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
+  // recorded into the trace, to show timestamps in the device local time.
+  readonly traceTzOffset: time;
+
+  // The list of CPUs in the trace
+  readonly cpus: number[];
+
+  // The number of gpus in the trace
+  readonly gpuCount: number;
+}
+
+export const defaultTraceContext: TraceContext = {
+  start: Time.ZERO,
+  end: Time.fromSeconds(10),
+  realtimeOffset: Time.ZERO,
+  utcOffset: Time.ZERO,
+  traceTzOffset: Time.ZERO,
+  cpus: [],
+  gpuCount: 0,
+};
+
 /**
  * Global accessors for state/dispatch in the frontend.
  */
@@ -260,18 +295,20 @@ class Globals {
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
   private _cmdManager = new CommandManager();
-  private _realtimeOffset = Time.ZERO;
-  private _utcOffset = Time.ZERO;
-  private _traceTzOffset = Time.ZERO;
   private _tabManager = new TabManager();
   private _trackManager = new TrackManager(this._store);
   private _selectionManager = new SelectionManager(this._store);
   private _hasFtrace: boolean = false;
 
+  omnibox = new OmniboxManager();
+
   scrollToTrackKey?: string | number;
   httpRpcState: HttpRpcState = {connected: false};
   newVersionAvailable = false;
   showPanningHint = false;
+  permalinkHash?: string;
+
+  traceContext = defaultTraceContext;
 
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
@@ -290,7 +327,7 @@ class Globals {
     count: new Uint8Array(0),
   };
 
-  engines = new Map<string, Engine>();
+  engines = new Map<string, EngineBase>();
 
   initialize(dispatch: Dispatch, router: Router) {
     this._dispatch = dispatch;
@@ -691,19 +728,19 @@ class Globals {
 
   // Get a timescale that covers the entire trace
   getTraceTimeScale(pxSpan: PxSpan): TimeScale {
-    const {start, end} = this.state.traceTime;
+    const {start, end} = this.traceContext;
     const traceTime = HighPrecisionTimeSpan.fromTime(start, end);
     return TimeScale.fromHPTimeSpan(traceTime, pxSpan);
   }
 
   // Get the trace time bounds
   stateTraceTime(): Span<HighPrecisionTime> {
-    const {start, end} = this.state.traceTime;
+    const {start, end} = this.traceContext;
     return HighPrecisionTimeSpan.fromTime(start, end);
   }
 
   stateTraceTimeTP(): Span<time, duration> {
-    const {start, end} = this.state.traceTime;
+    const {start, end} = this.traceContext;
     return new TimeSpan(start, end);
   }
 
@@ -723,37 +760,6 @@ class Globals {
     return assertExists(this._cmdManager);
   }
 
-  // This is the ts value at the time of the Unix epoch.
-  // Normally some large negative value, because the unix epoch is normally in
-  // the past compared to ts=0.
-  get realtimeOffset(): time {
-    return this._realtimeOffset;
-  }
-
-  set realtimeOffset(time: time) {
-    this._realtimeOffset = time;
-  }
-
-  // This is the timestamp that we should use for our offset when in UTC mode.
-  // Usually the most recent UTC midnight compared to the trace start time.
-  get utcOffset(): time {
-    return this._utcOffset;
-  }
-
-  set utcOffset(offset: time) {
-    this._utcOffset = offset;
-  }
-
-  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
-  // recorded into the trace, to show timestamps in the device local time.
-  get traceTzOffset(): time {
-    return this._traceTzOffset;
-  }
-
-  set traceTzOffset(offset: time) {
-    this._traceTzOffset = offset;
-  }
-
   get tabManager() {
     return this._tabManager;
   }
@@ -768,14 +774,14 @@ class Globals {
     switch (fmt) {
       case TimestampFormat.Timecode:
       case TimestampFormat.Seconds:
-        return this.state.traceTime.start;
+        return this.traceContext.start;
       case TimestampFormat.Raw:
       case TimestampFormat.RawLocale:
         return Time.ZERO;
       case TimestampFormat.UTC:
-        return this.utcOffset;
+        return this.traceContext.utcOffset;
       case TimestampFormat.TraceTz:
-        return this.traceTzOffset;
+        return this.traceContext.traceTzOffset;
       default:
         const x: never = fmt;
         throw new Error(`Unsupported format ${x}`);
@@ -862,6 +868,17 @@ function findTimeRangeOfSlice(slice: Partial<SliceLike>): {
     }
   } else {
     return {start: Time.INVALID, end: Time.INVALID};
+  }
+}
+
+// Returns the time span of the current selection, or the visible window if
+// there is no current selection.
+export function getTimeSpanOfSelectionOrVisibleWindow(): Span<time, duration> {
+  const range = globals.findTimeRangeOfSelection();
+  if (exists(range)) {
+    return new TimeSpan(range.start, range.end);
+  } else {
+    return globals.stateVisibleTime();
   }
 }
 

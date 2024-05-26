@@ -17,9 +17,8 @@ import m from 'mithril';
 import {Icons} from '../base/semantic_icons';
 import {duration, Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
-import {runQuery} from '../common/queries';
 import {raf} from '../core/raf_scheduler';
-import {EngineProxy} from '../trace_processor/engine';
+import {Engine} from '../trace_processor/engine';
 import {LONG, LONG_NULL, NUM, STR_NULL} from '../trace_processor/query_result';
 import {Button} from '../widgets/button';
 import {DetailsShell} from '../widgets/details_shell';
@@ -104,17 +103,18 @@ const ITEMS: ContextMenuItem[] = [
     run: (slice: SliceDetails) => {
       const engine = getEngine();
       if (engine === undefined) return;
-      runQuery(
-        `
+      engine
+        .query(
+          `
         INCLUDE PERFETTO MODULE android.binder;
         INCLUDE PERFETTO MODULE android.monitor_contention;
       `,
-        engine,
-      ).then(() =>
-        addDebugSliceTrack(
-          engine,
-          {
-            sqlSource: `
+        )
+        .then(() =>
+          addDebugSliceTrack(
+            engine,
+            {
+              sqlSource: `
                                 WITH merged AS (
                                   SELECT s.ts, s.dur, tx.aidl_name AS name, 0 AS depth
                                   FROM android_binder_txns tx
@@ -151,14 +151,14 @@ const ITEMS: ContextMenuItem[] = [
                                         AND short_blocked_method IS NOT NULL
                                   ORDER BY depth
                                 ) SELECT ts, dur, name FROM merged`,
-          },
-          `Binder names (${getProcessNameFromSlice(
-            slice,
-          )}:${getThreadNameFromSlice(slice)})`,
-          {ts: 'ts', dur: 'dur', name: 'name'},
-          [],
-        ),
-      );
+            },
+            `Binder names (${getProcessNameFromSlice(
+              slice,
+            )}:${getThreadNameFromSlice(slice)})`,
+            {ts: 'ts', dur: 'dur', name: 'name'},
+            [],
+          ),
+        );
     },
   },
 ];
@@ -167,7 +167,7 @@ function getSliceContextMenuItems(slice: SliceDetails) {
   return ITEMS.filter((item) => item.shouldDisplay(slice));
 }
 
-function getEngine(): EngineProxy | undefined {
+function getEngine(): Engine | undefined {
   const engineId = globals.getCurrentEngine()?.id;
   if (engineId === undefined) {
     return undefined;
@@ -177,7 +177,7 @@ function getEngine(): EngineProxy | undefined {
 }
 
 async function getAnnotationSlice(
-  engine: EngineProxy,
+  engine: Engine,
   id: number,
 ): Promise<SliceDetails | undefined> {
   const query = await engine.query(`
@@ -218,7 +218,7 @@ async function getAnnotationSlice(
 }
 
 async function getSliceDetails(
-  engine: EngineProxy,
+  engine: Engine,
   id: number,
   table: string,
 ): Promise<SliceDetails | undefined> {
@@ -300,7 +300,7 @@ export class ChromeSliceDetailsTab extends BottomTab<ChromeSliceDetailsTabConfig
     return !exists(this.sliceDetails);
   }
 
-  private renderRhs(engine: EngineProxy, slice: SliceDetails): m.Children {
+  private renderRhs(engine: Engine, slice: SliceDetails): m.Children {
     const precFlows = this.renderPrecedingFlows(slice);
     const followingFlows = this.renderFollowingFlows(slice);
     const args =

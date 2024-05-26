@@ -19,11 +19,13 @@
 
 #include <stdint.h>
 
-#include <memory>
+#include <tuple>
+#include <utility>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "src/trace_processor/importers/common/chunked_trace_reader.h"
 #include "src/trace_processor/importers/proto/multi_machine_trace_manager.h"
-#include "src/trace_processor/importers/proto/proto_incremental_state.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state_builder.h"
 #include "src/trace_processor/importers/proto/proto_trace_tokenizer.h"
 #include "src/trace_processor/storage/trace_storage.h"
 
@@ -76,14 +78,19 @@ class ProtoTraceReader : public ChunkedTraceReader {
   void ParseInternedData(const protos::pbzero::TracePacket_Decoder&,
                          TraceBlobView interned_data);
   void ParseTraceConfig(ConstBytes);
+  void ParseTraceStats(ConstBytes);
 
   std::optional<StringId> GetBuiltinClockNameOrNull(int64_t clock_id);
 
-  PacketSequenceState* GetIncrementalStateForPacketSequence(
+  PacketSequenceStateBuilder* GetIncrementalStateForPacketSequence(
       uint32_t sequence_id) {
-    if (!incremental_state)
-      incremental_state.reset(new ProtoIncrementalState(context_));
-    return incremental_state->GetOrCreateStateForPacketSequence(sequence_id);
+    auto* builder = packet_sequence_state_builders_.Find(sequence_id);
+    if (builder == nullptr) {
+      builder = packet_sequence_state_builders_
+                    .Insert(sequence_id, PacketSequenceStateBuilder(context_))
+                    .first;
+    }
+    return builder;
   }
   util::Status ParseExtensionDescriptor(ConstBytes descriptor);
 
@@ -95,9 +102,10 @@ class ProtoTraceReader : public ChunkedTraceReader {
   // timestamp given is latest_timestamp_.
   int64_t latest_timestamp_ = 0;
 
-  // Stores incremental state and references to interned data, e.g. for track
-  // event protos.
-  std::unique_ptr<ProtoIncrementalState> incremental_state;
+  base::FlatHashMap<uint32_t, PacketSequenceStateBuilder>
+      packet_sequence_state_builders_;
+
+  base::FlatHashMap<uint32_t, size_t> packet_sequence_data_loss_;
 
   StringId skipped_packet_key_id_;
   StringId invalid_incremental_state_key_id_;

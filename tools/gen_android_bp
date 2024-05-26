@@ -70,6 +70,7 @@ default_targets = [
     '//src/profiling/perf:traced_perf',
     '//src/traced/probes:traced_probes',
     '//src/traced/service:traced',
+    '//src/traced_relay:traced_relay',
     '//src/trace_processor:trace_processor_shell',
     '//src/trace_redaction:trace_redactor',
     '//test/cts:perfetto_cts_deps',
@@ -136,7 +137,7 @@ proto_groups = {
         ]
     },
     'config': {
-        'types': ['lite'],
+        'types': ['filegroup'],
         'targets': [
             '//protos/perfetto/config:source_set',
         ]

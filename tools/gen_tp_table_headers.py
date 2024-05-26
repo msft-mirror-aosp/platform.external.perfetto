@@ -67,10 +67,13 @@ def main():
     return os.path.join(args.import_prefix, get_relout_path(in_path))
 
   def get_relin_path_from_module_path(module_path: str):
-    return module_path[module_path.rfind('/src') + 1:]
+    return module_path[module_path.rfind(os.sep + 'src') + 1:]
 
   modules = [
-      os.path.splitext(get_relin_path(i).replace(os.sep, '.'))[0]
+      # On Windows the path can contain '/' or os.sep, depending on how this
+      # script is executed. So we need to replace both.
+      os.path.splitext(
+          get_relin_path(i).replace('/', '.').replace(os.sep, '.'))[0]
       for i in args.inputs
   ]
   headers: Dict[str, Header] = {}
