@@ -44,25 +44,28 @@ class InternTable {
   std::vector<std::string_view> interned_comms_;
 };
 
-class SchedSwitchTransform {
- public:
-  virtual ~SchedSwitchTransform();
-  virtual base::Status Transform(const Context& context,
-                                 uint64_t ts,
-                                 int32_t cpu,
-                                 int32_t* pid,
-                                 std::string* comm) const = 0;
-};
-
-// Goes through all sched switch events are modifies them.
+// TODO(vaage): Rename this class. When it was first created, it only handled
+// switch events, so having "switch" in the name sense. Now that it is
+// expanding to include waking events, a more general name is needed (e.g.
+// scheduling covers both switch and waking events).
 class RedactSchedSwitchHarness : public TransformPrimitive {
  public:
+  class Modifier {
+   public:
+    virtual ~Modifier();
+    virtual base::Status Modify(const Context& context,
+                                uint64_t ts,
+                                int32_t cpu,
+                                int32_t* pid,
+                                std::string* comm) const = 0;
+  };
+
   base::Status Transform(const Context& context,
                          std::string* packet) const override;
 
   template <class Transform>
   void emplace_transform() {
-    transforms_.emplace_back(new Transform());
+    modifier_ = std::make_unique<Transform>();
   }
 
  private:
@@ -86,6 +89,14 @@ class RedactSchedSwitchHarness : public TransformPrimitive {
       std::string* scratch_str,
       protos::pbzero::SchedSwitchFtraceEvent* message) const;
 
+  base::Status TransformFtraceEventSchedWaking(
+      const Context& context,
+      uint64_t ts,
+      int32_t cpu,
+      protos::pbzero::SchedWakingFtraceEvent::Decoder& sched_waking,
+      std::string* scratch_str,
+      protos::pbzero::SchedWakingFtraceEvent* message) const;
+
   base::Status TransformCompSched(
       const Context& context,
       int32_t cpu,
@@ -99,15 +110,15 @@ class RedactSchedSwitchHarness : public TransformPrimitive {
       InternTable* intern_table,
       protos::pbzero::FtraceEventBundle::CompactSched* message) const;
 
-  std::vector<std::unique_ptr<SchedSwitchTransform>> transforms_;
+  std::unique_ptr<Modifier> modifier_;
 };
 
-class ClearComms : public SchedSwitchTransform {
-  base::Status Transform(const Context& context,
-                         uint64_t ts,
-                         int32_t cpu,
-                         int32_t* pid,
-                         std::string* comm) const override;
+class ClearComms : public RedactSchedSwitchHarness::Modifier {
+  base::Status Modify(const Context& context,
+                      uint64_t ts,
+                      int32_t cpu,
+                      int32_t* pid,
+                      std::string* comm) const override;
 };
 
 }  // namespace perfetto::trace_redaction

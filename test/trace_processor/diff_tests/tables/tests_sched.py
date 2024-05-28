@@ -129,16 +129,16 @@ class TablesSched(TestSuite):
         """,
         out=Csv("""
         "id","type","ts","name","cpu","utid","arg_set_id","common_flags"
-        3,"ftrace_event",1735489788930,"sched_waking",0,300,4,1
-        4,"ftrace_event",1735489812571,"sched_waking",0,300,5,1
-        5,"ftrace_event",1735489833977,"sched_waking",1,305,6,1
-        8,"ftrace_event",1735489876788,"sched_waking",1,297,9,1
-        9,"ftrace_event",1735489879097,"sched_waking",0,304,10,1
-        12,"ftrace_event",1735489933912,"sched_waking",0,428,13,1
-        14,"ftrace_event",1735489972385,"sched_waking",1,232,15,1
-        17,"ftrace_event",1735489999987,"sched_waking",1,232,15,1
-        19,"ftrace_event",1735490039439,"sched_waking",1,298,18,1
-        20,"ftrace_event",1735490042084,"sched_waking",1,298,19,1
+        3,"__intrinsic_ftrace_event",1735489788930,"sched_waking",0,300,4,1
+        4,"__intrinsic_ftrace_event",1735489812571,"sched_waking",0,300,5,1
+        5,"__intrinsic_ftrace_event",1735489833977,"sched_waking",1,305,6,1
+        8,"__intrinsic_ftrace_event",1735489876788,"sched_waking",1,297,9,1
+        9,"__intrinsic_ftrace_event",1735489879097,"sched_waking",0,304,10,1
+        12,"__intrinsic_ftrace_event",1735489933912,"sched_waking",0,428,13,1
+        14,"__intrinsic_ftrace_event",1735489972385,"sched_waking",1,232,15,1
+        17,"__intrinsic_ftrace_event",1735489999987,"sched_waking",1,232,15,1
+        19,"__intrinsic_ftrace_event",1735490039439,"sched_waking",1,298,18,1
+        20,"__intrinsic_ftrace_event",1735490042084,"sched_waking",1,298,19,1
         """))
 
   def test_thread_executing_span_graph(self):
@@ -487,22 +487,24 @@ class TablesSched(TestSuite):
           table_name,
           critical_path_utid
         FROM _thread_executing_span_critical_path_stack((select utid from thread where tid = 3487), start_ts, end_ts), trace_bounds
-        ORDER BY ts
-        LIMIT 11
+        WHERE ts = 1737500355691
+        ORDER BY utid, id
         """,
         out=Csv("""
         "id","ts","dur","utid","stack_depth","name","table_name","critical_path_utid"
-        11889,1737349401439,57188,1477,0,"thread_state: R","thread_state",1477
-        11889,1737349401439,57188,1477,1,"[NULL]","thread_state",1477
-        11889,1737349401439,57188,1477,2,"[NULL]","thread_state",1477
-        11889,1737349401439,57188,1477,3,"process_name: com.android.providers.media.module","thread_state",1477
-        11889,1737349401439,57188,1477,4,"thread_name: rs.media.module","thread_state",1477
-        11891,1737349458627,1884896,1477,0,"thread_state: Running","thread_state",1477
-        11891,1737349458627,1884896,1477,1,"[NULL]","thread_state",1477
-        11891,1737349458627,1884896,1477,2,"[NULL]","thread_state",1477
-        11891,1737349458627,1884896,1477,3,"process_name: com.android.providers.media.module","thread_state",1477
-        11891,1737349458627,1884896,1477,4,"thread_name: rs.media.module","thread_state",1477
-        11891,1737349458627,1884896,1477,5,"cpu: 0","thread_state",1477
+        4271,1737500355691,1456753,1477,5,"bindApplication","slice",1477
+        13120,1737500355691,1456753,1477,0,"thread_state: S","thread_state",1477
+        13120,1737500355691,1456753,1477,1,"[NULL]","thread_state",1477
+        13120,1737500355691,1456753,1477,2,"[NULL]","thread_state",1477
+        13120,1737500355691,1456753,1477,3,"process_name: com.android.providers.media.module","thread_state",1477
+        13120,1737500355691,1456753,1477,4,"thread_name: rs.media.module","thread_state",1477
+        4800,1737500355691,1456753,1498,11,"HIDL::IComponentStore::getStructDescriptors::client","slice",1477
+        4801,1737500355691,1456753,1498,12,"binder transaction","slice",1477
+        13648,1737500355691,1456753,1498,6,"blocking thread_state: R+","thread_state",1477
+        13648,1737500355691,1456753,1498,7,"blocking process_name: com.android.providers.media.module","thread_state",1477
+        13648,1737500355691,1456753,1498,8,"blocking thread_name: CodecLooper","thread_state",1477
+        13648,1737500355691,1456753,1498,9,"[NULL]","thread_state",1477
+        13648,1737500355691,1456753,1498,10,"[NULL]","thread_state",1477
         """))
 
   def test_thread_executing_span_critical_path_graph(self):
@@ -682,7 +684,9 @@ class TablesSched(TestSuite):
         trace=DataPath('android_sched_and_ps.pb'),
         trace_modifier=TraceInjector(['ftrace_events'], {'machine_id': 1001}),
         query="""
-        SELECT ts, cpu, machine_id FROM sched WHERE ts >= 81473797418963 LIMIT 10;
+        SELECT ts, cpu.cpu, machine_id
+        FROM sched LEFT JOIN cpu USING (ucpu)
+        WHERE ts >= 81473797418963 LIMIT 10;
         """,
         out=Csv("""
         "ts","cpu","machine_id"
@@ -704,9 +708,44 @@ class TablesSched(TestSuite):
         trace=DataPath('android_sched_and_ps.pb'),
         trace_modifier=TraceInjector(['ftrace_events'], {'machine_id': 1001}),
         query="""
-        SELECT count(*) FROM raw WHERE machine_id is NULL;
+        SELECT count(*)
+        FROM raw LEFT JOIN cpu USING (ucpu)
+        WHERE machine_id is NULL;
         """,
         out=Csv("""
         "count(*)"
         0
+        """))
+
+  def test_sched_cpu_id(self):
+    return DiffTestBlueprint(
+        trace=DataPath('sched_switch_original.pb'),
+        query="""
+        SELECT * from cpu
+        """,
+        out=Csv("""
+        "ucpu","cpu","type","cluster_id","processor","machine_id"
+        0,0,"__intrinsic_cpu",0,"[NULL]","[NULL]"
+        1,1,"__intrinsic_cpu",0,"[NULL]","[NULL]"
+        2,2,"__intrinsic_cpu",0,"[NULL]","[NULL]"
+        3,3,"__intrinsic_cpu",0,"[NULL]","[NULL]"
+        4,4,"__intrinsic_cpu",0,"[NULL]","[NULL]"
+        7,7,"__intrinsic_cpu",0,"[NULL]","[NULL]"
+        """))
+
+  def test_sched_cpu_id_machine_id(self):
+    return DiffTestBlueprint(
+        trace=DataPath('sched_switch_original.pb'),
+        trace_modifier=TraceInjector(['ftrace_events'], {'machine_id': 1001}),
+        query="""
+        SELECT * from cpu
+        """,
+        out=Csv("""
+        "ucpu","cpu","type","cluster_id","processor","machine_id"
+        4096,0,"__intrinsic_cpu",0,"[NULL]",1
+        4097,1,"__intrinsic_cpu",0,"[NULL]",1
+        4098,2,"__intrinsic_cpu",0,"[NULL]",1
+        4099,3,"__intrinsic_cpu",0,"[NULL]",1
+        4100,4,"__intrinsic_cpu",0,"[NULL]",1
+        4103,7,"__intrinsic_cpu",0,"[NULL]",1
         """))

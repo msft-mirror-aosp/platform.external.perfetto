@@ -34,6 +34,7 @@ class AsyncTrackSetTracker;
 class ChunkedTraceReader;
 class ClockConverter;
 class ClockTracker;
+class CpuTracker;
 class DeobfuscationMappingTable;
 class DescriptorPool;
 class EtwModule;
@@ -119,6 +120,7 @@ class TraceProcessorContext {
   std::unique_ptr<PerfSampleTracker> perf_sample_tracker;
   std::unique_ptr<StackProfileTracker> stack_profile_tracker;
   std::unique_ptr<MetadataTracker> metadata_tracker;
+  std::unique_ptr<CpuTracker> cpu_tracker;
 
   // These fields are stored as pointers to Destructible objects rather than
   // their actual type (a subclass of Destructible), as the concrete subclass
@@ -143,6 +145,7 @@ class TraceProcessorContext {
   std::unique_ptr<Destructible> ftrace_sched_tracker;      // FtraceSchedEventTracker
   std::unique_ptr<Destructible> v8_tracker;                // V8Tracker
   std::unique_ptr<Destructible> jit_tracker;               // JitTracker
+  std::unique_ptr<Destructible> perf_dso_tracker;          // DsoTracker
   // clang-format on
 
   std::unique_ptr<ProtoTraceParser> proto_trace_parser;
