@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
 # Copyright (C) 2024 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# You may obtain a copy of the License a
 #
 #      http://www.apache.org/licenses/LICENSE-2.0
 #
@@ -12,11 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../../gn/perfetto_sql.gni")
+from python.generators.diff_tests.testing import DataPath, Path, DiffTestBlueprint, TestSuite
 
-perfetto_sql_source_set("winscope") {
-  sources = [
-    "inputmethod.sql",
-    "viewcapture.sql",
-  ]
-}
+
+class ExportTests(TestSuite):
+
+  def test_to_firefox_profile(self):
+    return DiffTestBlueprint(
+        trace=DataPath('zip/perf_track_sym.zip'),
+        query="""
+          INCLUDE PERFETTO MODULE export.to_firefox_profile;
+
+          SELECT export_to_firefox_profile();
+        """,
+        out=Path('firefox_profile.out'))

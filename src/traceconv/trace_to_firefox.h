@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
-syntax = "proto2";
+#ifndef SRC_TRACECONV_TRACE_TO_FIREFOX_H_
+#define SRC_TRACECONV_TRACE_TO_FIREFOX_H_
 
-package perfetto.protos;
+#include <iostream>
 
-import public "protos/perfetto/trace/android/winscope_extensions.proto";
-import "protos/perfetto/trace/android/inputmethodeditor.proto";
-import "protos/perfetto/trace/android/viewcapture.proto";
+namespace perfetto {
+namespace trace_to_text {
 
-message WinscopeExtensionsImpl {
-  extend WinscopeExtensions {
-    optional InputMethodClientsTraceProto inputmethod_clients = 1;
-    optional InputMethodServiceTraceProto inputmethod_service = 2;
-    optional InputMethodManagerServiceTraceProto inputmethod_manager_service =
-        3;
-    optional ViewCapture viewcapture = 4;
-  }
-}
+// Exports trace as as Firefox Profile. More details here:
+// https://firefox-source-docs.mozilla.org/tools/profiler/code-overview.html
+// https://github.com/firefox-devtools/profiler/blob/main/src/types/profile.js
+bool TraceToFirefoxProfile(std::istream* input, std::ostream* output);
+
+}  // namespace trace_to_text
+}  // namespace perfetto
+
+#endif  // SRC_TRACECONV_TRACE_TO_FIREFOX_H_
