@@ -57,6 +57,7 @@ from diff_tests.parser.android.tests_protolog import ProtoLog
 from diff_tests.parser.android.tests_shell_transitions import ShellTransitions
 from diff_tests.parser.android.tests_surfaceflinger_layers import SurfaceFlingerLayers
 from diff_tests.parser.android.tests_surfaceflinger_transactions import SurfaceFlingerTransactions
+from diff_tests.parser.android.tests_viewcapture import ViewCapture
 from diff_tests.parser.atrace.tests import Atrace
 from diff_tests.parser.atrace.tests_error_handling import AtraceErrorHandling
 from diff_tests.parser.chrome.tests import ChromeParser
@@ -106,6 +107,7 @@ from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.counters.tests import StdlibCounterIntervals
 from diff_tests.stdlib.cpu.tests import Cpu
 from diff_tests.stdlib.dynamic_tables.tests import DynamicTables
+from diff_tests.stdlib.export.tests import ExportTests
 from diff_tests.stdlib.gpu.tests import Gpu
 from diff_tests.stdlib.graphs.dominator_tree_tests import DominatorTree
 from diff_tests.stdlib.graphs.partition_tests import GraphPartitionTests
@@ -206,6 +208,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ShellTransitions(index_path, 'parser/android',
                         'ShellTransitions').fetch(),
       *ProtoLog(index_path, 'parser/android', 'ProtoLog').fetch(),
+      *ViewCapture(index_path, 'parser/android', 'ViewCapture').fetch(),
       *TrackEvent(index_path, 'parser/track_event', 'TrackEvent').fetch(),
       *TranslatedArgs(index_path, 'parser/translated_args',
                       'TranslatedArgs').fetch(),
@@ -267,6 +270,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *AndroidStdlib(index_path, 'stdlib/android', 'AndroidStdlib').fetch(),
       *Cpu(index_path, 'stdlib/cpu', 'Cpu').fetch(),
       *DominatorTree(index_path, 'stdlib/graphs', 'DominatorTree').fetch(),
+      *ExportTests(index_path, 'stdlib/export', 'ExportTests').fetch(),
       *Frames(index_path, 'stdlib/android', 'Frames').fetch(),
       *Gpu(index_path, 'stdlib/gpu', 'Gpu').fetch(),
       *GraphSearchTests(index_path, 'stdlib/graphs',

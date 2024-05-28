@@ -808,6 +808,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   // Note: if adding a table here which might potentially contain many rows
   // (O(rows in sched/slice/counter)), then consider calling ShrinkToFit on
   // that table in TraceStorage::ShrinkToFitTables.
+  RegisterStaticTable(storage->machine_table());
   RegisterStaticTable(storage->arg_table());
   RegisterStaticTable(storage->raw_table());
   RegisterStaticTable(storage->ftrace_event_table());
@@ -890,6 +891,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->surfaceflinger_layers_snapshot_table());
   RegisterStaticTable(storage->surfaceflinger_layer_table());
   RegisterStaticTable(storage->surfaceflinger_transactions_table());
+
+  RegisterStaticTable(storage->viewcapture_table());
 
   RegisterStaticTable(storage->window_manager_shell_transitions_table());
   RegisterStaticTable(

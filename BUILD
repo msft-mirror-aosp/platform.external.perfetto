@@ -1777,6 +1777,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/winscope/surfaceflinger_layers_parser.h",
         "src/trace_processor/importers/proto/winscope/surfaceflinger_transactions_parser.cc",
         "src/trace_processor/importers/proto/winscope/surfaceflinger_transactions_parser.h",
+        "src/trace_processor/importers/proto/winscope/viewcapture_args_parser.cc",
+        "src/trace_processor/importers/proto/winscope/viewcapture_args_parser.h",
         "src/trace_processor/importers/proto/winscope/winscope_module.cc",
         "src/trace_processor/importers/proto/winscope/winscope_module.h",
     ],
@@ -2509,6 +2511,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_winscope_winscope",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/android/winscope/inputmethod.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/winscope/viewcapture.sql",
     ],
 )
 
@@ -2607,6 +2610,14 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/thread_states.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/timestamps.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/export:export
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_export_export",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/export/to_firefox_profile.sql",
     ],
 )
 
@@ -2743,6 +2754,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_viz_summary_summary",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/viz/summary/counters.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/processes.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/threads.sql",
@@ -2776,6 +2788,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_cpu_cpu",
         ":src_trace_processor_perfetto_sql_stdlib_cpu_utilization_utilization",
         ":src_trace_processor_perfetto_sql_stdlib_deprecated_v42_common_common",
+        ":src_trace_processor_perfetto_sql_stdlib_export_export",
         ":src_trace_processor_perfetto_sql_stdlib_gpu_gpu",
         ":src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
         ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
@@ -3206,6 +3219,8 @@ perfetto_filegroup(
         "src/traceconv/deobfuscate_profile.h",
         "src/traceconv/symbolize_profile.cc",
         "src/traceconv/symbolize_profile.h",
+        "src/traceconv/trace_to_firefox.cc",
+        "src/traceconv/trace_to_firefox.h",
         "src/traceconv/trace_to_hprof.cc",
         "src/traceconv/trace_to_hprof.h",
         "src/traceconv/trace_to_json.cc",
@@ -4837,6 +4852,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/android/view/surfacecontrol.proto",
         "protos/perfetto/trace/android/view/viewrootimpl.proto",
         "protos/perfetto/trace/android/view/windowlayoutparams.proto",
+        "protos/perfetto/trace/android/viewcapture.proto",
         "protos/perfetto/trace/android/winscope_extensions_impl.proto",
     ],
     visibility = [
