@@ -20,7 +20,6 @@
 #include "protos/perfetto/trace/ftrace/ftrace_event.pbzero.h"
 #include "protos/perfetto/trace/ftrace/ftrace_event_bundle.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
-#include "src/trace_processor/util/status_macros.h"
 
 namespace perfetto::trace_redaction {
 namespace {
@@ -38,13 +37,13 @@ base::Status VerifyIntegrity::Collect(
     Context*) const {
   if (!packet.has_trusted_uid()) {
     return base::ErrStatus(
-        "VerifyIntegrity: missing field (TracePacket.trusted_uid).");
+        "VerifyIntegrity: missing field (TracePacket::kTrustedUid).");
   }
 
   if (packet.trusted_uid() != kAidSystem &&
       packet.trusted_uid() != kAidNobody) {
     return base::ErrStatus(
-        "VerifyIntegrity: invalid field value (TracePacket.trusted_uid).");
+        "VerifyIntegrity: invalid field (TracePacket::kTrustedUid).");
   }
 
   if (packet.has_ftrace_events()) {
@@ -58,46 +57,48 @@ base::Status VerifyIntegrity::Collect(
     if (ftrace_events.has_ftrace_clock()) {
       return base::ErrStatus(
           "VerifyIntegrity: unexpected field "
-          "(FtraceEventBundle::kFtraceClockFieldNumber).");
+          "(FtraceEventBundle::kFtraceClock).");
     }
 
     // Every ftrace event bundle should have a CPU field. This is necessary for
     // switch/waking redaction to work.
     if (!ftrace_events.has_cpu()) {
       return base::ErrStatus(
-          "VerifyIntegrity: missing field "
-          "(FtraceEventBundle::kCpuFieldNumber).");
+          "VerifyIntegrity: missing field (FtraceEventBundle::kCpu).");
     }
 
-    RETURN_IF_ERROR(VerifyFtraceEventsTime(ftrace_events));
+    for (auto event_buffer = ftrace_events.event(); event_buffer;
+         ++event_buffer) {
+      protos::pbzero::FtraceEvent::Decoder event(*event_buffer);
+
+      if (!event.has_timestamp()) {
+        return base::ErrStatus(
+            "VerifyIntegrity: missing field (FtraceEvent::kTimestamp).");
+      }
+
+      if (!event.has_pid()) {
+        return base::ErrStatus(
+            "VerifyIntegrity: missing field (FtraceEvent::kPid).");
+      }
+    }
   }
 
-  return base::OkStatus();
-}
-
-base::Status VerifyIntegrity::VerifyFtraceEventsTime(
-    const protos::pbzero::FtraceEventBundle::Decoder& bundle) const {
-  // If a bundle has ftrace events, the events will contain the time stamps.
-  // However, there are no ftrace events, the timestamp will be in the bundle.
-  if (!bundle.has_event() && !bundle.has_ftrace_timestamp()) {
+  // If there is a process tree, there should be a timestamp on the packet. This
+  // is the only way to know when the process tree was collected.
+  if (packet.has_process_tree() && !packet.has_timestamp()) {
     return base::ErrStatus(
-        "VerifyIntegrity: missing field "
-        "(FtraceEventBundle::kFtraceTimestampFieldNumber).");
+        "VerifyIntegrity: missing fields (TracePacket::kProcessTree + "
+        "TracePacket::kTimestamp).");
   }
 
-  for (auto event_buffer = bundle.event(); event_buffer; ++event_buffer) {
-    protos::pbzero::FtraceEvent::Decoder event(*event_buffer);
-
-    if (!protozero::ProtoDecoder(*event_buffer)
-             .FindField(protos::pbzero::FtraceEvent::kTimestampFieldNumber)
-             .valid()) {
-      return base::ErrStatus(
-          "VerifyIntegrity: missing field "
-          "(FtraceEvent::kTimestampFieldNumber)");
-    }
+  // If there are a process stats, there should be a timestamp on the packet.
+  // This is the only way to know when the stats were collected.
+  if (packet.has_process_stats() && !packet.has_timestamp()) {
+    return base::ErrStatus(
+        "VerifyIntegrity: missing fields (TracePacket::kProcessStats + "
+        "TracePacket::kTimestamp).");
   }
 
   return base::OkStatus();
 }
-
 }  // namespace perfetto::trace_redaction

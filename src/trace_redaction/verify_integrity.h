@@ -31,10 +31,6 @@ class VerifyIntegrity : public CollectPrimitive {
  public:
   base::Status Collect(const protos::pbzero::TracePacket::Decoder& packet,
                        Context* context) const override;
-
- private:
-  base::Status VerifyFtraceEventsTime(
-      const protos::pbzero::FtraceEventBundle::Decoder& bundle) const;
 };
 
 }  // namespace perfetto::trace_redaction
