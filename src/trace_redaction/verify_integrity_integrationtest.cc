@@ -14,27 +14,22 @@
  * limitations under the License.
  */
 
-#include "src/trace_redaction/filter_packet_using_allowlist.h"
-#include "perfetto/base/status.h"
-#include "perfetto/protozero/field.h"
-#include "src/trace_redaction/trace_redaction_framework.h"
+#include "src/base/test/status_matchers.h"
+#include "src/trace_redaction/trace_redaction_integration_fixture.h"
+#include "src/trace_redaction/trace_redactor.h"
+#include "src/trace_redaction/verify_integrity.h"
+#include "test/gtest_and_gmock.h"
 
 namespace perfetto::trace_redaction {
 
-base::Status FilterPacketUsingAllowlist::VerifyContext(
-    const Context& context) const {
-  if (context.trace_packet_allow_list.empty()) {
-    return base::ErrStatus("FilterPacketUsingAllowlist: missing allow-list.");
-  }
+class VerifyIntegrityIntegrationTest : public testing::Test,
+                                       public TraceRedactionIntegrationFixure {
+};
 
-  return base::OkStatus();
-}
-
-bool FilterPacketUsingAllowlist::KeepField(
-    const Context& context,
-    const protozero::Field& field) const {
-  PERFETTO_DCHECK(!context.trace_packet_allow_list.empty());
-  return field.valid() && context.trace_packet_allow_list.count(field.id());
+// The trace used in the integration tests should pass the verify primitive.
+TEST_F(VerifyIntegrityIntegrationTest, VerifiesValidTrace) {
+  trace_redactor()->emplace_collect<VerifyIntegrity>();
+  ASSERT_OK(Redact());
 }
 
 }  // namespace perfetto::trace_redaction
