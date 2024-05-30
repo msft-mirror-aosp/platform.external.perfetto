@@ -14,27 +14,25 @@
  * limitations under the License.
  */
 
-#include "src/trace_redaction/filter_packet_using_allowlist.h"
-#include "perfetto/base/status.h"
-#include "perfetto/protozero/field.h"
+#include "protos/perfetto/trace/ftrace/ftrace_event_bundle.pbzero.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
+
+#include "protos/perfetto/trace/trace_packet.pbzero.h"
+
+#ifndef SRC_TRACE_REDACTION_VERIFY_INTEGRITY_H_
+#define SRC_TRACE_REDACTION_VERIFY_INTEGRITY_H_
 
 namespace perfetto::trace_redaction {
 
-base::Status FilterPacketUsingAllowlist::VerifyContext(
-    const Context& context) const {
-  if (context.trace_packet_allow_list.empty()) {
-    return base::ErrStatus("FilterPacketUsingAllowlist: missing allow-list.");
-  }
-
-  return base::OkStatus();
-}
-
-bool FilterPacketUsingAllowlist::KeepField(
-    const Context& context,
-    const protozero::Field& field) const {
-  PERFETTO_DCHECK(!context.trace_packet_allow_list.empty());
-  return field.valid() && context.trace_packet_allow_list.count(field.id());
-}
+// This breaks the normal collect primitive pattern. Rather than collecting
+// information, it looks at packets and returns an error if the packet violates
+// any requirements.
+class VerifyIntegrity : public CollectPrimitive {
+ public:
+  base::Status Collect(const protos::pbzero::TracePacket::Decoder& packet,
+                       Context* context) const override;
+};
 
 }  // namespace perfetto::trace_redaction
+
+#endif  // SRC_TRACE_REDACTION_VERIFY_INTEGRITY_H_
