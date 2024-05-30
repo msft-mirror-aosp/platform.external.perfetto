@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_REDACTION_REDACT_SCHED_SWITCH_H_
-#define SRC_TRACE_REDACTION_REDACT_SCHED_SWITCH_H_
+#ifndef SRC_TRACE_REDACTION_REDACT_SCHED_EVENTS_H_
+#define SRC_TRACE_REDACTION_REDACT_SCHED_EVENTS_H_
 
 #include "src/trace_redaction/trace_redaction_framework.h"
 
@@ -44,44 +44,57 @@ class InternTable {
   std::vector<std::string_view> interned_comms_;
 };
 
-// TODO(vaage): Rename this class. When it was first created, it only handled
-// switch events, so having "switch" in the name sense. Now that it is
-// expanding to include waking events, a more general name is needed (e.g.
-// scheduling covers both switch and waking events).
-class RedactSchedSwitchHarness : public TransformPrimitive {
+class SchedEventModifier {
  public:
-  class Modifier {
-   public:
-    virtual ~Modifier();
-    virtual base::Status Modify(const Context& context,
-                                uint64_t ts,
-                                int32_t cpu,
-                                int32_t* pid,
-                                std::string* comm) const = 0;
-  };
+  virtual ~SchedEventModifier();
+  virtual base::Status Modify(const Context& context,
+                              uint64_t ts,
+                              int32_t cpu,
+                              int32_t* pid,
+                              std::string* comm) const = 0;
+};
 
+class SchedEventFilter {
+ public:
+  virtual ~SchedEventFilter();
+
+  // The filter only exposes the wakee, and not the waker, because most
+  // filtering logic only needs the wakee and while handling the waker logic
+  // for ftrace events is trival, handling it for compact sched is non-trival
+  // and easily implemented wrong.
+  virtual bool Includes(const Context& context,
+                        uint64_t ts,
+                        int32_t wakee) const = 0;
+};
+
+class RedactSchedEvents : public TransformPrimitive {
+ public:
   base::Status Transform(const Context& context,
                          std::string* packet) const override;
 
-  template <class Transform>
-  void emplace_transform() {
-    modifier_ = std::make_unique<Transform>();
+  template <class Modifier>
+  void emplace_modifier() {
+    modifier_ = std::make_unique<Modifier>();
+  }
+
+  template <class Filter>
+  void emplace_filter() {
+    filter_ = std::make_unique<Filter>();
   }
 
  private:
-  base::Status TransformFtraceEvents(
-      const Context& context,
-      protozero::Field ftrace_events,
-      protos::pbzero::FtraceEventBundle* message) const;
+  base::Status OnFtraceEvents(const Context& context,
+                              protozero::Field ftrace_events,
+                              protos::pbzero::FtraceEventBundle* message) const;
 
-  base::Status TransformFtraceEvent(const Context& context,
-                                    int32_t cpu,
-                                    protozero::Field ftrace_event,
-                                    protos::pbzero::FtraceEvent* message) const;
+  base::Status OnFtraceEvent(const Context& context,
+                             int32_t cpu,
+                             protozero::Field ftrace_event,
+                             protos::pbzero::FtraceEvent* message) const;
 
   // scratch_str is a reusable string, allowing comm modifications to be done in
   // a shared buffer, avoiding allocations when processing ftrace events.
-  base::Status TransformFtraceEventSchedSwitch(
+  base::Status OnFtraceEventSwitch(
       const Context& context,
       uint64_t ts,
       int32_t cpu,
@@ -89,31 +102,36 @@ class RedactSchedSwitchHarness : public TransformPrimitive {
       std::string* scratch_str,
       protos::pbzero::SchedSwitchFtraceEvent* message) const;
 
-  base::Status TransformFtraceEventSchedWaking(
+  // Unlike other On* functions, this one takes the parent message, allowing it
+  // to optionally add the body. This is what allows the waking event to be
+  // removed.
+  base::Status OnFtraceEventWaking(
       const Context& context,
       uint64_t ts,
       int32_t cpu,
       protos::pbzero::SchedWakingFtraceEvent::Decoder& sched_waking,
       std::string* scratch_str,
-      protos::pbzero::SchedWakingFtraceEvent* message) const;
+      protos::pbzero::FtraceEvent* parent_message) const;
 
-  base::Status TransformCompSched(
+  base::Status OnCompSched(
       const Context& context,
       int32_t cpu,
       protos::pbzero::FtraceEventBundle::CompactSched::Decoder& comp_sched,
       protos::pbzero::FtraceEventBundle::CompactSched* message) const;
 
-  base::Status TransformCompSchedSwitch(
+  base::Status OnCompSchedSwitch(
       const Context& context,
       int32_t cpu,
       protos::pbzero::FtraceEventBundle::CompactSched::Decoder& comp_sched,
       InternTable* intern_table,
       protos::pbzero::FtraceEventBundle::CompactSched* message) const;
 
-  std::unique_ptr<Modifier> modifier_;
+  std::unique_ptr<SchedEventModifier> modifier_;
+  std::unique_ptr<SchedEventFilter> filter_;
 };
 
-class ClearComms : public RedactSchedSwitchHarness::Modifier {
+class ClearComms : public SchedEventModifier {
+ public:
   base::Status Modify(const Context& context,
                       uint64_t ts,
                       int32_t cpu,
@@ -121,6 +139,18 @@ class ClearComms : public RedactSchedSwitchHarness::Modifier {
                       std::string* comm) const override;
 };
 
+class ConnectedToPackage : public SchedEventFilter {
+ public:
+  bool Includes(const Context& context,
+                uint64_t ts,
+                int32_t wakee) const override;
+};
+
+class AllowAll : public SchedEventFilter {
+ public:
+  bool Includes(const Context&, uint64_t, int32_t) const override;
+};
+
 }  // namespace perfetto::trace_redaction
 
-#endif  // SRC_TRACE_REDACTION_REDACT_SCHED_SWITCH_H_
+#endif  // SRC_TRACE_REDACTION_REDACT_SCHED_EVENTS_H_
