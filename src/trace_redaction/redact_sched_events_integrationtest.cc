@@ -22,7 +22,7 @@
 #include "src/base/test/status_matchers.h"
 #include "src/trace_redaction/collect_timeline_events.h"
 #include "src/trace_redaction/find_package_uid.h"
-#include "src/trace_redaction/redact_sched_switch.h"
+#include "src/trace_redaction/redact_sched_events.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 #include "src/trace_redaction/trace_redaction_integration_fixture.h"
 #include "src/trace_redaction/trace_redactor.h"
@@ -94,9 +94,10 @@ class RedactSchedSwitchIntegrationTest
     trace_redactor()->emplace_collect<FindPackageUid>();
     trace_redactor()->emplace_collect<CollectTimelineEvents>();
 
-    auto* harness =
-        trace_redactor()->emplace_transform<RedactSchedSwitchHarness>();
-    harness->emplace_transform<ClearComms>();
+    auto* redact_sched_events =
+        trace_redactor()->emplace_transform<RedactSchedEvents>();
+    redact_sched_events->emplace_modifier<ClearComms>();
+    redact_sched_events->emplace_filter<AllowAll>();
 
     context()->package_name = "com.Unity.com.unity.multiplayer.samples.coop";
   }
