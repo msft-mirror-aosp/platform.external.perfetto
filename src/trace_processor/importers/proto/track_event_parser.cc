@@ -26,11 +26,11 @@
 #include "perfetto/trace_processor/status.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
+#include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/flow_tracker.h"
-#include "src/trace_processor/importers/common/machine_tracker.h"
-#include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
+#include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/common/virtual_memory_mapping.h"
 #include "src/trace_processor/importers/json/json_utils.h"
@@ -1023,10 +1023,11 @@ class TrackEventParser::EventImporter {
     if (!utid_)
       return util::ErrStatus("raw legacy event without thread association");
 
-    RawId id = storage_->mutable_raw_table()
-                   ->Insert({ts_, parser_->raw_legacy_event_id_, 0, *utid_, 0,
-                             0, context_->machine_id()})
-                   .id;
+    auto ucpu = context_->cpu_tracker->GetOrCreateCpu(0);
+    RawId id =
+        storage_->mutable_raw_table()
+            ->Insert({ts_, parser_->raw_legacy_event_id_, *utid_, 0, 0, ucpu})
+            .id;
 
     auto inserter = context_->args_tracker->AddArgsTo(id);
     inserter
@@ -1132,7 +1133,7 @@ class TrackEventParser::EventImporter {
     }
 
     ArgsParser args_writer(ts_, *inserter, *storage_, sequence_state_,
-                                    /*support_json=*/true);
+                           /*support_json=*/true);
     int unknown_extensions = 0;
     log_errors(parser_->args_parser_.ParseMessage(
         blob_, ".perfetto.protos.TrackEvent", &parser_->reflect_fields_,
@@ -1532,7 +1533,7 @@ void TrackEventParser::ParseTrackDescriptor(
     const StringId raw_name_id = context_->storage->InternString(
         decoder.has_name() ? decoder.name() : decoder.static_name());
     const StringId name_id =
-      context_->process_track_translation_table->TranslateName(raw_name_id);
+        context_->process_track_translation_table->TranslateName(raw_name_id);
     tracks->mutable_name()->Set(*tracks->id().IndexOf(track_id), name_id);
   }
 }

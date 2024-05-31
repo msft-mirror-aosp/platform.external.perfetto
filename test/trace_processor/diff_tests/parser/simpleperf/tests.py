@@ -64,18 +64,17 @@ class Simpleperf(TestSuite):
           name,
           unit,
           description,
-          perf_session_id,
           cpu,
           is_timebase
         FROM perf_counter_track
         ORDER BY perf_session_id, name, cpu;
         ''',
         out=Csv('''
-        "name","unit","description","perf_session_id","cpu","is_timebase"
-        "","","",0,2,1
-        "","","",0,6,1
-        "","","",0,7,1
-        "","","",0,16,1
+        "name","unit","description","cpu","is_timebase"
+        "","","",2,1
+        "","","",6,1
+        "","","",7,1
+        "","","",16,1
         '''))
 
   def test_perf_with_add_counter_tracks(self):
@@ -84,21 +83,17 @@ class Simpleperf(TestSuite):
         query='''
         SELECT
           name,
-          parent_id,
-          source_arg_set_id,
-          machine_id,
           unit,
           description,
-          perf_session_id,
           cpu,
           is_timebase
         FROM perf_counter_track
         ORDER BY perf_session_id, name, cpu;
         ''',
         out=Csv('''
-        "name","parent_id","source_arg_set_id","machine_id","unit","description","perf_session_id","cpu","is_timebase"
-        "cpu-cycles","[NULL]","[NULL]","[NULL]","","",0,40,1
-        "instructions","[NULL]","[NULL]","[NULL]","","",0,40,0
+        "name","unit","description","cpu","is_timebase"
+        "cpu-cycles","","",40,1
+        "instructions","","",40,0
         '''))
 
   # simpleperf report -i perf.data --print-event-count --csv
@@ -141,4 +136,25 @@ class Simpleperf(TestSuite):
         "47111a47babdcd27ca2f9ff450dc1897ded761ed","/lib/modules/3.13.0-76-generic/kernel/drivers/ata/pata_acpi.ko"
         "0b12a384a9f4a3f3659b7171ca615dbec3a81f71","/t1"
         "0b12a384a9f4a3f3659b7171ca615dbec3a81f71","/t2"
+        '''))
+
+  def test_clocks_align(self):
+    return DiffTestBlueprint(
+        trace=DataPath('zip/perf_track_sym.zip'),
+        query=Path('clocks_align_test.sql'),
+        out=Csv('''
+        "misaligned_count"
+        0
+        '''))
+
+  def test_cmdline(self):
+    return DiffTestBlueprint(
+        trace=DataPath('simpleperf/perf.data'),
+        query='''
+        SELECT cmdline
+        FROM perf_session
+        ''',
+        out=Csv('''
+        "cmdline"
+        "/ssd/android/aosp_master/out/host/linux-x86/bin/simpleperf record -p 26083,26090,26124,26130 sleep 0.0001"
         '''))

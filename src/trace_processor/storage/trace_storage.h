@@ -618,6 +618,13 @@ class TraceStorage {
     return &cpu_profile_stack_sample_table_;
   }
 
+  const tables::PerfSessionTable& perf_session_table() const {
+    return perf_session_table_;
+  }
+  tables::PerfSessionTable* mutable_perf_session_table() {
+    return &perf_session_table_;
+  }
+
   const tables::PerfSampleTable& perf_sample_table() const {
     return perf_sample_table_;
   }
@@ -843,6 +850,13 @@ class TraceStorage {
   tables::SurfaceFlingerTransactionsTable*
   mutable_surfaceflinger_transactions_table() {
     return &surfaceflinger_transactions_table_;
+  }
+
+  const tables::ViewCaptureTable& viewcapture_table() const {
+    return viewcapture_table_;
+  }
+  tables::ViewCaptureTable* mutable_viewcapture_table() {
+    return &viewcapture_table_;
   }
 
   const tables::WindowManagerShellTransitionsTable&
@@ -1092,6 +1106,7 @@ class TraceStorage {
       &string_pool_};
   tables::CpuProfileStackSampleTable cpu_profile_stack_sample_table_{
       &string_pool_, &stack_sample_table_};
+  tables::PerfSessionTable perf_session_table_{&string_pool_};
   tables::PerfSampleTable perf_sample_table_{&string_pool_};
   tables::PackageListTable package_list_table_{&string_pool_};
   tables::AndroidGameInterventionListTable
@@ -1147,6 +1162,7 @@ class TraceStorage {
   tables::SurfaceFlingerLayerTable surfaceflinger_layer_table_{&string_pool_};
   tables::SurfaceFlingerTransactionsTable surfaceflinger_transactions_table_{
       &string_pool_};
+  tables::ViewCaptureTable viewcapture_table_{&string_pool_};
   tables::WindowManagerShellTransitionsTable
       window_manager_shell_transitions_table_{&string_pool_};
   tables::WindowManagerShellTransitionHandlersTable

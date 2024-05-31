@@ -677,7 +677,7 @@ export class TraceController extends Controller<States> {
       }
       globals.setLegacySelection(
         {
-          kind: 'CHROME_SLICE',
+          kind: 'SLICE',
           id: row.id,
           trackKey,
           table: 'slice',
@@ -1024,6 +1024,9 @@ export class TraceController extends Controller<States> {
 
     this.updateStatus('Creating slice summaries');
     await engine.query(`include perfetto module viz.summary.slices;`);
+
+    this.updateStatus('Creating counter summaries');
+    await engine.query(`include perfetto module viz.summary.counters;`);
 
     this.updateStatus('Creating thread summaries');
     await engine.query(`include perfetto module viz.summary.threads;`);

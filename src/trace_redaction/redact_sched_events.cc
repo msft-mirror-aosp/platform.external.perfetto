@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "src/trace_redaction/redact_sched_switch.h"
+#include "src/trace_redaction/redact_sched_events.h"
 
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "src/trace_processor/util/status_macros.h"
@@ -106,10 +106,27 @@ std::string_view InternTable::Find(size_t index) const {
 // collection of ftrace event messages) because data in a sched_switch message
 // is needed in order to know if the event should be added to the bundle.
 
-SchedSwitchTransform::~SchedSwitchTransform() = default;
+SchedEventModifier::~SchedEventModifier() = default;
 
-base::Status RedactSchedSwitchHarness::Transform(const Context& context,
-                                                 std::string* packet) const {
+SchedEventFilter::~SchedEventFilter() = default;
+
+base::Status RedactSchedEvents::Transform(const Context& context,
+                                          std::string* packet) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(filter_);
+
+  if (!context.timeline) {
+    return base::ErrStatus("RedactSchedEvents: missing timeline.");
+  }
+
+  if (!context.package_uid.has_value()) {
+    return base::ErrStatus("RedactSchedEvents: missing package uid.");
+  }
+
+  if (!packet || packet->empty()) {
+    return base::ErrStatus("RedactSchedEvents: null or empty packet.");
+  }
+
   protozero::HeapBuffered<protos::pbzero::TracePacket> message;
   protozero::ProtoDecoder decoder(*packet);
 
@@ -117,7 +134,7 @@ base::Status RedactSchedSwitchHarness::Transform(const Context& context,
        field = decoder.ReadField()) {
     if (field.id() == protos::pbzero::TracePacket::kFtraceEventsFieldNumber) {
       RETURN_IF_ERROR(
-          TransformFtraceEvents(context, field, message->set_ftrace_events()));
+          OnFtraceEvents(context, field, message->set_ftrace_events()));
     } else {
       proto_util::AppendField(field, message.get());
     }
@@ -128,7 +145,7 @@ base::Status RedactSchedSwitchHarness::Transform(const Context& context,
   return base::OkStatus();
 }
 
-base::Status RedactSchedSwitchHarness::TransformFtraceEvents(
+base::Status RedactSchedEvents::OnFtraceEvents(
     const Context& context,
     protozero::Field ftrace_events,
     protos::pbzero::FtraceEventBundle* message) const {
@@ -141,14 +158,14 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEvents(
       decoder.FindField(protos::pbzero::FtraceEventBundle::kCpuFieldNumber);
   if (!cpu.valid()) {
     return base::ErrStatus(
-        "RedactSchedSwitchHarness: missing cpu in ftrace event bundle.");
+        "RedactSchedEvents: missing cpu in ftrace event bundle.");
   }
 
   for (auto field = decoder.ReadField(); field.valid();
        field = decoder.ReadField()) {
     if (field.id() == protos::pbzero::FtraceEventBundle::kEventFieldNumber) {
-      RETURN_IF_ERROR(TransformFtraceEvent(context, cpu.as_int32(), field,
-                                           message->add_event()));
+      RETURN_IF_ERROR(
+          OnFtraceEvent(context, cpu.as_int32(), field, message->add_event()));
       continue;
     }
 
@@ -156,8 +173,8 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEvents(
         protos::pbzero::FtraceEventBundle::kCompactSchedFieldNumber) {
       protos::pbzero::FtraceEventBundle::CompactSched::Decoder comp_sched(
           field.as_bytes());
-      RETURN_IF_ERROR(TransformCompSched(context, cpu.as_int32(), comp_sched,
-                                         message->set_compact_sched()));
+      RETURN_IF_ERROR(OnCompSched(context, cpu.as_int32(), comp_sched,
+                                  message->set_compact_sched()));
       continue;
     }
 
@@ -167,7 +184,7 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEvents(
   return base::OkStatus();
 }
 
-base::Status RedactSchedSwitchHarness::TransformFtraceEvent(
+base::Status RedactSchedEvents::OnFtraceEvent(
     const Context& context,
     int32_t cpu,
     protozero::Field ftrace_event,
@@ -181,34 +198,52 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEvent(
       decoder.FindField(protos::pbzero::FtraceEvent::kTimestampFieldNumber);
   if (!ts.valid()) {
     return base::ErrStatus(
-        "RedactSchedSwitchHarness: missing timestamp in ftrace event.");
+        "RedactSchedEvents: missing timestamp in ftrace event.");
   }
 
   std::string scratch_str;
 
   for (auto field = decoder.ReadField(); field.valid();
        field = decoder.ReadField()) {
-    if (field.id() == protos::pbzero::FtraceEvent::kSchedSwitchFieldNumber) {
-      protos::pbzero::SchedSwitchFtraceEvent::Decoder sched_switch(
-          field.as_bytes());
-      RETURN_IF_ERROR(TransformFtraceEventSchedSwitch(
-          context, ts.as_uint64(), cpu, sched_switch, &scratch_str,
-          message->set_sched_switch()));
-    } else {
-      proto_util::AppendField(field, message);
+    switch (field.id()) {
+      case protos::pbzero::FtraceEvent::kSchedSwitchFieldNumber: {
+        protos::pbzero::SchedSwitchFtraceEvent::Decoder sched_switch(
+            field.as_bytes());
+        RETURN_IF_ERROR(OnFtraceEventSwitch(context, ts.as_uint64(), cpu,
+                                            sched_switch, &scratch_str,
+                                            message->set_sched_switch()));
+        break;
+      }
+
+      case protos::pbzero::FtraceEvent::kSchedWakingFieldNumber: {
+        protos::pbzero::SchedWakingFtraceEvent::Decoder sched_waking(
+            field.as_bytes());
+        RETURN_IF_ERROR(OnFtraceEventWaking(
+            context, ts.as_uint64(), cpu, sched_waking, &scratch_str, message));
+        break;
+      }
+
+      default: {
+        proto_util::AppendField(field, message);
+        break;
+      }
     }
   }
 
   return base::OkStatus();
 }
 
-base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
+base::Status RedactSchedEvents::OnFtraceEventSwitch(
     const Context& context,
     uint64_t ts,
     int32_t cpu,
     protos::pbzero::SchedSwitchFtraceEvent::Decoder& sched_switch,
     std::string* scratch_str,
     protos::pbzero::SchedSwitchFtraceEvent* message) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(scratch_str);
+  PERFETTO_DCHECK(message);
+
   auto has_fields = {
       sched_switch.has_prev_comm(), sched_switch.has_prev_pid(),
       sched_switch.has_prev_prio(), sched_switch.has_prev_state(),
@@ -217,7 +252,7 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
 
   if (!std::all_of(has_fields.begin(), has_fields.end(), IsTrue)) {
     return base::ErrStatus(
-        "RedactSchedSwitchHarness: missing required SchedSwitchFtraceEvent "
+        "RedactSchedEvents: missing required SchedSwitchFtraceEvent "
         "field.");
   }
 
@@ -233,10 +268,7 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
 
   scratch_str->assign(prev_comm.data, prev_comm.size);
 
-  for (const auto& transform : transforms_) {
-    RETURN_IF_ERROR(
-        transform->Transform(context, ts, cpu, &prev_pid, scratch_str));
-  }
+  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &prev_pid, scratch_str));
 
   message->set_prev_comm(*scratch_str);                // FieldNumber = 1
   message->set_prev_pid(prev_pid);                     // FieldNumber = 2
@@ -245,10 +277,7 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
 
   scratch_str->assign(next_comm.data, next_comm.size);
 
-  for (const auto& transform : transforms_) {
-    RETURN_IF_ERROR(
-        transform->Transform(context, ts, cpu, &next_pid, scratch_str));
-  }
+  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &next_pid, scratch_str));
 
   message->set_next_comm(*scratch_str);              // FieldNumber = 5
   message->set_next_pid(next_pid);                   // FieldNumber = 6
@@ -257,7 +286,67 @@ base::Status RedactSchedSwitchHarness::TransformFtraceEventSchedSwitch(
   return base::OkStatus();
 }
 
-base::Status RedactSchedSwitchHarness::TransformCompSched(
+// Redact sched waking trace events in a ftrace event bundle:
+//
+//  event {
+//    timestamp: 6702093787823849
+//    pid: 814                      <-- waker
+//    sched_waking {
+//      comm: "surfaceflinger"
+//      pid: 756                    <-- target
+//      prio: 97
+//      success: 1
+//      target_cpu: 2
+//    }
+//  }
+base::Status RedactSchedEvents::OnFtraceEventWaking(
+    const Context& context,
+    uint64_t ts,
+    int32_t cpu,
+    protos::pbzero::SchedWakingFtraceEvent::Decoder& sched_waking,
+    std::string* scratch_str,
+    protos::pbzero::FtraceEvent* parent_message) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(scratch_str);
+  PERFETTO_DCHECK(parent_message);
+
+  auto has_fields = {sched_waking.has_comm(), sched_waking.has_pid(),
+                     sched_waking.has_prio(), sched_waking.has_success(),
+                     sched_waking.has_target_cpu()};
+
+  if (!std::all_of(has_fields.begin(), has_fields.end(), IsTrue)) {
+    return base::ErrStatus(
+        "RedactSchedEvents: missing required SchedWakingFtraceEvent "
+        "field.");
+  }
+
+  auto pid = sched_waking.pid();
+
+  if (!filter_->Includes(context, ts, pid)) {
+    return base::OkStatus();
+  }
+
+  auto comm = sched_waking.comm();
+
+  // There are 5 values in a sched switch message. Since 2 of the 5 can be
+  // replaced, it is easier/cleaner to go value-by-value. Go in proto-defined
+  // order.
+
+  scratch_str->assign(comm.data, comm.size);
+
+  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, scratch_str));
+
+  auto message = parent_message->set_sched_waking();
+  message->set_comm(*scratch_str);                     // FieldNumber = 1
+  message->set_pid(pid);                               // FieldNumber = 2
+  message->set_prio(sched_waking.prio());              // FieldNumber = 3
+  message->set_success(sched_waking.success());        // FieldNumber = 4
+  message->set_target_cpu(sched_waking.target_cpu());  // FieldNumber = 5
+
+  return base::OkStatus();
+}
+
+base::Status RedactSchedEvents::OnCompSched(
     const Context& context,
     int32_t cpu,
     protos::pbzero::FtraceEventBundle::CompactSched::Decoder& comp_sched,
@@ -285,14 +374,14 @@ base::Status RedactSchedSwitchHarness::TransformCompSched(
 
     if (index < 0) {
       return base::ErrStatus(
-          "RedactSchedSwitchHarness: failed to insert string into intern "
+          "RedactSchedEvents: failed to insert string into intern "
           "table.");
     }
   }
 
   if (std::any_of(has_switch_fields.begin(), has_switch_fields.end(), IsTrue)) {
-    RETURN_IF_ERROR(TransformCompSchedSwitch(context, cpu, comp_sched,
-                                             &intern_table, message));
+    RETURN_IF_ERROR(
+        OnCompSchedSwitch(context, cpu, comp_sched, &intern_table, message));
   }
 
   if (std::any_of(has_waking_fields.begin(), has_waking_fields.end(), IsTrue)) {
@@ -308,12 +397,15 @@ base::Status RedactSchedSwitchHarness::TransformCompSched(
   return base::OkStatus();
 }
 
-base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
+base::Status RedactSchedEvents::OnCompSchedSwitch(
     const Context& context,
     int32_t cpu,
     protos::pbzero::FtraceEventBundle::CompactSched::Decoder& comp_sched,
     InternTable* intern_table,
     protos::pbzero::FtraceEventBundle::CompactSched* message) const {
+  PERFETTO_DCHECK(modifier_);
+  PERFETTO_DCHECK(message);
+
   auto has_fields = {
       comp_sched.has_intern_table(),
       comp_sched.has_switch_timestamp(),
@@ -325,8 +417,8 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
   if (!std::all_of(has_fields.begin(), has_fields.end(), IsTrue)) {
     return base::ErrStatus(
-        "RedactSchedSwitchHarness: missing required "
-        "FtraceEventBundle::CompactSched switch field.");
+        "RedactSchedEvents: missing required FtraceEventBundle::CompactSched "
+        "switch field.");
   }
 
   std::array<bool, 3> parse_errors = {false, false, false};
@@ -336,8 +428,7 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
   auto it_comm = comp_sched.switch_next_comm_index(&parse_errors.at(2));
 
   if (std::any_of(parse_errors.begin(), parse_errors.end(), IsTrue)) {
-    return base::ErrStatus(
-        "RedactSchedSwitchHarness: failed to parse CompactSched.");
+    return base::ErrStatus("RedactSchedEvents: failed to parse CompactSched.");
   }
 
   std::string scratch_str;
@@ -359,16 +450,13 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
     scratch_str.assign(comm);
 
-    for (const auto& transform : transforms_) {
-      transform->Transform(context, ts, cpu, &pid, &scratch_str);
-    }
+    RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, &scratch_str));
 
     auto found = intern_table->Push(scratch_str.data(), scratch_str.size());
 
     if (found < 0) {
       return base::ErrStatus(
-          "RedactSchedSwitchHarness: failed to insert string into intern "
-          "table.");
+          "RedactSchedEvents: failed to insert string into intern table.");
     }
 
     packed_comm.Append(found);
@@ -381,7 +469,7 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
   if (it_ts || it_pid || it_comm) {
     return base::ErrStatus(
-        "RedactSchedSwitchHarness: uneven associative arrays in "
+        "RedactSchedEvents: uneven associative arrays in "
         "FtraceEventBundle::CompactSched (switch).");
   }
 
@@ -420,7 +508,7 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
   if (!std::all_of(passed_through.begin(), passed_through.end(), IsTrue)) {
     return base::ErrStatus(
-        "RedactSchedSwitchHarness: missing required "
+        "RedactSchedEvents: missing required "
         "FtraceEventBundle::CompactSched switch field.");
   }
 
@@ -429,11 +517,11 @@ base::Status RedactSchedSwitchHarness::TransformCompSchedSwitch(
 
 // Switch event transformation: Clear the comm value if the thread/process is
 // not part of the target packet.
-base::Status ClearComms::Transform(const Context& context,
-                                   uint64_t ts,
-                                   int32_t,
-                                   int32_t* pid,
-                                   std::string* comm) const {
+base::Status ClearComms::Modify(const Context& context,
+                                uint64_t ts,
+                                int32_t,
+                                int32_t* pid,
+                                std::string* comm) const {
   PERFETTO_DCHECK(pid);
   PERFETTO_DCHECK(comm);
 
@@ -442,6 +530,18 @@ base::Status ClearComms::Transform(const Context& context,
   }
 
   return base::OkStatus();
+}
+
+bool ConnectedToPackage::Includes(const Context& context,
+                                  uint64_t ts,
+                                  int32_t wakee) const {
+  PERFETTO_DCHECK(context.package_uid.has_value());
+
+  return context.timeline->PidConnectsToUid(ts, wakee, *context.package_uid);
+}
+
+bool AllowAll::Includes(const Context&, uint64_t, int32_t) const {
+  return true;
 }
 
 }  // namespace perfetto::trace_redaction

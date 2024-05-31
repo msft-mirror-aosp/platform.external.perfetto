@@ -59,6 +59,7 @@
 #include "src/trace_processor/importers/proto/additional_modules.h"
 #include "src/trace_processor/importers/proto/content_analyzer.h"
 #include "src/trace_processor/importers/systrace/systrace_trace_parser.h"
+#include "src/trace_processor/importers/zip/zip_trace_reader.h"
 #include "src/trace_processor/iterator_impl.h"
 #include "src/trace_processor/metrics/all_chrome_metrics.descriptor.h"
 #include "src/trace_processor/metrics/all_webview_metrics.descriptor.h"
@@ -121,6 +122,7 @@
 #include "src/trace_processor/util/regex.h"
 #include "src/trace_processor/util/sql_modules.h"
 #include "src/trace_processor/util/status_macros.h"
+#include "src/trace_processor/util/trace_type.h"
 
 #include "protos/perfetto/common/builtin_clock.pbzero.h"
 #include "protos/perfetto/trace/clock_snapshot.pbzero.h"
@@ -308,8 +310,8 @@ const char* TraceTypeToString(TraceType trace_type) {
       return "ctrace";
     case kNinjaLogTraceType:
       return "ninja_log";
-    case kAndroidBugreportTraceType:
-      return "android_bugreport";
+    case kZipFile:
+      return "zip";
     case kPerfDataTraceType:
       return "perf_data";
   }
@@ -362,8 +364,7 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
         kGzipTraceType);
     context_.reader_registry->RegisterTraceReader<GzipTraceParser>(
         kCtraceTraceType);
-    context_.reader_registry->RegisterTraceReader<AndroidBugreportParser>(
-        kAndroidBugreportTraceType);
+    context_.reader_registry->RegisterTraceReader<ZipTraceReader>(kZipFile);
   }
 
   if (json::IsJsonSupported()) {
@@ -807,6 +808,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   // Note: if adding a table here which might potentially contain many rows
   // (O(rows in sched/slice/counter)), then consider calling ShrinkToFit on
   // that table in TraceStorage::ShrinkToFitTables.
+  RegisterStaticTable(storage->machine_table());
   RegisterStaticTable(storage->arg_table());
   RegisterStaticTable(storage->raw_table());
   RegisterStaticTable(storage->ftrace_event_table());
@@ -852,6 +854,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->symbol_table());
   RegisterStaticTable(storage->heap_profile_allocation_table());
   RegisterStaticTable(storage->cpu_profile_stack_sample_table());
+  RegisterStaticTable(storage->perf_session_table());
   RegisterStaticTable(storage->perf_sample_table());
   RegisterStaticTable(storage->stack_profile_callsite_table());
   RegisterStaticTable(storage->stack_profile_mapping_table());
@@ -889,6 +892,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->surfaceflinger_layers_snapshot_table());
   RegisterStaticTable(storage->surfaceflinger_layer_table());
   RegisterStaticTable(storage->surfaceflinger_transactions_table());
+
+  RegisterStaticTable(storage->viewcapture_table());
 
   RegisterStaticTable(storage->window_manager_shell_transitions_table());
   RegisterStaticTable(
