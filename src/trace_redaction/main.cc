@@ -22,15 +22,13 @@
 #include "src/trace_redaction/filter_ftrace_using_allowlist.h"
 #include "src/trace_redaction/filter_packet_using_allowlist.h"
 #include "src/trace_redaction/filter_print_events.h"
-#include "src/trace_redaction/filter_task_rename.h"
 #include "src/trace_redaction/find_package_uid.h"
 #include "src/trace_redaction/populate_allow_lists.h"
 #include "src/trace_redaction/prune_package_list.h"
 #include "src/trace_redaction/redact_ftrace_event.h"
+#include "src/trace_redaction/redact_process_events.h"
 #include "src/trace_redaction/redact_sched_events.h"
-#include "src/trace_redaction/redact_task_newtask.h"
 #include "src/trace_redaction/remap_scheduling_events.h"
-#include "src/trace_redaction/remove_process_free_comm.h"
 #include "src/trace_redaction/scrub_ftrace_events.h"
 #include "src/trace_redaction/scrub_process_stats.h"
 #include "src/trace_redaction/scrub_process_trees.h"
@@ -74,7 +72,6 @@ static base::Status Main(std::string_view input,
   auto* scrub_ftrace_events = redactor.emplace_transform<ScrubFtraceEvents>();
   scrub_ftrace_events->emplace_back<FilterFtraceUsingAllowlist>();
   scrub_ftrace_events->emplace_back<FilterPrintEvents>();
-  scrub_ftrace_events->emplace_back<FilterTaskRename>();
   scrub_ftrace_events->emplace_back<FilterSuspendResume>();
 
   // Scrub packets and ftrace events first as they will remove the largest
@@ -84,40 +81,29 @@ static base::Status Main(std::string_view input,
   redactor.emplace_transform<PrunePackageList>();
   redactor.emplace_transform<ScrubProcessStats>();
 
+  // Redacts all switch and waking events. This should use the same modifier and
+  // filter as the process events (see below).
   auto* redact_sched_events = redactor.emplace_transform<RedactSchedEvents>();
   redact_sched_events->emplace_modifier<ClearComms>();
   redact_sched_events->emplace_filter<ConnectedToPackage>();
 
-  auto* redact_ftrace_events = redactor.emplace_transform<RedactFtraceEvent>();
-  redact_ftrace_events
-      ->emplace_back<RemoveProcessFreeComm::kFieldId, RemoveProcessFreeComm>();
+  // Redacts all new task, rename task, process free events. This should use the
+  // same modifier and filter as the schedule events (see above).
+  auto* redact_process_events =
+      redactor.emplace_transform<RedactProcessEvents>();
+  redact_process_events->emplace_modifier<ClearComms>();
+  redact_process_events->emplace_filter<ConnectedToPackage>();
 
-  // By default, the comm value is cleared. However, when thread merging is
-  // enabled (kTaskNewtaskFieldNumber + ThreadMergeDropField), the event is
-  // dropped, meaning that this primitive was effectivly a no-op. This primitive
-  // remains so that removing thread merging won't leak thread names via new
-  // task events.
-  auto* redact_new_task =
-      redact_ftrace_events
-          ->emplace_back<RedactTaskNewTask::kFieldId, RedactTaskNewTask>();
-  redact_new_task->emplace_back<ClearComms>();
-
-  // This set of transformations will change pids. This will break the
-  // connections between pids and the timeline (the synth threads are not in the
-  // timeline). If a transformation uses the timeline, it must be before this
-  // transformation.
-  auto* merge_threads = redactor.emplace_transform<RedactFtraceEvent>();
-  merge_threads->emplace_back<ThreadMergeRemapFtraceEventPid::kFieldId,
-                              ThreadMergeRemapFtraceEventPid>();
-  merge_threads->emplace_back<ThreadMergeRemapSchedSwitchPid::kFieldId,
-                              ThreadMergeRemapSchedSwitchPid>();
-  merge_threads->emplace_back<ThreadMergeRemapSchedWakingPid::kFieldId,
-                              ThreadMergeRemapSchedWakingPid>();
-  merge_threads->emplace_back<ThreadMergeDropField::kTaskNewtaskFieldNumber,
-                              ThreadMergeDropField>();
-  merge_threads
-      ->emplace_back<ThreadMergeDropField::kSchedProcessFreeFieldNumber,
-                     ThreadMergeDropField>();
+  // TODO(vaage): The primitives used to implement thread merging do not work
+  // correctly with other primitives.
+  //
+  //    - ThreadMergeRemapFtraceEventPid
+  //    - ThreadMergeRemapSchedSwitchPid
+  //    - ThreadMergeRemapSchedWakingPid
+  //    - ThreadMergeDropField(kTaskNewtaskFieldNumber)
+  //    - ThreadMergeDropField(kSchedProcessFreeFieldNumber)
+  //
+  // Add these primitives back one-by-one to find the issue.
 
   Context context;
   context.package_name = package_name;
