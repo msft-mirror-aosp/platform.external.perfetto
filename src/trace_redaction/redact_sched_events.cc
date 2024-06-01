@@ -244,7 +244,7 @@ base::Status RedactSchedEvents::OnFtraceEventSwitch(
   PERFETTO_DCHECK(scratch_str);
   PERFETTO_DCHECK(message);
 
-  auto has_fields = {
+  std::array<bool, 7> has_fields = {
       sched_switch.has_prev_comm(), sched_switch.has_prev_pid(),
       sched_switch.has_prev_prio(), sched_switch.has_prev_state(),
       sched_switch.has_next_comm(), sched_switch.has_next_pid(),
@@ -310,9 +310,9 @@ base::Status RedactSchedEvents::OnFtraceEventWaking(
   PERFETTO_DCHECK(scratch_str);
   PERFETTO_DCHECK(parent_message);
 
-  auto has_fields = {sched_waking.has_comm(), sched_waking.has_pid(),
-                     sched_waking.has_prio(), sched_waking.has_success(),
-                     sched_waking.has_target_cpu()};
+  std::array<bool, 5> has_fields = {
+      sched_waking.has_comm(), sched_waking.has_pid(), sched_waking.has_prio(),
+      sched_waking.has_success(), sched_waking.has_target_cpu()};
 
   if (!std::all_of(has_fields.begin(), has_fields.end(), IsTrue)) {
     return base::ErrStatus(
@@ -351,20 +351,6 @@ base::Status RedactSchedEvents::OnCompSched(
     int32_t cpu,
     protos::pbzero::FtraceEventBundle::CompactSched::Decoder& comp_sched,
     protos::pbzero::FtraceEventBundle::CompactSched* message) const {
-  auto has_switch_fields = {
-      comp_sched.has_switch_timestamp(),
-      comp_sched.has_switch_prev_state(),
-      comp_sched.has_switch_next_pid(),
-      comp_sched.has_switch_next_prio(),
-      comp_sched.has_switch_next_comm_index(),
-  };
-
-  auto has_waking_fields = {
-      comp_sched.has_waking_timestamp(),  comp_sched.has_waking_pid(),
-      comp_sched.has_waking_target_cpu(), comp_sched.has_waking_prio(),
-      comp_sched.has_waking_comm_index(), comp_sched.has_waking_common_flags(),
-  };
-
   // Populate the intern table once; it will be used by both sched and waking.
   InternTable intern_table;
 
@@ -379,13 +365,28 @@ base::Status RedactSchedEvents::OnCompSched(
     }
   }
 
+  std::array<bool, 5> has_switch_fields = {
+      comp_sched.has_switch_timestamp(),
+      comp_sched.has_switch_prev_state(),
+      comp_sched.has_switch_next_pid(),
+      comp_sched.has_switch_next_prio(),
+      comp_sched.has_switch_next_comm_index(),
+  };
+
   if (std::any_of(has_switch_fields.begin(), has_switch_fields.end(), IsTrue)) {
     RETURN_IF_ERROR(
         OnCompSchedSwitch(context, cpu, comp_sched, &intern_table, message));
   }
 
+  std::array<bool, 6> has_waking_fields = {
+      comp_sched.has_waking_timestamp(),  comp_sched.has_waking_pid(),
+      comp_sched.has_waking_target_cpu(), comp_sched.has_waking_prio(),
+      comp_sched.has_waking_comm_index(), comp_sched.has_waking_common_flags(),
+  };
+
   if (std::any_of(has_waking_fields.begin(), has_waking_fields.end(), IsTrue)) {
-    // TODO(vaage): Create and call TransformCompSchedWaking().
+    RETURN_IF_ERROR(
+        OnCompactSchedWaking(context, comp_sched, &intern_table, message));
   }
 
   // IMPORTANT: The intern table can only be added after switch and waking
@@ -406,7 +407,7 @@ base::Status RedactSchedEvents::OnCompSchedSwitch(
   PERFETTO_DCHECK(modifier_);
   PERFETTO_DCHECK(message);
 
-  auto has_fields = {
+  std::array<bool, 6> has_fields = {
       comp_sched.has_intern_table(),
       comp_sched.has_switch_timestamp(),
       comp_sched.has_switch_prev_state(),
@@ -421,16 +422,6 @@ base::Status RedactSchedEvents::OnCompSchedSwitch(
         "switch field.");
   }
 
-  std::array<bool, 3> parse_errors = {false, false, false};
-
-  auto it_ts = comp_sched.switch_timestamp(&parse_errors.at(0));
-  auto it_pid = comp_sched.switch_next_pid(&parse_errors.at(1));
-  auto it_comm = comp_sched.switch_next_comm_index(&parse_errors.at(2));
-
-  if (std::any_of(parse_errors.begin(), parse_errors.end(), IsTrue)) {
-    return base::ErrStatus("RedactSchedEvents: failed to parse CompactSched.");
-  }
-
   std::string scratch_str;
 
   protozero::PackedVarInt packed_comm;
@@ -439,6 +430,12 @@ base::Status RedactSchedEvents::OnCompSchedSwitch(
   // The first it_ts value is an absolute value, all other values are delta
   // values.
   uint64_t ts = 0;
+
+  std::array<bool, 3> parse_errors = {false, false, false};
+
+  auto it_ts = comp_sched.switch_timestamp(&parse_errors.at(0));
+  auto it_pid = comp_sched.switch_next_pid(&parse_errors.at(1));
+  auto it_comm = comp_sched.switch_next_comm_index(&parse_errors.at(2));
 
   while (it_ts && it_pid && it_comm) {
     ts += *it_ts;
@@ -465,6 +462,11 @@ base::Status RedactSchedEvents::OnCompSchedSwitch(
     ++it_ts;
     ++it_pid;
     ++it_comm;
+  }
+
+  if (std::any_of(parse_errors.begin(), parse_errors.end(), IsTrue)) {
+    return base::ErrStatus(
+        "RedactSchedEvents: error reading FtraceEventBundle::CompactSched.");
   }
 
   if (it_ts || it_pid || it_comm) {
@@ -515,6 +517,116 @@ base::Status RedactSchedEvents::OnCompSchedSwitch(
   return base::OkStatus();
 }
 
+base::Status RedactSchedEvents::OnCompactSchedWaking(
+    const Context& context,
+    protos::pbzero::FtraceEventBundle::CompactSched::Decoder& compact_sched,
+    InternTable* intern_table,
+    protos::pbzero::FtraceEventBundle::CompactSched* compact_sched_message)
+    const {
+  protozero::PackedVarInt var_comm_index;
+  protozero::PackedVarInt var_common_flags;
+  protozero::PackedVarInt var_pid;
+  protozero::PackedVarInt var_prio;
+  protozero::PackedVarInt var_target_cpu;
+  protozero::PackedVarInt var_timestamp;
+
+  // Time is expressed as delta time, for example:
+  //
+  //         Event: A          B     C      D
+  // Absolute Time: 20         30    35     41
+  //                |          |     |      |
+  //    Delta Time: 20         10    5      6
+  //
+  // When an event is removed, for example, event B, delta times are off:
+  //
+  //               Event:  A          *     C      D
+  //       Absolute Time: 20         30    35     41
+  //                       |          |     |      |
+  //          Delta Time: 20          *     5      6
+  //                       |                |      |
+  // Effective Abs. Time: 20               25     31
+  //               Error:  0               10     10
+  //
+  // To address this issue, delta times are added into a bucket. The bucket is
+  // drained each time an event is retained. If an event is dropped, its time
+  // is added to the bucket, but the bucket won't be drained until a retained
+  // event drains it.
+  uint64_t ts_bucket = 0;
+  uint64_t ts_absolute = 0;
+
+  std::string comm;
+
+  std::array<bool, 7> parse_errors = {!compact_sched.has_intern_table(),
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false};
+
+  // A note on readability, because the waking iterators are the primary focus,
+  // they won't have a "waking" prefix.
+  auto it_comm_index = compact_sched.waking_comm_index(&parse_errors.at(1));
+  auto it_common_flags = compact_sched.waking_common_flags(&parse_errors.at(2));
+  auto it_pid = compact_sched.waking_pid(&parse_errors.at(3));
+  auto it_prio = compact_sched.waking_prio(&parse_errors.at(4));
+  auto it_target_cpu = compact_sched.waking_target_cpu(&parse_errors.at(5));
+  auto it_timestamp = compact_sched.waking_timestamp(&parse_errors.at(6));
+
+  while (it_comm_index && it_common_flags && it_pid && it_prio &&
+         it_target_cpu && it_timestamp) {
+    ts_bucket += *it_timestamp;  // add time to the bucket
+    ts_absolute += *it_timestamp;
+
+    if (filter_->Includes(context, ts_absolute, *it_pid)) {
+      // Now that the waking event will be kept, it can be modified using the
+      // same rules as switch events.
+      auto pid = *it_pid;
+      comm.assign(intern_table->Find(*it_comm_index));
+      modifier_->Modify(context, ts_absolute, *it_target_cpu, &pid, &comm);
+
+      auto comm_it = intern_table->Push(comm.data(), comm.size());
+
+      var_comm_index.Append(comm_it);
+      var_common_flags.Append(*it_common_flags);
+      var_pid.Append(pid);
+      var_prio.Append(*it_prio);
+      var_target_cpu.Append(*it_target_cpu);
+      var_timestamp.Append(ts_bucket);
+
+      ts_bucket = 0;  // drain the whole bucket.
+    }
+
+    ++it_comm_index;
+    ++it_common_flags;
+    ++it_pid;
+    ++it_prio;
+    ++it_target_cpu;
+    ++it_timestamp;
+  }
+
+  if (std::any_of(parse_errors.begin(), parse_errors.end(), IsTrue)) {
+    return base::ErrStatus(
+        "RedactSchedEvents: failed to parse FtraceEventBundle::CompactSched.");
+  }
+
+  if (it_comm_index || it_common_flags || it_pid || it_prio || it_target_cpu ||
+      it_timestamp) {
+    return base::ErrStatus(
+        "RedactSchedEvents: uneven associative arrays in "
+        "FtraceEventBundle::CompactSched (waking).");
+  }
+
+  compact_sched_message->set_waking_comm_index(var_comm_index);
+  compact_sched_message->set_waking_common_flags(var_common_flags);
+  compact_sched_message->set_waking_pid(var_pid);
+  compact_sched_message->set_waking_prio(var_prio);
+  compact_sched_message->set_waking_target_cpu(var_target_cpu);
+  compact_sched_message->set_waking_timestamp(var_timestamp);
+
+  return base::OkStatus();
+}
+
 // Switch event transformation: Clear the comm value if the thread/process is
 // not part of the target packet.
 base::Status ClearComms::Modify(const Context& context,
@@ -529,6 +641,14 @@ base::Status ClearComms::Modify(const Context& context,
     comm->clear();
   }
 
+  return base::OkStatus();
+}
+
+base::Status DoNothing::Modify(const Context&,
+                               uint64_t,
+                               int32_t,
+                               int32_t*,
+                               std::string*) const {
   return base::OkStatus();
 }
 
