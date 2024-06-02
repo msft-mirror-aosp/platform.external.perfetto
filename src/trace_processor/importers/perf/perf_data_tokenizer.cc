@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -30,9 +31,11 @@
 #include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "protos/perfetto/trace/clock_snapshot.pbzero.h"
+#include "protos/third_party/simpleperf/record_file.pbzero.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/perf/attrs_section_reader.h"
+#include "src/trace_processor/importers/perf/dso_tracker.h"
 #include "src/trace_processor/importers/perf/features.h"
 #include "src/trace_processor/importers/perf/perf_event.h"
 #include "src/trace_processor/importers/perf/perf_file.h"
@@ -42,6 +45,7 @@
 #include "src/trace_processor/importers/proto/perf_sample_tracker.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/storage/stats.h"
+#include "src/trace_processor/util/build_id.h"
 #include "src/trace_processor/util/status_macros.h"
 
 namespace perfetto {
@@ -387,7 +391,12 @@ base::Status PerfDataTokenizer::ParseFeature(uint8_t feature_id,
 
     case feature::ID_BUILD_ID:
       return feature::BuildId::Parse(
-          std::move(data), [](feature::BuildId) { return base::OkStatus(); });
+          std::move(data), [&](feature::BuildId build_id) {
+            perf_session_->AddBuildId(
+                build_id.pid, std::move(build_id.filename),
+                BuildId::FromRaw(std::move(build_id.build_id)));
+            return base::OkStatus();
+          });
 
     case feature::ID_GROUP_DESC: {
       feature::HeaderGroupDesc group_desc;
@@ -408,7 +417,11 @@ base::Status PerfDataTokenizer::ParseFeature(uint8_t feature_id,
     }
     case feature::ID_SIMPLEPERF_FILE2: {
       RETURN_IF_ERROR(feature::ParseSimpleperfFile2(
-          std::move(data), [&](TraceBlobView) { return util::OkStatus(); }));
+          std::move(data), [&](TraceBlobView blob) {
+            third_party::simpleperf::proto::pbzero::FileFeature::Decoder file(
+                blob.data(), blob.length());
+            DsoTracker::GetOrCreate(context_).AddSimpleperfFile2(file);
+          }));
 
       break;
     }
