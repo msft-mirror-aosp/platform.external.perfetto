@@ -64,7 +64,7 @@ class SchedEventFilter {
   // and easily implemented wrong.
   virtual bool Includes(const Context& context,
                         uint64_t ts,
-                        int32_t wakee) const = 0;
+                        int32_t target) const = 0;
 };
 
 class RedactSchedEvents : public TransformPrimitive {
@@ -126,11 +126,27 @@ class RedactSchedEvents : public TransformPrimitive {
       InternTable* intern_table,
       protos::pbzero::FtraceEventBundle::CompactSched* message) const;
 
+  base::Status OnCompactSchedWaking(
+      const Context& context,
+      protos::pbzero::FtraceEventBundle::CompactSched::Decoder& compact_sched,
+      InternTable* intern_table,
+      protos::pbzero::FtraceEventBundle::CompactSched* compact_sched_message)
+      const;
+
   std::unique_ptr<SchedEventModifier> modifier_;
   std::unique_ptr<SchedEventFilter> filter_;
 };
 
 class ClearComms : public SchedEventModifier {
+ public:
+  base::Status Modify(const Context& context,
+                      uint64_t ts,
+                      int32_t cpu,
+                      int32_t* pid,
+                      std::string* comm) const override;
+};
+
+class DoNothing : public SchedEventModifier {
  public:
   base::Status Modify(const Context& context,
                       uint64_t ts,
