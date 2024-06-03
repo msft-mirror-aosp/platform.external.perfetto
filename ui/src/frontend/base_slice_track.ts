@@ -15,7 +15,7 @@
 import {Disposable, NullDisposable} from '../base/disposable';
 import {assertExists} from '../base/logging';
 import {clamp, floatEqual} from '../base/math_utils';
-import {duration, Time, time} from '../base/time';
+import {Time, time} from '../base/time';
 import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
 import {
@@ -25,23 +25,23 @@ import {
 } from '../common/canvas_utils';
 import {colorCompare} from '../core/color';
 import {UNEXPECTED_PINK} from '../core/colorizer';
-import {Selection, SelectionKind} from '../common/state';
+import {
+  LegacySelection,
+  SelectionKind,
+  getLegacySelection,
+} from '../common/state';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
-import {EngineProxy, Slice, SliceRect, Track} from '../public';
+import {Engine, Slice, SliceRect, Track} from '../public';
 import {LONG, NUM} from '../trace_processor/query_result';
 
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
 import {PanelSize} from './panel';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
-import {constraintsToQuerySuffix} from './sql_utils';
 import {NewTrackArgs} from './track';
-import {
-  BUCKETS_PER_PIXEL,
-  CacheKey,
-  TimelineCache,
-} from '../core/timeline_cache';
+import {BUCKETS_PER_PIXEL, CacheKey} from '../core/timeline_cache';
+import {uuidv4Sql} from '../base/uuid';
 
 // The common class that underpins all tracks drawing slices.
 
@@ -121,13 +121,11 @@ function filterVisibleSlices<S extends Slice>(
   // to the right).
   // Since the slices are sorted by startS we can check this easily:
   const maybeFirstSlice: S | undefined = slices[0];
-  if (exists(maybeFirstSlice) && maybeFirstSlice.startNsQ > end) {
+  if (exists(maybeFirstSlice) && maybeFirstSlice.startNs > end) {
     return [];
   }
 
-  return slices.filter(
-    (slice) => slice.startNsQ <= end && slice.endNsQ >= start,
-  );
+  return slices.filter((slice) => slice.startNs <= end && slice.endNs >= start);
 }
 
 export const filterVisibleSlicesForTesting = filterVisibleSlices;
@@ -141,13 +139,11 @@ export const filterVisibleSlicesForTesting = filterVisibleSlices;
 // merges several tracks into one visual track.
 export const BASE_ROW = {
   id: NUM, // The slice ID, for selection / lookups.
-  ts: LONG, // Start time in nanoseconds.
-  dur: LONG, // Duration in nanoseconds. -1 = incomplete, 0 = instant.
+  ts: LONG, // True ts in nanoseconds.
+  dur: LONG, // True duration in nanoseconds. -1 = incomplete, 0 = instant.
+  tsQ: LONG, // Quantized start time in nanoseconds.
+  durQ: LONG, // Quantized duration in nanoseconds.
   depth: NUM, // Vertical depth.
-
-  // These are computed by the base class:
-  tsq: LONG, // Quantized |ts|. This class owns the quantization logic.
-  tsqEnd: LONG, // Quantized |ts+dur|. The end bucket.
 };
 
 export type BaseRow = typeof BASE_ROW;
@@ -179,8 +175,9 @@ export abstract class BaseSliceTrack<
 > implements Track
 {
   protected sliceLayout: SliceLayout = {...DEFAULT_SLICE_LAYOUT};
-  protected engine: EngineProxy;
+  protected engine: Engine;
   protected trackKey: string;
+  protected trackUuid = uuidv4Sql();
 
   // This is the over-skirted cached bounds:
   private slicesKey: CacheKey = CacheKey.zero();
@@ -188,17 +185,11 @@ export abstract class BaseSliceTrack<
   // This is the currently 'cached' slices:
   private slices = new Array<CastInternal<T['slice']>>();
 
-  // This is the slices cache:
-  private cache: TimelineCache<Array<CastInternal<T['slice']>>> =
-    new TimelineCache(5);
-
-  private hasOneOffData: boolean = false;
   // Incomplete slices (dur = -1). Rather than adding a lot of logic to
   // the SQL queries to handle this case we materialise them one off
   // then unconditionally render them. This should be efficient since
   // there are at most |depth| slices.
   private incomplete = new Array<CastInternal<T['slice']>>();
-  private maxDurNs: duration = 0n;
 
   // The currently selected slice.
   // TODO(hjd): We should fetch this from the underlying data rather
@@ -300,13 +291,13 @@ export abstract class BaseSliceTrack<
     }
   }
 
-  protected isSelectionHandled(selection: Selection): boolean {
+  protected isSelectionHandled(selection: LegacySelection): boolean {
     // TODO(hjd): Remove when updating selection.
-    // We shouldn't know here about CHROME_SLICE. Maybe should be set by
+    // We shouldn't know here about THREAD_SLICE. Maybe should be set by
     // whatever deals with that. Dunno the namespace of selection is weird. For
     // most cases in non-ambiguous (because most things are a 'slice'). But some
     // others (e.g. THREAD_SLICE) have their own ID namespace so we need this.
-    const supportedSelectionKinds: SelectionKind[] = ['SLICE', 'CHROME_SLICE'];
+    const supportedSelectionKinds: SelectionKind[] = ['SCHED_SLICE', 'SLICE'];
     return supportedSelectionKinds.includes(selection.kind);
   }
 
@@ -320,8 +311,71 @@ export abstract class BaseSliceTrack<
     return `${size}px Roboto Condensed`;
   }
 
+  private getTableName(): string {
+    return `slice_${this.trackUuid}`;
+  }
+
   async onCreate(): Promise<void> {
     this.initState = await this.onInit();
+
+    // TODO(hjd): Consider case below:
+    // raw:
+    // 0123456789
+    //   [A     did not end)
+    //     [B ]
+    //
+    //
+    // quantised:
+    // 0123456789
+    //   [A     did not end)
+    // [     B  ]
+    // Does it lead to odd results?
+    const extraCols = this.extraSqlColumns.join(',');
+    let queryRes;
+    if (CROP_INCOMPLETE_SLICE_FLAG.get()) {
+      queryRes = await this.engine.query(`
+          select
+            ${this.depthColumn()},
+            ts as tsQ,
+            ts,
+            -1 as durQ,
+            -1 as dur,
+            id
+            ${extraCols ? ',' + extraCols : ''}
+          from (${this.getSqlSource()})
+          where dur = -1;
+        `);
+    } else {
+      queryRes = await this.engine.query(`
+        select
+          ${this.depthColumn()},
+          max(ts) as tsQ,
+          ts,
+          -1 as durQ,
+          -1 as dur,
+          id
+          ${extraCols ? ',' + extraCols : ''}
+        from (${this.getSqlSource()})
+        group by 1
+        having dur = -1
+      `);
+    }
+    const incomplete = new Array<CastInternal<T['slice']>>(queryRes.numRows());
+    const it = queryRes.iter(this.getRowSpec());
+    for (let i = 0; it.valid(); it.next(), ++i) {
+      incomplete[i] = this.rowToSliceInternal(it);
+    }
+    this.onUpdatedSlices(incomplete);
+    this.incomplete = incomplete;
+
+    await this.engine.query(`
+      create virtual table ${this.getTableName()}
+      using __intrinsic_slice_mipmap((
+        select id, ts, dur, ${this.depthColumn()}
+        from (${this.getSqlSource()})
+        where dur != -1
+      ));
+    `);
   }
 
   async onUpdate(): Promise<void> {
@@ -360,7 +414,7 @@ export abstract class BaseSliceTrack<
       vizTime.end.toTime('ceil'),
     );
 
-    let selection = globals.state.currentSelection;
+    let selection = getLegacySelection(globals.state);
     if (!selection || !this.isSelectionHandled(selection)) {
       selection = null;
     }
@@ -390,8 +444,8 @@ export abstract class BaseSliceTrack<
       // partially visible. This might end up with a negative x if the
       // slice starts before the visible time or with a width that overflows
       // pxEnd.
-      slice.x = timeScale.timeToPx(slice.startNsQ);
-      slice.w = timeScale.durationToPx(slice.durNsQ);
+      slice.x = timeScale.timeToPx(slice.startNs);
+      slice.w = timeScale.durationToPx(slice.durNs);
 
       if (slice.flags & SLICE_FLAGS_INSTANT) {
         // In the case of an instant slice, set the slice geometry on the
@@ -607,82 +661,18 @@ export abstract class BaseSliceTrack<
     } // if (hoveredSlice)
   }
 
-  onDestroy() {
+  async onDestroy(): Promise<void> {
     if (this.initState) {
       this.initState.dispose();
       this.initState = undefined;
     }
+    await this.engine.tryQuery(`drop table ${this.getTableName()}`);
   }
 
   // This method figures out if the visible window is outside the bounds of
   // the cached data and if so issues new queries (i.e. sorta subsumes the
   // onBoundsChange).
   private async maybeRequestData(rawSlicesKey: CacheKey) {
-    if (!this.hasOneOffData) {
-      // TODO(hjd): This could be done in onInit maybe?
-      const queryRes = await this.engine.query(`select
-          ifnull(max(dur), 0) as maxDur, count(1) as rowCount
-          from (${this.getSqlSource()})`);
-      const row = queryRes.firstRow({maxDur: LONG, rowCount: NUM});
-      this.maxDurNs = row.maxDur;
-
-      {
-        // TODO(hjd): Consider case below:
-        // raw:
-        // 0123456789
-        //   [A     did not end)
-        //     [B ]
-        //
-        //
-        // quantised:
-        // 0123456789
-        //   [A     did not end)
-        // [     B  ]
-        // Does it lead to odd results?
-        const extraCols = this.extraSqlColumns.join(',');
-        let queryRes;
-        if (CROP_INCOMPLETE_SLICE_FLAG.get()) {
-          queryRes = await this.engine.query(`
-            select
-              ${this.depthColumn()},
-              ts as tsq,
-              ts as tsqEnd,
-              ts,
-              -1 as dur,
-              id
-              ${extraCols ? ',' + extraCols : ''}
-            from (${this.getSqlSource()})
-            where dur = -1;
-          `);
-        } else {
-          queryRes = await this.engine.query(`
-            select
-              ${this.depthColumn()},
-              max(ts) as tsq,
-              max(ts) as tsqEnd,
-              max(ts) as ts,
-              -1 as dur,
-              id
-              ${extraCols ? ',' + extraCols : ''}
-            from (${this.getSqlSource()})
-            group by 1
-            having dur = -1;
-          `);
-        }
-        const incomplete = new Array<CastInternal<T['slice']>>(
-          queryRes.numRows(),
-        );
-        const it = queryRes.iter(this.getRowSpec());
-        for (let i = 0; it.valid(); it.next(), ++i) {
-          incomplete[i] = this.rowToSliceInternal(it);
-        }
-        this.onUpdatedSlices(incomplete);
-        this.incomplete = incomplete;
-      }
-
-      this.hasOneOffData = true;
-    }
-
     if (rawSlicesKey.isCoveredBy(this.slicesKey)) {
       return; // We have the data already, no need to re-query
     }
@@ -695,52 +685,23 @@ export abstract class BaseSliceTrack<
       );
     }
 
-    const maybeCachedSlices = this.cache.lookup(slicesKey);
-    if (maybeCachedSlices) {
-      this.slicesKey = slicesKey;
-      this.onUpdatedSlices(maybeCachedSlices);
-      this.slices = maybeCachedSlices;
-      return;
-    }
-
-    const bucketNs = slicesKey.bucketSize;
-    let queryTsq;
-    let queryTsqEnd;
-    // When we're zoomed into the level of single ns there is no point
-    // doing quantization (indeed it causes bad artifacts) so instead
-    // we use ts / ts+dur directly.
-    if (bucketNs === 1n) {
-      queryTsq = 'ts';
-      queryTsqEnd = 'ts + dur';
-    } else {
-      queryTsq = `(ts + ${bucketNs / 2n}) / ${bucketNs} * ${bucketNs}`;
-      queryTsqEnd = `(ts + dur + ${bucketNs / 2n}) / ${bucketNs} * ${bucketNs}`;
-    }
-
+    const resolution = rawSlicesKey.bucketSize;
     const extraCols = this.extraSqlColumns.join(',');
-    const maybeDepth = this.isFlat() ? undefined : 'depth';
-
-    const constraint = constraintsToQuerySuffix({
-      filters: [
-        `ts >= ${slicesKey.start - this.maxDurNs}`,
-        `ts <= ${slicesKey.end}`,
-      ],
-      groupBy: [maybeDepth, 'tsq'],
-      orderBy: [maybeDepth, 'tsq'],
-    });
-
-    // TODO(hjd): Count and expose the number of slices summarized in
-    // each bucket?
     const queryRes = await this.engine.query(`
       SELECT
-        ${queryTsq} AS tsq,
-        ${queryTsqEnd} AS tsqEnd,
-        ts,
-        MAX(dur) AS dur,
-        id,
-        ${this.depthColumn()}
+        (z.ts / ${resolution}) * ${resolution} as tsQ,
+        ((z.dur / ${resolution}) + 1) * ${resolution} as durQ,
+        s.ts as ts,
+        s.dur as dur,
+        s.id,
+        z.depth
         ${extraCols ? ',' + extraCols : ''}
-      FROM (${this.getSqlSource()}) ${constraint}
+      FROM ${this.getTableName()}(
+        ${slicesKey.start},
+        ${slicesKey.end},
+        ${slicesKey.bucketSize}
+      ) z
+      CROSS JOIN (${this.getSqlSource()}) s using (id)
     `);
 
     // Here convert each row to a Slice. We do what we can do
@@ -764,7 +725,6 @@ export abstract class BaseSliceTrack<
     }
     this.maxDataDepth = maxDataDepth;
     this.onUpdatedSlices(slices);
-    this.cache.insert(slicesKey, slices);
     this.slices = slices;
 
     raf.scheduleRedraw();
@@ -785,11 +745,6 @@ export abstract class BaseSliceTrack<
   }
 
   rowToSlice(row: T['row']): T['slice'] {
-    const startNsQ = Time.fromRaw(row.tsq);
-    const endNsQ = Time.fromRaw(row.tsqEnd);
-    const ts = Time.fromRaw(row.ts);
-    const dur: duration = row.dur;
-
     let flags = 0;
     if (row.dur === -1n) {
       flags |= SLICE_FLAGS_INCOMPLETE;
@@ -799,11 +754,11 @@ export abstract class BaseSliceTrack<
 
     return {
       id: row.id,
-      startNsQ,
-      endNsQ,
-      durNsQ: endNsQ - startNsQ,
-      ts,
-      dur,
+      startNs: Time.fromRaw(row.tsQ),
+      endNs: Time.fromRaw(row.tsQ + row.durQ),
+      durNs: row.durQ,
+      ts: Time.fromRaw(row.ts),
+      dur: row.dur,
       flags,
       depth: row.depth,
       title: '',
@@ -842,7 +797,7 @@ export abstract class BaseSliceTrack<
     for (const slice of this.incomplete) {
       const visibleTimeScale = globals.timeline.visibleTimeScale;
       const startPx = CROP_INCOMPLETE_SLICE_FLAG.get()
-        ? visibleTimeScale.timeToPx(slice.startNsQ)
+        ? visibleTimeScale.timeToPx(slice.startNs)
         : slice.x;
       const cropUnfinishedSlicesCondition = CROP_INCOMPLETE_SLICE_FLAG.get()
         ? startPx + INCOMPLETE_SLICE_WIDTH_PX >= x

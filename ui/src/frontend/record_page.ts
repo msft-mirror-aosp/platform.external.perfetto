@@ -25,6 +25,7 @@ import {
   isChromeTarget,
   isCrOSTarget,
   isLinuxTarget,
+  isWindowsTarget,
   LoadedConfig,
   MAX_TIME,
   RecordingTarget,
@@ -55,6 +56,8 @@ import {MemorySettings} from './recording/memory_settings';
 import {PowerSettings} from './recording/power_settings';
 import {RecordingSectionAttrs} from './recording/recording_sections';
 import {RecordingSettings} from './recording/recording_settings';
+import {EtwSettings} from './recording/etw_settings';
+import {createPermalink} from './permalink';
 
 export const PERSIST_CONFIG_FLAG = featureFlags.register({
   id: 'persistConfigsUI',
@@ -68,6 +71,7 @@ export const RECORDING_SECTIONS = [
   'instructions',
   'config',
   'cpu',
+  'etw',
   'gpu',
   'power',
   'memory',
@@ -173,9 +177,7 @@ function Instructions(cssClass: string) {
           'button.permalinkconfig',
           {
             onclick: () => {
-              globals.dispatch(
-                Actions.createPermalink({isRecordingConfig: true}),
-              );
+              createPermalink({isRecordingConfig: true});
             },
           },
           'Share recording settings',
@@ -807,6 +809,15 @@ function recordMenu(routePage: string) {
       m('.sub', 'Lightweight stack polling'),
     ),
   );
+  const etwProbe = m(
+    'a[href="#!/record/etw"]',
+    m(
+      `li${routePage === 'etw' ? '.active' : ''}`,
+      m('i.material-icons', 'subtitles'),
+      m('.title', 'ETW Tracing Config'),
+      m('.sub', 'Context switch, Thread state'),
+    ),
+  );
   const recInProgress = globals.state.recordingInProgress;
 
   const probes = [];
@@ -814,6 +825,8 @@ function recordMenu(routePage: string) {
     probes.push(cpuProbe, powerProbe, memoryProbe, chromeProbe, advancedProbe);
   } else if (isChromeTarget(target)) {
     probes.push(chromeProbe);
+  } else if (isWindowsTarget(target)) {
+    probes.push(chromeProbe, etwProbe);
   } else {
     probes.push(
       cpuProbe,
@@ -908,6 +921,7 @@ export const RecordPage = createPage({
       ['chrome', ChromeSettings],
       ['tracePerf', LinuxPerfSettings],
       ['advanced', AdvancedSettings],
+      ['etw', EtwSettings],
     ]);
     for (const [section, component] of settingsSections.entries()) {
       pages.push(

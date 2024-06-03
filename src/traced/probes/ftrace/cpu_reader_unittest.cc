@@ -1021,6 +1021,7 @@ TEST_F(CpuReaderParsePagePayloadTest, ParseSixSchedSwitch) {
   EXPECT_EQ(last_read_event_ts_, 1'045'157'726'697'236ULL);
 
   auto bundle = GetBundle();
+  EXPECT_EQ(0u, bundle.last_read_event_timestamp());
   ASSERT_EQ(bundle.event().size(), 6u);
   {
     const protos::gen::FtraceEvent& event = bundle.event()[1];
@@ -1078,6 +1079,7 @@ TEST_F(CpuReaderParsePagePayloadTest, ParseSixSchedSwitchCompactFormat) {
   auto bundle = GetBundle();
 
   const auto& compact_sched = bundle.compact_sched();
+  EXPECT_EQ(0u, bundle.last_read_event_timestamp());
 
   EXPECT_EQ(6u, compact_sched.switch_timestamp().size());
   EXPECT_EQ(6u, compact_sched.switch_prev_state().size());
@@ -2457,7 +2459,7 @@ TEST_F(CpuReaderParsePagePayloadTest, ParseFullPageSchedSwitch) {
 //            <...>-9290  [000] ....  1352.724574: suspend_resume: thaw_processes[0] begin
 // clang-format on
 
-static ExamplePage g_suspend_resume {
+static ExamplePage g_suspend_resume{
     "synthetic",
     R"(00000000: edba 155a 3201 0000 7401 0000 0000 0000  ...Z2...t.......
 00000010: 7e58 22cd 1201 0000 0600 0000 ac00 0000  ~X".............
@@ -3625,6 +3627,7 @@ TEST(CpuReaderTest, LastReadEventTimestampWithSplitBundles) {
 
   const uint64_t kSecondPrintTs = 1308020252356549ULL;
   EXPECT_EQ(kSecondPrintTs, first_bundle.event()[1].timestamp());
+  EXPECT_EQ(0u, first_bundle.last_read_event_timestamp());
 
   // 1 print + lost_events + updated last_read_event_timestamp
   auto const& second_bundle = packets[1].ftrace_events();

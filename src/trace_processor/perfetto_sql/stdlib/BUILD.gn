@@ -25,6 +25,8 @@ perfetto_amalgamated_sql_header("stdlib") {
     "counters",
     "cpu",
     "deprecated/v42/common",
+    "export",
+    "gpu",
     "graphs",
     "intervals",
     "linux",
@@ -36,6 +38,8 @@ perfetto_amalgamated_sql_header("stdlib") {
     "stack_trace",
     "time",
     "v8",
+    "viz/summary",
+    "wattson",
   ]
   generated_header = "stdlib.h"
   namespace = "stdlib"

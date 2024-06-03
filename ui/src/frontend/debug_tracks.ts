@@ -16,18 +16,20 @@ import {uuidv4} from '../base/uuid';
 import {Actions, DeferredAction} from '../common/actions';
 import {SCROLLING_TRACK_GROUP} from '../common/state';
 import {globals} from './globals';
-import {EngineProxy, PrimaryTrackSortKey} from '../public';
-import {DebugTrackV2Config} from '../tracks/debug/slice_track';
+import {Engine, PrimaryTrackSortKey} from '../public';
+import {DebugTrackV2Config} from '../core_plugins/debug/slice_track';
 
 export const ARG_PREFIX = 'arg_';
 export const DEBUG_SLICE_TRACK_URI = 'perfetto.DebugSlices';
 export const DEBUG_COUNTER_TRACK_URI = 'perfetto.DebugCounter';
 
-// Names of the columns of the underlying view to be used as ts / dur / name.
+// Names of the columns of the underlying view to be used as
+// ts / dur / name / pivot.
 export interface SliceColumns {
   ts: string;
   dur: string;
   name: string;
+  pivot?: string;
 }
 
 export interface DebugTrackV2CreateConfig {
@@ -53,7 +55,7 @@ export interface SqlDataSource {
 // once or want to tweak the actions once produced. Otherwise, use
 // addDebugSliceTrack().
 export async function createDebugSliceTrackActions(
-  _engine: EngineProxy,
+  _engine: Engine,
   data: SqlDataSource,
   trackName: string,
   sliceColumns: SliceColumns,
@@ -67,7 +69,6 @@ export async function createDebugSliceTrackActions(
   const trackConfig: DebugTrackV2Config = {
     data,
     columns: sliceColumns,
-    closeable,
     argColumns,
   };
 
@@ -79,6 +80,7 @@ export async function createDebugSliceTrackActions(
       trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
       trackGroup: SCROLLING_TRACK_GROUP,
       params: trackConfig,
+      closeable,
     }),
   ];
   if (config?.pinned ?? true) {
@@ -87,10 +89,47 @@ export async function createDebugSliceTrackActions(
   return actions;
 }
 
+export async function addPivotDebugSliceTracks(
+  engine: Engine,
+  data: SqlDataSource,
+  trackName: string,
+  sliceColumns: SliceColumns,
+  argColumns: string[],
+  config?: DebugTrackV2CreateConfig,
+) {
+  if (sliceColumns.pivot) {
+    // Get distinct values to group by
+    const pivotValues = await engine.query(`
+      with all_vals as (${data.sqlSource})
+      select DISTINCT ${sliceColumns.pivot} from all_vals;`);
+
+    const iter = pivotValues.iter({});
+
+    for (; iter.valid(); iter.next()) {
+      const pivotDataSource: SqlDataSource = {
+        sqlSource: `select * from
+        (${data.sqlSource})
+        where ${sliceColumns.pivot} = '${iter.get(sliceColumns.pivot)}'`,
+      };
+
+      const actions = await createDebugSliceTrackActions(
+        engine,
+        pivotDataSource,
+        `${trackName.trim() || 'Pivot Track'}: ${iter.get(sliceColumns.pivot)}`,
+        sliceColumns,
+        argColumns,
+        config,
+      );
+
+      globals.dispatchMultiple(actions);
+    }
+  }
+}
+
 // Adds a debug track immediately. Use createDebugSliceTrackActions() if you
 // want to create many tracks at once.
 export async function addDebugSliceTrack(
-  engine: EngineProxy,
+  engine: Engine,
   data: SqlDataSource,
   trackName: string,
   sliceColumns: SliceColumns,
@@ -117,7 +156,6 @@ export interface CounterColumns {
 export interface CounterDebugTrackConfig {
   data: SqlDataSource;
   columns: CounterColumns;
-  closeable: boolean;
 }
 
 export interface CounterDebugTrackCreateConfig {
@@ -143,7 +181,6 @@ export async function createDebugCounterTrackActions(
   const params: CounterDebugTrackConfig = {
     data,
     columns,
-    closeable,
   };
 
   const trackKey = uuidv4();
@@ -155,6 +192,7 @@ export async function createDebugCounterTrackActions(
       trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
       trackGroup: SCROLLING_TRACK_GROUP,
       params,
+      closeable,
     }),
   ];
   if (config?.pinned ?? true) {

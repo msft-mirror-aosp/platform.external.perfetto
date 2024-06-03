@@ -50,6 +50,10 @@ class SystemProbesParser {
   TraceProcessorContext* const context_;
 
   const StringId utid_name_id_;
+  const StringId ns_unit_id_;
+  const StringId bytes_unit_id_;
+  const StringId available_chunks_unit_id_;
+
   const StringId num_forks_name_id_;
   const StringId num_irq_total_name_id_;
   const StringId num_softirq_total_name_id_;
@@ -71,7 +75,7 @@ class SystemProbesParser {
   // their StringId. Keep kProcStatsProcessSize equal to 1 + max proto field
   // id of ProcessStats::Process. Also update the value in
   // ChromeSystemProbesParser.
-  static constexpr size_t kProcStatsProcessSize = 23;
+  static constexpr size_t kProcStatsProcessSize = 24;
   std::array<StringId, kProcStatsProcessSize> proc_stats_process_names_{};
 
   // Maps a SysStats::PsiSample::PsiResource type to its StringId.

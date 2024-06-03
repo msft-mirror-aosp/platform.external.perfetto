@@ -33,6 +33,7 @@ import DisableTracingResponse = protos.perfetto.protos.DisableTracingResponse;
 import EnableMetatraceArgs = protos.perfetto.protos.EnableMetatraceArgs;
 import EnableTracingRequest = protos.perfetto.protos.EnableTracingRequest;
 import EnableTracingResponse = protos.perfetto.protos.EnableTracingResponse;
+import EtwConfig = protos.perfetto.protos.EtwConfig;
 import FreeBuffersRequest = protos.perfetto.protos.FreeBuffersRequest;
 import FreeBuffersResponse = protos.perfetto.protos.FreeBuffersResponse;
 import FtraceConfig = protos.perfetto.protos.FtraceConfig;
@@ -74,9 +75,7 @@ import ResetTraceProcessorArgs = protos.perfetto.protos.ResetTraceProcessorArgs;
 import StatCounters = protos.perfetto.protos.SysStatsConfig.StatCounters;
 import StatusResult = protos.perfetto.protos.StatusResult;
 import SysStatsConfig = protos.perfetto.protos.SysStatsConfig;
-import Trace = protos.perfetto.protos.Trace;
 import TraceConfig = protos.perfetto.protos.TraceConfig;
-import TracePacket = protos.perfetto.protos.TracePacket;
 import TraceProcessorApiVersion = protos.perfetto.protos.TraceProcessorApiVersion;
 import TraceProcessorRpc = protos.perfetto.protos.TraceProcessorRpc;
 import TraceProcessorRpcStream = protos.perfetto.protos.TraceProcessorRpcStream;
@@ -101,6 +100,7 @@ export {
   EnableMetatraceArgs,
   EnableTracingRequest,
   EnableTracingResponse,
+  EtwConfig,
   FreeBuffersRequest,
   FreeBuffersResponse,
   FtraceConfig,
@@ -142,9 +142,7 @@ export {
   StatCounters,
   StatusResult,
   SysStatsConfig,
-  Trace,
   TraceConfig,
-  TracePacket,
   TraceProcessorApiVersion,
   TraceProcessorRpc,
   TraceProcessorRpcStream,

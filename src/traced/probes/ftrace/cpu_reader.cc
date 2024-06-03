@@ -297,13 +297,16 @@ size_t CpuReader::ReadAndProcessBatch(
   if (pages_read == 0)
     return pages_read;
 
+  uint64_t last_read_ts = last_read_event_ts_;
   for (FtraceDataSource* data_source : started_data_sources) {
+    last_read_ts = last_read_event_ts_;
     ProcessPagesForDataSource(
         data_source->trace_writer(), data_source->mutable_metadata(), cpu_,
         data_source->parsing_config(), data_source->mutable_parse_errors(),
-        &last_read_event_ts_, parsing_buf, pages_read, compact_sched_buf,
-        table_, symbolizer_, ftrace_clock_snapshot_, ftrace_clock_);
+        &last_read_ts, parsing_buf, pages_read, compact_sched_buf, table_,
+        symbolizer_, ftrace_clock_snapshot_, ftrace_clock_);
   }
+  last_read_event_ts_ = last_read_ts;
 
   return pages_read;
 }
@@ -407,6 +410,13 @@ void CpuReader::Bundler::FinalizeAndRunSymbolizer() {
 // event bundle proto with a timestamp, letting the trace processor decide
 // whether to discard or keep the post-error data. Previously, we crashed as
 // soon as we encountered such an error.
+// TODO(rsavitski, b/192586066): consider moving last_read_event_ts tracking to
+// be per-datasource. The current implementation can be pessimistic if there are
+// multiple concurrent data sources, one of which is only interested in sparse
+// events (imagine a print filter and one matching event every minute, while the
+// buffers are read - advancing the last read timestamp - multiple times per
+// second). Tracking the timestamp of the last event *written into the
+// datasource* can be more accurate.
 // static
 bool CpuReader::ProcessPagesForDataSource(
     TraceWriter* trace_writer,
@@ -687,9 +697,9 @@ protos::pbzero::FtraceParseStatus CpuReader::ParsePagePayload(
         }
         last_data_record_ts = timestamp;
         ptr = next;  // jump to next event
-      }  // default case
-    }    // switch (event_header.type_or_length)
-  }      // while (ptr < end)
+      }              // default case
+    }                // switch (event_header.type_or_length)
+  }                  // while (ptr < end)
   if (last_data_record_ts)
     *last_read_event_ts = last_data_record_ts;
   return FtraceParseStatus::FTRACE_STATUS_OK;
@@ -858,6 +868,9 @@ bool CpuReader::ParseField(const Field& field,
       return true;
     case kDevId64ToUint64:
       ReadDevId<uint64_t>(field_start, field_id, message, metadata);
+      return true;
+    case kFtraceSymAddr32ToUint64:
+      ReadSymbolAddr<uint32_t>(field_start, field_id, message, metadata);
       return true;
     case kFtraceSymAddr64ToUint64:
       ReadSymbolAddr<uint64_t>(field_start, field_id, message, metadata);

@@ -22,12 +22,7 @@ import {
 } from '../frontend/record_config';
 import {SqlTables} from '../frontend/sql_table/well_known_tables';
 
-import {
-  defaultTraceTime,
-  NonSerializableState,
-  State,
-  STATE_VERSION,
-} from './state';
+import {NonSerializableState, State, STATE_VERSION} from './state';
 
 const AUTOLOAD_STARTED_CONFIG_FLAG = featureFlags.register({
   id: 'autoloadStartedConfig',
@@ -83,7 +78,6 @@ export function createEmptyNonSerializableState(): NonSerializableState {
       ],
       constrainToArea: true,
       queryRequested: false,
-      argumentNames: [],
     },
   };
 }
@@ -93,7 +87,6 @@ export function createEmptyState(): State {
     version: STATE_VERSION,
     nextId: '-1',
     newEngineMode: 'USE_HTTP_RPC_IF_AVAILABLE',
-    traceTime: {...defaultTraceTime},
     tracks: {},
     utidToThreadSortKey: {},
     aggregatePreferences: {},
@@ -102,7 +95,6 @@ export function createEmptyState(): State {
     scrollingTracks: [],
     areas: {},
     queries: {},
-    permalink: {},
     notes: {},
 
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get()
@@ -113,7 +105,8 @@ export function createEmptyState(): State {
 
     frontendLocalState: {
       visibleState: {
-        ...defaultTraceTime,
+        start: Time.ZERO,
+        end: Time.fromSeconds(10),
         lastUpdate: 0,
         resolution: 0n,
       },
@@ -124,23 +117,10 @@ export function createEmptyState(): State {
       mode: 'SEARCH',
     },
 
-    logsPagination: {
-      offset: 0,
-      count: 0,
-    },
-
-    ftracePagination: {
-      offset: 0,
-      count: 0,
-    },
-
-    ftraceFilter: {
-      excludedNames: [],
-    },
-
     status: {msg: '', timestamp: 0},
-    currentSelection: null,
-    currentFlamegraphState: null,
+    selection: {
+      kind: 'empty',
+    },
     traceConversionInProgress: false,
 
     perfDebug: false,
@@ -169,14 +149,6 @@ export function createEmptyState(): State {
     fetchChromeCategories: false,
     chromeCategories: undefined,
     nonSerializableState: createEmptyNonSerializableState(),
-
-    logFilteringCriteria: {
-      // The first two log priorities are ignored.
-      minimumLevel: 2,
-      tags: [],
-      textEntry: '',
-      hideNonMatching: true,
-    },
 
     // Somewhere to store plugins' persistent state.
     plugins: {},

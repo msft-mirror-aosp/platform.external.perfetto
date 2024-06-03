@@ -31,9 +31,6 @@ import {Panel} from './panel_container';
 export class TickmarkPanel implements Panel {
   readonly kind = 'panel';
   readonly selectable = false;
-  readonly trackKey = undefined;
-
-  constructor(readonly key: string) {}
 
   render(): m.Children {
     return m('.tickbar');
@@ -84,19 +81,21 @@ export class TickmarkPanel implements Panel {
       );
     }
     const index = globals.state.searchIndex;
-    if (index !== -1 && index < globals.currentSearchResults.tsStarts.length) {
-      const start = globals.currentSearchResults.tsStarts[index];
-      const triangleStart =
-        Math.max(visibleTimeScale.timeToPx(Time.fromRaw(start)), 0) +
-        TRACK_SHELL_WIDTH;
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.moveTo(triangleStart, size.height);
-      ctx.lineTo(triangleStart - 3, 0);
-      ctx.lineTo(triangleStart + 3, 0);
-      ctx.lineTo(triangleStart, size.height);
-      ctx.fill();
-      ctx.closePath();
+    if (index !== -1 && index < globals.currentSearchResults.tses.length) {
+      const start = globals.currentSearchResults.tses[index];
+      if (start !== -1n) {
+        const triangleStart =
+          Math.max(visibleTimeScale.timeToPx(Time.fromRaw(start)), 0) +
+          TRACK_SHELL_WIDTH;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(triangleStart, size.height);
+        ctx.lineTo(triangleStart - 3, 0);
+        ctx.lineTo(triangleStart + 3, 0);
+        ctx.lineTo(triangleStart, size.height);
+        ctx.fill();
+        ctx.closePath();
+      }
     }
 
     ctx.restore();

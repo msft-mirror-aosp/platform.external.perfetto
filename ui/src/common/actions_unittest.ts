@@ -15,23 +15,21 @@
 import {produce} from 'immer';
 
 import {assertExists} from '../base/logging';
-import {Time} from '../base/time';
 import {PrimaryTrackSortKey} from '../public';
-import {SLICE_TRACK_KIND} from '../tracks/chrome_slices';
-import {HEAP_PROFILE_TRACK_KIND} from '../tracks/heap_profile';
-import {PROCESS_SCHEDULING_TRACK_KIND} from '../tracks/process_summary/process_scheduling_track';
-import {THREAD_STATE_TRACK_KIND} from '../tracks/thread_state';
+import {HEAP_PROFILE_TRACK_KIND} from '../core_plugins/heap_profile';
+import {PROCESS_SCHEDULING_TRACK_KIND} from '../core_plugins/process_summary/process_scheduling_track';
+import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
 
 import {StateActions} from './actions';
 import {createEmptyState} from './empty_state';
 import {
   InThreadTrackSortKey,
-  ProfileType,
   SCROLLING_TRACK_GROUP,
   State,
   TraceUrlSource,
   TrackSortKey,
 } from './state';
+import {THREAD_SLICE_TRACK_KIND} from '../core_plugins/thread_slice/thread_slice_track';
 
 function fakeTrack(
   state: State,
@@ -60,14 +58,14 @@ function fakeTrack(
 
 function fakeTrackGroup(
   state: State,
-  args: {id: string; summaryTrackId: string},
+  args: {key: string; summaryTrackKey: string},
 ): State {
   return produce(state, (draft) => {
     StateActions.addTrackGroup(draft, {
       name: 'A group',
-      id: args.id,
+      key: args.key,
       collapsed: false,
-      summaryTrackKey: args.summaryTrackId,
+      summaryTrackKey: args.summaryTrackKey,
     });
   });
 }
@@ -117,7 +115,7 @@ test('add track to track group', () => {
   const afterGroup = produce(state, (draft) => {
     StateActions.addTrackGroup(draft, {
       name: 'A track group',
-      id: '123-123-123',
+      key: '123-123-123',
       summaryTrackKey: 's',
       collapsed: false,
     });
@@ -133,8 +131,8 @@ test('add track to track group', () => {
     });
   });
 
-  expect(afterTrackAdd.trackGroups['123-123-123'].tracks[0]).toBe('s');
-  expect(afterTrackAdd.trackGroups['123-123-123'].tracks[1]).toBe('1');
+  expect(afterTrackAdd.trackGroups['123-123-123'].summaryTrack).toBe('s');
+  expect(afterTrackAdd.trackGroups['123-123-123'].tracks[0]).toBe('1');
 });
 
 test('reorder tracks', () => {
@@ -151,19 +149,19 @@ test('reorder tracks', () => {
     });
   });
 
-  const firstTrackId = once.scrollingTracks[0];
-  const secondTrackId = once.scrollingTracks[1];
+  const firstTrackKey = once.scrollingTracks[0];
+  const secondTrackKey = once.scrollingTracks[1];
 
   const twice = produce(once, (draft) => {
     StateActions.moveTrack(draft, {
-      srcId: `${firstTrackId}`,
+      srcId: `${firstTrackKey}`,
       op: 'after',
-      dstId: `${secondTrackId}`,
+      dstId: `${secondTrackKey}`,
     });
   });
 
-  expect(twice.scrollingTracks[0]).toBe(secondTrackId);
-  expect(twice.scrollingTracks[1]).toBe(firstTrackId);
+  expect(twice.scrollingTracks[0]).toBe(secondTrackKey);
+  expect(twice.scrollingTracks[1]).toBe(firstTrackKey);
 });
 
 test('reorder pinned to scrolling', () => {
@@ -326,7 +324,7 @@ test('setEngineReady', () => {
 
 test('sortTracksByPriority', () => {
   let state = createEmptyState();
-  state = fakeTrackGroup(state, {id: 'g', summaryTrackId: 'b'});
+  state = fakeTrackGroup(state, {key: 'g', summaryTrackKey: 'b'});
   state = fakeTrack(state, {
     key: 'b',
     uri: HEAP_PROFILE_TRACK_KIND,
@@ -346,12 +344,12 @@ test('sortTracksByPriority', () => {
 
   // High Priority tracks should be sorted before Low Priority tracks:
   // 'b' appears twice because it's the summary track
-  expect(after.trackGroups['g'].tracks).toEqual(['a', 'b', 'b']);
+  expect(after.trackGroups['g'].tracks).toEqual(['a', 'b']);
 });
 
 test('sortTracksByPriorityAndKindAndName', () => {
   let state = createEmptyState();
-  state = fakeTrackGroup(state, {id: 'g', summaryTrackId: 'b'});
+  state = fakeTrackGroup(state, {key: 'g', summaryTrackKey: 'b'});
   state = fakeTrack(state, {
     key: 'a',
     uri: PROCESS_SCHEDULING_TRACK_KIND,
@@ -360,19 +358,19 @@ test('sortTracksByPriorityAndKindAndName', () => {
   });
   state = fakeTrack(state, {
     key: 'b',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackGroup: 'g',
     trackSortKey: PrimaryTrackSortKey.MAIN_THREAD,
   });
   state = fakeTrack(state, {
     key: 'c',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackGroup: 'g',
     trackSortKey: PrimaryTrackSortKey.RENDER_THREAD,
   });
   state = fakeTrack(state, {
     key: 'd',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackGroup: 'g',
     trackSortKey: PrimaryTrackSortKey.GPU_COMPLETION_THREAD,
   });
@@ -383,13 +381,13 @@ test('sortTracksByPriorityAndKindAndName', () => {
   });
   state = fakeTrack(state, {
     key: 'f',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackGroup: 'g',
     name: 'T2',
   });
   state = fakeTrack(state, {
     key: 'g',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackGroup: 'g',
     name: 'T10',
   });
@@ -406,7 +404,6 @@ test('sortTracksByPriorityAndKindAndName', () => {
   expect(after.trackGroups['g'].tracks).toEqual([
     'a',
     'b',
-    'b',
     'c',
     'd',
     'e',
@@ -417,10 +414,10 @@ test('sortTracksByPriorityAndKindAndName', () => {
 
 test('sortTracksByTidThenName', () => {
   let state = createEmptyState();
-  state = fakeTrackGroup(state, {id: 'g', summaryTrackId: 'a'});
+  state = fakeTrackGroup(state, {key: 'g', summaryTrackKey: 'a'});
   state = fakeTrack(state, {
     key: 'a',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackSortKey: {
       utid: 1,
       priority: InThreadTrackSortKey.ORDINARY,
@@ -431,7 +428,7 @@ test('sortTracksByTidThenName', () => {
   });
   state = fakeTrack(state, {
     key: 'b',
-    uri: SLICE_TRACK_KIND,
+    uri: THREAD_SLICE_TRACK_KIND,
     trackSortKey: {
       utid: 2,
       priority: InThreadTrackSortKey.ORDINARY,
@@ -456,40 +453,5 @@ test('sortTracksByTidThenName', () => {
     StateActions.sortThreadTracks(draft, {});
   });
 
-  expect(after.trackGroups['g'].tracks).toEqual(['a', 'a', 'c', 'b']);
-});
-
-test('perf samples open flamegraph', () => {
-  const state = createEmptyState();
-
-  const afterSelectingPerf = produce(state, (draft) => {
-    StateActions.selectPerfSamples(draft, {
-      id: 0,
-      upid: 0,
-      leftTs: Time.fromRaw(0n),
-      rightTs: Time.fromRaw(0n),
-      type: ProfileType.PERF_SAMPLE,
-    });
-  });
-
-  expect(assertExists(afterSelectingPerf.currentFlamegraphState).type).toBe(
-    ProfileType.PERF_SAMPLE,
-  );
-});
-
-test('heap profile opens flamegraph', () => {
-  const state = createEmptyState();
-
-  const afterSelectingPerf = produce(state, (draft) => {
-    StateActions.selectHeapProfile(draft, {
-      id: 0,
-      upid: 0,
-      ts: Time.fromRaw(0n),
-      type: ProfileType.JAVA_HEAP_GRAPH,
-    });
-  });
-
-  expect(assertExists(afterSelectingPerf.currentFlamegraphState).type).toBe(
-    ProfileType.JAVA_HEAP_GRAPH,
-  );
+  expect(after.trackGroups['g'].tracks).toEqual(['a', 'c', 'b']);
 });

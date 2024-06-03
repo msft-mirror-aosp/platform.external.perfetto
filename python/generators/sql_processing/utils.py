@@ -112,14 +112,16 @@ ALLOWED_PREFIXES = {
     'chrome/util': 'cr',
     'intervals': 'interval',
     'graphs': 'graph',
-    'slices': 'slice'
+    'slices': 'slice',
 }
 
 # Allows for nonstandard object names.
 OBJECT_NAME_ALLOWLIST = {
+    'graphs/partition.sql': ['tree_structural_partition_by_group'],
     'slices/with_context.sql': ['process_slice', 'thread_slice'],
     'slices/cpu_time.sql': ['thread_slice_cpu_time']
 }
+
 
 # Given a regex pattern and a string to match against, returns all the
 # matching positions. Specifically, it returns a dictionary from the line

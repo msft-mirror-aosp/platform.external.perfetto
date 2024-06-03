@@ -15,7 +15,6 @@
 import m from 'mithril';
 
 import {Time, time} from '../base/time';
-import {runQuery} from '../common/queries';
 import {raf} from '../core/raf_scheduler';
 import {Anchor} from '../widgets/anchor';
 import {Button} from '../widgets/button';
@@ -24,8 +23,9 @@ import {GridLayout} from '../widgets/grid_layout';
 import {Section} from '../widgets/section';
 import {SqlRef} from '../widgets/sql_ref';
 import {Tree, TreeNode} from '../widgets/tree';
+import {Intent} from '../widgets/common';
 
-import {BottomTab, bottomTabRegistry, NewBottomTabArgs} from './bottom_tab';
+import {BottomTab, NewBottomTabArgs} from './bottom_tab';
 import {SchedSqlId, ThreadStateSqlId} from './sql_types';
 import {
   getFullThreadName,
@@ -319,15 +319,15 @@ export class ThreadStateTab extends BottomTab<ThreadStateTabConfig> {
       ),
       m(Button, {
         label: 'Critical path lite',
+        intent: Intent.Primary,
         onclick: () =>
-          runQuery(
-            `INCLUDE PERFETTO MODULE sched.thread_executing_span;`,
-            this.engine,
-          ).then(() =>
-            addDebugSliceTrack(
-              this.engine,
-              {
-                sqlSource: `
+          this.engine
+            .query(`INCLUDE PERFETTO MODULE sched.thread_executing_span;`)
+            .then(() =>
+              addDebugSliceTrack(
+                this.engine,
+                {
+                  sqlSource: `
                     SELECT
                       cr.id,
                       cr.utid,
@@ -345,25 +345,27 @@ export class ThreadStateTab extends BottomTab<ThreadStateTabConfig> {
                     JOIN thread USING(utid)
                     JOIN process USING(upid)
                   `,
-                columns: sliceLiteColumnNames,
-              },
-              `${this.state?.thread?.name}`,
-              sliceLiteColumns,
-              sliceLiteColumnNames,
+                  columns: sliceLiteColumnNames,
+                },
+                `${this.state?.thread?.name}`,
+                sliceLiteColumns,
+                sliceLiteColumnNames,
+              ),
             ),
-          ),
       }),
       m(Button, {
         label: 'Critical path',
+        intent: Intent.Primary,
         onclick: () =>
-          runQuery(
-            `INCLUDE PERFETTO MODULE sched.thread_executing_span;`,
-            this.engine,
-          ).then(() =>
-            addDebugSliceTrack(
-              this.engine,
-              {
-                sqlSource: `
+          this.engine
+            .query(
+              `INCLUDE PERFETTO MODULE sched.thread_executing_span_with_slice;`,
+            )
+            .then(() =>
+              addDebugSliceTrack(
+                this.engine,
+                {
+                  sqlSource: `
                     SELECT cr.id, cr.utid, cr.ts, cr.dur, cr.name, cr.table_name
                       FROM
                         _thread_executing_span_critical_path_stack(
@@ -372,13 +374,13 @@ export class ThreadStateTab extends BottomTab<ThreadStateTabConfig> {
                           trace_bounds.end_ts - trace_bounds.start_ts) cr,
                         trace_bounds WHERE name IS NOT NULL
                   `,
-                columns: sliceColumnNames,
-              },
-              `${this.state?.thread?.name}`,
-              sliceColumns,
-              sliceColumnNames,
+                  columns: sliceColumnNames,
+                },
+                `${this.state?.thread?.name}`,
+                sliceColumns,
+                sliceColumnNames,
+              ),
             ),
-          ),
       }),
     ];
   }
@@ -387,5 +389,3 @@ export class ThreadStateTab extends BottomTab<ThreadStateTabConfig> {
     return this.state === undefined || this.relatedStates === undefined;
   }
 }
-
-bottomTabRegistry.register(ThreadStateTab);

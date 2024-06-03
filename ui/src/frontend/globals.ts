@@ -31,31 +31,32 @@ import {
 } from '../common/high_precision_time';
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
-import {onSelectionChanged} from '../common/selection_observer';
 import {
-  CallsiteInfo,
   EngineConfig,
-  ProfileType,
   RESOLUTION_DEFAULT,
   State,
+  getLegacySelection,
 } from '../common/state';
 import {TabManager} from '../common/tab_registry';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {TrackManager} from '../common/track_cache';
-import {TABS_V2_FLAG} from '../core/feature_flags';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
-import {Engine} from '../trace_processor/engine';
+import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 
 import {Analytics, initAnalytics} from './analytics';
-import {BottomTabList} from './bottom_tab';
 import {Timeline} from './frontend_local_state';
 import {Router} from './router';
 import {horizontalScrollToTs} from './scroll_helper';
 import {ServiceWorkerController} from './service_worker_controller';
 import {SliceSqlId} from './sql_types';
 import {PxSpan, TimeScale} from './time_scale';
+import {SelectionManager, LegacySelection} from '../core/selection_manager';
+import {exists} from '../base/utils';
+import {OmniboxManager} from './omnibox_manager';
+import {CallsiteInfo} from '../common/flamegraph_util';
+import {FlamegraphCache} from './flamegraph_panel';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -144,25 +145,6 @@ export interface ThreadStateDetails {
   dur?: duration;
 }
 
-export interface FlamegraphDetails {
-  type?: ProfileType;
-  id?: number;
-  start?: time;
-  dur?: duration;
-  pids?: number[];
-  upids?: number[];
-  flamegraph?: CallsiteInfo[];
-  expandedCallsite?: CallsiteInfo;
-  viewingOption?: string;
-  expandedId?: number;
-  // isInAreaSelection is true if a flamegraph is part of the current area
-  // selection.
-  isInAreaSelection?: boolean;
-  // When heap_graph_non_finalized_graph has a count >0, we mark the graph
-  // as incomplete.
-  graphIncomplete?: boolean;
-}
-
 export interface CpuProfileDetails {
   id?: number;
   ts?: time;
@@ -186,27 +168,6 @@ export interface ThreadDesc {
   cmdline?: string;
 }
 type ThreadMap = Map<number, ThreadDesc>;
-
-export interface FtraceEvent {
-  id: number;
-  ts: time;
-  name: string;
-  cpu: number;
-  thread: string | null;
-  process: string | null;
-  args: string;
-}
-
-export interface FtracePanelData {
-  events: FtraceEvent[];
-  offset: number;
-  numEvents: number; // Number of events in the visible window
-}
-
-export interface FtraceStat {
-  name: string;
-  count: number;
-}
 
 function getRoot() {
   // Works out the root directory where the content should be served from
@@ -232,17 +193,57 @@ export interface MakeSelectionOpts {
   clearSearch?: boolean;
 }
 
+// All of these control additional things we can do when doing a
+// selection.
+export interface LegacySelectionArgs {
+  clearSearch: boolean;
+  switchToCurrentSelectionTab: boolean;
+  pendingScrollId: number | undefined;
+}
+
+export interface TraceContext {
+  readonly start: time;
+  readonly end: time;
+
+  // This is the ts value at the time of the Unix epoch.
+  // Normally some large negative value, because the unix epoch is normally in
+  // the past compared to ts=0.
+  readonly realtimeOffset: time;
+
+  // This is the timestamp that we should use for our offset when in UTC mode.
+  // Usually the most recent UTC midnight compared to the trace start time.
+  readonly utcOffset: time;
+
+  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
+  // recorded into the trace, to show timestamps in the device local time.
+  readonly traceTzOffset: time;
+
+  // The list of CPUs in the trace
+  readonly cpus: number[];
+
+  // The number of gpus in the trace
+  readonly gpuCount: number;
+}
+
+export const defaultTraceContext: TraceContext = {
+  start: Time.ZERO,
+  end: Time.fromSeconds(10),
+  realtimeOffset: Time.ZERO,
+  utcOffset: Time.ZERO,
+  traceTzOffset: Time.ZERO,
+  cpus: [],
+  gpuCount: 0,
+};
+
 /**
  * Global accessors for state/dispatch in the frontend.
  */
 class Globals {
   readonly root = getRoot();
 
-  bottomTabList?: BottomTabList = undefined;
-
   private _testing = false;
   private _dispatch?: Dispatch = undefined;
-  private _store = createStore(createEmptyState());
+  private _store = createStore<State>(createEmptyState());
   private _timeline?: Timeline = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
@@ -260,7 +261,6 @@ class Globals {
   private _selectedFlows?: Flow[] = undefined;
   private _visibleFlowCategories?: Map<string, boolean> = undefined;
   private _counterDetails?: CounterDetails = undefined;
-  private _flamegraphDetails?: FlamegraphDetails = undefined;
   private _cpuProfileDetails?: CpuProfileDetails = undefined;
   private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
@@ -272,26 +272,29 @@ class Globals {
   private _router?: Router = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
-  private _ftraceCounters?: FtraceStat[] = undefined;
-  private _ftracePanelData?: FtracePanelData = undefined;
   private _cmdManager = new CommandManager();
-  private _realtimeOffset = Time.ZERO;
-  private _utcOffset = Time.ZERO;
-  private _traceTzOffset = Time.ZERO;
   private _tabManager = new TabManager();
   private _trackManager = new TrackManager(this._store);
+  private _selectionManager = new SelectionManager(this._store);
+  private _hasFtrace: boolean = false;
+
+  omnibox = new OmniboxManager();
+  areaFlamegraphCache = new FlamegraphCache('area');
 
   scrollToTrackKey?: string | number;
   httpRpcState: HttpRpcState = {connected: false};
   newVersionAvailable = false;
   showPanningHint = false;
+  permalinkHash?: string;
+
+  traceContext = defaultTraceContext;
 
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
 
   private _currentSearchResults: CurrentSearchResults = {
-    sliceIds: new Float64Array(0),
-    tsStarts: new BigInt64Array(0),
+    eventIds: new Float64Array(0),
+    tses: new BigInt64Array(0),
     utids: new Float64Array(0),
     trackKeys: [],
     sources: [],
@@ -303,7 +306,7 @@ class Globals {
     count: new Uint8Array(0),
   };
 
-  engines = new Map<string, Engine>();
+  engines = new Map<string, EngineBase>();
 
   initialize(dispatch: Dispatch, router: Router) {
     this._dispatch = dispatch;
@@ -334,9 +337,9 @@ class Globals {
     this._visibleFlowCategories = new Map<string, boolean>();
     this._counterDetails = {};
     this._threadStateDetails = {};
-    this._flamegraphDetails = {};
     this._cpuProfileDetails = {};
     this.engines.clear();
+    this._selectionManager.clear();
   }
 
   // Only initialises the store - useful for testing.
@@ -456,14 +459,6 @@ class Globals {
     return assertExists(this._aggregateDataStore);
   }
 
-  get flamegraphDetails() {
-    return assertExists(this._flamegraphDetails);
-  }
-
-  set flamegraphDetails(click: FlamegraphDetails) {
-    this._flamegraphDetails = assertExists(click);
-  }
-
   get traceErrors() {
     return this._traceErrors;
   }
@@ -520,16 +515,12 @@ class Globals {
     this._currentSearchResults = results;
   }
 
+  set hasFtrace(value: boolean) {
+    this._hasFtrace = value;
+  }
+
   get hasFtrace(): boolean {
-    return Boolean(this._ftraceCounters && this._ftraceCounters.length > 0);
-  }
-
-  get ftraceCounters(): FtraceStat[] | undefined {
-    return this._ftraceCounters;
-  }
-
-  set ftraceCounters(value: FtraceStat[] | undefined) {
-    this._ftraceCounters = value;
+    return this._hasFtrace;
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
@@ -611,48 +602,42 @@ class Globals {
     return this.state.engine;
   }
 
-  get ftracePanelData(): FtracePanelData | undefined {
-    return this._ftracePanelData;
-  }
-
-  set ftracePanelData(data: FtracePanelData | undefined) {
-    this._ftracePanelData = data;
-  }
-
   makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
     const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
-
-    const previousState = this.state;
-
     const currentSelectionTabUri = 'current_selection';
 
     // A new selection should cancel the current search selection.
     clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
 
-    if (TABS_V2_FLAG.get()) {
-      if (action.type !== 'deselect' && switchToCurrentSelectionTab) {
-        globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
-      }
-    } else {
-      if (action.type === 'deselect') {
-        globals.dispatch(Actions.setCurrentTab({tab: undefined}));
-      } else if (switchToCurrentSelectionTab) {
-        globals.dispatch(Actions.setCurrentTab({tab: currentSelectionTabUri}));
-      }
+    if (switchToCurrentSelectionTab) {
+      globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
     }
     globals.dispatch(action);
+  }
 
-    // HACK(stevegolton + altimin): This is a workaround to allow passing the
-    // next tab state to the Bottom Tab API
-    if (this.state.currentSelection !== previousState.currentSelection) {
-      // TODO(altimin): Currently we are not triggering this when changing
-      // the set of selected tracks via toggling per-track checkboxes.
-      // Fix that.
-      onSelectionChanged(
-        this.state.currentSelection ?? undefined,
-        switchToCurrentSelectionTab,
+  setLegacySelection(
+    legacySelection: LegacySelection,
+    args: LegacySelectionArgs,
+  ): void {
+    this._selectionManager.setLegacy(legacySelection);
+    if (args.clearSearch) {
+      globals.dispatch(Actions.setSearchIndex({index: -1}));
+    }
+    if (args.pendingScrollId !== undefined) {
+      globals.dispatch(
+        Actions.setPendingScrollId({
+          pendingScrollId: args.pendingScrollId,
+        }),
       );
     }
+    if (args.switchToCurrentSelectionTab) {
+      globals.dispatch(Actions.showTab({uri: 'current_selection'}));
+    }
+  }
+
+  clearSelection(): void {
+    globals.dispatch(Actions.setSearchIndex({index: -1}));
+    this._selectionManager.clear();
   }
 
   resetForTesting() {
@@ -671,8 +656,8 @@ class Globals {
     this._numQueriesQueued = 0;
     this._metricResult = undefined;
     this._currentSearchResults = {
-      sliceIds: new Float64Array(0),
-      tsStarts: new BigInt64Array(0),
+      eventIds: new Float64Array(0),
+      tses: new BigInt64Array(0),
       utids: new Float64Array(0),
       trackKeys: [],
       sources: [],
@@ -696,6 +681,7 @@ class Globals {
   set isInternalUser(value: boolean) {
     localStorage.setItem('isInternalUser', value ? '1' : '0');
     this._isInternalUser = value;
+    raf.scheduleFullRedraw();
   }
 
   get testing() {
@@ -712,19 +698,19 @@ class Globals {
 
   // Get a timescale that covers the entire trace
   getTraceTimeScale(pxSpan: PxSpan): TimeScale {
-    const {start, end} = this.state.traceTime;
+    const {start, end} = this.traceContext;
     const traceTime = HighPrecisionTimeSpan.fromTime(start, end);
     return TimeScale.fromHPTimeSpan(traceTime, pxSpan);
   }
 
   // Get the trace time bounds
   stateTraceTime(): Span<HighPrecisionTime> {
-    const {start, end} = this.state.traceTime;
+    const {start, end} = this.traceContext;
     return HighPrecisionTimeSpan.fromTime(start, end);
   }
 
   stateTraceTimeTP(): Span<time, duration> {
-    const {start, end} = this.state.traceTime;
+    const {start, end} = this.traceContext;
     return new TimeSpan(start, end);
   }
 
@@ -744,37 +730,6 @@ class Globals {
     return assertExists(this._cmdManager);
   }
 
-  // This is the ts value at the time of the Unix epoch.
-  // Normally some large negative value, because the unix epoch is normally in
-  // the past compared to ts=0.
-  get realtimeOffset(): time {
-    return this._realtimeOffset;
-  }
-
-  set realtimeOffset(time: time) {
-    this._realtimeOffset = time;
-  }
-
-  // This is the timestamp that we should use for our offset when in UTC mode.
-  // Usually the most recent UTC midnight compared to the trace start time.
-  get utcOffset(): time {
-    return this._utcOffset;
-  }
-
-  set utcOffset(offset: time) {
-    this._utcOffset = offset;
-  }
-
-  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
-  // recorded into the trace, to show timestamps in the device local time.
-  get traceTzOffset(): time {
-    return this._traceTzOffset;
-  }
-
-  set traceTzOffset(offset: time) {
-    this._traceTzOffset = offset;
-  }
-
   get tabManager() {
     return this._tabManager;
   }
@@ -789,14 +744,14 @@ class Globals {
     switch (fmt) {
       case TimestampFormat.Timecode:
       case TimestampFormat.Seconds:
-        return this.state.traceTime.start;
+        return this.traceContext.start;
       case TimestampFormat.Raw:
       case TimestampFormat.RawLocale:
         return Time.ZERO;
       case TimestampFormat.UTC:
-        return this.utcOffset;
+        return this.traceContext.utcOffset;
       case TimestampFormat.TraceTz:
-        return this.traceTzOffset;
+        return this.traceContext.traceTzOffset;
       default:
         const x: never = fmt;
         throw new Error(`Unsupported format ${x}`);
@@ -808,46 +763,25 @@ class Globals {
     return Time.sub(ts, this.timestampOffset());
   }
 
-  findTimeRangeOfSelection(): {start: time; end: time} {
-    const selection = this.state.currentSelection;
-    let start = Time.INVALID;
-    let end = Time.INVALID;
+  findTimeRangeOfSelection(): {start: time; end: time} | undefined {
+    const selection = getLegacySelection(this.state);
     if (selection === null) {
-      return {start, end};
-    } else if (
-      selection.kind === 'SLICE' ||
-      selection.kind === 'CHROME_SLICE'
-    ) {
+      return undefined;
+    }
+
+    if (selection.kind === 'SCHED_SLICE' || selection.kind === 'SLICE') {
       const slice = this.sliceDetails;
-      if (slice.ts && slice.dur !== undefined && slice.dur > 0) {
-        start = slice.ts;
-        end = Time.add(start, slice.dur);
-      } else if (slice.ts) {
-        start = slice.ts;
-        // This will handle either:
-        // a)slice.dur === -1 -> unfinished slice
-        // b)slice.dur === 0  -> instant event
-        end =
-          slice.dur === -1n
-            ? Time.add(start, INCOMPLETE_SLICE_DURATION)
-            : Time.add(start, INSTANT_FOCUS_DURATION);
-      }
+      return findTimeRangeOfSlice(slice);
     } else if (selection.kind === 'THREAD_STATE') {
       const threadState = this.threadStateDetails;
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-      if (threadState.ts && threadState.dur) {
-        start = threadState.ts;
-        end = Time.add(start, threadState.dur);
-      }
+      return findTimeRangeOfSlice(threadState);
     } else if (selection.kind === 'COUNTER') {
-      start = selection.leftTs;
-      end = selection.rightTs;
+      return {start: selection.leftTs, end: selection.rightTs};
     } else if (selection.kind === 'AREA') {
       const selectedArea = this.state.areas[selection.areaId];
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (selectedArea) {
-        start = selectedArea.start;
-        end = selectedArea.end;
+        return {start: selectedArea.start, end: selectedArea.end};
       }
     } else if (selection.kind === 'NOTE') {
       const selectedNote = this.state.notes[selection.id];
@@ -855,25 +789,66 @@ class Globals {
       // above in the AREA case.
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (selectedNote && selectedNote.noteType === 'DEFAULT') {
-        start = selectedNote.timestamp;
-        end = Time.add(selectedNote.timestamp, INSTANT_FOCUS_DURATION);
+        return {
+          start: selectedNote.timestamp,
+          end: Time.add(selectedNote.timestamp, INSTANT_FOCUS_DURATION),
+        };
       }
     } else if (selection.kind === 'LOG') {
       // TODO(hjd): Make focus selection work for logs.
     } else if (selection.kind === 'GENERIC_SLICE') {
-      start = selection.start;
-      if (selection.duration > 0) {
-        end = Time.add(start, selection.duration);
-      } else {
-        end = Time.add(start, INSTANT_FOCUS_DURATION);
-      }
+      return findTimeRangeOfSlice({
+        ts: selection.start,
+        dur: selection.duration,
+      });
     }
 
-    return {start, end};
+    return undefined;
   }
 
   panToTimestamp(ts: time): void {
     horizontalScrollToTs(ts);
+  }
+}
+
+interface SliceLike {
+  ts: time;
+  dur: duration;
+}
+
+// Returns the start and end points of a slice-like object If slice is instant
+// or incomplete, dummy time will be returned which instead.
+function findTimeRangeOfSlice(slice: Partial<SliceLike>): {
+  start: time;
+  end: time;
+} {
+  if (exists(slice.ts) && exists(slice.dur)) {
+    if (slice.dur === -1n) {
+      return {
+        start: slice.ts,
+        end: Time.add(slice.ts, INCOMPLETE_SLICE_DURATION),
+      };
+    } else if (slice.dur === 0n) {
+      return {
+        start: slice.ts,
+        end: Time.add(slice.ts, INSTANT_FOCUS_DURATION),
+      };
+    } else {
+      return {start: slice.ts, end: Time.add(slice.ts, slice.dur)};
+    }
+  } else {
+    return {start: Time.INVALID, end: Time.INVALID};
+  }
+}
+
+// Returns the time span of the current selection, or the visible window if
+// there is no current selection.
+export function getTimeSpanOfSelectionOrVisibleWindow(): Span<time, duration> {
+  const range = globals.findTimeRangeOfSelection();
+  if (exists(range)) {
+    return new TimeSpan(range.start, range.end);
+  } else {
+    return globals.stateVisibleTime();
   }
 }
 

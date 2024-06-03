@@ -15,7 +15,12 @@
 import("../../../../../gn/perfetto_sql.gni")
 
 perfetto_sql_source_set("android") {
-  deps = [ "startup" ]
+  deps = [
+    "auto",
+    "frames",
+    "startup",
+    "winscope",
+  ]
   sources = [
     "anrs.sql",
     "app_process_starts.sql",
@@ -23,6 +28,8 @@ perfetto_sql_source_set("android") {
     "battery_stats.sql",
     "binder.sql",
     "broadcasts.sql",
+    "critical_blocking_calls.sql",
+    "device.sql",
     "dvfs.sql",
     "freezer.sql",
     "garbage_collection.sql",
@@ -32,6 +39,7 @@ perfetto_sql_source_set("android") {
     "monitor_contention.sql",
     "network_packets.sql",
     "oom_adjuster.sql",
+    "power_rails.sql",
     "process_metadata.sql",
     "screenshots.sql",
     "services.sql",

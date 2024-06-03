@@ -23,6 +23,14 @@ import {raf} from '../core/raf_scheduler';
 import {EmptyState} from '../widgets/empty_state';
 import {FlowEventsAreaSelectedPanel} from './flow_events_panel';
 import {PivotTable} from './pivot_table';
+import {
+  FlamegraphDetailsPanel,
+  FlamegraphSelectionParams,
+} from './flamegraph_panel';
+import {ProfileType, TrackState, getLegacySelection} from '../common/state';
+import {AreaSelectionHandler} from '../controller/area_selection_handler';
+import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../core_plugins/perf_samples_profile';
+import {assertExists} from '../base/logging';
 
 interface View {
   key: string;
@@ -32,6 +40,8 @@ interface View {
 
 class AreaDetailsPanel implements m.ClassComponent {
   private currentTab: string | undefined = undefined;
+  private areaSelectionHandler = new AreaSelectionHandler();
+  private flamegraphSelection?: FlamegraphSelectionParams;
 
   private getCurrentView(): string | undefined {
     const types = this.getViews().map(({key}) => key);
@@ -53,6 +63,18 @@ class AreaDetailsPanel implements m.ClassComponent {
 
   private getViews(): View[] {
     const views = [];
+
+    this.flamegraphSelection = this.computeFlamegraphSelection();
+    if (this.flamegraphSelection !== undefined) {
+      views.push({
+        key: 'flamegraph_selection',
+        name: 'Flamegraph Selection',
+        content: m(FlamegraphDetailsPanel, {
+          cache: globals.areaFlamegraphCache,
+          selection: this.flamegraphSelection,
+        }),
+      });
+    }
 
     for (const [key, value] of globals.aggregateDataStore.entries()) {
       if (!isEmptyData(value)) {
@@ -100,7 +122,6 @@ class AreaDetailsPanel implements m.ClassComponent {
         key,
         label: name,
         active: currentViewKey === key,
-        minimal: true,
       });
     });
 
@@ -132,6 +153,40 @@ class AreaDetailsPanel implements m.ClassComponent {
       },
       'No details available for this area selection',
     );
+  }
+
+  private computeFlamegraphSelection() {
+    const currentSelection = getLegacySelection(globals.state);
+    if (currentSelection?.kind !== 'AREA') {
+      return undefined;
+    }
+    const [hasAreaChanged, area] = this.areaSelectionHandler.getAreaChange();
+    if (area === undefined) {
+      return undefined;
+    }
+    if (!hasAreaChanged) {
+      // If the AreaSelectionHandler says things have not changed, just return
+      // a copy of the last seen selection.
+      return this.flamegraphSelection;
+    }
+    const upids = [];
+    for (const trackId of area.tracks) {
+      const track: TrackState | undefined = globals.state.tracks[trackId];
+      const trackInfo = globals.trackManager.resolveTrackInfo(track?.uri);
+      if (trackInfo?.kind !== PERF_SAMPLES_PROFILE_TRACK_KIND) {
+        continue;
+      }
+      upids.push(assertExists(trackInfo.upid));
+    }
+    if (upids.length === 0) {
+      return undefined;
+    }
+    return {
+      profileType: ProfileType.PERF_SAMPLE,
+      start: area.start,
+      end: area.end,
+      upids,
+    };
   }
 }
 

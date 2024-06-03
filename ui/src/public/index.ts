@@ -15,14 +15,17 @@
 import m from 'mithril';
 
 import {Hotkey} from '../base/hotkeys';
-import {duration, time} from '../base/time';
+import {Span, duration, time} from '../base/time';
 import {Migrate, Store} from '../base/store';
 import {ColorScheme} from '../core/colorizer';
-import {Selection} from '../common/state';
+import {LegacySelection} from '../common/state';
 import {PanelSize} from '../frontend/panel';
-import {EngineProxy} from '../trace_processor/engine';
+import {Engine} from '../trace_processor/engine';
+import {UntypedEventSet} from '../core/event_set';
+import {TraceContext} from '../frontend/globals';
+import {PromptOption} from '../frontend/omnibox_manager';
 
-export {EngineProxy} from '../trace_processor/engine';
+export {Engine} from '../trace_processor/engine';
 export {
   LONG,
   LONG_NULL,
@@ -33,6 +36,7 @@ export {
 } from '../trace_processor/query_result';
 export {BottomTabToSCSAdapter} from './utils';
 export {createStore, Migrate, Store} from '../base/store';
+export {PromptOption} from '../frontend/omnibox_manager';
 
 // This is a temporary fix until this is available in the plugin API.
 export {
@@ -44,9 +48,9 @@ export interface Slice {
   // These properties are updated only once per query result when the Slice
   // object is created and don't change afterwards.
   readonly id: number;
-  readonly startNsQ: time;
-  readonly endNsQ: time;
-  readonly durNsQ: duration;
+  readonly startNs: time;
+  readonly endNs: time;
+  readonly durNs: duration;
   readonly ts: time;
   readonly dur: duration;
   readonly depth: number;
@@ -176,10 +180,15 @@ export interface SliceRect {
 
 export interface Track {
   /**
-   * Optional: Called when the track is first materialized on the timeline.
+   * Optional: Called once before onUpdate is first called.
+   *
    * If this function returns a Promise, this promise is awaited before onUpdate
    * or onDestroy is called. Any calls made to these functions in the meantime
    * will be queued up and the hook will be called later once onCreate returns.
+   *
+   * Exactly when this hook is called is left purposely undefined. The only
+   * guarantee is that it will be called once before onUpdate is first called.
+   *
    * @param ctx Our track context object.
    */
   onCreate?(ctx: TrackContext): Promise<void> | void;
@@ -208,6 +217,11 @@ export interface Track {
   onMouseMove?(position: {x: number; y: number}): void;
   onMouseClick?(position: {x: number; y: number}): boolean;
   onMouseOut?(): void;
+
+  /**
+   * Optional: Get the event set that represents this track's data.
+   */
+  getEventSet?(): UntypedEventSet;
 }
 
 // A definition of a track, including a renderer implementation and metadata.
@@ -325,7 +339,7 @@ export interface TabDescriptor {
 }
 
 export interface DetailsPanel {
-  render(selection: Selection): m.Children;
+  render(selection: LegacySelection): m.Children;
   isLoading?(): boolean;
 }
 
@@ -333,7 +347,7 @@ export interface DetailsPanel {
 // currently loaded trace. Passed to trace-relevant hooks on a plugin instead of
 // PluginContext.
 export interface PluginContextTrace extends PluginContext {
-  readonly engine: EngineProxy;
+  readonly engine: Engine;
 
   // Control over the main timeline.
   timeline: {
@@ -370,6 +384,12 @@ export interface PluginContextTrace extends PluginContext {
 
     // Bring a timestamp into view.
     panToTimestamp(ts: time): void;
+
+    // Move the viewport
+    setViewportTime(start: time, end: time): void;
+
+    // A span representing the current viewport location
+    readonly viewport: Span<time, duration>;
   };
 
   // Control over the bottom details pane.
@@ -415,11 +435,15 @@ export interface PluginContextTrace extends PluginContext {
 
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;
+
+  trace: TraceContext;
+
+  prompt(text: string, options?: PromptOption[]): Promise<string>;
 }
 
 export interface Plugin {
   // Lifecycle methods.
-  onActivate(ctx: PluginContext): void;
+  onActivate?(ctx: PluginContext): void;
   onTraceLoad?(ctx: PluginContextTrace): Promise<void>;
   onTraceUnload?(ctx: PluginContextTrace): Promise<void>;
   onDeactivate?(ctx: PluginContext): void;
@@ -460,6 +484,12 @@ export interface TrackRef {
 
   // Optional: Add tracks to a group with this name.
   groupName?: string;
+
+  // Optional: Track key
+  key?: string;
+
+  // Optional: Whether the track is pinned
+  isPinned?: boolean;
 }
 
 // A predicate for selecting a subset of tracks.
@@ -486,6 +516,9 @@ interface WellKnownTrackTags {
 
   // Controls whether to show the "debuggable" chip.
   debuggable: boolean;
+
+  // Groupname of the track
+  groupName: string;
 }
 
 // An set of key/value pairs describing a given track. These are used for
@@ -498,9 +531,8 @@ export type TrackTags = Partial<WellKnownTrackTags> & {
   [key: string]: string | number | boolean | undefined;
 };
 
-// Plugins can be passed as class refs, factory functions, or concrete plugin
-// implementations.
-export type PluginFactory = PluginClass | Plugin | (() => Plugin);
+// Plugins can be class refs or concrete plugin implementations.
+export type PluginFactory = PluginClass | Plugin;
 
 export interface PluginDescriptor {
   // A unique string for your plugin. To ensure the name is unique you

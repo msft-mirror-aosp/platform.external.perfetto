@@ -541,6 +541,9 @@ class TraceStorage {
     return &ftrace_event_table_;
   }
 
+  const tables::MachineTable& machine_table() const { return machine_table_; }
+  tables::MachineTable* mutable_machine_table() { return &machine_table_; }
+
   const tables::CpuTable& cpu_table() const { return cpu_table_; }
   tables::CpuTable* mutable_cpu_table() { return &cpu_table_; }
 
@@ -613,6 +616,13 @@ class TraceStorage {
   }
   tables::CpuProfileStackSampleTable* mutable_cpu_profile_stack_sample_table() {
     return &cpu_profile_stack_sample_table_;
+  }
+
+  const tables::PerfSessionTable& perf_session_table() const {
+    return perf_session_table_;
+  }
+  tables::PerfSessionTable* mutable_perf_session_table() {
+    return &perf_session_table_;
   }
 
   const tables::PerfSampleTable& perf_sample_table() const {
@@ -761,6 +771,30 @@ class TraceStorage {
   tables::V8JsFunctionTable* mutable_v8_js_function_table() {
     return &v8_js_function_table_;
   }
+  const tables::V8JsCodeTable& v8_js_code_table() const {
+    return v8_js_code_table_;
+  }
+  tables::V8JsCodeTable* mutable_v8_js_code_table() {
+    return &v8_js_code_table_;
+  }
+  const tables::V8InternalCodeTable& v8_internal_code_table() const {
+    return v8_internal_code_table_;
+  }
+  tables::V8InternalCodeTable* mutable_v8_internal_code_table() {
+    return &v8_internal_code_table_;
+  }
+  const tables::V8WasmCodeTable& v8_wasm_code_table() const {
+    return v8_wasm_code_table_;
+  }
+  tables::V8WasmCodeTable* mutable_v8_wasm_code_table() {
+    return &v8_wasm_code_table_;
+  }
+  const tables::V8RegexpCodeTable& v8_regexp_code_table() const {
+    return v8_regexp_code_table_;
+  }
+  tables::V8RegexpCodeTable* mutable_v8_regexp_code_table() {
+    return &v8_regexp_code_table_;
+  }
 
   const tables::JitCodeTable& jit_code_table() const { return jit_code_table_; }
   tables::JitCodeTable* mutable_jit_code_table() { return &jit_code_table_; }
@@ -769,6 +803,29 @@ class TraceStorage {
     return jit_frame_table_;
   }
   tables::JitFrameTable* mutable_jit_frame_table() { return &jit_frame_table_; }
+
+  const tables::InputMethodClientsTable& inputmethod_clients_table() const {
+    return inputmethod_clients_table_;
+  }
+  tables::InputMethodClientsTable* mutable_inputmethod_clients_table() {
+    return &inputmethod_clients_table_;
+  }
+
+  const tables::InputMethodManagerServiceTable&
+  inputmethod_manager_service_table() const {
+    return inputmethod_manager_service_table_;
+  }
+  tables::InputMethodManagerServiceTable*
+  mutable_inputmethod_manager_service_table() {
+    return &inputmethod_manager_service_table_;
+  }
+
+  const tables::InputMethodServiceTable& inputmethod_service_table() const {
+    return inputmethod_service_table_;
+  }
+  tables::InputMethodServiceTable* mutable_inputmethod_service_table() {
+    return &inputmethod_service_table_;
+  }
 
   const tables::SurfaceFlingerLayersSnapshotTable&
   surfaceflinger_layers_snapshot_table() const {
@@ -793,6 +850,13 @@ class TraceStorage {
   tables::SurfaceFlingerTransactionsTable*
   mutable_surfaceflinger_transactions_table() {
     return &surfaceflinger_transactions_table_;
+  }
+
+  const tables::ViewCaptureTable& viewcapture_table() const {
+    return viewcapture_table_;
+  }
+  tables::ViewCaptureTable* mutable_viewcapture_table() {
+    return &viewcapture_table_;
   }
 
   const tables::WindowManagerShellTransitionsTable&
@@ -858,8 +922,9 @@ class TraceStorage {
                           const char* key,
                           std::optional<Variadic>* result) const {
     const auto& args = arg_table();
-    RowMap filtered = args.QueryToRowMap(
-        {args.arg_set_id().eq(arg_set_id), args.key().eq(key)}, {});
+    Query q;
+    q.constraints = {args.arg_set_id().eq(arg_set_id), args.key().eq(key)};
+    RowMap filtered = args.QueryToRowMap(q);
     if (filtered.empty()) {
       *result = std::nullopt;
       return util::OkStatus();
@@ -1022,6 +1087,8 @@ class TraceStorage {
   tables::RawTable raw_table_{&string_pool_};
   tables::FtraceEventTable ftrace_event_table_{&string_pool_, &raw_table_};
 
+  tables::MachineTable machine_table_{&string_pool_};
+
   tables::CpuTable cpu_table_{&string_pool_};
 
   tables::CpuFreqTable cpu_freq_table_{&string_pool_};
@@ -1039,6 +1106,7 @@ class TraceStorage {
       &string_pool_};
   tables::CpuProfileStackSampleTable cpu_profile_stack_sample_table_{
       &string_pool_, &stack_sample_table_};
+  tables::PerfSessionTable perf_session_table_{&string_pool_};
   tables::PerfSampleTable perf_sample_table_{&string_pool_};
   tables::PackageListTable package_list_table_{&string_pool_};
   tables::AndroidGameInterventionListTable
@@ -1075,17 +1143,26 @@ class TraceStorage {
   tables::V8JsScriptTable v8_js_script_table_{&string_pool_};
   tables::V8WasmScriptTable v8_wasm_script_table_{&string_pool_};
   tables::V8JsFunctionTable v8_js_function_table_{&string_pool_};
+  tables::V8JsCodeTable v8_js_code_table_{&string_pool_};
+  tables::V8InternalCodeTable v8_internal_code_table_{&string_pool_};
+  tables::V8WasmCodeTable v8_wasm_code_table_{&string_pool_};
+  tables::V8RegexpCodeTable v8_regexp_code_table_{&string_pool_};
 
   // Jit tables
   tables::JitCodeTable jit_code_table_{&string_pool_};
   tables::JitFrameTable jit_frame_table_{&string_pool_};
 
   // Winscope tables
+  tables::InputMethodClientsTable inputmethod_clients_table_{&string_pool_};
+  tables::InputMethodManagerServiceTable inputmethod_manager_service_table_{
+      &string_pool_};
+  tables::InputMethodServiceTable inputmethod_service_table_{&string_pool_};
   tables::SurfaceFlingerLayersSnapshotTable
       surfaceflinger_layers_snapshot_table_{&string_pool_};
   tables::SurfaceFlingerLayerTable surfaceflinger_layer_table_{&string_pool_};
   tables::SurfaceFlingerTransactionsTable surfaceflinger_transactions_table_{
       &string_pool_};
+  tables::ViewCaptureTable viewcapture_table_{&string_pool_};
   tables::WindowManagerShellTransitionsTable
       window_manager_shell_transitions_table_{&string_pool_};
   tables::WindowManagerShellTransitionHandlersTable
@@ -1132,6 +1209,9 @@ struct std::hash<::perfetto::trace_processor::FrameId>
     : std::hash<::perfetto::trace_processor::BaseId> {};
 template <>
 struct std::hash<::perfetto::trace_processor::tables::HeapGraphObjectTable::Id>
+    : std::hash<::perfetto::trace_processor::BaseId> {};
+template <>
+struct std::hash<::perfetto::trace_processor::tables::V8IsolateTable::Id>
     : std::hash<::perfetto::trace_processor::BaseId> {};
 template <>
 struct std::hash<::perfetto::trace_processor::tables::JitCodeTable::Id>

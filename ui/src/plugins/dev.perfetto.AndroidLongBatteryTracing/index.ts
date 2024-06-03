@@ -12,13 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
-import {EngineProxy} from '../../trace_processor/engine';
+import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {Engine} from '../../trace_processor/engine';
 import {
   SimpleSliceTrack,
   SimpleSliceTrackConfig,
@@ -55,6 +50,33 @@ const DEFAULT_NETWORK = `
         else conn
       end as name
   from diff where keep is null or keep`;
+
+const RADIO_TRANSPORT_TYPE = `
+  create or replace perfetto view radio_transport_data_conn as
+  select ts, safe_dur AS dur, value_name as data_conn, value AS data_conn_val
+  from android_battery_stats_state
+  where track_name = "battery_stats.data_conn";
+
+  create or replace perfetto view radio_transport_nr_state as
+  select ts, safe_dur AS dur, value AS nr_state_val
+  from android_battery_stats_state
+  where track_name = "battery_stats.nr_state";
+
+  drop table if exists radio_transport_join;
+  create virtual table radio_transport_join
+  using span_left_join(radio_transport_data_conn, radio_transport_nr_state);
+
+  create or replace perfetto view radio_transport as
+  select
+    ts, dur,
+    case data_conn_val
+      -- On LTE with NR connected is 5G NSA.
+      when 13 then iif(nr_state_val = 3, '5G (NSA)', data_conn)
+      -- On NR with NR state present, is 5G SA.
+      when 20 then iif(nr_state_val is null, '5G (SA or NSA)', '5G (SA)')
+      else data_conn
+    end as name
+  from radio_transport_join;`;
 
 const TETHERING = `
   with base as (
@@ -448,44 +470,45 @@ const KERNEL_WAKELOCKS = `
       wakelock_dur
     from step2
     where wakelock_dur is not null
-      and wakelock_dur > 0
-      and count >= 0
-  ),
-  step4 as (
-    select
-      ts,
-      ts_end,
-      suspended_dur,
-      wakelock_name,
-      count,
-      1.0 * wakelock_dur / (ts_end - ts - suspended_dur) as ratio,
-      wakelock_dur
-    from step3
+      and wakelock_dur >= 0
   )
   select
     ts,
-    min(ratio, 1) * (ts_end - ts) as dur,
+    ts_end - ts as dur,
     wakelock_name,
-    cast (100.0 * ratio as int) || '% (+' || count || ')' as name
-    from step4
-  where cast (100.0 * wakelock_dur / (ts_end - ts - suspended_dur) as int) > 1`;
+    min(100.0 * wakelock_dur / (ts_end - ts - suspended_dur), 100) as value
+  from step3`;
 
 const KERNEL_WAKELOCKS_SUMMARY = `
-  select distinct wakelock_name
+  select wakelock_name, max(value) as max_value
   from kernel_wakelocks
   where wakelock_name not in ('PowerManager.SuspendLockout', 'PowerManagerService.Display')
+  group by 1
+  having max_value > 1
   order by 1;`;
 
 const HIGH_CPU = `
   drop table if exists high_cpu;
   create table high_cpu as
-  with base as (
+  with cpu_cycles_args as (
     select
-      ts,
-      EXTRACT_ARG(arg_set_id, 'cpu_cycles_per_uid_cluster.uid') as uid,
-      EXTRACT_ARG(arg_set_id, 'cpu_cycles_per_uid_cluster.cluster') as cluster,
-      sum(EXTRACT_ARG(arg_set_id, 'cpu_cycles_per_uid_cluster.time_millis')) as time_millis
-    from track t join slice s on t.id = s.track_id
+      arg_set_id,
+      min(iif(key = 'cpu_cycles_per_uid_cluster.uid', int_value, null)) as uid,
+      min(iif(key = 'cpu_cycles_per_uid_cluster.cluster', int_value, null)) as cluster,
+      min(iif(key = 'cpu_cycles_per_uid_cluster.time_millis', int_value, null)) as time_millis
+    from args
+    where key in (
+      'cpu_cycles_per_uid_cluster.uid',
+      'cpu_cycles_per_uid_cluster.cluster',
+      'cpu_cycles_per_uid_cluster.time_millis'
+    )
+    group by 1
+  ),
+  base as (
+    select ts, uid, cluster, sum(time_millis) as time_millis
+    from track t
+    join slice s on t.id = s.track_id
+    join cpu_cycles_args using (arg_set_id)
     where t.name = 'Statsd Atoms'
       and s.name = 'cpu_cycles_per_uid_cluster'
     group by 1, 2, 3
@@ -510,8 +533,7 @@ const HIGH_CPU = `
   with_ratio as (
     select
       ts,
-      100.0 * cpu_dur / dur as value,
-      dur,
+      iif(dur is null, 0, 100.0 * cpu_dur / dur) as value,
       case cluster when 0 then 'little' when 1 then 'mid' when 2 then 'big' else 'cl-' || cluster end as cluster,
       case
           when uid = 0 then 'AID_ROOT'
@@ -522,17 +544,9 @@ const HIGH_CPU = `
           else pl.package_name
       end as pkg
     from with_windows left join app_package_list pl using(uid)
-    where cpu_dur is not null
-  ),
-  with_zeros as (
-      select ts, value, cluster, pkg
-      from with_ratio
-      union all
-      select ts + dur as ts, 0 as value, cluster, pkg
-      from with_ratio
   )
   select ts, sum(value) as value, cluster, pkg
-  from with_zeros
+  from with_ratio
   group by 1, 3, 4`;
 
 const WAKEUPS = `
@@ -1047,16 +1061,13 @@ const BT_BYTES = `
     from step3 left join app_package_list pl using(uid)
 `;
 
+// See go/bt_system_context_report for reference on the bit-twiddling.
 const BT_ACTIVITY = `
+  create perfetto table bt_activity as
   with step1 as (
     select
         EXTRACT_ARG(arg_set_id, 'bluetooth_activity_info.timestamp_millis') * 1000000 as ts,
-        case EXTRACT_ARG(arg_set_id, 'bluetooth_activity_info.bluetooth_stack_state')
-        when 1 then 'active'
-        when 2 then 'scanning'
-        when 3 then 'idle'
-        else 'invalid'
-        end as bluetooth_stack_state,
+        EXTRACT_ARG(arg_set_id, 'bluetooth_activity_info.bluetooth_stack_state') as bluetooth_stack_state,
         EXTRACT_ARG(arg_set_id, 'bluetooth_activity_info.controller_idle_time_millis') * 1000000 as controller_idle_dur,
         EXTRACT_ARG(arg_set_id, 'bluetooth_activity_info.controller_tx_time_millis') * 1000000 as controller_tx_dur,
         EXTRACT_ARG(arg_set_id, 'bluetooth_activity_info.controller_rx_time_millis') * 1000000 as controller_rx_dur
@@ -1076,16 +1087,30 @@ const BT_ACTIVITY = `
   )
   select
     ts,
-    dur * controller_rx_dur / dur as dur,
-    cast(100.0 * controller_rx_dur / dur as int) || '% RX, ' ||
-        cast(100.0 * controller_tx_dur / dur as int) || '% TX, ' || bluetooth_stack_state as name
+    dur,
+    bluetooth_stack_state & 0x0000000F as acl_active_count,
+    bluetooth_stack_state & 0x000000F0 >> 4 as acl_sniff_count,
+    bluetooth_stack_state & 0x00000F00 >> 8 as acl_ble_count,
+    bluetooth_stack_state & 0x0000F000 >> 12 as advertising_count,
+    case bluetooth_stack_state & 0x000F0000 >> 16
+      when 0 then 0
+      when 1 then 5
+      when 2 then 10
+      when 3 then 25
+      when 4 then 100
+      else -1
+    end as le_scan_duty_cycle,
+    bluetooth_stack_state & 0x00100000 >> 20 as inquiry_active,
+    bluetooth_stack_state & 0x00200000 >> 21 as sco_active,
+    bluetooth_stack_state & 0x00400000 >> 22 as a2dp_active,
+    bluetooth_stack_state & 0x00800000 >> 23 as le_audio_active,
+    max(0, 100.0 * controller_idle_dur / dur) as controller_idle_pct,
+    max(0, 100.0 * controller_tx_dur / dur) as controller_tx_pct,
+    max(0, 100.0 * controller_rx_dur / dur) as controller_rx_pct
   from step2
-  where controller_rx_dur > 0
 `;
 
 class AndroidLongBatteryTracing implements Plugin {
-  onActivate(_: PluginContext): void {}
-
   addSliceTrack(
     ctx: PluginContextTrace,
     name: string,
@@ -1149,7 +1174,7 @@ class AndroidLongBatteryTracing implements Plugin {
     this.addSliceTrack(
       ctx,
       name,
-      `SELECT ts, dur, value_name AS name
+      `SELECT ts, safe_dur AS dur, value_name AS name
     FROM android_battery_stats_state
     WHERE track_name = "${track}"`,
       groupName,
@@ -1170,7 +1195,7 @@ class AndroidLongBatteryTracing implements Plugin {
     this.addSliceTrack(
       ctx,
       name,
-      `SELECT ts, dur, str_value AS name
+      `SELECT ts, safe_dur AS dur, str_value AS name
     FROM android_battery_stats_event_slices
     WHERE track_name = "${track}"`,
       groupName,
@@ -1206,7 +1231,7 @@ class AndroidLongBatteryTracing implements Plugin {
       'Device State: Long wakelocks',
       `SELECT
             ts - 60000000000 as ts,
-            dur + 60000000000 as dur,
+            safe_dur + 60000000000 as dur,
             str_value AS name,
             ifnull(
             (select package_name from package_list where uid = int_value % 100000),
@@ -1241,6 +1266,7 @@ class AndroidLongBatteryTracing implements Plugin {
 
     const e = ctx.engine;
     await e.query(NETWORK_SUMMARY);
+    await e.query(RADIO_TRANSPORT_TYPE);
 
     this.addSliceTrack(ctx, 'Default network', DEFAULT_NETWORK, groupName);
 
@@ -1300,12 +1326,11 @@ class AndroidLongBatteryTracing implements Plugin {
       groupName,
       features,
     );
-    this.addBatteryStatsState(
+    this.addSliceTrack(
       ctx,
       'Cellular connection',
-      'battery_stats.data_conn',
+      `select ts, dur, name from radio_transport`,
       groupName,
-      features,
     );
     this.addBatteryStatsState(
       ctx,
@@ -1423,11 +1448,12 @@ class AndroidLongBatteryTracing implements Plugin {
     const result = await e.query(KERNEL_WAKELOCKS_SUMMARY);
     const it = result.iter({wakelock_name: 'str'});
     for (; it.valid(); it.next()) {
-      this.addSliceTrack(
+      this.addCounterTrack(
         ctx,
         it.wakelock_name,
-        `select ts, dur, name from kernel_wakelocks where wakelock_name = "${it.wakelock_name}"`,
+        `select ts, dur, value from kernel_wakelocks where wakelock_name = "${it.wakelock_name}"`,
         groupName,
+        {yRangeSharingKey: 'kernel_wakelock', unit: '%'},
       );
     }
   }
@@ -1564,7 +1590,83 @@ class AndroidLongBatteryTracing implements Plugin {
       BT_BYTES,
       groupName,
     );
-    this.addSliceTrack(ctx, 'Activity info', BT_ACTIVITY, groupName);
+    await ctx.engine.query(BT_ACTIVITY);
+    this.addCounterTrack(
+      ctx,
+      'ACL Classic Active Count',
+      'select ts, dur, acl_active_count as value from bt_activity',
+      groupName,
+    );
+    this.addCounterTrack(
+      ctx,
+      'ACL Classic Sniff Count',
+      'select ts, dur, acl_sniff_count as value from bt_activity',
+      groupName,
+    );
+    this.addCounterTrack(
+      ctx,
+      'ACL BLE Count',
+      'select ts, dur, acl_ble_count as value from bt_activity',
+      groupName,
+    );
+    this.addCounterTrack(
+      ctx,
+      'Advertising Instance Count',
+      'select ts, dur, advertising_count as value from bt_activity',
+      groupName,
+    );
+    this.addCounterTrack(
+      ctx,
+      'LE Scan Duty Cycle Maximum',
+      'select ts, dur, le_scan_duty_cycle as value from bt_activity',
+      groupName,
+      {unit: '%'},
+    );
+    this.addSliceTrack(
+      ctx,
+      'Inquiry Active',
+      "select ts, dur, 'Active' as name from bt_activity where inquiry_active",
+      groupName,
+    );
+    this.addSliceTrack(
+      ctx,
+      'SCO Active',
+      "select ts, dur, 'Active' as name from bt_activity where sco_active",
+      groupName,
+    );
+    this.addSliceTrack(
+      ctx,
+      'A2DP Active',
+      "select ts, dur, 'Active' as name from bt_activity where a2dp_active",
+      groupName,
+    );
+    this.addSliceTrack(
+      ctx,
+      'LE Audio Active',
+      "select ts, dur, 'Active' as name from bt_activity where le_audio_active",
+      groupName,
+    );
+    this.addCounterTrack(
+      ctx,
+      'Controller Idle Time',
+      'select ts, dur, controller_idle_pct as value from bt_activity',
+      groupName,
+      {yRangeSharingKey: 'bt_controller_time', unit: '%'},
+    );
+    this.addCounterTrack(
+      ctx,
+      'Controller TX Time',
+      'select ts, dur, controller_tx_pct as value from bt_activity',
+      groupName,
+      {yRangeSharingKey: 'bt_controller_time', unit: '%'},
+    );
+    this.addCounterTrack(
+      ctx,
+      'Controller RX Time',
+      'select ts, dur, controller_rx_pct as value from bt_activity',
+      groupName,
+      {yRangeSharingKey: 'bt_controller_time', unit: '%'},
+    );
     this.addSliceTrack(
       ctx,
       'Quality reports',
@@ -1595,7 +1697,7 @@ class AndroidLongBatteryTracing implements Plugin {
     );
   }
 
-  async findFeatures(e: EngineProxy): Promise<Set<string>> {
+  async findFeatures(e: Engine): Promise<Set<string>> {
     const features = new Set<string>();
 
     const addFeatures = async (q: string) => {

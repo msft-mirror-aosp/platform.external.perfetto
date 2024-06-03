@@ -22,6 +22,7 @@
 #include "perfetto/ext/traced/sys_stats_counters.h"
 #include "perfetto/protozero/proto_decoder.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
+#include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
@@ -107,6 +108,10 @@ std::optional<int> FingerprintToSdkVersion(const std::string& fingerprint) {
 SystemProbesParser::SystemProbesParser(TraceProcessorContext* context)
     : context_(context),
       utid_name_id_(context->storage->InternString("utid")),
+      ns_unit_id_(context->storage->InternString("ns")),
+      bytes_unit_id_(context->storage->InternString("bytes")),
+      available_chunks_unit_id_(
+          context->storage->InternString("available chunks")),
       num_forks_name_id_(context->storage->InternString("num_forks")),
       num_irq_total_name_id_(context->storage->InternString("num_irq_total")),
       num_softirq_total_name_id_(
@@ -164,6 +169,8 @@ SystemProbesParser::SystemProbesParser(TraceProcessorContext* context)
       context->storage->InternString("mem.smaps.pss.file");
   proc_stats_process_names_[ProcessStats::Process::kSmrPssShmemKbFieldNumber] =
       context->storage->InternString("mem.smaps.pss.shmem");
+  proc_stats_process_names_[ProcessStats::Process::kSmrSwapPssKbFieldNumber] =
+      context->storage->InternString("mem.smaps.swap.pss");
   proc_stats_process_names_
       [ProcessStats::Process::kRuntimeUserModeFieldNumber] =
           context->storage->InternString("runtime.user_ns");
@@ -208,6 +215,8 @@ void SystemProbesParser::ParseDiskStats(int64_t ts, ConstBytes blob) {
     context_->event_tracker->PushCounter(ts, value, track);
   };
 
+  // TODO(rsavitski): with the UI now supporting rate mode for counter tracks,
+  // this is likely redundant.
   auto calculate_throughput = [](double amount, int64_t diff) {
     return diff == 0 ? 0 : amount * MS_PER_SEC / static_cast<double>(diff);
   };
@@ -277,9 +286,10 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     }
     // /proc/meminfo counters are in kB, convert to bytes
     TrackId track = context_->track_tracker->InternGlobalCounterTrack(
-        TrackTracker::Group::kMemory, meminfo_strs_id_[key]);
+        TrackTracker::Group::kMemory, meminfo_strs_id_[key], {},
+        bytes_unit_id_);
     context_->event_tracker->PushCounter(
-        ts, static_cast<double>(mi.value()) * 1024., track);
+        ts, static_cast<double>(mi.value()) * 1024, track);
   }
 
   for (auto it = sys_stats.devfreq(); it; ++it) {
@@ -402,20 +412,23 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
         ts, static_cast<double>(sys_stats.num_softirq_total()), track);
   }
 
+  // Fragmentation of the kernel binary buddy memory allocator.
+  // See /proc/buddyinfo in `man 5 proc`.
   for (auto it = sys_stats.buddy_info(); it; ++it) {
     protos::pbzero::SysStats::BuddyInfo::Decoder bi(*it);
     int order = 0;
     for (auto order_it = bi.order_pages(); order_it; ++order_it) {
       std::string node = bi.node().ToStdString();
       std::string zone = bi.zone().ToStdString();
-      uint32_t size_kb =
+      uint32_t chunk_size_kb =
           static_cast<uint32_t>(((1 << order) * page_size_) / 1024);
       base::StackString<255> counter_name("mem.buddyinfo[%s][%s][%u kB]",
-                                          node.c_str(), zone.c_str(), size_kb);
+                                          node.c_str(), zone.c_str(),
+                                          chunk_size_kb);
       StringId name =
           context_->storage->InternString(counter_name.string_view());
       TrackId track = context_->track_tracker->InternGlobalCounterTrack(
-          TrackTracker::Group::kMemory, name);
+          TrackTracker::Group::kMemory, name, {}, available_chunks_unit_id_);
       context_->event_tracker->PushCounter(ts, static_cast<double>(*order_it),
                                            track);
       order++;
@@ -426,6 +439,8 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     ParseDiskStats(ts, *it);
   }
 
+  // Pressure Stall Information. See
+  // https://docs.kernel.org/accounting/psi.html.
   for (auto it = sys_stats.psi(); it; ++it) {
     protos::pbzero::SysStats::PsiSample::Decoder psi(*it);
 
@@ -436,11 +451,12 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
       continue;
     }
 
+    // Unit = total blocked time on this resource in nanoseconds.
     // TODO(b/315152880): Consider moving psi entries for cpu/io/memory into
     // groups specific to that resource (e.g., `Group::kMemory`).
     TrackId track = context_->track_tracker->InternGlobalCounterTrack(
         TrackTracker::Group::kDeviceState,
-        sys_stats_psi_resource_names_[resource]);
+        sys_stats_psi_resource_names_[resource], {}, ns_unit_id_);
     context_->event_tracker->PushCounter(
         ts, static_cast<double>(psi.total_ns()), track);
   }
@@ -731,13 +747,10 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
 void SystemProbesParser::ParseCpuInfo(ConstBytes blob) {
   protos::pbzero::CpuInfo::Decoder packet(blob.data, blob.size);
   uint32_t cluster_id = 0;
+  uint32_t cpu_id = 0;
   std::vector<uint32_t> last_cpu_freqs;
-  for (auto it = packet.cpus(); it; it++) {
+  for (auto it = packet.cpus(); it; it++, cpu_id++) {
     protos::pbzero::CpuInfo::Cpu::Decoder cpu(*it);
-    tables::CpuTable::Row cpu_row;
-    if (cpu.has_processor()) {
-      cpu_row.processor = context_->storage->InternString(cpu.processor());
-    }
     std::vector<uint32_t> freqs;
     for (auto freq_it = cpu.frequencies(); freq_it; freq_it++) {
       freqs.push_back(*freq_it);
@@ -747,16 +760,16 @@ void SystemProbesParser::ParseCpuInfo(ConstBytes blob) {
     if (freqs != last_cpu_freqs && !last_cpu_freqs.empty()) {
       cluster_id++;
     }
-    cpu_row.cluster_id = cluster_id;
 
     last_cpu_freqs = freqs;
-    tables::CpuTable::Id cpu_row_id =
-        context_->storage->mutable_cpu_table()->Insert(cpu_row).id;
+
+    tables::CpuTable::Id ucpu =
+        context_->cpu_tracker->SetCpuInfo(cpu_id, cpu.processor(), cluster_id);
 
     for (auto freq_it = cpu.frequencies(); freq_it; freq_it++) {
       uint32_t freq = *freq_it;
       tables::CpuFreqTable::Row cpu_freq_row;
-      cpu_freq_row.cpu_id = cpu_row_id;
+      cpu_freq_row.ucpu = ucpu;
       cpu_freq_row.freq = freq;
       context_->storage->mutable_cpu_freq_table()->Insert(cpu_freq_row);
     }

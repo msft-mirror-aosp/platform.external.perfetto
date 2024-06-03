@@ -17,12 +17,11 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_SCHED_EVENT_TRACKER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_SCHED_EVENT_TRACKER_H_
 
-#include "perfetto/ext/base/string_view.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
-#include "src/trace_processor/importers/common/system_info_tracker.h"
+
+#include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/destructible.h"
-#include "src/trace_processor/types/task_state.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
@@ -47,8 +46,10 @@ class SchedEventTracker : public Destructible {
     // just switched to. Set the duration to -1, to indicate that the event is
     // not finished. Duration will be updated later after event finish.
     auto* sched = context_->storage->mutable_sched_slice_table();
+    // Get the unique CPU Id over all machines from the CPU table.
+    auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
     auto row_and_id = sched->Insert(
-        {ts, /* duration */ -1, cpu, next_utid, kNullStringId, next_prio});
+        {ts, /* duration */ -1, next_utid, kNullStringId, next_prio, ucpu});
     SchedId sched_id = row_and_id.id;
     return *sched->id().IndexOf(sched_id);
   }
@@ -82,20 +83,6 @@ class SchedEventTracker : public Destructible {
     // when unpacking the information inside; this allows savings of 48 bits
     // per slice.
     slices->mutable_end_state()->Set(pending_slice_idx, prev_state);
-  }
-
-  // TODO(rsavitski): fold back into ftrace parser, this is specific to Linux.
-  PERFETTO_ALWAYS_INLINE
-  StringId TaskStateToStringId(int64_t task_state_int) {
-    using ftrace_utils::TaskState;
-
-    std::optional<VersionNumber> kernel_version =
-        SystemInfoTracker::GetOrCreate(context_)->GetKernelVersion();
-    TaskState task_state = TaskState::FromRawPrevState(
-        static_cast<uint16_t>(task_state_int), kernel_version);
-    return task_state.is_valid()
-               ? context_->storage->InternString(task_state.ToString().data())
-               : kNullStringId;
   }
 
  private:

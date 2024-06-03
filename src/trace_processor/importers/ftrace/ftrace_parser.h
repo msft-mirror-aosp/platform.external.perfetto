@@ -35,6 +35,7 @@
 #include "src/trace_processor/importers/ftrace/mali_gpu_event_tracker.h"
 #include "src/trace_processor/importers/ftrace/pkvm_hyp_cpu_tracker.h"
 #include "src/trace_processor/importers/ftrace/rss_stat_tracker.h"
+#include "src/trace_processor/importers/ftrace/thermal_tracker.h"
 #include "src/trace_processor/importers/ftrace/virtio_gpu_tracker.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
@@ -73,7 +74,9 @@ class FtraceParser {
   void ParseSchedWaking(int64_t timestamp, uint32_t pid, protozero::ConstBytes);
   void ParseSchedProcessFree(int64_t timestamp, protozero::ConstBytes);
   void ParseCpuFreq(int64_t timestamp, protozero::ConstBytes);
+  void ParseCpuFreqThrottle(int64_t timestamp, protozero::ConstBytes);
   void ParseGpuFreq(int64_t timestamp, protozero::ConstBytes);
+  void ParseKgslGpuFreq(int64_t timestamp, protozero::ConstBytes);
   void ParseCpuIdle(int64_t timestamp, protozero::ConstBytes);
   void ParsePrint(int64_t timestamp, uint32_t pid, protozero::ConstBytes);
   void ParseZero(int64_t timestamp, uint32_t pid, protozero::ConstBytes);
@@ -201,8 +204,6 @@ class FtraceParser {
                          protozero::ConstBytes);
   void ParseSoftIrqExit(uint32_t cpu, int64_t timestamp, protozero::ConstBytes);
   void ParseGpuMemTotal(int64_t timestamp, protozero::ConstBytes);
-  void ParseThermalTemperature(int64_t timestamp, protozero::ConstBytes);
-  void ParseCdevUpdate(int64_t timestamp, protozero::ConstBytes);
   void ParseSchedBlockedReason(protozero::ConstBytes,
                                PacketSequenceStateGeneration*);
   void ParseFastRpcDmaStat(int64_t timestamp,
@@ -237,10 +238,12 @@ class FtraceParser {
   void ParseSchedCpuUtilCfs(int64_t timestamp, protozero::ConstBytes);
 
   void ParseFuncgraphEntry(int64_t timestamp,
+                           uint32_t cpu,
                            uint32_t pid,
                            protozero::ConstBytes blob,
                            PacketSequenceStateGeneration* seq_state);
   void ParseFuncgraphExit(int64_t timestamp,
+                          uint32_t cpu,
                           uint32_t pid,
                           protozero::ConstBytes blob,
                           PacketSequenceStateGeneration* seq_state);
@@ -296,6 +299,13 @@ class FtraceParser {
                                    protozero::ConstBytes);
   StringId GetRpmStatusStringId(int32_t rpm_status_val);
   void ParseRpmStatus(int64_t ts, protozero::ConstBytes);
+  void ParseDevicePmCallbackStart(int64_t ts, protozero::ConstBytes);
+  void ParseDevicePmCallbackEnd(int64_t ts, protozero::ConstBytes);
+  void ParsePanelWriteGeneric(int64_t timestamp,
+                              uint32_t pid,
+                              protozero::ConstBytes);
+  void ParseGoogleIccEvent(int64_t timestamp, protozero::ConstBytes);
+  void ParseGoogleIrmEvent(int64_t timestamp, protozero::ConstBytes);
 
   TraceProcessorContext* context_;
   RssStatTracker rss_stat_tracker_;
@@ -305,11 +315,13 @@ class FtraceParser {
   MaliGpuEventTracker mali_gpu_event_tracker_;
   PkvmHypervisorCpuTracker pkvm_hyp_cpu_tracker_;
   GpuWorkPeriodTracker gpu_work_period_tracker_;
+  ThermalTracker thermal_tracker_;
 
   const StringId sched_wakeup_name_id_;
   const StringId sched_waking_name_id_;
   const StringId cpu_id_;
   const StringId cpu_freq_name_id_;
+  const StringId cpu_freq_throttle_name_id_;
   const StringId gpu_freq_name_id_;
   const StringId cpu_idle_name_id_;
   const StringId suspend_resume_name_id_;
@@ -385,6 +397,8 @@ class FtraceParser {
   const StringId bytes_read_id_end_;
   const StringId android_fs_category_id_;
   const StringId android_fs_data_read_id_;
+  const StringId google_icc_event_id_;
+  const StringId google_irm_event_id_;
   const StringId runtime_status_invalid_id_;
   const StringId runtime_status_active_id_;
   const StringId runtime_status_suspending_id_;
@@ -459,6 +473,17 @@ class FtraceParser {
   // Tracks Linux devices with active runtime power management (RPM) status
   // slices.
   std::unordered_set<std::string> devices_with_active_rpm_slice_;
+
+  // Tracks unique identifiers ("cookies") to create separate async tracks for
+  // the Suspend/Resume UI track. The separation prevents unnestable slices from
+  // overlapping on a single trace processor track.
+  //
+  // For `suspend_resume` ftrace events, the key for this map is derived from
+  // the `val` field in the trace object.
+  //
+  // For `device_pm_callback_[start|end]` ftrace events, the key for this map is
+  // derived from the device name.
+  base::FlatHashMap<std::string, int64_t> suspend_resume_cookie_map_;
 
   struct PairHash {
     std::size_t operator()(const std::pair<uint64_t, int64_t>& p) const {

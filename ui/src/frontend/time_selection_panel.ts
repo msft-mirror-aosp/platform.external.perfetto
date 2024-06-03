@@ -32,6 +32,7 @@ import {
 import {PanelSize} from './panel';
 import {Panel} from './panel_container';
 import {renderDuration} from './widgets/duration';
+import {getLegacySelection} from '../common/state';
 
 export interface BBox {
   x: number;
@@ -139,9 +140,6 @@ function drawIBar(
 export class TimeSelectionPanel implements Panel {
   readonly kind = 'panel';
   readonly selectable = false;
-  readonly trackKey = undefined;
-
-  constructor(readonly key: string) {}
 
   render(): m.Children {
     return m('.time-selection-panel');
@@ -172,7 +170,7 @@ export class TimeSelectionPanel implements Panel {
     }
 
     const localArea = globals.timeline.selectedArea;
-    const selection = globals.state.currentSelection;
+    const selection = getLegacySelection(globals.state);
     if (localArea !== undefined) {
       const start = Time.min(localArea.start, localArea.end);
       const end = Time.max(localArea.start, localArea.end);

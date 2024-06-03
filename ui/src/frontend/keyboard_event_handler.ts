@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
-import {Area} from '../common/state';
+import {Area, getLegacySelection} from '../common/state';
 
 import {Flow, globals} from './globals';
 import {focusHorizontalRange, verticalScrollToTrack} from './scroll_helper';
@@ -44,13 +45,11 @@ function findAnotherFlowExcept(boundFlows: Flow[], flowId: number): number {
 
 // Change focus to the next flow event (matching the direction)
 export function focusOtherFlow(direction: Direction) {
-  if (
-    !globals.state.currentSelection ||
-    globals.state.currentSelection.kind !== 'CHROME_SLICE'
-  ) {
+  const currentSelection = getLegacySelection(globals.state);
+  if (!currentSelection || currentSelection.kind !== 'SLICE') {
     return;
   }
-  const sliceId = globals.state.currentSelection.id;
+  const sliceId = currentSelection.id;
   if (sliceId === -1) {
     return;
   }
@@ -78,14 +77,12 @@ export function focusOtherFlow(direction: Direction) {
 
 // Select the slice connected to the flow in focus
 export function moveByFocusedFlow(direction: Direction): void {
-  if (
-    !globals.state.currentSelection ||
-    globals.state.currentSelection.kind !== 'CHROME_SLICE'
-  ) {
+  const currentSelection = getLegacySelection(globals.state);
+  if (!currentSelection || currentSelection.kind !== 'SLICE') {
     return;
   }
 
-  const sliceId = globals.state.currentSelection.id;
+  const sliceId = currentSelection.id;
   const flowId =
     direction === 'Backward'
       ? globals.state.focusedFlowIdLeft
@@ -102,13 +99,18 @@ export function moveByFocusedFlow(direction: Direction): void {
       const trackKeyByTrackId = globals.trackManager.trackKeyByTrackId;
       const trackKey = trackKeyByTrackId.get(flowPoint.trackId);
       if (trackKey) {
-        globals.makeSelection(
-          Actions.selectChromeSlice({
+        globals.setLegacySelection(
+          {
+            kind: 'SLICE',
             id: flowPoint.sliceId,
             trackKey,
             table: 'slice',
-            scroll: true,
-          }),
+          },
+          {
+            clearSearch: true,
+            pendingScrollId: flowPoint.sliceId,
+            switchToCurrentSelectionTab: true,
+          },
         );
       }
     }
@@ -117,25 +119,20 @@ export function moveByFocusedFlow(direction: Direction): void {
 
 export function lockSliceSpan(persistent = false) {
   const range = globals.findTimeRangeOfSelection();
-  if (
-    range.start !== -1n &&
-    range.end !== -1n &&
-    globals.state.currentSelection !== null
-  ) {
-    const tracks = globals.state.currentSelection.trackKey
-      ? [globals.state.currentSelection.trackKey]
-      : [];
+  const currentSelection = getLegacySelection(globals.state);
+  if (exists(range) && currentSelection !== null) {
+    const tracks = currentSelection.trackKey ? [currentSelection.trackKey] : [];
     const area: Area = {start: range.start, end: range.end, tracks};
     globals.dispatch(Actions.markArea({area, persistent}));
   }
 }
 
 export function findCurrentSelection() {
-  const selection = globals.state.currentSelection;
+  const selection = getLegacySelection(globals.state);
   if (selection === null) return;
 
   const range = globals.findTimeRangeOfSelection();
-  if (range.start !== -1n && range.end !== -1n) {
+  if (exists(range)) {
     focusHorizontalRange(range.start, range.end);
   }
 

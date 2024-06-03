@@ -86,7 +86,7 @@ describe('android_trace_30s', () => {
   });
 
   test('expand_camera', async () => {
-    await page.click('.pf-overlay-canvas');
+    await page.click('.pf-overlay');
     await page.click('h1[title="com.google.android.GoogleCamera 5506"]');
     await page.evaluate(() => {
       document.querySelector('.scrolling-panel-container')!.scrollTo(0, 400);
@@ -114,7 +114,7 @@ describe('chrome_rendering_desktop', () => {
 
   test('expand_browser_proc', async () => {
     const page = await getPage();
-    await page.click('.pf-overlay-canvas');
+    await page.click('.pf-overlay');
     await page.click('h1[title="Browser 12685"]');
     await waitForPerfettoIdle(page);
   });
@@ -326,6 +326,30 @@ describe('modal_dialog', () => {
 
   test('dismiss_2', async () => {
     await page.keyboard.press('Escape');
+    await waitForPerfettoIdle(page);
+  });
+});
+
+describe('features', () => {
+  let page: Page;
+
+  beforeAll(async () => {
+    page = await getPage();
+    await page.goto('http://localhost:10000/?testing=1');
+    await waitForPerfettoIdle(page);
+  });
+
+  // Test that we show a (debuggable) chip next to tracks for debuggable apps.
+  // Regression test for aosp/3106008 .
+  test('track_debuggable_chip', async () => {
+    const page = await getPage();
+    await page.goto(
+      'http://localhost:10000/?testing=1/#!/?url=http://localhost:10000/test/data/api32_startup_warm.perfetto-trace',
+    );
+    await waitForPerfettoIdle(page);
+    await page.hover(
+      'h1[title="androidx.benchmark.integration.macrobenchmark.test 7527"]',
+    );
     await waitForPerfettoIdle(page);
   });
 });

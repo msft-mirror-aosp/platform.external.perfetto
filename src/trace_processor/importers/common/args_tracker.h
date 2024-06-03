@@ -119,6 +119,21 @@ class ArgsTracker {
     return AddArgsTo(context_->storage->mutable_flow_table(), id);
   }
 
+  BoundInserter AddArgsTo(tables::InputMethodClientsTable::Id id) {
+    return AddArgsTo(context_->storage->mutable_inputmethod_clients_table(),
+                     id);
+  }
+
+  BoundInserter AddArgsTo(tables::InputMethodServiceTable::Id id) {
+    return AddArgsTo(context_->storage->mutable_inputmethod_service_table(),
+                     id);
+  }
+
+  BoundInserter AddArgsTo(tables::InputMethodManagerServiceTable::Id id) {
+    return AddArgsTo(
+        context_->storage->mutable_inputmethod_manager_service_table(), id);
+  }
+
   BoundInserter AddArgsTo(tables::MemorySnapshotNodeTable::Id id) {
     return AddArgsTo(context_->storage->mutable_memory_snapshot_node_table(),
                      id);
@@ -137,6 +152,10 @@ class ArgsTracker {
   BoundInserter AddArgsTo(tables::SurfaceFlingerTransactionsTable::Id id) {
     return AddArgsTo(
         context_->storage->mutable_surfaceflinger_transactions_table(), id);
+  }
+
+  BoundInserter AddArgsTo(tables::ViewCaptureTable::Id id) {
+    return AddArgsTo(context_->storage->mutable_viewcapture_table(), id);
   }
 
   BoundInserter AddArgsTo(tables::WindowManagerShellTransitionsTable::Id id) {

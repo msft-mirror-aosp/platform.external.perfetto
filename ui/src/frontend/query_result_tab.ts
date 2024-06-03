@@ -22,24 +22,17 @@ import {QueryError} from '../trace_processor/query_result';
 import {
   AddDebugTrackMenu,
   uuidToViewName,
-} from '../tracks/debug/add_debug_track_menu';
+} from '../core_plugins/debug/add_debug_track_menu';
 import {Button} from '../widgets/button';
 import {PopupMenu2} from '../widgets/menu';
 import {PopupPosition} from '../widgets/popup';
 
-import {
-  addTab,
-  BottomTab,
-  bottomTabRegistry,
-  closeTab,
-  NewBottomTabArgs,
-} from './bottom_tab';
+import {BottomTab, NewBottomTabArgs} from './bottom_tab';
 import {QueryTable} from './query_table';
-import {TABS_V2_FLAG} from '../core/feature_flags';
 import {globals} from './globals';
 import {Actions} from '../common/actions';
 import {BottomTabToTabAdapter} from '../public/utils';
-import {EngineProxy} from '../public';
+import {Engine} from '../public';
 
 interface QueryResultTabConfig {
   readonly query: string;
@@ -55,33 +48,25 @@ export function addQueryResultsTab(
   config: QueryResultTabConfig,
   tag?: string,
 ): void {
-  if (TABS_V2_FLAG.get()) {
-    const queryResultsTab = new QueryResultTab({
-      config,
-      engine: getEngine(),
-      uuid: uuidv4(),
-    });
+  const queryResultsTab = new QueryResultTab({
+    config,
+    engine: getEngine(),
+    uuid: uuidv4(),
+  });
 
-    const uri = 'queryResults#' + (tag ?? uuidv4());
+  const uri = 'queryResults#' + (tag ?? uuidv4());
 
-    globals.tabManager.registerTab({
-      uri,
-      content: new BottomTabToTabAdapter(queryResultsTab),
-      isEphemeral: true,
-    });
+  globals.tabManager.registerTab({
+    uri,
+    content: new BottomTabToTabAdapter(queryResultsTab),
+    isEphemeral: true,
+  });
 
-    globals.dispatch(Actions.showTab({uri}));
-  } else {
-    return addTab({
-      kind: QueryResultTab.kind,
-      tag,
-      config,
-    });
-  }
+  globals.dispatch(Actions.showTab({uri}));
 }
 
 // TODO(stevegolton): Find a way to make this more elegant.
-function getEngine(): EngineProxy {
+function getEngine(): Engine {
   const engConfig = globals.getCurrentEngine();
   const engineId = assertExists(engConfig).id;
   return assertExists(globals.engines.get(engineId)).getProxy('QueryResult');
@@ -139,14 +124,13 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
       query: this.config.query,
       resp: this.queryResponse,
       fillParent: true,
-      onClose: () => closeTab(this.uuid),
       contextButtons: [
         this.sqlViewName === undefined
           ? null
           : m(
               PopupMenu2,
               {
-                trigger: m(Button, {label: 'Show debug track', minimal: true}),
+                trigger: m(Button, {label: 'Show debug track'}),
                 popupPosition: PopupPosition.Top,
               },
               m(AddDebugTrackMenu, {
@@ -192,5 +176,3 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     return viewId;
   }
 }
-
-bottomTabRegistry.register(QueryResultTab);

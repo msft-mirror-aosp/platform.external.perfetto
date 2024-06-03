@@ -12,14 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
 import {addDebugSliceTrack} from '../../public';
-import {runQuery} from '../../common/queries';
 
 const PERF_TRACE_COUNTERS_PRECONDITION = `
   SELECT
@@ -31,11 +25,9 @@ const PERF_TRACE_COUNTERS_PRECONDITION = `
 `;
 
 class AndroidPerfTraceCounters implements Plugin {
-  onActivate(_: PluginContext): void {}
-
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    const resp = await runQuery(PERF_TRACE_COUNTERS_PRECONDITION, ctx.engine);
-    if (resp.totalRowCount === 0) return;
+    const resp = await ctx.engine.query(PERF_TRACE_COUNTERS_PRECONDITION);
+    if (resp.numRows() === 0) return;
     ctx.registerCommand({
       id: 'dev.perfetto.AndroidPerfTraceCounters#ThreadRuntimeIPC',
       name: 'Add a track to show a thread runtime ipc',

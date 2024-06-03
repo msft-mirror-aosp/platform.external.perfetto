@@ -17,6 +17,7 @@
 #include "src/trace_processor/db/column/dummy_storage.h"
 
 #include <cstdint>
+#include <optional>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
@@ -49,21 +50,30 @@ void DummyStorage::ChainImpl::IndexSearchValidated(FilterOp,
   PERFETTO_FATAL("Shouldn't be called");
 }
 
-Range DummyStorage::ChainImpl::OrderedIndexSearchValidated(
-    FilterOp,
-    SqlValue,
-    const OrderedIndices&) const {
-  PERFETTO_FATAL("Shouldn't be called");
-}
-
 void DummyStorage::ChainImpl::StableSort(SortToken*,
                                          SortToken*,
                                          SortDirection) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 
+void DummyStorage::ChainImpl::Distinct(Indices&) const {
+  PERFETTO_FATAL("Shouldn't be called");
+}
+
 uint32_t DummyStorage::ChainImpl::size() const {
   return 0;
+}
+
+std::optional<Token> DummyStorage::ChainImpl::MaxElement(Indices&) const {
+  PERFETTO_FATAL("Shouldn't be called");
+}
+
+std::optional<Token> DummyStorage::ChainImpl::MinElement(Indices&) const {
+  PERFETTO_FATAL("Shouldn't be called");
+}
+
+SqlValue DummyStorage::ChainImpl::Get_AvoidUsingBecauseSlow(uint32_t) const {
+  PERFETTO_FATAL("Shouldn't be called");
 }
 
 void DummyStorage::ChainImpl::Serialize(StorageProto*) const {

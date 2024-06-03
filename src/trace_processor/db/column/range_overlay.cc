@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -118,22 +119,6 @@ void RangeOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
   inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-Range RangeOverlay::ChainImpl::OrderedIndexSearchValidated(
-    FilterOp op,
-    SqlValue sql_val,
-    const OrderedIndices& indices) const {
-  PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::IndexSearch");
-
-  // Should be SIMD optimized.
-  std::vector<uint32_t> storage_iv(indices.size);
-  for (uint32_t i = 0; i < indices.size; ++i) {
-    storage_iv[i] = indices.data[i] + range_->start;
-  }
-  return inner_->OrderedIndexSearchValidated(
-      op, sql_val,
-      OrderedIndices{storage_iv.data(), indices.size, indices.state});
-}
-
 void RangeOverlay::ChainImpl::StableSort(SortToken* start,
                                          SortToken* end,
                                          SortDirection direction) const {
@@ -141,6 +126,37 @@ void RangeOverlay::ChainImpl::StableSort(SortToken* start,
     it->index += range_->start;
   }
   inner_->StableSort(start, end, direction);
+}
+
+void RangeOverlay::ChainImpl::Distinct(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::Distinct");
+  for (auto& token : indices.tokens) {
+    token.index += range_->start;
+  }
+  inner_->Distinct(indices);
+}
+
+std::optional<Token> RangeOverlay::ChainImpl::MaxElement(
+    Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::MaxElement");
+  for (auto& token : indices.tokens) {
+    token.index += range_->start;
+  }
+  return inner_->MaxElement(indices);
+}
+
+SqlValue RangeOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
+    uint32_t index) const {
+  return inner_->Get_AvoidUsingBecauseSlow(index + range_->start);
+}
+
+std::optional<Token> RangeOverlay::ChainImpl::MinElement(
+    Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB, "RangeOverlay::MinElement");
+  for (auto& token : indices.tokens) {
+    token.index += range_->start;
+  }
+  return inner_->MinElement(indices);
 }
 
 void RangeOverlay::ChainImpl::Serialize(StorageProto*) const {

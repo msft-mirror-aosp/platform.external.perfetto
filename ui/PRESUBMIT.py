@@ -17,7 +17,6 @@ import time
 import subprocess
 from os.path import relpath, dirname, join
 
-
 USE_PYTHON3 = True
 
 
@@ -99,7 +98,7 @@ def CheckPrettier(input_api, output_api):
 
   def file_filter(x):
     return input_api.FilterSourceFile(
-        x, files_to_check=[r'.*\.ts$', r'.*\.js$'])
+        x, files_to_check=[r'.*\.ts$', r'.*\.js$', r'.*\.scss$'])
 
   files = input_api.AffectedSourceFiles(file_filter)
 

@@ -18,12 +18,16 @@
 #define SRC_TRACE_REDACTION_TRACE_REDACTION_FRAMEWORK_H_
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "perfetto/base/flat_set.h"
 #include "perfetto/base/status.h"
-#include "perfetto/ext/base/status_or.h"
+#include "src/trace_redaction/frame_cookie.h"
+#include "src/trace_redaction/process_thread_timeline.h"
 
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 
@@ -35,6 +39,59 @@ namespace perfetto::trace_redaction {
 constexpr uint64_t NormalizeUid(uint64_t uid) {
   return uid % 1000000;
 }
+
+class SystemInfo {
+ public:
+  int32_t AllocateSynthThread() {
+    return (1 << kSynthShift) | (++next_synth_thread_);
+  }
+
+  uint32_t ReserveCpu(uint32_t cpu) {
+    last_cpu_ = std::max(last_cpu_, cpu);
+    return last_cpu_;
+  }
+
+  uint32_t last_cpu() const { return last_cpu_; }
+
+ private:
+  // This is the last allocated tid. Using a tid equal to or less than this tid
+  // risks a collision with another tid. If a tid is ever created (by a
+  // primitive) this should be advanced to the max between this value and the
+  // new tid.
+  //
+  // On a 64 bit machine, the max pid limit is 2^22 (approximately 4 million).
+  // Perfetto uses a 32 (signed) int for the pid. Even in this case, there is
+  // room for 2^9 synthetic threads (2 ^ (31 - 22) = 2 ^ 9).
+  //
+  // Futhermore, ther Android source code return 4194304 (2 ^ 22) on 64 bit
+  // devices.
+  //
+  //  /proc/sys/kernel/pid_max (since Linux 2.5.34)
+  //      This file specifies the value at which PIDs wrap around
+  //      (i.e., the value in this file is one greater than the
+  //      maximum PID).  PIDs greater than this value are not
+  //      allocated; thus, the value in this file also acts as a
+  //      system-wide limit on the total number of processes and
+  //      threads.  The default value for this file, 32768, results
+  //      in the same range of PIDs as on earlier kernels.  On
+  //      32-bit platforms, 32768 is the maximum value for pid_max.
+  //      On 64-bit systems, pid_max can be set to any value up to
+  //      2^22 (PID_MAX_LIMIT, approximately 4 million).
+  //
+  // SOURCE: https://man7.org/linux/man-pages/man5/proc.5.html
+  static constexpr auto kSynthShift = 22;
+  int32_t next_synth_thread_ = 0;
+
+  // The last CPU index seen. If this value is 7, it means there are at least
+  // 8 CPUs.
+  uint32_t last_cpu_ = 0;
+};
+
+class SyntheticThreadGroup {
+ public:
+  int32_t tgid;
+  std::vector<int32_t> tids;
+};
 
 // Primitives should be stateless. All state should be stored in the context.
 // Primitives should depend on data in the context, not the origin of the data.
@@ -56,6 +113,19 @@ class Context {
   // The package that should not be redacted. This must be populated before
   // running any primitives.
   std::string package_name;
+
+  // Each packet will have a trusted uid. This is the package emitting the
+  // event. In production we only expect:
+  //
+  //    1000: probably frame_timeline packets you will see those on.
+  //    9999: traced/traced_probes (sometimes called "nobody").
+  //
+  // While field traces are limited to these two uids, it created an artifical
+  // limitation when testing.
+  //
+  // When empty, all uids should be allowed. When non-empty, only uids found in
+  // the collection are allowed.
+  std::vector<int32_t> trusted_uids = {1000, 9999};
 
   // The package list maps a package name to a uid. It is possible for multiple
   // package names to map to the same uid, for example:
@@ -156,27 +226,92 @@ class Context {
   //  3.  In this example, a cpu_idle event populates the one-of slot in the
   //      ftrace event
   base::FlatSet<uint32_t> ftrace_packet_allow_list;
+
+  //  message SuspendResumeFtraceEvent {
+  //    optional string action = 1 [(datapol.semantic_type) = ST_NOT_REQUIRED];
+  //    optional int32 val = 2;
+  //    optional uint32 start = 3 [(datapol.semantic_type) = ST_NOT_REQUIRED];
+  //  }
+  //
+  // The "action" in SuspendResumeFtraceEvent is a free-form string. There are
+  // some know and expected values. Those values are stored here and all events
+  // who's action value is not found here, the ftrace event will be dropped.
+  base::FlatSet<std::string> suspend_result_allow_list;
+
+  // The timeline is a query-focused data structure that connects a pid to a
+  // uid at specific point in time.
+  //
+  // A timeline has two modes:
+  //
+  //    1. write-only
+  //    2. read-only
+  //
+  // Attempting to use the timeline incorrectly results in undefined behaviour.
+  //
+  // To use a timeline, the primitive needs to be "built" (add events) and then
+  // "sealed" (transition to read-only).
+  //
+  // A timeline must have Sort() called to change from write-only to read-only.
+  // After Sort(), Flatten() and Reduce() can be called (optional) to improve
+  // the practical look-up times (compared to theoretical look-up times).
+  std::unique_ptr<ProcessThreadTimeline> timeline;
+
+  // All frame events:
+  //
+  //  - ActualDisplayFrame
+  //  - ActualSurfaceFrame
+  //  - ExpectedDisplayFrame
+  //  - ExpectedSurfaceFrame
+  //
+  // Connect a time, a pid, and a cookie value. Cookies are unqiue within a
+  // trace, so if a cookie was connected to the target package, it can always be
+  // used.
+  //
+  // End events (i.e. FrameEnd) only have a time and cookie value. The cookie
+  // value connects it to its start time.
+  //
+  // In the collect phase, all start events are collected and converted to a
+  // simpler structure.
+  //
+  // In the build phase, the cookies are filtered to only include the ones that
+  // belong to the target package. This is down in the build phase, and not the
+  // collect phase, because the timeline is needed to determine if the cookie
+  // belongs to the target package.
+  std::vector<FrameCookie> global_frame_cookies;
+
+  // The collect of cookies that belong to the target package. Because cookie
+  // values are unique within the scope of the trace, pid and time are no longer
+  // needed and a set can be used for faster queries.
+  std::unordered_set<int64_t> package_frame_cookies;
+
+  std::optional<SystemInfo> system_info;
+
+  std::optional<SyntheticThreadGroup> synthetic_threads;
 };
 
-// Responsible for extracting low-level data from the trace and storing it in
-// the context.
+// Extracts low-level data from the trace and writes it into the context. The
+// life cycle of a collect primitive is:
+//
+//  primitive.Begin(&context);
+//
+//  for (auto& packet : packets) {
+//    primitive.Collect(packet, &context);
+//  }
+//
+//  primitive.End(&context);
 class CollectPrimitive {
  public:
-  // When a collect primitive has collected all necessary information, it can
-  // stop processing packets by returning kRetire. If the primitives wants to
-  // continue processing packets, it will return kNextPacket.
-  //
-  // If a collector encounters an unrecoverable error, base::ErrStatus() is
-  // returned.
-  enum class ContinueCollection : bool { kRetire = false, kNextPacket = true };
-
   virtual ~CollectPrimitive();
 
-  // Processes a packet and writes low-level data to the context. Returns
-  // kContinue if the primitive wants more data (i.e. next packet).
-  virtual base::StatusOr<ContinueCollection> Collect(
-      const protos::pbzero::TracePacket::Decoder& packet,
-      Context* context) const = 0;
+  // Called once before the first call to Collect(...).
+  virtual base::Status Begin(Context*) const;
+
+  // Reads a trace packet and updates the context.
+  virtual base::Status Collect(const protos::pbzero::TracePacket::Decoder&,
+                               Context*) const = 0;
+
+  // Called once after the last call to Collect(...).
+  virtual base::Status End(Context*) const;
 };
 
 // Responsible for converting low-level data from the context and storing it in

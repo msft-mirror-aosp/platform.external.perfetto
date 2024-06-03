@@ -74,6 +74,8 @@ namespace stats {
        "enable. See ftrace_setup_errors in the metadata table for details."),  \
   F(ftrace_abi_errors_skipped_zero_data_length,                                \
                                           kSingle,  kInfo,     kAnalysis, ""), \
+  F(ftrace_thermal_exynos_acpm_unknown_tz_id,                                  \
+                                          kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_non_numeric_counters,         kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_timestamp_overflow,           kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_invalid_event,                kSingle,  kError,    kAnalysis, ""), \
@@ -153,7 +155,13 @@ namespace stats {
   F(traced_buf_patches_succeeded,         kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_readaheads_failed,         kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_readaheads_succeeded,      kIndexed, kInfo,     kTrace,    ""), \
-  F(traced_buf_trace_writer_packet_loss,  kIndexed, kDataLoss, kTrace,    ""), \
+  F(traced_buf_trace_writer_packet_loss,  kIndexed, kDataLoss, kTrace,         \
+      "The tracing service observed packet loss for this buffer during this "  \
+      "tracing session. This also counts packet loss that happened before "    \
+      "the RING_BUFFER start or after the DISCARD buffer end."),               \
+  F(traced_buf_sequence_packet_loss,      kIndexed, kDataLoss, kAnalysis,      \
+      "The number of groups of consecutive packets lost in each sequence for " \
+      "this buffer"), \
   F(traced_buf_write_wrap_count,          kIndexed, kInfo,     kTrace,    ""), \
   F(traced_chunks_discarded,              kSingle,  kInfo,     kTrace,    ""), \
   F(traced_data_sources_registered,       kSingle,  kInfo,     kTrace,    ""), \
@@ -260,8 +268,13 @@ namespace stats {
   F(perf_process_shard_count,             kIndexed, kInfo,     kTrace,    ""), \
   F(perf_chosen_process_shard,            kIndexed, kInfo,     kTrace,    ""), \
   F(perf_guardrail_stop_ts,               kIndexed, kDataLoss, kTrace,    ""), \
-  F(perf_samples_skipped,                 kSingle,  kInfo,     kTrace,    ""), \
+  F(perf_unknown_record_type,             kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_record_skipped,                  kSingle,  kError,    kAnalysis, ""), \
+  F(perf_samples_skipped,                 kSingle,  kError,    kAnalysis, ""), \
+  F(perf_features_skipped,                kIndexed, kInfo,     kAnalysis, ""), \
   F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,    ""), \
+  F(perf_dummy_mapping_used,              kSingle,  kInfo,     kAnalysis, ""), \
+  F(perf_invalid_event_id,                kSingle,  kError,    kTrace,    ""), \
   F(memory_snapshot_parser_failure,       kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_out_of_order,    kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_unknown_cpu_freq,                                     \
@@ -289,6 +302,30 @@ namespace stats {
   F(v8_intern_errors,                                                          \
                                           kSingle,  kDataLoss, kAnalysis,      \
       "Failed to resolve V8 interned data."),                                  \
+  F(v8_no_defaults,                                                            \
+                                          kSingle,  kDataLoss, kAnalysis,      \
+      "Failed to resolve V8 default data."),                                   \
+  F(v8_no_code_range,                                                          \
+                                          kSingle,  kError,    kAnalysis,      \
+      "V8 isolate had no code range."),                                        \
+  F(v8_unknown_code_type,                 kSingle,  kError,    kAnalysis, ""), \
+  F(v8_code_load_missing_code_range,      kSingle,  kError,    kAnalysis,      \
+      "V8 load had no code range or an empty one. Event ignored."),            \
+  F(winscope_inputmethod_clients_parse_errors,                                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "InputMethod clients packet has unknown fields, which results in "       \
+      "some arguments missing. You may need a newer version of trace "         \
+      "processor to parse them."),                                             \
+  F(winscope_inputmethod_manager_service_parse_errors,                         \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "InputMethod manager service packet has unknown fields, which results "  \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
+  F(winscope_inputmethod_service_parse_errors,                                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "InputMethod service packet has unknown fields, which results in "       \
+      "some arguments missing. You may need a newer version of trace "         \
+      "processor to parse them."),                                             \
   F(winscope_sf_layers_parse_errors,      kSingle,  kInfo,     kAnalysis,      \
       "SurfaceFlinger layers snapshot has unknown fields, which results in "   \
       "some arguments missing. You may need a newer version of trace "         \
@@ -312,6 +349,14 @@ namespace stats {
   F(winscope_protolog_missing_interned_stacktrace_parse_errors,                \
                                           kSingle,  kInfo,     kAnalysis,      \
       "Failed to find interned ProtoLog stacktrace."),                         \
+  F(winscope_viewcapture_parse_errors,                                         \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "ViewCapture packet has unknown fields, which results in some "          \
+      "arguments missing. You may need a newer version of trace processor "    \
+      "to parse them."),                                                       \
+  F(winscope_viewcapture_missing_interned_string_parse_errors,                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "Failed to find interned ViewCapture string."),                          \
   F(jit_unknown_frame,                    kSingle,  kDataLoss, kTrace,         \
       "Indicates that we were unable to determine the function for a frame in "\
       "a jitted memory region"),                                               \
@@ -338,7 +383,7 @@ enum Source {
   // being reflected in the stats table.
   kTrace,
 
-  // The counter is genrated when importing / processing the trace in the trace
+  // The counter is generated when importing / processing the trace in the trace
   // processor.
   kAnalysis
 };
