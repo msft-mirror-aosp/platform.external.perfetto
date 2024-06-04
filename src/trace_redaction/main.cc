@@ -19,21 +19,16 @@
 #include "src/trace_redaction/collect_frame_cookies.h"
 #include "src/trace_redaction/collect_system_info.h"
 #include "src/trace_redaction/collect_timeline_events.h"
-#include "src/trace_redaction/filter_ftrace_using_allowlist.h"
 #include "src/trace_redaction/filter_packet_using_allowlist.h"
-#include "src/trace_redaction/filter_print_events.h"
 #include "src/trace_redaction/find_package_uid.h"
 #include "src/trace_redaction/populate_allow_lists.h"
 #include "src/trace_redaction/prune_package_list.h"
-#include "src/trace_redaction/redact_ftrace_event.h"
+#include "src/trace_redaction/redact_ftrace_events.h"
 #include "src/trace_redaction/redact_process_events.h"
+#include "src/trace_redaction/redact_process_trees.h"
 #include "src/trace_redaction/redact_sched_events.h"
-#include "src/trace_redaction/remap_scheduling_events.h"
-#include "src/trace_redaction/scrub_ftrace_events.h"
 #include "src/trace_redaction/scrub_process_stats.h"
-#include "src/trace_redaction/scrub_process_trees.h"
 #include "src/trace_redaction/scrub_trace_packet.h"
-#include "src/trace_redaction/suspend_resume.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 #include "src/trace_redaction/trace_redactor.h"
 #include "src/trace_redaction/verify_integrity.h"
@@ -60,7 +55,6 @@ static base::Status Main(std::string_view input,
 
   // Add all builders.
   redactor.emplace_build<PopulateAllowlists>();
-  redactor.emplace_build<AllowSuspendResume>();
   redactor.emplace_build<ReduceFrameCookies>();
   redactor.emplace_build<BuildSyntheticThreads>();
 
@@ -69,15 +63,18 @@ static base::Status Main(std::string_view input,
   scrub_packet->emplace_back<FilterPacketUsingAllowlist>();
   scrub_packet->emplace_back<FilterFrameEvents>();
 
-  auto* scrub_ftrace_events = redactor.emplace_transform<ScrubFtraceEvents>();
-  scrub_ftrace_events->emplace_back<FilterFtraceUsingAllowlist>();
-  scrub_ftrace_events->emplace_back<FilterPrintEvents>();
-  scrub_ftrace_events->emplace_back<FilterSuspendResume>();
+  auto* ftrace_allowlist = redactor.emplace_transform<RedactFtraceEvents>();
+  ftrace_allowlist->emplace_filter<FilterFtracesUsingAllowlist>();
+  ftrace_allowlist->emplace_writer<WriteFtracesPassthrough>();
+
+  auto* ftrace_suspend_resume =
+      redactor.emplace_transform<RedactFtraceEvents>();
+  ftrace_suspend_resume->emplace_filter<FilterFtraceUsingSuspendResume>();
+  ftrace_suspend_resume->emplace_writer<WriteFtracesPassthrough>();
 
   // Scrub packets and ftrace events first as they will remove the largest
   // chucks of data from the trace. This will reduce the amount of data that the
   // other primitives need to operate on.
-  redactor.emplace_transform<ScrubProcessTrees>();
   redactor.emplace_transform<PrunePackageList>();
   redactor.emplace_transform<ScrubProcessStats>();
 
@@ -104,6 +101,15 @@ static base::Status Main(std::string_view input,
   //    - ThreadMergeDropField(kSchedProcessFreeFieldNumber)
   //
   // Add these primitives back one-by-one to find the issue.
+
+  // Configure the primitive to remove processes and threads that don't belong
+  // to the target package and adds a process and threads for the synth thread
+  // group and threads.
+  {
+    auto* primitive = redactor.emplace_transform<RedactProcessTrees>();
+    primitive->emplace_modifier<ProcessTreeCreateSynthThreads>();
+    primitive->emplace_filter<ProcessTreeFilterConnectedToPackage>();
+  }
 
   Context context;
   context.package_name = package_name;
