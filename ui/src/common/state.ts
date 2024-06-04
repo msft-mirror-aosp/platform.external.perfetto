@@ -28,7 +28,6 @@ import {
   selectionToLegacySelection,
   Selection,
   LegacySelection,
-  ProfileType,
 } from '../core/selection_manager';
 
 export {
@@ -42,7 +41,7 @@ export {
   LegacySelection,
   AreaSelection,
   ProfileType,
-  ChromeSliceSelection,
+  ThreadSliceSelection,
   CpuProfileSampleSelection,
 } from '../core/selection_manager';
 
@@ -152,7 +151,9 @@ export const MAX_TIME = 180;
 // 53. Remove android log state.
 // 54. Remove traceTime.
 // 55. Rename TrackGroupState.id -> TrackGroupState.key.
-export const STATE_VERSION = 55;
+// 56. Renamed chrome slice to thread slice everywhere.
+// 57. Remove flamegraph related code from state.
+export const STATE_VERSION = 57;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -187,56 +188,6 @@ export type UtidToTrackSortKey = {
     sortKey: PrimaryTrackSortKey;
   };
 };
-
-export enum FlamegraphStateViewingOption {
-  SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY = 'SPACE',
-  ALLOC_SPACE_MEMORY_ALLOCATED_KEY = 'ALLOC_SPACE',
-  OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS',
-  OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS',
-  PERF_SAMPLES_KEY = 'PERF_SAMPLES',
-  DOMINATOR_TREE_OBJ_SIZE_KEY = 'DOMINATED_OBJ_SIZE',
-  DOMINATOR_TREE_OBJ_COUNT_KEY = 'DOMINATED_OBJ_COUNT',
-}
-
-const HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS = [
-  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_SIZE_KEY,
-  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_COUNT_KEY,
-] as const;
-
-export type HeapGraphDominatorTreeViewingOption =
-  (typeof HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS)[number];
-
-export function isHeapGraphDominatorTreeViewingOption(
-  option: FlamegraphStateViewingOption,
-): option is HeapGraphDominatorTreeViewingOption {
-  return (
-    HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS as readonly FlamegraphStateViewingOption[]
-  ).includes(option);
-}
-
-export interface FlamegraphState {
-  kind: 'FLAMEGRAPH_STATE';
-  upids: number[];
-  start: time;
-  end: time;
-  type: ProfileType;
-  viewingOption: FlamegraphStateViewingOption;
-  focusRegex: string;
-  expandedCallsiteByViewingOption: {[key: string]: CallsiteInfo | undefined};
-}
-
-export interface CallsiteInfo {
-  id: number;
-  parentId: number;
-  depth: number;
-  name?: string;
-  totalSize: number;
-  selfSize: number;
-  mapping: string;
-  merged: boolean;
-  highlighted: boolean;
-  location?: string;
-}
 
 export interface TraceFileSource {
   type: 'FILE';
@@ -484,8 +435,8 @@ export interface State {
   notes: ObjectById<Note | AreaNote>;
   status: Status;
   selection: Selection;
-  currentFlamegraphState: FlamegraphState | null;
   traceConversionInProgress: boolean;
+  flamegraphModalDismissed: boolean;
 
   /**
    * This state is updated on the frontend at 60Hz and eventually syncronised to
@@ -521,7 +472,6 @@ export interface State {
   recordingInProgress: boolean;
   recordingCancelled: boolean;
   extensionInstalled: boolean;
-  flamegraphModalDismissed: boolean;
   recordingTarget: RecordingTarget;
   availableAdbDevices: AdbRecordingTarget[];
   lastRecordingError?: string;
