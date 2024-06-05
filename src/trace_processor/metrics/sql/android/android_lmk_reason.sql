@@ -20,7 +20,7 @@ SELECT RUN_METRIC('android/process_mem.sql');
 SELECT RUN_METRIC('android/process_metadata.sql');
 
 DROP VIEW IF EXISTS android_lmk_reason_output;
-CREATE VIEW android_lmk_reason_output AS
+CREATE PERFETTO VIEW android_lmk_reason_output AS
 WITH
 total_ion_name AS (
   SELECT
@@ -64,8 +64,8 @@ lmk_process_sizes AS (
   FROM lmk_events
   JOIN rss_and_swap_span
   WHERE lmk_events.ts
-    BETWEEN rss_and_swap_span.ts
-    AND rss_and_swap_span.ts + MAX(rss_and_swap_span.dur - 1, 0)
+  BETWEEN rss_and_swap_span.ts
+  AND rss_and_swap_span.ts + MAX(rss_and_swap_span.dur - 1, 0)
 ),
 lmk_process_sizes_output AS (
   SELECT ts, RepeatedField(AndroidLmkReasonMetric_Process(

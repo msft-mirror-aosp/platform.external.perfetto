@@ -17,35 +17,35 @@
 #ifndef SRC_TRACE_PROCESSOR_CONTAINERS_BIT_VECTOR_H_
 #define SRC_TRACE_PROCESSOR_CONTAINERS_BIT_VECTOR_H_
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-
 #include <algorithm>
-#include <array>
-#include <optional>
+#include <cstdint>
+#include <initializer_list>
+#include <iterator>
+#include <utility>
 #include <vector>
 
+#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/public/compiler.h"
 
 namespace perfetto {
-namespace trace_processor {
+namespace protos::pbzero {
+class SerializedColumn_BitVector;
+class SerializedColumn_BitVector_Decoder;
+}  // namespace protos::pbzero
 
+namespace trace_processor {
 namespace internal {
 
 class BaseIterator;
-class AllBitsIterator;
 class SetBitsIterator;
 
 }  // namespace internal
 
-// A bitvector which compactly stores a vector of bools using a single bit
+// A BitVector which compactly stores a vector of bools using a single bit
 // for each bool.
 class BitVector {
  public:
-  using AllBitsIterator = internal::AllBitsIterator;
-  using SetBitsIterator = internal::SetBitsIterator;
-
   static constexpr uint32_t kBitsInWord = 64;
 
   // Builder class which allows efficiently creating a BitVector by appending
@@ -54,12 +54,12 @@ class BitVector {
   class Builder {
    public:
     // Creates a Builder for building a BitVector of |size| bits.
-    explicit Builder(uint32_t size) : words_(WordCount(size)), size_(size) {}
-
-    // Skips forward |n| bits leaving them as zeroed.
-    void Skip(uint32_t n) {
-      PERFETTO_DCHECK(global_bit_offset_ + n <= size_);
-      global_bit_offset_ += n;
+    explicit Builder(uint32_t size, uint32_t skip = 0)
+        : words_(BlockCount(size) * Block::kWords),
+          global_bit_offset_(skip),
+          size_(size),
+          skipped_blocks_(skip / Block::kBits) {
+      PERFETTO_CHECK(global_bit_offset_ <= size_);
     }
 
     // Appends a single bit to the builder.
@@ -78,28 +78,29 @@ class BitVector {
     void AppendWord(uint64_t word) {
       PERFETTO_DCHECK(global_bit_offset_ % BitWord::kBits == 0);
       PERFETTO_DCHECK(global_bit_offset_ + BitWord::kBits <= size_);
+
       words_[global_bit_offset_ / BitWord::kBits] = word;
       global_bit_offset_ += BitWord::kBits;
     }
 
     // Creates a BitVector from this Builder.
     BitVector Build() && {
-      Address addr = IndexToAddress(size_ - 1);
-      uint32_t no_blocks = addr.block_idx + 1;
-      std::vector<uint32_t> counts(no_blocks);
+      if (size_ == 0)
+        return {};
 
-      // Calculate counts only for full blocks.
-      for (uint32_t i = 1; i < no_blocks; ++i) {
+      std::vector<uint32_t> counts(BlockCount(size_));
+      PERFETTO_CHECK(skipped_blocks_ <= counts.size());
+      for (uint32_t i = skipped_blocks_ + 1; i < counts.size(); ++i) {
         counts[i] = counts[i - 1] +
                     ConstBlock(&words_[Block::kWords * (i - 1)]).CountSetBits();
       }
-      return BitVector{std::move(words_), std::move(counts), size_};
+      return {std::move(words_), std::move(counts), size_};
     }
 
     // Returns the number of bits which are in complete words which can be
     // appended to this builder before having to fallback to |Append| due to
     // being close to the end.
-    uint32_t BitsInCompleteWordsUntilFull() {
+    uint32_t BitsInCompleteWordsUntilFull() const {
       uint32_t next_word = WordCount(global_bit_offset_);
       uint32_t end_word = WordFloor(size_);
       uint32_t complete_words = next_word < end_word ? end_word - next_word : 0;
@@ -108,9 +109,9 @@ class BitVector {
 
     // Returns the number of bits which should be appended using |Append| either
     // hitting a word boundary (and thus able to use |AppendWord|) or until the
-    // bitvector is full (i.e. no more Appends should happen), whichever would
+    // BitVector is full (i.e. no more Appends should happen), whichever would
     // happen first.
-    uint32_t BitsUntilWordBoundaryOrFull() {
+    uint32_t BitsUntilWordBoundaryOrFull() const {
       if (global_bit_offset_ == 0 && size_ < BitWord::kBits) {
         return size_;
       }
@@ -121,34 +122,44 @@ class BitVector {
 
     // Returns the number of bits which should be appended using |Append| before
     // hitting a word boundary (and thus able to use |AppendWord|) or until the
-    // bitvector is full (i.e. no more Appends should happen).
-    uint32_t BitsUntilFull() { return size_ - global_bit_offset_; }
+    // BitVector is full (i.e. no more Appends should happen).
+    uint32_t BitsUntilFull() const { return size_ - global_bit_offset_; }
 
    private:
     std::vector<uint64_t> words_;
     uint32_t global_bit_offset_ = 0;
     uint32_t size_ = 0;
+    uint32_t skipped_blocks_ = 0;
   };
 
-  // Creates an empty bitvector.
+  // Creates an empty BitVector.
   BitVector();
 
-  explicit BitVector(std::initializer_list<bool> init);
+  BitVector(std::initializer_list<bool> init);
 
-  // Creates a bitvector of |count| size filled with |value|.
+  // Creates a BitVector of |count| size filled with |value|.
   explicit BitVector(uint32_t count, bool value = false);
 
-  // Enable moving bitvectors as they have no unmovable state.
+  BitVector(const BitVector&) = delete;
+  BitVector& operator=(const BitVector&) = delete;
+
+  // Enable moving BitVectors as they have no unmovable state.
   BitVector(BitVector&&) noexcept = default;
   BitVector& operator=(BitVector&&) = default;
 
-  // Create a copy of the bitvector.
+  // Create a copy of the BitVector.
   BitVector Copy() const;
 
-  // Create a bitwise Not copy of the bitvector.
-  BitVector Not() const;
+  // Bitwise Not of the BitVector.
+  void Not();
 
-  // Returns the size of the bitvector.
+  // Bitwise Or of the BitVector.
+  void Or(const BitVector&);
+
+  // Bitwise And of the BitVector.
+  void And(const BitVector&);
+
+  // Returns the size of the BitVector.
   uint32_t size() const { return static_cast<uint32_t>(size_); }
 
   // Returns whether the bit at |idx| is set.
@@ -159,10 +170,10 @@ class BitVector {
     return ConstBlockFromIndex(addr.block_idx).IsSet(addr.block_offset);
   }
 
-  // Returns the number of set bits in the bitvector.
+  // Returns the number of set bits in the BitVector.
   uint32_t CountSetBits() const { return CountSetBits(size()); }
 
-  // Returns the number of set bits between the start of the bitvector
+  // Returns the number of set bits between the start of the BitVector
   // (inclusive) and the index |end| (exclusive).
   uint32_t CountSetBits(uint32_t end) const {
     if (end == 0)
@@ -221,7 +232,7 @@ class BitVector {
     if (PERFETTO_LIKELY(!old_value)) {
       BlockFromIndex(addr.block_idx).Set(addr.block_offset);
 
-      uint32_t size = static_cast<uint32_t>(counts_.size());
+      auto size = static_cast<uint32_t>(counts_.size());
       for (uint32_t i = addr.block_idx + 1; i < size; ++i) {
         counts_[i]++;
       }
@@ -242,21 +253,21 @@ class BitVector {
     if (PERFETTO_LIKELY(old_value)) {
       BlockFromIndex(addr.block_idx).Clear(addr.block_offset);
 
-      uint32_t size = static_cast<uint32_t>(counts_.size());
+      auto size = static_cast<uint32_t>(counts_.size());
       for (uint32_t i = addr.block_idx + 1; i < size; ++i) {
         counts_[i]--;
       }
     }
   }
 
-  // Appends true to the bitvector.
+  // Appends true to the BitVector.
   void AppendTrue() {
     AppendFalse();
     Address addr = IndexToAddress(size() - 1);
     BlockFromIndex(addr.block_idx).Set(addr.block_offset);
   }
 
-  // Appends false to the bitvector.
+  // Appends false to the BitVector.
   void AppendFalse() {
     Address addr = IndexToAddress(size_);
     uint32_t old_blocks_size = BlockCount();
@@ -282,12 +293,13 @@ class BitVector {
   // Creates a BitVector of size |end| with the bits between |start| and |end|
   // filled by calling the filler function |f(index of bit)|.
   //
-  // As an example, suppose Range(3, 7, [](x) { return x < 5 }). This would
-  // result in the following bitvector:
-  // [0 0 0 1 1 0 0]
+  // As an example, suppose RangeForTesting(3, 7, [](x) { return x < 5 }). This
+  // would result in the following BitVector: [0 0 0 1 1 0 0]
   template <typename Filler = bool(uint32_t)>
-  static BitVector Range(uint32_t start, uint32_t end, Filler f) {
-    // Compute the block index and bitvector index where we start and end
+  PERFETTO_WARN_UNUSED_RESULT static BitVector RangeForTesting(uint32_t start,
+                                                               uint32_t end,
+                                                               Filler f) {
+    // Compute the block index and BitVector index where we start and end
     // working one block at a time.
     uint32_t start_fast_block = BlockCount(start);
     uint32_t start_fast_idx = BlockToIndex(start_fast_block);
@@ -299,8 +311,6 @@ class BitVector {
       for (uint32_t i = start; i < end; ++i) {
         bv.Append(f(i));
       }
-      bv.counts_.emplace_back(bv.CountSetBits());
-      bv.size_ = end;
       return bv;
     }
 
@@ -334,9 +344,19 @@ class BitVector {
     return bv;
   }
 
-  // Creates a BitVector of size |end| bit the bits between |start| and |end|
-  // filled with corresponding bits |this| BitVector.
-  BitVector IntersectRange(uint32_t range_start, uint32_t range_end) const;
+  // Creates BitVector from a vector of sorted indices. Set bits in the
+  // resulting BitVector are values from the index vector.
+  // Note for callers - the passed index vector has to:
+  // - be sorted
+  // - have first element >= 0
+  // - last value smaller than numeric limit of uint32_t.
+  PERFETTO_WARN_UNUSED_RESULT static BitVector FromSortedIndexVector(
+      const std::vector<int64_t>&);
+
+  // Creates a BitVector of size `min(range_end, size())` with bits between
+  // |start| and |end| filled with corresponding bits from |this| BitVector.
+  PERFETTO_WARN_UNUSED_RESULT BitVector
+  IntersectRange(uint32_t range_start, uint32_t range_end) const;
 
   // Requests the removal of unused capacity.
   // Matches the semantics of std::vector::shrink_to_fit.
@@ -345,7 +365,7 @@ class BitVector {
     counts_.shrink_to_fit();
   }
 
-  // Updates the ith set bit of this bitvector with the value of
+  // Updates the ith set bit of this BitVector with the value of
   // |other.IsSet(i)|.
   //
   // This is the best way to batch update all the bits which are set; for
@@ -357,39 +377,45 @@ class BitVector {
   // other: 0 1 1 0
   // This will change this to the following:
   // this:  0 1 0 0 1 0 0
-  // TODO(lalitm): investigate whether we should just change this to And.
   void UpdateSetBits(const BitVector& other);
 
-  // Iterate all the bits in the BitVector.
+  // For each set bit position  in |other|, Selects the value of each bit in
+  // |this| and stores them contiguously in |this|.
   //
-  // Usage:
-  // for (auto it = bv.IterateAllBits(); it; it.Next()) {
-  //   ...
-  // }
-  AllBitsIterator IterateAllBits() const;
-
-  // Iterate all the set bits in the BitVector.
+  // Precondition: |this.size()| <= |other.size()|.
   //
-  // Usage:
-  // for (auto it = bv.IterateSetBits(); it; it.Next()) {
-  //   ...
-  // }
-  SetBitsIterator IterateSetBits() const;
+  // For example suppose the following:
+  // this:  1 1 0 0 1 0 1
+  // other: 0 1 0 1 0 1 0 0 1 0
+  // |this| will change this to the following:
+  // this:  1 0 0
+  void SelectBits(const BitVector& other);
 
-  // Returns the approximate cost (in bytes) of storing a bitvector with size
+  // Returns the approximate cost (in bytes) of storing a BitVector with size
   // |n|. This can be used to make decisions about whether using a BitVector is
   // worthwhile.
   // This cost should not be treated as exact - it just gives an indication of
   // the memory needed.
   static constexpr uint32_t ApproxBytesCost(uint32_t n) {
-    // The two main things making up a bitvector is the cost of the blocks of
+    // The two main things making up a BitVector is the cost of the blocks of
     // bits and the cost of the counts vector.
     return BlockCount(n) * Block::kBits + BlockCount(n) * sizeof(uint32_t);
   }
 
+  // Returns a vector<uint32_t> containing the indices of all the set bits
+  // in the BitVector.
+  std::vector<uint32_t> GetSetBitIndices() const;
+
+  // Serialize internals of BitVector to proto.
+  void Serialize(protos::pbzero::SerializedColumn_BitVector* msg) const;
+
+  // Deserialize BitVector from proto.
+  void Deserialize(
+      const protos::pbzero::SerializedColumn_BitVector_Decoder& bv_msg);
+
  private:
+  using SetBitsIterator = internal::SetBitsIterator;
   friend class internal::BaseIterator;
-  friend class internal::AllBitsIterator;
   friend class internal::SetBitsIterator;
 
   // Represents the offset of a bit within a block.
@@ -398,7 +424,7 @@ class BitVector {
     uint16_t bit_idx;
   };
 
-  // Represents the address of a bit within the bitvector.
+  // Represents the address of a bit within the BitVector.
   struct Address {
     uint32_t block_idx;
     BlockOffset block_offset;
@@ -417,6 +443,12 @@ class BitVector {
 
     // Bitwise ors the given |mask| to the current value.
     void Or(uint64_t mask) { *word_ |= mask; }
+
+    // Bitwise ands the given |mask| to the current value.
+    void And(uint64_t mask) { *word_ &= mask; }
+
+    // Bitwise not.
+    void Not() { *word_ = ~(*word_); }
 
     // Sets the bit at the given index to true.
     void Set(uint32_t idx) {
@@ -503,9 +535,6 @@ class BitVector {
       PERFETTO_DCHECK(idx < kBits);
       return (*word_ >> idx) & 1ull;
     }
-
-    // Bitwise not.
-    uint64_t Not() const { return ~(*word_); }
 
     // Returns the index of the nth set bit.
     // Undefined if |n| >= |CountSetBits()|.
@@ -602,9 +631,6 @@ class BitVector {
   // On x86 architectures we generally target for trace processor, the
   // size of a cache line is 64 bytes (or 512 bits). For this reason,
   // we make the size of the block contain 8 atoms as 8 * 64 == 512.
-  //
-  // TODO(lalitm): investigate whether we should tune this value for
-  // WASM and ARM.
   class Block {
    public:
     // See class documentation for how these constants are chosen.
@@ -664,6 +690,12 @@ class BitVector {
 
       // Finally, we set the word block from the start to the end offset.
       BitWord(&start_word_[end.word_idx]).Set(0, end.bit_idx);
+    }
+
+    void Or(Block& sec) {
+      for (uint32_t i = 0; i < kWords; ++i) {
+        BitWord(&start_word_[i]).Or(sec.start_word_[i]);
+      }
     }
 
     template <typename Filler>
@@ -772,10 +804,7 @@ class BitVector {
             std::vector<uint32_t> counts,
             uint32_t size);
 
-  BitVector(const BitVector&) = delete;
-  BitVector& operator=(const BitVector&) = delete;
-
-  // Returns the number of 8 elements blocks in the bitvector.
+  // Returns the number of 8 elements blocks in the BitVector.
   uint32_t BlockCount() {
     return static_cast<uint32_t>(words_.size()) / Block::kWords;
   }
@@ -836,6 +865,14 @@ class BitVector {
     }
   }
 
+  // Iterate all the set bits in the BitVector.
+  //
+  // Usage:
+  // for (auto it = bv.IterateSetBits(); it; it.Next()) {
+  //   ...
+  // }
+  SetBitsIterator IterateSetBits() const;
+
   // Returns the index of the word which would store |idx|.
   static constexpr uint32_t WordFloor(uint32_t idx) {
     return idx / BitWord::kBits;
@@ -883,6 +920,16 @@ class BitVector {
   // Converts a block index to a index in the BitVector.
   static constexpr uint32_t BlockToIndex(uint32_t block_idx) {
     return block_idx * Block::kBits;
+  }
+
+  // Updates the counts in |counts| by counting the set bits in |words|.
+  static void UpdateCounts(const std::vector<uint64_t>& words,
+                           std::vector<uint32_t>& counts) {
+    PERFETTO_CHECK(words.size() == counts.size() * Block::kWords);
+    for (uint32_t i = 1; i < counts.size(); ++i) {
+      counts[i] = counts[i - 1] +
+                  ConstBlock(&words[Block::kWords * (i - 1)]).CountSetBits();
+    }
   }
 
   uint32_t size_ = 0;

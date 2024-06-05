@@ -60,6 +60,7 @@ PERFETTO_CONFIG = struct(
         protobuf_py = [],
         pandas_py = [],
         tp_vendor_py = [],
+        tp_resolvers_py = [],
 
         # There are multiple configurations for the function name demangling
         # logic in trace processor:
@@ -128,6 +129,8 @@ PERFETTO_CONFIG = struct(
         py_proto_library = None,
 
         go_proto_library = None,
+
+        jspb_proto_library = None,
     ),
 
     # The default copts which we use to compile C++ code.

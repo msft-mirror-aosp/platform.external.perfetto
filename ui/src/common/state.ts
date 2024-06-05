@@ -12,58 +12,79 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {BigintMath} from '../base/bigint_math';
+import {duration, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {
   Aggregation,
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-import {TopLevelScrollSelection} from '../tracks/scroll_jank/scroll_track';
+import {PrimaryTrackSortKey} from '../public/index';
 
-import {Direction} from './event_set';
-import {TPDuration, TPTime} from './time';
+import {Direction} from '../core/event_set';
+
+import {
+  selectionToLegacySelection,
+  Selection,
+  LegacySelection,
+} from '../core/selection_manager';
+
+export {
+  Selection,
+  SelectionKind,
+  NoteSelection,
+  SliceSelection,
+  CounterSelection,
+  HeapProfileSelection,
+  PerfSamplesSelection,
+  LegacySelection,
+  AreaSelection,
+  ProfileType,
+  ThreadSliceSelection,
+  CpuProfileSampleSelection,
+} from '../core/selection_manager';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
  * We use this instead of using |Map| object since it is simpler and faster to
  * serialize for use in postMessage.
  */
-export interface ObjectById<Class extends{id: string}> { [id: string]: Class; }
+export interface ObjectById<Class extends {id: string}> {
+  [id: string]: Class;
+}
+
+// Same as ObjectById but the key parameter is called `key` rather than `id`.
+export interface ObjectByKey<Class extends {key: string}> {
+  [key: string]: Class;
+}
 
 export interface Timestamped {
   lastUpdate: number;
 }
 
-export type OmniboxMode = 'SEARCH'|'COMMAND';
+export type OmniboxMode = 'SEARCH' | 'COMMAND';
 
 export interface OmniboxState {
   omnibox: string;
   mode: OmniboxMode;
+  force?: boolean;
 }
+
+// This is simply an arbitrarily large number to default to.
+export const RESOLUTION_DEFAULT = BigintMath.bitFloor(1_000_000_000_000n);
 
 export interface VisibleState extends Timestamped {
-  start: TPTime;
-  end: TPTime;
-  resolution: TPDuration;
+  start: time;
+  end: time;
+  resolution: duration;
 }
 
-export interface AreaSelection {
-  kind: 'AREA';
-  areaId: string;
-  // When an area is marked it will be assigned a unique note id and saved as
-  // an AreaNote for the user to return to later. id = 0 is the special id that
-  // is overwritten when a new area is marked. Any other id is a persistent
-  // marking that will not be overwritten.
-  // When not set, the area selection will be replaced with any
-  // new area selection (i.e. not saved anywhere).
-  noteId?: string;
-}
-
-export type AreaById = Area&{id: string};
+export type AreaById = Area & {id: string};
 
 export interface Area {
-  start: TPTime;
-  end: TPTime;
+  start: time;
+  end: time;
   tracks: string[];
 }
 
@@ -104,43 +125,41 @@ export const MAX_TIME = 180;
 // 29. Add ftrace state. <-- Borked, state contains a non-serializable object.
 // 30. Convert ftraceFilter.excludedNames from Set<string> to string[].
 // 31. Convert all timestamps to bigints.
-export const STATE_VERSION = 31;
+// 32. Add pendingDeeplink.
+// 33. Add plugins state.
+// 34. Add additional pendingDeeplink fields (query, pid).
+// 35. Add force to OmniboxState
+// 36. Remove metrics
+// 37. Add additional pendingDeeplink fields (visStart, visEnd).
+// 38. Add track tags.
+// 39. Ported cpu_slice, ftrace, and android_log tracks to plugin tracks. Track
+//     state entries now require a URI and old track implementations are no
+//     longer registered.
+// 40. Ported counter, process summary/sched, & cpu_freq to plugin tracks.
+// 41. Ported all remaining tracks.
+// 42. Rename trackId -> trackKey.
+// 43. Remove visibleTracks.
+// 44. Add TabsV2 state.
+// 45. Remove v1 tracks.
+// 46. Remove trackKeyByTrackId.
+// 47. Selection V2
+// 48. Rename legacySelection -> selection and introduce new Selection type.
+// 49. Remove currentTab, which is only relevant to TabsV1.
+// 50. Remove ftrace filter state.
+// 51. Changed structure of FlamegraphState.expandedCallsiteByViewingOption.
+// 52. Update track group state - don't make the summary track the first track.
+// 53. Remove android log state.
+// 54. Remove traceTime.
+// 55. Rename TrackGroupState.id -> TrackGroupState.key.
+// 56. Renamed chrome slice to thread slice everywhere.
+// 57. Remove flamegraph related code from state.
+export const STATE_VERSION = 57;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
-export type EngineMode = 'WASM'|'HTTP_RPC';
+export type EngineMode = 'WASM' | 'HTTP_RPC';
 
-export type NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE'|'FORCE_BUILTIN_WASM';
-
-// Tracks within track groups (usually corresponding to processes) are sorted.
-// As we want to group all tracks related to a given thread together, we use
-// two keys:
-// - Primary key corresponds to a priority of a track block (all tracks related
-//   to a given thread or a single track if it's not thread-associated).
-// - Secondary key corresponds to a priority of a given thread-associated track
-//   within its thread track block.
-// Each track will have a sort key, which either a primary sort key
-// (for non-thread tracks) or a tid and secondary sort key (mapping of tid to
-// primary sort key is done independently).
-export enum PrimaryTrackSortKey {
-  DEBUG_SLICE_TRACK,
-  NULL_TRACK,
-  PROCESS_SCHEDULING_TRACK,
-  PROCESS_SUMMARY_TRACK,
-  EXPECTED_FRAMES_SLICE_TRACK,
-  ACTUAL_FRAMES_SLICE_TRACK,
-  PERF_SAMPLES_PROFILE_TRACK,
-  HEAP_PROFILE_TRACK,
-  MAIN_THREAD,
-  RENDER_THREAD,
-  GPU_COMPLETION_THREAD,
-  CHROME_IO_THREAD,
-  CHROME_COMPOSITOR_THREAD,
-  ORDINARY_THREAD,
-  COUNTER_TRACK,
-  ASYNC_SLICE_TRACK,
-  ORDINARY_TRACK,
-}
+export type NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE' | 'FORCE_BUILTIN_WASM';
 
 // Key that is used to sort tracks within a block of tracks associated with a
 // given thread.
@@ -155,43 +174,20 @@ export enum InThreadTrackSortKey {
 
 // Sort key used for sorting tracks associated with a thread.
 export type ThreadTrackSortKey = {
-  utid: number,
-  priority: InThreadTrackSortKey,
-}
+  utid: number;
+  priority: InThreadTrackSortKey;
+};
 
 // Sort key for all tracks: both thread-associated and non-thread associated.
-export type TrackSortKey = PrimaryTrackSortKey|ThreadTrackSortKey;
+export type TrackSortKey = PrimaryTrackSortKey | ThreadTrackSortKey;
 
 // Mapping which defines order for threads within a given process.
 export type UtidToTrackSortKey = {
   [utid: number]: {
-    tid?: number, sortKey: PrimaryTrackSortKey,
-  }
-}
-
-export enum ProfileType {
-  HEAP_PROFILE = 'heap_profile',
-  NATIVE_HEAP_PROFILE = 'heap_profile:libc.malloc',
-  JAVA_HEAP_SAMPLES = 'heap_profile:com.android.art',
-  JAVA_HEAP_GRAPH = 'graph',
-  PERF_SAMPLE = 'perf',
-}
-
-export type FlamegraphStateViewingOption =
-    'SPACE'|'ALLOC_SPACE'|'OBJECTS'|'ALLOC_OBJECTS'|'PERF_SAMPLES';
-
-export interface CallsiteInfo {
-  id: number;
-  parentId: number;
-  depth: number;
-  name?: string;
-  totalSize: number;
-  selfSize: number;
-  mapping: string;
-  merged: boolean;
-  highlighted: boolean;
-  location?: string;
-}
+    tid?: number;
+    sortKey: PrimaryTrackSortKey;
+  };
+};
 
 export interface TraceFileSource {
   type: 'FILE';
@@ -226,35 +222,37 @@ export interface TraceHttpRpcSource {
 }
 
 export type TraceSource =
-    TraceFileSource|TraceArrayBufferSource|TraceUrlSource|TraceHttpRpcSource;
+  | TraceFileSource
+  | TraceArrayBufferSource
+  | TraceUrlSource
+  | TraceHttpRpcSource;
 
 export interface TrackState {
-  id: string;
-  engineId: string;
-  kind: string;
+  uri: string;
+  key: string;
   name: string;
   labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  config: {
-    trackId?: number;
-    trackIds?: number[];
-  };
+  params?: unknown;
+  state?: unknown;
+  closeable?: boolean;
 }
 
 export interface TrackGroupState {
-  id: string;
-  engineId: string;
+  key: string;
   name: string;
   collapsed: boolean;
-  tracks: string[];  // Child track ids.
+  tracks: string[]; // Child track ids.
+  fixedOrdering?: boolean; // Render tracks without sorting.
+  summaryTrack: string | undefined;
 }
 
 export interface EngineConfig {
   id: string;
-  mode?: EngineMode;  // Is undefined until |ready| is true.
+  mode?: EngineMode; // Is undefined until |ready| is true.
   ready: boolean;
-  failed?: string;  // If defined the engine has crashed with the given message.
+  failed?: string; // If defined the engine has crashed with the given message.
   source: TraceSource;
 }
 
@@ -264,31 +262,19 @@ export interface QueryConfig {
   query: string;
 }
 
-export interface PermalinkConfig {
-  requestId?: string;  // Set by the frontend to request a new permalink.
-  hash?: string;       // Set by the controller when the link has been created.
-  isRecordingConfig?:
-      boolean;  // this permalink request is for a recording config only
-}
-
-export interface TraceTime {
-  start: TPTime;
-  end: TPTime;
-}
-
 export interface FrontendLocalState {
   visibleState: VisibleState;
 }
 
 export interface Status {
   msg: string;
-  timestamp: number;  // Epoch in seconds (Date.now() / 1000).
+  timestamp: number; // Epoch in seconds (Date.now() / 1000).
 }
 
 export interface Note {
   noteType: 'DEFAULT';
   id: string;
-  timestamp: TPTime;
+  timestamp: time;
   color: string;
   text: string;
 }
@@ -301,99 +287,9 @@ export interface AreaNote {
   text: string;
 }
 
-export interface NoteSelection {
-  kind: 'NOTE';
-  id: string;
-}
-
-export interface SliceSelection {
-  kind: 'SLICE';
-  id: number;
-}
-
-export interface DebugSliceSelection {
-  kind: 'DEBUG_SLICE';
-  id: number;
-  sqlTableName: string;
-  start: TPTime;
-  duration: TPDuration;
-}
-
-export interface CounterSelection {
-  kind: 'COUNTER';
-  leftTs: TPTime;
-  rightTs: TPTime;
-  id: number;
-}
-
-export interface HeapProfileSelection {
-  kind: 'HEAP_PROFILE';
-  id: number;
-  upid: number;
-  ts: TPTime;
-  type: ProfileType;
-}
-
-export interface PerfSamplesSelection {
-  kind: 'PERF_SAMPLES';
-  id: number;
-  upid: number;
-  leftTs: TPTime;
-  rightTs: TPTime;
-  type: ProfileType;
-}
-
-export interface FlamegraphState {
-  kind: 'FLAMEGRAPH_STATE';
-  upids: number[];
-  start: TPTime;
-  end: TPTime;
-  type: ProfileType;
-  viewingOption: FlamegraphStateViewingOption;
-  focusRegex: string;
-  expandedCallsite?: CallsiteInfo;
-}
-
-export interface CpuProfileSampleSelection {
-  kind: 'CPU_PROFILE_SAMPLE';
-  id: number;
-  utid: number;
-  ts: number;
-}
-
-export interface ChromeSliceSelection {
-  kind: 'CHROME_SLICE';
-  id: number;
-  table: string;
-}
-
-export interface ThreadStateSelection {
-  kind: 'THREAD_STATE';
-  id: number;
-}
-
-export interface LogSelection {
-  kind: 'LOG';
-  id: number;
-  trackId: string;
-}
-
-export type Selection =
-    (NoteSelection|SliceSelection|CounterSelection|HeapProfileSelection|
-     CpuProfileSampleSelection|ChromeSliceSelection|ThreadStateSelection|
-     AreaSelection|PerfSamplesSelection|LogSelection|DebugSliceSelection|
-     TopLevelScrollSelection)&{trackId?: string};
-export type SelectionKind = Selection['kind'];  // 'THREAD_STATE' | 'SLICE' ...
-
 export interface Pagination {
   offset: number;
   count: number;
-}
-
-export type StringListPatch = ['add' | 'remove', string];
-
-export interface FtraceFilterPatch {
-  excludedNames: StringListPatch[];
 }
 
 export interface RecordingTarget {
@@ -407,18 +303,12 @@ export interface AdbRecordingTarget extends RecordingTarget {
 
 export interface Sorting {
   column: string;
-  direction: 'DESC'|'ASC';
+  direction: 'DESC' | 'ASC';
 }
 
 export interface AggregationState {
   id: string;
   sorting?: Sorting;
-}
-
-export interface MetricsState {
-  availableMetrics?: string[];  // Undefined until list is loaded.
-  selectedIndex?: number;
-  requestedMetric?: string;  // Unset after metric request is handled.
 }
 
 // Auxiliary metadata needed to parse the query result, as well as to render it
@@ -458,7 +348,7 @@ export interface PivotTableState {
   selectionArea?: PivotTableAreaState;
 
   // Query response
-  queryResult: PivotTableResult|null;
+  queryResult: PivotTableResult | null;
 
   // Selected pivots for tables other than slice.
   // Because of the query generation, pivoting happens first on non-slice
@@ -476,9 +366,6 @@ export interface PivotTableState {
   // Set to true by frontend to request controller to perform the query to
   // acquire the necessary data from the engine.
   queryRequested: boolean;
-
-  // Argument names in the current trace, used for autocompletion purposes.
-  argumentNames: string[];
 }
 
 export interface LoadedConfigNone {
@@ -495,24 +382,27 @@ export interface LoadedConfigNamed {
 }
 
 export type LoadedConfig =
-    LoadedConfigNone|LoadedConfigAutomatic|LoadedConfigNamed;
+  | LoadedConfigNone
+  | LoadedConfigAutomatic
+  | LoadedConfigNamed;
 
 export interface NonSerializableState {
   pivotTable: PivotTableState;
 }
 
-export interface LogFilteringCriteria {
-  minimumLevel: number;
-  tags: string[];
-  textEntry: string;
-  hideNonMatching: boolean;
+export interface PendingDeeplinkState {
+  ts?: string;
+  dur?: string;
+  tid?: string;
+  pid?: string;
+  query?: string;
+  visStart?: string;
+  visEnd?: string;
 }
 
-export interface FtraceFilterState {
-  // We use an exclude list rather than include list for filtering events, as we
-  // want to include all events by default but we won't know what names are
-  // present initially.
-  excludedNames: string[];
+export interface TabsV2State {
+  openTabs: string[];
+  currentTab: string;
 }
 
 export interface State {
@@ -531,31 +421,22 @@ export interface State {
    */
   newEngineMode: NewEngineMode;
   engine?: EngineConfig;
-  traceTime: TraceTime;
   traceUuid?: string;
-  trackGroups: ObjectById<TrackGroupState>;
-  tracks: ObjectById<TrackState>;
-  uiTrackIdByTraceTrackId: {[key: number]: string;};
+  trackGroups: ObjectByKey<TrackGroupState>;
+  tracks: ObjectByKey<TrackState>;
   utidToThreadSortKey: UtidToTrackSortKey;
   areas: ObjectById<AreaById>;
   aggregatePreferences: ObjectById<AggregationState>;
-  visibleTracks: string[];
   scrollingTracks: string[];
   pinnedTracks: string[];
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
   queries: ObjectById<QueryConfig>;
-  metrics: MetricsState;
-  permalink: PermalinkConfig;
-  notes: ObjectById<Note|AreaNote>;
+  notes: ObjectById<Note | AreaNote>;
   status: Status;
-  currentSelection: Selection|null;
-  currentFlamegraphState: FlamegraphState|null;
-  logsPagination: Pagination;
-  ftracePagination: Pagination;
-  ftraceFilter: FtraceFilterState;
+  selection: Selection;
   traceConversionInProgress: boolean;
-  visualisedArgs: string[];
+  flamegraphModalDismissed: boolean;
 
   /**
    * This state is updated on the frontend at 60Hz and eventually syncronised to
@@ -574,15 +455,16 @@ export interface State {
   // Hovered and focused events
   hoveredUtid: number;
   hoveredPid: number;
-  hoverCursorTimestamp: TPTime;
-  hoveredNoteTimestamp: TPTime;
+  hoverCursorTimestamp: time;
+  hoveredNoteTimestamp: time;
   highlightedSliceId: number;
   focusedFlowIdLeft: number;
   focusedFlowIdRight: number;
   pendingScrollId?: number;
 
   searchIndex: number;
-  currentTab?: string;
+
+  tabs: TabsV2State;
 
   /**
    * Trace recording
@@ -590,37 +472,47 @@ export interface State {
   recordingInProgress: boolean;
   recordingCancelled: boolean;
   extensionInstalled: boolean;
-  flamegraphModalDismissed: boolean;
   recordingTarget: RecordingTarget;
   availableAdbDevices: AdbRecordingTarget[];
   lastRecordingError?: string;
   recordingStatus?: string;
 
   fetchChromeCategories: boolean;
-  chromeCategories: string[]|undefined;
+  chromeCategories: string[] | undefined;
 
   // Special key: this part of the state is not going to be serialized when
   // using permalink. Can be used to store those parts of the state that can't
   // be serialized at the moment, such as ES6 Set and Map.
   nonSerializableState: NonSerializableState;
 
-  // Android logs filtering state.
-  logFilteringCriteria: LogFilteringCriteria;
-
   // Omnibox info.
   omniboxState: OmniboxState;
+
+  // Pending deeplink which will happen when we first finish opening a
+  // trace.
+  pendingDeeplink?: PendingDeeplinkState;
+
+  // Individual plugin states
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  plugins: {[key: string]: any};
 }
 
-export const defaultTraceTime = {
-  start: 0n,
-  end: BigInt(10e9),
-};
-
 export declare type RecordMode =
-    'STOP_WHEN_FULL' | 'RING_BUFFER' | 'LONG_TRACE';
+  | 'STOP_WHEN_FULL'
+  | 'RING_BUFFER'
+  | 'LONG_TRACE';
 
 // 'Q','P','O' for Android, 'L' for Linux, 'C' for Chrome.
-export declare type TargetOs = 'S' | 'R' | 'Q' | 'P' | 'O' | 'C' | 'L' | 'CrOS';
+export declare type TargetOs =
+  | 'S'
+  | 'R'
+  | 'Q'
+  | 'P'
+  | 'O'
+  | 'C'
+  | 'L'
+  | 'CrOS'
+  | 'Win';
 
 export function isAndroidP(target: RecordingTarget) {
   return target.os === 'P';
@@ -642,18 +534,29 @@ export function isLinuxTarget(target: RecordingTarget) {
   return target.os === 'L';
 }
 
-export function isAdbTarget(target: RecordingTarget):
-    target is AdbRecordingTarget {
+export function isWindowsTarget(target: RecordingTarget) {
+  return target.os === 'Win';
+}
+
+export function isAdbTarget(
+  target: RecordingTarget,
+): target is AdbRecordingTarget {
   return !!(target as AdbRecordingTarget).serial;
 }
 
 export function hasActiveProbes(config: RecordConfig) {
-  const fieldsWithEmptyResult = new Set<string>(
-      ['hpBlockClient', 'allAtraceApps', 'chromePrivacyFiltering']);
+  const fieldsWithEmptyResult = new Set<string>([
+    'hpBlockClient',
+    'allAtraceApps',
+    'chromePrivacyFiltering',
+  ]);
   let key: keyof RecordConfig;
   for (key in config) {
-    if (typeof (config[key]) === 'boolean' && config[key] === true &&
-        !fieldsWithEmptyResult.has(key)) {
+    if (
+      typeof config[key] === 'boolean' &&
+      config[key] === true &&
+      !fieldsWithEmptyResult.has(key)
+    ) {
       return true;
     }
   }
@@ -671,16 +574,20 @@ export function getDefaultRecordingTargets(): RecordingTarget[] {
     {os: 'C', name: 'Chrome'},
     {os: 'CrOS', name: 'Chrome OS (system trace)'},
     {os: 'L', name: 'Linux desktop'},
+    {os: 'Win', name: 'Windows desktop'},
   ];
 }
 
 export function getBuiltinChromeCategoryList(): string[] {
-  // List of static Chrome categories, last updated at 2023-04-04 from HEAD of
+  // List of static Chrome categories, last updated at 2024-05-15 from HEAD of
   // Chromium's //base/trace_event/builtin_categories.h.
   return [
     'accessibility',
     'AccountFetcherService',
+    'android.adpf',
+    'android.ui.jank',
     'android_webview',
+    'android_webview.timeline',
     'aogh',
     'audio',
     'base',
@@ -715,6 +622,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'compositor',
     'content',
     'content_capture',
+    'interactions',
     'delegated_ink_trails',
     'device',
     'devtools',
@@ -742,6 +650,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'gpu.angle',
     'gpu.angle.texture_metrics',
     'gpu.capture',
+    'graphics.pipeline',
     'headless',
     'history',
     'hwoverlays',
@@ -749,6 +658,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'ime',
     'IndexedDB',
     'input',
+    'input.scrolling',
     'io',
     'ipc',
     'Java',
@@ -768,7 +678,9 @@ export function getBuiltinChromeCategoryList(): string[] {
     'mus',
     'native',
     'navigation',
+    'navigation.debug',
     'net',
+    'network.scheduler',
     'netlog',
     'offline_pages',
     'omnibox',
@@ -831,19 +743,19 @@ export function getBuiltinChromeCategoryList(): string[] {
     'webengine.fidl',
     'weblayer',
     'WebCore',
+    'webnn',
     'webrtc',
     'webrtc_stats',
     'xr',
     'disabled-by-default-android_view_hierarchy',
     'disabled-by-default-animation-worklet',
     'disabled-by-default-audio',
-    'disabled-by-default-audio-worklet',
     'disabled-by-default-audio.latency',
+    'disabled-by-default-audio-worklet',
     'disabled-by-default-base',
     'disabled-by-default-blink.debug',
     'disabled-by-default-blink.debug.display_lock',
     'disabled-by-default-blink.debug.layout',
-    'disabled-by-default-blink.debug.layout.scrollbars',
     'disabled-by-default-blink.debug.layout.trees',
     'disabled-by-default-blink.feature_usage',
     'disabled-by-default-blink.image_decoding',
@@ -871,6 +783,9 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-devtools.timeline.layers',
     'disabled-by-default-devtools.timeline.picture',
     'disabled-by-default-devtools.timeline.stack',
+    'disabled-by-default-devtools.target-rundown',
+    'disabled-by-default-devtools.v8-source-rundown',
+    'disabled-by-default-devtools.v8-source-rundown-sources',
     'disabled-by-default-file',
     'disabled-by-default-fonts',
     'disabled-by-default-gpu_cmd_queue',
@@ -878,6 +793,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-gpu.debug',
     'disabled-by-default-gpu.decoder',
     'disabled-by-default-gpu.device',
+    'disabled-by-default-gpu.graphite.dawn',
     'disabled-by-default-gpu.service',
     'disabled-by-default-gpu.vulkan.vma',
     'disabled-by-default-histogram_samples',
@@ -903,7 +819,9 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-skia.gpu',
     'disabled-by-default-skia.gpu.cache',
     'disabled-by-default-skia.shaders',
+    'disabled-by-default-skottie',
     'disabled-by-default-SyncFileSystem',
+    'disabled-by-default-system_power',
     'disabled-by-default-system_stats',
     'disabled-by-default-thread_pool_diagnostics',
     'disabled-by-default-toplevel.ipc',
@@ -922,6 +840,7 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-v8.wasm.detailed',
     'disabled-by-default-v8.wasm.turbofan',
     'disabled-by-default-video_and_image_capture',
+    'disabled-by-default-display.framedisplayed',
     'disabled-by-default-viz.gpu_composite_time',
     'disabled-by-default-viz.debug.overlay_planes',
     'disabled-by-default-viz.hit_testing_flow',
@@ -930,23 +849,31 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-viz.surface_id_flow',
     'disabled-by-default-viz.surface_lifetime',
     'disabled-by-default-viz.triangles',
+    'disabled-by-default-viz.visual_debugger',
     'disabled-by-default-webaudio.audionode',
     'disabled-by-default-webgpu',
+    'disabled-by-default-webnn',
     'disabled-by-default-webrtc',
     'disabled-by-default-worker.scheduler',
     'disabled-by-default-xr.debug',
   ];
 }
 
-export function getContainingTrackId(state: State, trackId: string): null|
-    string {
-  const track = state.tracks[trackId];
-  if (!track) {
+export function getContainingGroupKey(
+  state: State,
+  trackKey: string,
+): null | string {
+  const track = state.tracks[trackKey];
+  if (track === undefined) {
     return null;
   }
-  const parentId = track.trackGroup;
-  if (!parentId) {
+  const parentGroupKey = track.trackGroup;
+  if (!parentGroupKey) {
     return null;
   }
-  return parentId;
+  return parentGroupKey;
+}
+
+export function getLegacySelection(state: State): LegacySelection | null {
+  return selectionToLegacySelection(state.selection);
 }

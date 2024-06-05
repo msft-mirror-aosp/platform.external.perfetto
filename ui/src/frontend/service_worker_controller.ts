@@ -19,7 +19,7 @@
 // Design doc: http://go/perfetto-offline.
 
 import {reportError} from '../base/logging';
-import {ignoreCacheUnactionableErrors} from '../common/errors';
+import {raf} from '../core/raf_scheduler';
 
 import {globals} from './globals';
 
@@ -32,8 +32,10 @@ class BypassCache {
   static async isBypassed(): Promise<boolean> {
     try {
       return await caches.has(BYPASS_ID);
-    } catch (e) {
-      return ignoreCacheUnactionableErrors(e, false);
+    } catch (_) {
+      // TODO(288483453): Reinstate:
+      // return ignoreCacheUnactionableErrors(e, false);
+      return false;
     }
   }
 
@@ -44,38 +46,40 @@ class BypassCache {
       } else {
         await caches.delete(BYPASS_ID);
       }
-    } catch (e) {
-      ignoreCacheUnactionableErrors(e, undefined);
+    } catch (_) {
+      // TODO(288483453): Reinstate:
+      // ignoreCacheUnactionableErrors(e, undefined);
     }
   }
 }
 
 export class ServiceWorkerController {
-  private _initialWorker: ServiceWorker|null = null;
+  private _initialWorker: ServiceWorker | null = null;
   private _bypassed = false;
   private _installing = false;
 
   // Caller should reload().
   async setBypass(bypass: boolean) {
-    if (!('serviceWorker' in navigator)) return;  // Not supported.
+    if (!('serviceWorker' in navigator)) return; // Not supported.
     this._bypassed = bypass;
     if (bypass) {
-      await BypassCache.setBypass(true);  // Create the entry.
+      await BypassCache.setBypass(true); // Create the entry.
       for (const reg of await navigator.serviceWorker.getRegistrations()) {
         await reg.unregister();
       }
     } else {
       await BypassCache.setBypass(false);
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (window.localStorage) {
         window.localStorage.setItem('bypassDisabled', '1');
       }
       this.install();
     }
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
   }
 
   onStateChange(sw: ServiceWorker) {
-    globals.rafScheduler.scheduleFullRedraw();
+    raf.scheduleFullRedraw();
     if (sw.state === 'installing') {
       this._installing = true;
     } else if (sw.state === 'activated') {
@@ -85,20 +89,20 @@ export class ServiceWorkerController {
       // Ctrl+Shift+R). In these cases, we are already at the last
       // version.
       if (sw !== this._initialWorker && this._initialWorker) {
-        globals.frontendLocalState.newVersionAvailable = true;
+        globals.newVersionAvailable = true;
       }
     }
   }
 
-  monitorWorker(sw: ServiceWorker|null) {
+  monitorWorker(sw: ServiceWorker | null) {
     if (!sw) return;
     sw.addEventListener('error', (e) => reportError(e));
     sw.addEventListener('statechange', () => this.onStateChange(sw));
-    this.onStateChange(sw);  // Trigger updates for the current state.
+    this.onStateChange(sw); // Trigger updates for the current state.
   }
 
   async install() {
-    if (!('serviceWorker' in navigator)) return;  // Not supported.
+    if (!('serviceWorker' in navigator)) return; // Not supported.
 
     if (location.pathname !== '/') {
       // Disable the service worker when the UI is loaded from a non-root URL
@@ -111,10 +115,12 @@ export class ServiceWorkerController {
     // user manually re-enabled it (in which case bypassDisabled = '1').
     const hostname = location.hostname;
     const isLocalhost = ['127.0.0.1', '::1', 'localhost'].includes(hostname);
-    const bypassDisabled = window.localStorage &&
-        window.localStorage.getItem('bypassDisabled') === '1';
+    const bypassDisabled =
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      window.localStorage &&
+      window.localStorage.getItem('bypassDisabled') === '1';
     if (isLocalhost && !bypassDisabled) {
-      await this.setBypass(true);  // Will cause the check below to bail out.
+      await this.setBypass(true); // Will cause the check below to bail out.
     }
 
     if (await BypassCache.isBypassed()) {

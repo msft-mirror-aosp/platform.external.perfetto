@@ -16,7 +16,7 @@
 import inspect
 import os
 from dataclasses import dataclass
-from typing import List, Union, Callable
+from typing import Any, Dict, List, Union, Callable
 from enum import Enum
 import re
 
@@ -72,6 +72,42 @@ class Systrace:
   contents: str
 
 
+class TraceInjector:
+  '''Injects fields into trace packets before test starts.
+
+  TraceInjector can be used within a DiffTestBlueprint to selectively inject
+  fields to trace packets containing specific data types. For example:
+
+    DiffTestBlueprint(
+        trace=...,
+        trace_modifier=TraceInjector('ftrace_events',
+                                     'sys_stats',
+                                     'process_tree',
+                                     {'machine_id': 1001},
+                                     trusted_uid=123)
+        query=...,
+        out=...)
+
+  packet_data_types: Data types to target for injection ('ftrace_events',
+  'sys_stats', 'process_tree')
+  injected_fields: Fields and their values to inject into matching packets
+  ({'machine_id': 1001}, trusted_uid=123).
+  '''
+
+  def __init__(self, packet_data_types: List[str], injected_fields: Dict[str,
+                                                                         Any]):
+    self.packet_data_types = packet_data_types
+    self.injected_fields = injected_fields
+
+  def inject(self, proto):
+    for p in proto.packet:
+      for f in self.packet_data_types:
+        if p.HasField(f):
+          for k, v, in self.injected_fields.items():
+            setattr(p, k, v)
+          continue
+
+
 class TestType(Enum):
   QUERY = 1
   METRIC = 2
@@ -86,6 +122,7 @@ class DiffTestBlueprint:
   trace: Union[Path, DataPath, Json, Systrace, TextProto]
   query: Union[str, Path, DataPath, Metric]
   out: Union[Path, DataPath, Json, Csv, TextProto, BinaryProto]
+  trace_modifier: Union[TraceInjector, None] = None
 
   def is_trace_file(self):
     return isinstance(self.trace, Path)
@@ -132,7 +169,7 @@ class TestCase:
       return None
 
     if isinstance(self.blueprint.query, DataPath):
-      path = os.path.join(self.test_dir, 'data', self.blueprint.query.filename)
+      path = os.path.join(self.test_data_dir, self.blueprint.query.filename)
     else:
       path = os.path.abspath(
           os.path.join(self.index_dir, self.blueprint.query.filename))
@@ -147,7 +184,7 @@ class TestCase:
       return None
 
     if isinstance(self.blueprint.trace, DataPath):
-      path = os.path.join(self.test_dir, 'data', self.blueprint.trace.filename)
+      path = os.path.join(self.test_data_dir, self.blueprint.trace.filename)
     else:
       path = os.path.abspath(
           os.path.join(self.index_dir, self.blueprint.trace.filename))
@@ -162,7 +199,7 @@ class TestCase:
       return None
 
     if isinstance(self.blueprint.out, DataPath):
-      path = os.path.join(self.test_dir, 'data', self.blueprint.out.filename)
+      path = os.path.join(self.test_data_dir, self.blueprint.out.filename)
     else:
       path = os.path.abspath(
           os.path.join(self.index_dir, self.blueprint.out.filename))
@@ -172,12 +209,12 @@ class TestCase:
           f"Out file ({path}) for test '{self.name}' does not exist.")
     return path
 
-  def __init__(self, name: str, blueprint: DiffTestBlueprint,
-               index_dir: str) -> None:
+  def __init__(self, name: str, blueprint: DiffTestBlueprint, index_dir: str,
+               test_data_dir: str) -> None:
     self.name = name
     self.blueprint = blueprint
     self.index_dir = index_dir
-    self.test_dir = os.path.dirname(os.path.dirname(os.path.dirname(index_dir)))
+    self.test_data_dir = test_data_dir
 
     if blueprint.is_metric():
       self.type = TestType.METRIC
@@ -199,14 +236,21 @@ class TestCase:
 # All functions with name starting with `test_` have to return
 # DiffTestBlueprint and function name is a test name. All DiffTestModules have
 # to be included in `test/diff_tests/trace_processor/include_index.py`.
-# `fetch_diff_test` function should not be overwritten.
+# `fetch` function should not be overwritten.
 class TestSuite:
 
-  def __init__(self, include_index_dir: str, dir_name: str,
-               class_name: str) -> None:
+  def __init__(
+      self,
+      include_index_dir: str,
+      dir_name: str,
+      class_name: str,
+      test_data_dir: str = os.path.abspath(
+          os.path.join(__file__, '../../../../test/data'))
+  ) -> None:
     self.dir_name = dir_name
     self.index_dir = os.path.join(include_index_dir, dir_name)
     self.class_name = class_name
+    self.test_data_dir = test_data_dir
 
   def __test_name(self, method_name):
     return f"{self.class_name}:{method_name.split('test_',1)[1]}"
@@ -215,7 +259,29 @@ class TestSuite:
     attrs = (getattr(self, name) for name in dir(self))
     methods = [attr for attr in attrs if inspect.ismethod(attr)]
     return [
-        TestCase(self.__test_name(method.__name__), method(), self.index_dir)
+        TestCase(
+            self.__test_name(method.__name__), method(), self.index_dir,
+            self.test_data_dir)
         for method in methods
         if method.__name__.startswith('test_')
     ]
+
+
+def PrintProfileProto(profile):
+  locations = {l.id: l for l in profile.location}
+  functions = {f.id: f for f in profile.function}
+  samples = []
+  # Strips trailing annotations like (.__uniq.1657) from the function name.
+  filter_fname = lambda x: re.sub(' [(\[].*?uniq.*?[)\]]$', '', x)
+  for s in profile.sample:
+    stack = []
+    for location in [locations[id] for id in s.location_id]:
+      for function in [functions[l.function_id] for l in location.line]:
+        stack.append("{name} ({address})".format(
+            name=filter_fname(profile.string_table[function.name]),
+            address=hex(location.address)))
+      if len(location.line) == 0:
+        stack.append("({address})".format(address=hex(location.address)))
+    samples.append('Sample:\nValues: {values}\nStack:\n{stack}'.format(
+        values=', '.join(map(str, s.value)), stack='\n'.join(stack)))
+  return '\n\n'.join(sorted(samples)) + '\n'

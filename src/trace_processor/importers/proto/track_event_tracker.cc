@@ -18,15 +18,17 @@
 
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
+#include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/tables/track_tables_py.h"
 
 namespace perfetto {
 namespace trace_processor {
 
 TrackEventTracker::TrackEventTracker(TraceProcessorContext* context)
     : source_key_(context->storage->InternString("source")),
-      source_id_key_(context->storage->InternString("source_id")),
+      source_id_key_(context->storage->InternString("trace_id")),
       is_root_in_scope_key_(context->storage->InternString("is_root_in_scope")),
       category_key_(context->storage->InternString("category")),
       has_first_packet_on_sequence_key_id_(
@@ -163,6 +165,7 @@ void TrackEventTracker::ReserveDescriptorChildTrack(uint64_t uuid,
 TrackId TrackEventTracker::InsertThreadTrack(UniqueTid utid) {
   tables::ThreadTrackTable::Row row;
   row.utid = utid;
+  row.machine_id = context_->machine_id();
   auto* thread_tracks = context_->storage->mutable_thread_track_table();
   return thread_tracks->Insert(row).id;
 }
@@ -199,7 +202,9 @@ std::optional<TrackId> TrackEventTracker::GetDescriptorTrack(
       reservation_it->second.is_counter) {
     return track_id;
   }
-  tracks->mutable_name()->Set(row, event_name);
+  const StringId track_name =
+      context_->process_track_translation_table->TranslateName(event_name);
+  tracks->mutable_name()->Set(row, track_name);
   return track_id;
 }
 
@@ -283,6 +288,7 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
       if (track.is_counter()) {
         tables::ThreadCounterTrackTable::Row row;
         row.utid = track.utid();
+        row.machine_id = context_->machine_id();
 
         auto* thread_counter_tracks =
             context_->storage->mutable_thread_counter_track_table();
@@ -295,6 +301,7 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
       if (track.is_counter()) {
         tables::ProcessCounterTrackTable::Row row;
         row.upid = track.upid();
+        row.machine_id = context_->machine_id();
 
         auto* process_counter_tracks =
             context_->storage->mutable_process_counter_track_table();
@@ -303,14 +310,20 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
 
       tables::ProcessTrackTable::Row row;
       row.upid = track.upid();
+      row.machine_id = context_->machine_id();
 
       auto* process_tracks = context_->storage->mutable_process_track_table();
       return process_tracks->Insert(row).id;
     }
     case ResolvedDescriptorTrack::Scope::kGlobal: {
-      if (track.is_counter())
-        return context_->storage->mutable_counter_track_table()->Insert({}).id;
-      return context_->storage->mutable_track_table()->Insert({}).id;
+      if (track.is_counter()) {
+        tables::CounterTrackTable::Row row;
+        row.machine_id = context_->machine_id();
+        return context_->storage->mutable_counter_track_table()->Insert(row).id;
+      }
+      tables::TrackTable::Row row;
+      row.machine_id = context_->machine_id();
+      return context_->storage->mutable_track_table()->Insert(row).id;
     }
   }
   PERFETTO_FATAL("For GCC");

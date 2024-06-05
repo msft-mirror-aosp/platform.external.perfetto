@@ -12,18 +12,153 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {CallsiteInfo} from './state';
+import {featureFlags} from '../core/feature_flags';
+import {ProfileType} from './state';
 
-export const SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY = 'SPACE';
-export const ALLOC_SPACE_MEMORY_ALLOCATED_KEY = 'ALLOC_SPACE';
-export const OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS';
-export const OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS';
-export const PERF_SAMPLES_KEY = 'PERF_SAMPLES';
+export enum FlamegraphViewingOption {
+  SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY = 'SPACE',
+  ALLOC_SPACE_MEMORY_ALLOCATED_KEY = 'ALLOC_SPACE',
+  OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS',
+  OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS',
+  PERF_SAMPLES_KEY = 'PERF_SAMPLES',
+  DOMINATOR_TREE_OBJ_SIZE_KEY = 'DOMINATED_OBJ_SIZE',
+  DOMINATOR_TREE_OBJ_COUNT_KEY = 'DOMINATED_OBJ_COUNT',
+}
 
-export const DEFAULT_VIEWING_OPTION = SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY;
+interface ViewingOption {
+  option: FlamegraphViewingOption;
+  name: string;
+}
+
+export interface CallsiteInfo {
+  id: number;
+  parentId: number;
+  depth: number;
+  name?: string;
+  totalSize: number;
+  selfSize: number;
+  mapping: string;
+  merged: boolean;
+  highlighted: boolean;
+  location?: string;
+}
+
+const SHOW_HEAP_GRAPH_DOMINATOR_TREE_FLAG = featureFlags.register({
+  id: 'showHeapGraphDominatorTree',
+  name: 'Show heap graph dominator tree',
+  description: 'Show dominated size and objects tabs in Java heap graph view.',
+  defaultValue: true,
+});
+
+export function viewingOptions(profileType: ProfileType): Array<ViewingOption> {
+  switch (profileType) {
+    case ProfileType.PERF_SAMPLE:
+      return [
+        {
+          option: FlamegraphViewingOption.PERF_SAMPLES_KEY,
+          name: 'Samples',
+        },
+      ];
+    case ProfileType.JAVA_HEAP_GRAPH:
+      return [
+        {
+          option: FlamegraphViewingOption.SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY,
+          name: 'Size',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_NOT_FREED_KEY,
+          name: 'Objects',
+        },
+      ].concat(
+        SHOW_HEAP_GRAPH_DOMINATOR_TREE_FLAG.get()
+          ? [
+              {
+                option: FlamegraphViewingOption.DOMINATOR_TREE_OBJ_SIZE_KEY,
+                name: 'Dominated size',
+              },
+              {
+                option: FlamegraphViewingOption.DOMINATOR_TREE_OBJ_COUNT_KEY,
+                name: 'Dominated objects',
+              },
+            ]
+          : [],
+      );
+    case ProfileType.HEAP_PROFILE:
+      return [
+        {
+          option: FlamegraphViewingOption.SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY,
+          name: 'Unreleased size',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_NOT_FREED_KEY,
+          name: 'Unreleased count',
+        },
+        {
+          option: FlamegraphViewingOption.ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
+          name: 'Total size',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_KEY,
+          name: 'Total count',
+        },
+      ];
+    case ProfileType.NATIVE_HEAP_PROFILE:
+      return [
+        {
+          option: FlamegraphViewingOption.SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY,
+          name: 'Unreleased malloc size',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_NOT_FREED_KEY,
+          name: 'Unreleased malloc count',
+        },
+        {
+          option: FlamegraphViewingOption.ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
+          name: 'Total malloc size',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_KEY,
+          name: 'Total malloc count',
+        },
+      ];
+    case ProfileType.JAVA_HEAP_SAMPLES:
+      return [
+        {
+          option: FlamegraphViewingOption.ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
+          name: 'Total allocation size',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_KEY,
+          name: 'Total allocation count',
+        },
+      ];
+    case ProfileType.MIXED_HEAP_PROFILE:
+      return [
+        {
+          option: FlamegraphViewingOption.ALLOC_SPACE_MEMORY_ALLOCATED_KEY,
+          name: 'Total allocation size (malloc + java)',
+        },
+        {
+          option: FlamegraphViewingOption.OBJECTS_ALLOCATED_KEY,
+          name: 'Total allocation count (malloc + java)',
+        },
+      ];
+    default:
+      const exhaustiveCheck: never = profileType;
+      throw new Error(`Unhandled case: ${exhaustiveCheck}`);
+  }
+}
+
+export function defaultViewingOption(
+  profileType: ProfileType,
+): FlamegraphViewingOption {
+  return viewingOptions(profileType)[0].option;
+}
 
 export function expandCallsites(
-    data: CallsiteInfo[], clickedCallsiteIndex: number): CallsiteInfo[] {
+  data: ReadonlyArray<CallsiteInfo>,
+  clickedCallsiteIndex: number,
+): ReadonlyArray<CallsiteInfo> {
   if (clickedCallsiteIndex === -1) return data;
   const expandedCallsites: CallsiteInfo[] = [];
   if (clickedCallsiteIndex >= data.length || clickedCallsiteIndex < -1) {
@@ -53,7 +188,10 @@ export function expandCallsites(
 // Merge callsites that have approximately width less than
 // MIN_PIXEL_DISPLAYED. All small callsites in the same depth and with same
 // parent will be merged to one with total size of all merged callsites.
-export function mergeCallsites(data: CallsiteInfo[], minSizeDisplayed: number) {
+export function mergeCallsites(
+  data: ReadonlyArray<CallsiteInfo>,
+  minSizeDisplayed: number,
+) {
   const mergedData: CallsiteInfo[] = [];
   const mergedCallsites: Map<number, number> = new Map();
   for (let i = 0; i < data.length; i++) {
@@ -64,8 +202,10 @@ export function mergeCallsites(data: CallsiteInfo[], minSizeDisplayed: number) {
       continue;
     }
     const copiedCallsite = copyCallsite(data[i]);
-    copiedCallsite.parentId =
-        getCallsitesParentHash(copiedCallsite, mergedCallsites);
+    copiedCallsite.parentId = getCallsitesParentHash(
+      copiedCallsite,
+      mergedCallsites,
+    );
 
     let mergedAny = false;
     // If current callsite is small, find other small callsites with same depth
@@ -74,9 +214,11 @@ export function mergeCallsites(data: CallsiteInfo[], minSizeDisplayed: number) {
       let j = i + 1;
       let nextCallsite = data[j];
       while (j < data.length && copiedCallsite.depth === nextCallsite.depth) {
-        if (copiedCallsite.parentId ===
-                getCallsitesParentHash(nextCallsite, mergedCallsites) &&
-            nextCallsite.totalSize <= minSizeDisplayed) {
+        if (
+          copiedCallsite.parentId ===
+            getCallsitesParentHash(nextCallsite, mergedCallsites) &&
+          nextCallsite.totalSize <= minSizeDisplayed
+        ) {
           copiedCallsite.totalSize += nextCallsite.totalSize;
           mergedCallsites.set(nextCallsite.id, copiedCallsite.id);
           mergedAny = true;
@@ -110,11 +252,14 @@ function copyCallsite(callsite: CallsiteInfo): CallsiteInfo {
 }
 
 function getCallsitesParentHash(
-    callsite: CallsiteInfo, map: Map<number, number>): number {
-  return map.has(callsite.parentId) ? +map.get(callsite.parentId)! :
-                                      callsite.parentId;
+  callsite: CallsiteInfo,
+  map: Map<number, number>,
+): number {
+  return map.has(callsite.parentId)
+    ? +map.get(callsite.parentId)!
+    : callsite.parentId;
 }
-export function findRootSize(data: CallsiteInfo[]) {
+export function findRootSize(data: ReadonlyArray<CallsiteInfo>) {
   let totalSize = 0;
   let i = 0;
   while (i < data.length && data[i].depth === 0) {

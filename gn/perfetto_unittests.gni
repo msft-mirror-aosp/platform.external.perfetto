@@ -20,7 +20,9 @@ perfetto_unittests_targets = [
   "src/base:unittests",
   "src/base/threading:unittests",
   "src/protozero:unittests",
+  "src/shared_lib:unittests",
   "src/tracing/core:unittests",
+  "src/tracing/service:unittests",
   "src/tracing:unittests",
   "src/profiling:unittests",
   "src/profiling/symbolizer:unittests",
@@ -46,6 +48,7 @@ if (enable_perfetto_platform_services) {
   perfetto_unittests_targets += [
     "src/perfetto_cmd:unittests",
     "src/traced/service:unittests",
+    "src/kernel_utils:unittests",
   ]
   if (enable_perfetto_traced_probes) {
     perfetto_unittests_targets += [
@@ -76,6 +79,11 @@ if (enable_perfetto_trace_processor) {
 
   if (enable_perfetto_trace_processor_sqlite) {
     perfetto_unittests_targets += [ "src/trace_processor/metrics:unittests" ]
-    perfetto_unittests_targets += [ "src/cloud_trace_processor:unittests" ]
   }
 }
+
+if (enable_perfetto_traced_relay) {
+  perfetto_unittests_targets += [ "src/traced_relay:unittests" ]
+}
+
+perfetto_unittests_targets += [ "src/trace_redaction:unittests" ]

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Duration} from '../../base/time';
 import {ColumnDef} from '../../common/aggregation_data';
-import {Engine} from '../../common/engine';
 import {Area, Sorting} from '../../common/state';
-import {tpDurationToSeconds} from '../../common/time';
 import {globals} from '../../frontend/globals';
-import {Config, COUNTER_TRACK_KIND} from '../../tracks/counter';
+import {Engine} from '../../trace_processor/engine';
+import {COUNTER_TRACK_KIND} from '../../core_plugins/counter';
 
 import {AggregationController} from './aggregation_controller';
 
@@ -25,49 +25,86 @@ export class CounterAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
-    const ids = [];
-    for (const trackId of area.tracks) {
-      const track = globals.state.tracks[trackId];
-      // Track will be undefined for track groups.
-      if (track !== undefined && track.kind === COUNTER_TRACK_KIND) {
-        const config = track.config as Config;
-        // TODO(hjd): Also aggregate annotation (with namespace) counters.
-        if (config.namespace === undefined) {
-          ids.push(config.trackId);
+    const trackIds: (string | number)[] = [];
+    for (const trackKey of area.tracks) {
+      const track = globals.state.tracks[trackKey];
+      if (track?.uri) {
+        const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
+        if (trackInfo?.kind === COUNTER_TRACK_KIND) {
+          trackInfo.trackIds && trackIds.push(...trackInfo.trackIds);
         }
       }
     }
-    if (ids.length === 0) return false;
+    if (trackIds.length === 0) return false;
     const duration = area.end - area.start;
-    const durationSec = tpDurationToSeconds(duration);
+    const durationSec = Duration.toSeconds(duration);
 
-    const query = `create view ${this.kind} as select
-    name,
-    count(1) as count,
-    round(sum(weighted_value)/${duration}, 2) as avg_value,
-    last as last_value,
-    first as first_value,
-    max(last) - min(first) as delta_value,
-    round((max(last) - min(first))/${durationSec}, 2) as rate,
-    min(value) as min_value,
-    max(value) as max_value
-    from
-        (select *,
-        (min(ts + dur, ${area.end}) - max(ts,${area.start}))
-        * value as weighted_value,
-        first_value(value) over
-        (partition by track_id order by ts) as first,
-        last_value(value) over
-        (partition by track_id order by ts
-            range between unbounded preceding and unbounded following) as last
-        from experimental_counter_dur
-        where track_id in (${ids})
-        and ts + dur >= ${area.start} and
-        ts <= ${area.end})
-    join counter_track
-    on track_id = counter_track.id
-    group by track_id`;
-
+    // TODO(lalitm): Rewrite this query in a way that is both simpler and faster
+    let query;
+    if (trackIds.length === 1) {
+      // Optimized query for the special case where there is only 1 track id.
+      query = `CREATE VIEW ${this.kind} AS
+      WITH aggregated AS (
+        SELECT
+          COUNT(1) AS count,
+          ROUND(SUM(
+            (MIN(ts + dur, ${area.end}) - MAX(ts,${area.start}))*value)/${duration},
+            2
+          ) AS avg_value,
+          (SELECT value FROM experimental_counter_dur WHERE track_id = ${trackIds[0]}
+            AND ts + dur >= ${area.start}
+            AND ts <= ${area.end} ORDER BY ts DESC LIMIT 1)
+            AS last_value,
+          (SELECT value FROM experimental_counter_dur WHERE track_id = ${trackIds[0]}
+            AND ts + dur >= ${area.start}
+            AND ts <= ${area.end} ORDER BY ts ASC LIMIT 1)
+            AS first_value,
+          MIN(value) AS min_value,
+          MAX(value) AS max_value
+        FROM experimental_counter_dur
+          WHERE track_id = ${trackIds[0]}
+          AND ts + dur >= ${area.start}
+          AND ts <= ${area.end})
+      SELECT
+        (SELECT name FROM counter_track WHERE id = ${trackIds[0]}) AS name,
+        *,
+        MAX(last_value) - MIN(first_value) AS delta_value,
+        ROUND((MAX(last_value) - MIN(first_value))/${durationSec}, 2) AS rate
+      FROM aggregated`;
+    } else {
+      // Slower, but general purspose query that can aggregate multiple tracks
+      query = `CREATE VIEW ${this.kind} AS
+      WITH aggregated AS (
+        SELECT track_id,
+          COUNT(1) AS count,
+          ROUND(SUM(
+            (MIN(ts + dur, ${area.end}) - MAX(ts,${area.start}))*value)/${duration},
+            2
+          ) AS avg_value,
+          value_at_max_ts(-ts, value) AS first,
+          value_at_max_ts(ts, value) AS last,
+          MIN(value) AS min_value,
+          MAX(value) AS max_value
+        FROM experimental_counter_dur
+          WHERE track_id IN (${trackIds})
+          AND ts + dur >= ${area.start} AND
+          ts <= ${area.end}
+        GROUP BY track_id
+      )
+      SELECT
+        name,
+        count,
+        avg_value,
+        last AS last_value,
+        first AS first_value,
+        last - first AS delta_value,
+        ROUND((last - first)/${durationSec}, 2) AS rate,
+        min_value,
+        max_value
+      FROM aggregated JOIN counter_track ON
+        track_id = counter_track.id
+      GROUP BY track_id`;
+    }
     await engine.query(query);
     return true;
   }
@@ -129,7 +166,6 @@ export class CounterAggregationController extends AggregationController {
         columnConstructor: Float64Array,
         columnId: 'max_value',
       },
-
     ];
   }
 

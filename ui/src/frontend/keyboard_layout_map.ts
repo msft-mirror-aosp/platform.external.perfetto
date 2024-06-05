@@ -14,7 +14,11 @@
 // A keyboard layout map that converts key codes to their equivalent glyphs for
 // a given keyboard layout (e.g. 'KeyX' -> 'x').
 export interface KeyboardLayoutMap {
-  get(code: string): string|undefined;
+  get(code: string): string | undefined;
+}
+
+interface Keyboard {
+  getLayoutMap(): KeyboardLayoutMap;
 }
 
 export class NotSupportedError extends Error {}
@@ -30,7 +34,7 @@ export async function nativeKeyboardLayoutMap(): Promise<KeyboardLayoutMap> {
   if ('keyboard' in window.navigator) {
     // Typescript's dom library doesn't know about this feature, so we must
     // take some liberties when it comes to relaxing types
-    const keyboard = (window.navigator as any).keyboard;
+    const keyboard = window.navigator.keyboard as Keyboard;
     return await keyboard.getLayoutMap();
   } else {
     throw new NotSupportedError('Keyboard API is not supported');

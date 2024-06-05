@@ -36,6 +36,7 @@ namespace protozero {
 namespace {
 
 using ::testing::_;
+using ::testing::ElementsAre;
 using ::testing::InSequence;
 using ::testing::Invoke;
 using namespace proto_utils;
@@ -533,17 +534,23 @@ TEST(ProtoDecoderTest, MalformedPackedVarIntBuffer) {
   ASSERT_TRUE(parse_error);
 }
 
-// Tests that big field ids (> 0xffff) are just skipped but don't fail parsing.
-// This is a regression test for b/145339282 (DataSourceConfig.for_testing
-// having a very large ID == 268435455 until Android R).
-TEST(ProtoDecoderTest, SkipBigFieldIds) {
+// Tests that:
+// 1. Very big field ids (>= 2**24) are just skipped but don't fail parsing.
+//    This is a regression test for b/145339282 (DataSourceConfig.for_testing
+//    having a very large ID == 268435455 until Android R).
+// 2. Moderately big" field ids can be parsed correctly. See also
+//    https://github.com/google/perfetto/issues/510 .
+TEST(ProtoDecoderTest, BigFieldIds) {
   HeapBuffered<Message> message;
   message->AppendVarInt(/*field_id=*/1, 11);
-  message->AppendVarInt(/*field_id=*/1000000, 0);  // Will be skipped
+  message->AppendVarInt(/*field_id=*/1 << 24, 0);  // Will be skipped
   message->AppendVarInt(/*field_id=*/65535, 99);
-  message->AppendVarInt(/*field_id=*/268435455, 0);  // Will be skipped
+  message->AppendVarInt(/*field_id=*/(1 << 24) + 1023,
+                        0);  // Will be skipped
   message->AppendVarInt(/*field_id=*/2, 12);
-  message->AppendVarInt(/*field_id=*/2000000, 0);  // Will be skipped
+  message->AppendVarInt(/*field_id=*/1 << 28, 0);  // Will be skipped
+
+  message->AppendVarInt(/*field_id=*/(1 << 24) - 1, 13);
   auto data = message.SerializeAsArray();
 
   // Check the iterator-based ProtoDecoder.
@@ -563,6 +570,11 @@ TEST(ProtoDecoderTest, SkipBigFieldIds) {
     ASSERT_TRUE(field.valid());
     ASSERT_EQ(field.id(), 2u);
     ASSERT_EQ(field.as_int32(), 12);
+
+    field = decoder.ReadField();
+    ASSERT_TRUE(field.valid());
+    ASSERT_EQ(field.id(), (1u << 24) - 1u);
+    ASSERT_EQ(field.as_int32(), 13);
 
     field = decoder.ReadField();
     ASSERT_FALSE(field.valid());
@@ -611,6 +623,28 @@ TEST(ProtoDecoderTest, PacketRepeatedWireTypeMismatch) {
   ASSERT_FALSE(parse_error);
   // But the iterator returns 0 elements.
   EXPECT_FALSE(it);
+}
+
+TEST(ProtoDecoderTest, RepeatedMaxFieldIdStack) {
+  HeapBuffered<Message> message;
+  message->AppendVarInt(15, 1);
+  message->AppendVarInt(15, 2);
+  std::vector<uint8_t> proto = message.SerializeAsArray();
+
+  // Make sure that even with a max field id close to the stack capacity,
+  // TypedProtoDecoder behaves correctly w.r.t. repeated fields.
+  const int kMaxFieldId = PROTOZERO_DECODER_INITIAL_STACK_CAPACITY;
+
+  {
+    protozero::TypedProtoDecoder<kMaxFieldId,
+                                 /*HAS_NONPACKED_REPEATED_FIELDS=*/true>
+        decoder(proto.data(), proto.size());
+    std::vector<uint64_t> res;
+    for (auto it = decoder.GetRepeated<uint64_t>(15); it; it++) {
+      res.push_back(*it);
+    }
+    EXPECT_THAT(res, ElementsAre(1, 2));
+  }
 }
 
 }  // namespace

@@ -14,56 +14,72 @@
 
 import {BigintMath} from '../base/bigint_math';
 import {assertExists} from '../base/logging';
+import {createStore, Store} from '../base/store';
+import {duration, Span, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
-import {Args, ArgsTree} from '../common/arg_types';
+import {Args} from '../common/arg_types';
+import {CommandManager} from '../common/commands';
 import {
   ConversionJobName,
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {Engine} from '../common/engine';
 import {
   HighPrecisionTime,
   HighPrecisionTimeSpan,
 } from '../common/high_precision_time';
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
-import {CallsiteInfo, EngineConfig, ProfileType, State} from '../common/state';
-import {Span, tpTimeFromSeconds} from '../common/time';
 import {
-  TPDuration,
-  TPTime,
-  TPTimeSpan,
-} from '../common/time';
+  EngineConfig,
+  RESOLUTION_DEFAULT,
+  State,
+  getLegacySelection,
+} from '../common/state';
+import {TabManager} from '../common/tab_registry';
+import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
+import {TrackManager} from '../common/track_cache';
+import {setPerfHooks} from '../core/perf';
+import {raf} from '../core/raf_scheduler';
+import {EngineBase} from '../trace_processor/engine';
+import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 
 import {Analytics, initAnalytics} from './analytics';
-import {BottomTabList} from './bottom_tab';
-import {FrontendLocalState} from './frontend_local_state';
-import {RafScheduler} from './raf_scheduler';
+import {Timeline} from './frontend_local_state';
 import {Router} from './router';
+import {horizontalScrollToTs} from './scroll_helper';
 import {ServiceWorkerController} from './service_worker_controller';
+import {SliceSqlId} from './sql_types';
 import {PxSpan, TimeScale} from './time_scale';
+import {SelectionManager, LegacySelection} from '../core/selection_manager';
+import {exists} from '../base/utils';
+import {OmniboxManager} from './omnibox_manager';
+import {CallsiteInfo} from '../common/flamegraph_util';
+import {FlamegraphCache} from './flamegraph_panel';
+
+const INSTANT_FOCUS_DURATION = 1n;
+const INCOMPLETE_SLICE_DURATION = 30_000n;
 
 type Dispatch = (action: DeferredAction) => void;
 type TrackDataStore = Map<string, {}>;
-type QueryResultsStore = Map<string, {}|undefined>;
+type QueryResultsStore = Map<string, {} | undefined>;
 type AggregateDataStore = Map<string, AggregateData>;
 type Description = Map<string, string>;
 
 export interface SliceDetails {
-  ts?: TPTime;
+  ts?: time;
   absTime?: string;
-  dur?: TPDuration;
-  threadTs?: TPTime;
-  threadDur?: TPDuration;
+  dur?: duration;
+  threadTs?: time;
+  threadDur?: duration;
   priority?: number;
-  endState?: string|null;
+  endState?: string | null;
   cpu?: number;
   id?: number;
   threadStateId?: number;
   utid?: number;
-  wakeupTs?: TPTime;
+  wakeupTs?: time;
   wakerUtid?: number;
   wakerCpu?: number;
   category?: string;
@@ -76,7 +92,6 @@ export interface SliceDetails {
   packageName?: string;
   versionCode?: number;
   args?: Args;
-  argsTree?: ArgsTree;
   description?: Description;
 }
 
@@ -85,9 +100,9 @@ export interface FlowPoint {
 
   sliceName: string;
   sliceCategory: string;
-  sliceId: number;
-  sliceStartTs: number;
-  sliceEndTs: number;
+  sliceId: SliceSqlId;
+  sliceStartTs: time;
+  sliceEndTs: time;
   // Thread and process info. Only set in sliceSelected not in areaSelected as
   // the latter doesn't display per-flow info and it'd be a waste to join
   // additional tables for undisplayed info in that case. Nothing precludes
@@ -108,54 +123,38 @@ export interface Flow {
 
   begin: FlowPoint;
   end: FlowPoint;
-  dur: number;
+  dur: duration;
+
+  // Whether this flow connects a slice with its descendant.
+  flowToDescendant: boolean;
 
   category?: string;
   name?: string;
 }
 
 export interface CounterDetails {
-  startTime?: TPTime;
+  startTime?: time;
   value?: number;
   delta?: number;
-  duration?: TPDuration;
+  duration?: duration;
   name?: string;
 }
 
 export interface ThreadStateDetails {
-  ts?: TPTime;
-  dur?: TPDuration;
-}
-
-export interface FlamegraphDetails {
-  type?: ProfileType;
-  id?: number;
-  start?: TPTime;
-  dur?: TPDuration;
-  pids?: number[];
-  upids?: number[];
-  flamegraph?: CallsiteInfo[];
-  expandedCallsite?: CallsiteInfo;
-  viewingOption?: string;
-  expandedId?: number;
-  // isInAreaSelection is true if a flamegraph is part of the current area
-  // selection.
-  isInAreaSelection?: boolean;
-  // When heap_graph_non_finalized_graph has a count >0, we mark the graph
-  // as incomplete.
-  graphIncomplete?: boolean;
+  ts?: time;
+  dur?: duration;
 }
 
 export interface CpuProfileDetails {
   id?: number;
-  ts?: number;
+  ts?: time;
   utid?: number;
   stack?: CallsiteInfo[];
 }
 
 export interface QuantizedLoad {
-  start: TPTime;
-  end: TPTime;
+  start: time;
+  end: time;
   load: number;
 }
 type OverviewStore = Map<string, QuantizedLoad[]>;
@@ -169,27 +168,6 @@ export interface ThreadDesc {
   cmdline?: string;
 }
 type ThreadMap = Map<number, ThreadDesc>;
-
-export interface FtraceEvent {
-  id: number;
-  ts: TPTime;
-  name: string;
-  cpu: number;
-  thread: string|null;
-  process: string|null;
-  args: string;
-}
-
-export interface FtracePanelData {
-  events: FtraceEvent[];
-  offset: number;
-  numEvents: number;  // Number of events in the visible window
-}
-
-export interface FtraceStat {
-  name: string;
-  count: number;
-}
 
 function getRoot() {
   // Works out the root directory where the content should be served from
@@ -206,22 +184,70 @@ function getRoot() {
   return root;
 }
 
+// Options for globals.makeSelection().
+export interface MakeSelectionOpts {
+  // Whether to switch to the current selection tab or not. Default = true.
+  switchToCurrentSelectionTab?: boolean;
+
+  // Whether to cancel the current search selection. Default = true.
+  clearSearch?: boolean;
+}
+
+// All of these control additional things we can do when doing a
+// selection.
+export interface LegacySelectionArgs {
+  clearSearch: boolean;
+  switchToCurrentSelectionTab: boolean;
+  pendingScrollId: number | undefined;
+}
+
+export interface TraceContext {
+  readonly start: time;
+  readonly end: time;
+
+  // This is the ts value at the time of the Unix epoch.
+  // Normally some large negative value, because the unix epoch is normally in
+  // the past compared to ts=0.
+  readonly realtimeOffset: time;
+
+  // This is the timestamp that we should use for our offset when in UTC mode.
+  // Usually the most recent UTC midnight compared to the trace start time.
+  readonly utcOffset: time;
+
+  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
+  // recorded into the trace, to show timestamps in the device local time.
+  readonly traceTzOffset: time;
+
+  // The list of CPUs in the trace
+  readonly cpus: number[];
+
+  // The number of gpus in the trace
+  readonly gpuCount: number;
+}
+
+export const defaultTraceContext: TraceContext = {
+  start: Time.ZERO,
+  end: Time.fromSeconds(10),
+  realtimeOffset: Time.ZERO,
+  utcOffset: Time.ZERO,
+  traceTzOffset: Time.ZERO,
+  cpus: [],
+  gpuCount: 0,
+};
+
 /**
  * Global accessors for state/dispatch in the frontend.
  */
 class Globals {
   readonly root = getRoot();
 
-  bottomTabList?: BottomTabList = undefined;
-
   private _testing = false;
   private _dispatch?: Dispatch = undefined;
-  private _state?: State = undefined;
-  private _frontendLocalState?: FrontendLocalState = undefined;
-  private _rafScheduler?: RafScheduler = undefined;
+  private _store = createStore<State>(createEmptyState());
+  private _timeline?: Timeline = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
-  private _isInternalUser: boolean|undefined = undefined;
+  private _isInternalUser: boolean | undefined = undefined;
 
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;
@@ -235,7 +261,6 @@ class Globals {
   private _selectedFlows?: Flow[] = undefined;
   private _visibleFlowCategories?: Map<string, boolean> = undefined;
   private _counterDetails?: CounterDetails = undefined;
-  private _flamegraphDetails?: FlamegraphDetails = undefined;
   private _cpuProfileDetails?: CpuProfileDetails = undefined;
   private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
@@ -247,37 +272,57 @@ class Globals {
   private _router?: Router = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
-  private _ftraceCounters?: FtraceStat[] = undefined;
-  private _ftracePanelData?: FtracePanelData = undefined;
+  private _cmdManager = new CommandManager();
+  private _tabManager = new TabManager();
+  private _trackManager = new TrackManager(this._store);
+  private _selectionManager = new SelectionManager(this._store);
+  private _hasFtrace: boolean = false;
+
+  omnibox = new OmniboxManager();
+  areaFlamegraphCache = new FlamegraphCache('area');
+
+  scrollToTrackKey?: string | number;
+  httpRpcState: HttpRpcState = {connected: false};
+  newVersionAvailable = false;
+  showPanningHint = false;
+  permalinkHash?: string;
+
+  traceContext = defaultTraceContext;
 
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
 
   private _currentSearchResults: CurrentSearchResults = {
-    sliceIds: new Float64Array(0),
-    tsStarts: new Float64Array(0),
+    eventIds: new Float64Array(0),
+    tses: new BigInt64Array(0),
     utids: new Float64Array(0),
-    trackIds: [],
+    trackKeys: [],
     sources: [],
     totalResults: 0,
   };
   searchSummary: SearchSummary = {
-    tsStarts: new Float64Array(0),
-    tsEnds: new Float64Array(0),
+    tsStarts: new BigInt64Array(0),
+    tsEnds: new BigInt64Array(0),
     count: new Uint8Array(0),
   };
 
-  engines = new Map<string, Engine>();
+  engines = new Map<string, EngineBase>();
 
   initialize(dispatch: Dispatch, router: Router) {
     this._dispatch = dispatch;
     this._router = router;
-    this._state = createEmptyState();
-    this._frontendLocalState = new FrontendLocalState();
-    this._rafScheduler = new RafScheduler();
+    this._timeline = new Timeline();
+
+    setPerfHooks(
+      () => this.state.perfDebug,
+      () => this.dispatch(Actions.togglePerfDebug({})),
+    );
+
     this._serviceWorkerController = new ServiceWorkerController();
     this._testing =
-        self.location && self.location.search.indexOf('testing=1') >= 0;
+      /* eslint-disable @typescript-eslint/strict-boolean-expressions */
+      self.location && self.location.search.indexOf('testing=1') >= 0;
+    /* eslint-enable */
     this._logging = initAnalytics();
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
@@ -292,9 +337,14 @@ class Globals {
     this._visibleFlowCategories = new Map<string, boolean>();
     this._counterDetails = {};
     this._threadStateDetails = {};
-    this._flamegraphDetails = {};
     this._cpuProfileDetails = {};
     this.engines.clear();
+    this._selectionManager.clear();
+  }
+
+  // Only initialises the store - useful for testing.
+  initStore(initialState: State) {
+    this._store = createStore(initialState);
   }
 
   get router(): Router {
@@ -310,11 +360,11 @@ class Globals {
   }
 
   get state(): State {
-    return assertExists(this._state);
+    return assertExists(this._store).state;
   }
 
-  set state(state: State) {
-    this._state = assertExists(state);
+  get store(): Store<State> {
+    return assertExists(this._store);
   }
 
   get dispatch(): Dispatch {
@@ -328,12 +378,8 @@ class Globals {
     }
   }
 
-  get frontendLocalState() {
-    return assertExists(this._frontendLocalState);
-  }
-
-  get rafScheduler() {
-    return assertExists(this._rafScheduler);
+  get timeline() {
+    return assertExists(this._timeline);
   }
 
   get logging() {
@@ -413,14 +459,6 @@ class Globals {
     return assertExists(this._aggregateDataStore);
   }
 
-  get flamegraphDetails() {
-    return assertExists(this._flamegraphDetails);
-  }
-
-  set flamegraphDetails(click: FlamegraphDetails) {
-    this._flamegraphDetails = assertExists(click);
-  }
-
   get traceErrors() {
     return this._traceErrors;
   }
@@ -477,16 +515,12 @@ class Globals {
     this._currentSearchResults = results;
   }
 
+  set hasFtrace(value: boolean) {
+    this._hasFtrace = value;
+  }
+
   get hasFtrace(): boolean {
-    return Boolean(this._ftraceCounters && this._ftraceCounters.length > 0);
-  }
-
-  get ftraceCounters(): FtraceStat[]|undefined {
-    return this._ftraceCounters;
-  }
-
-  set ftraceCounters(value: FtraceStat[]|undefined) {
-    this._ftraceCounters = value;
+    return this._hasFtrace;
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
@@ -541,7 +575,7 @@ class Globals {
     this.aggregateDataStore.set(kind, data);
   }
 
-  getCurResolution(): TPDuration {
+  getCurResolution(): duration {
     // Truncate the resolution to the closest power of 2 (in nanosecond space).
     // We choose to work in ns space because resolution is consumed be track
     // controllers for quantization and they rely on resolution to be a power
@@ -552,45 +586,63 @@ class Globals {
     // levels. Logic: each zoom level represents a delta of 0.1 * (visible
     // window span). Therefore, zooming out by six levels is 1.1^6 ~= 2.
     // Similarily, zooming in six levels is 0.9^6 ~= 0.5.
-    const timeScale = this.frontendLocalState.visibleTimeScale;
+    const timeScale = this.timeline.visibleTimeScale;
     // TODO(b/186265930): Remove once fixed:
     if (timeScale.pxSpan.delta === 0) {
       console.error(`b/186265930: Bad pxToSec suppressed`);
-      return BigintMath.bitFloor(tpTimeFromSeconds(1000));
+      return RESOLUTION_DEFAULT;
     }
 
-    const timePerPx = HighPrecisionTime.max(
-        timeScale.pxDeltaToDuration(1), new HighPrecisionTime(1n));
+    const timePerPx = timeScale.pxDeltaToDuration(this.quantPx);
 
-    const resolutionBig = BigintMath.bitFloor(timePerPx.toTPTime());
-    return resolutionBig;
+    return BigintMath.bitFloor(timePerPx.toTime('floor'));
   }
 
-  getCurrentEngine(): EngineConfig|undefined {
+  getCurrentEngine(): EngineConfig | undefined {
     return this.state.engine;
   }
 
-  get ftracePanelData(): FtracePanelData|undefined {
-    return this._ftracePanelData;
-  }
+  makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
+    const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
+    const currentSelectionTabUri = 'current_selection';
 
-  set ftracePanelData(data: FtracePanelData|undefined) {
-    this._ftracePanelData = data;
-  }
-
-  makeSelection(action: DeferredAction<{}>, tabToOpen = 'current_selection') {
     // A new selection should cancel the current search selection.
-    globals.dispatch(Actions.setSearchIndex({index: -1}));
-    const tab = action.type === 'deselect' ? undefined : tabToOpen;
-    globals.dispatch(Actions.setCurrentTab({tab}));
+    clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
+
+    if (switchToCurrentSelectionTab) {
+      globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
+    }
     globals.dispatch(action);
+  }
+
+  setLegacySelection(
+    legacySelection: LegacySelection,
+    args: LegacySelectionArgs,
+  ): void {
+    this._selectionManager.setLegacy(legacySelection);
+    if (args.clearSearch) {
+      globals.dispatch(Actions.setSearchIndex({index: -1}));
+    }
+    if (args.pendingScrollId !== undefined) {
+      globals.dispatch(
+        Actions.setPendingScrollId({
+          pendingScrollId: args.pendingScrollId,
+        }),
+      );
+    }
+    if (args.switchToCurrentSelectionTab) {
+      globals.dispatch(Actions.showTab({uri: 'current_selection'}));
+    }
+  }
+
+  clearSelection(): void {
+    globals.dispatch(Actions.setSearchIndex({index: -1}));
+    this._selectionManager.clear();
   }
 
   resetForTesting() {
     this._dispatch = undefined;
-    this._state = undefined;
-    this._frontendLocalState = undefined;
-    this._rafScheduler = undefined;
+    this._timeline = undefined;
     this._serviceWorkerController = undefined;
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
@@ -604,10 +656,10 @@ class Globals {
     this._numQueriesQueued = 0;
     this._metricResult = undefined;
     this._currentSearchResults = {
-      sliceIds: new Float64Array(0),
-      tsStarts: new Float64Array(0),
+      eventIds: new Float64Array(0),
+      tses: new BigInt64Array(0),
       utids: new Float64Array(0),
-      trackIds: [],
+      trackKeys: [],
       sources: [],
       totalResults: 0,
     };
@@ -629,6 +681,7 @@ class Globals {
   set isInternalUser(value: boolean) {
     localStorage.setItem('isInternalUser', value ? '1' : '0');
     this._isInternalUser = value;
+    raf.scheduleFullRedraw();
   }
 
   get testing() {
@@ -640,31 +693,162 @@ class Globals {
   // however pending RAFs and workers seem to outlive the |window| and need to
   // be cleaned up explicitly.
   shutdown() {
-    this._rafScheduler!.shutdown();
+    raf.shutdown();
   }
 
   // Get a timescale that covers the entire trace
   getTraceTimeScale(pxSpan: PxSpan): TimeScale {
-    const {start, end} = this.state.traceTime;
-    const traceTime = HighPrecisionTimeSpan.fromTpTime(start, end);
-    return new TimeScale(traceTime.start, traceTime.duration.nanos, pxSpan);
+    const {start, end} = this.traceContext;
+    const traceTime = HighPrecisionTimeSpan.fromTime(start, end);
+    return TimeScale.fromHPTimeSpan(traceTime, pxSpan);
   }
 
   // Get the trace time bounds
   stateTraceTime(): Span<HighPrecisionTime> {
-    const {start, end} = this.state.traceTime;
-    return HighPrecisionTimeSpan.fromTpTime(start, end);
+    const {start, end} = this.traceContext;
+    return HighPrecisionTimeSpan.fromTime(start, end);
   }
 
-  stateTraceTimeTP(): Span<TPTime> {
-    const {start, end} = this.state.traceTime;
-    return new TPTimeSpan(start, end);
+  stateTraceTimeTP(): Span<time, duration> {
+    const {start, end} = this.traceContext;
+    return new TimeSpan(start, end);
   }
 
   // Get the state version of the visible time bounds
-  stateVisibleTime(): Span<TPTime> {
+  stateVisibleTime(): Span<time, duration> {
     const {start, end} = this.state.frontendLocalState.visibleState;
-    return new TPTimeSpan(start, end);
+    return new TimeSpan(start, end);
+  }
+
+  // How many pixels to use for one quanta of horizontal resolution
+  get quantPx(): number {
+    const quantPx = (self as {} as {quantPx: number | undefined}).quantPx;
+    return quantPx ?? 1;
+  }
+
+  get commandManager(): CommandManager {
+    return assertExists(this._cmdManager);
+  }
+
+  get tabManager() {
+    return this._tabManager;
+  }
+
+  get trackManager() {
+    return this._trackManager;
+  }
+
+  // Offset between t=0 and the configured time domain.
+  timestampOffset(): time {
+    const fmt = timestampFormat();
+    switch (fmt) {
+      case TimestampFormat.Timecode:
+      case TimestampFormat.Seconds:
+        return this.traceContext.start;
+      case TimestampFormat.Raw:
+      case TimestampFormat.RawLocale:
+        return Time.ZERO;
+      case TimestampFormat.UTC:
+        return this.traceContext.utcOffset;
+      case TimestampFormat.TraceTz:
+        return this.traceContext.traceTzOffset;
+      default:
+        const x: never = fmt;
+        throw new Error(`Unsupported format ${x}`);
+    }
+  }
+
+  // Convert absolute time to domain time.
+  toDomainTime(ts: time): time {
+    return Time.sub(ts, this.timestampOffset());
+  }
+
+  findTimeRangeOfSelection(): {start: time; end: time} | undefined {
+    const selection = getLegacySelection(this.state);
+    if (selection === null) {
+      return undefined;
+    }
+
+    if (selection.kind === 'SCHED_SLICE' || selection.kind === 'SLICE') {
+      const slice = this.sliceDetails;
+      return findTimeRangeOfSlice(slice);
+    } else if (selection.kind === 'THREAD_STATE') {
+      const threadState = this.threadStateDetails;
+      return findTimeRangeOfSlice(threadState);
+    } else if (selection.kind === 'COUNTER') {
+      return {start: selection.leftTs, end: selection.rightTs};
+    } else if (selection.kind === 'AREA') {
+      const selectedArea = this.state.areas[selection.areaId];
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      if (selectedArea) {
+        return {start: selectedArea.start, end: selectedArea.end};
+      }
+    } else if (selection.kind === 'NOTE') {
+      const selectedNote = this.state.notes[selection.id];
+      // Notes can either be default or area notes. Area notes are handled
+      // above in the AREA case.
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      if (selectedNote && selectedNote.noteType === 'DEFAULT') {
+        return {
+          start: selectedNote.timestamp,
+          end: Time.add(selectedNote.timestamp, INSTANT_FOCUS_DURATION),
+        };
+      }
+    } else if (selection.kind === 'LOG') {
+      // TODO(hjd): Make focus selection work for logs.
+    } else if (selection.kind === 'GENERIC_SLICE') {
+      return findTimeRangeOfSlice({
+        ts: selection.start,
+        dur: selection.duration,
+      });
+    }
+
+    return undefined;
+  }
+
+  panToTimestamp(ts: time): void {
+    horizontalScrollToTs(ts);
+  }
+}
+
+interface SliceLike {
+  ts: time;
+  dur: duration;
+}
+
+// Returns the start and end points of a slice-like object If slice is instant
+// or incomplete, dummy time will be returned which instead.
+function findTimeRangeOfSlice(slice: Partial<SliceLike>): {
+  start: time;
+  end: time;
+} {
+  if (exists(slice.ts) && exists(slice.dur)) {
+    if (slice.dur === -1n) {
+      return {
+        start: slice.ts,
+        end: Time.add(slice.ts, INCOMPLETE_SLICE_DURATION),
+      };
+    } else if (slice.dur === 0n) {
+      return {
+        start: slice.ts,
+        end: Time.add(slice.ts, INSTANT_FOCUS_DURATION),
+      };
+    } else {
+      return {start: slice.ts, end: Time.add(slice.ts, slice.dur)};
+    }
+  } else {
+    return {start: Time.INVALID, end: Time.INVALID};
+  }
+}
+
+// Returns the time span of the current selection, or the visible window if
+// there is no current selection.
+export function getTimeSpanOfSelectionOrVisibleWindow(): Span<time, duration> {
+  const range = globals.findTimeRangeOfSelection();
+  if (exists(range)) {
+    return new TimeSpan(range.start, range.end);
+  } else {
+    return globals.stateVisibleTime();
   }
 }
 

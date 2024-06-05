@@ -28,6 +28,26 @@ from python.generators.trace_processor_table.public import CppUint32
 from python.generators.trace_processor_table.public import CppSelfTableId
 from python.generators.trace_processor_table.public import WrappingSqlView
 
+MACHINE_TABLE = Table(
+    python_module=__file__,
+    class_name='MachineTable',
+    sql_name='machine',
+    columns=[
+        C('raw_id', CppUint32()),
+    ],
+    tabledoc=TableDoc(
+        doc='''
+          Contains raw machine_id of trace packets emitted from remote machines.
+        ''',
+        group='Metadata',
+        columns={
+            'raw_id':
+                '''
+                  Raw machine identifier in the trace packet, non-zero for
+                  remote machines.
+                '''
+        }))
+
 PROCESS_TABLE = Table(
     python_module=__file__,
     class_name='ProcessTable',
@@ -43,11 +63,12 @@ PROCESS_TABLE = Table(
         C('android_appid', CppOptional(CppUint32())),
         C('cmdline', CppOptional(CppString())),
         C('arg_set_id', CppUint32()),
+        C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
     ],
     wrapping_sql_view=WrappingSqlView(view_name='process',),
     tabledoc=TableDoc(
         doc='Contains information of processes seen during the trace',
-        group='Misc',
+        group='Metadata',
         skip_id_and_type=True,
         columns={
             'upid':
@@ -98,6 +119,11 @@ PROCESS_TABLE = Table(
             'arg_set_id':
                 ColumnDoc(
                     'Extra args for this process.', joinable='args.arg_set_id'),
+            'machine_id':
+                '''
+                  Machine identifier, non-null for processes on a remote
+                  machine.
+                ''',
         }))
 
 THREAD_TABLE = Table(
@@ -112,11 +138,12 @@ THREAD_TABLE = Table(
         C('end_ts', CppOptional(CppInt64())),
         C('upid', CppOptional(CppTableId(PROCESS_TABLE))),
         C('is_main_thread', CppOptional(CppUint32())),
+        C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
     ],
     wrapping_sql_view=WrappingSqlView(view_name='thread',),
     tabledoc=TableDoc(
         doc='Contains information of threads seen during the trace',
-        group='Misc',
+        group='Metadata',
         skip_id_and_type=True,
         columns={
             'utid':
@@ -157,19 +184,53 @@ THREAD_TABLE = Table(
                 '''
                   Boolean indicating if this thread is the main thread
                   in the process.
+                ''',
+            'machine_id':
                 '''
+                  Machine identifier, non-null for threads on a remote machine.
+                ''',
+        }))
+
+CPU_TABLE = Table(
+    python_module=__file__,
+    class_name='CpuTable',
+    sql_name='__intrinsic_cpu',
+    columns=[
+        C('cpu', CppOptional(CppUint32())),
+        C('cluster_id', CppUint32()),
+        C('processor', CppString()),
+        C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
+    ],
+    tabledoc=TableDoc(
+        doc='''
+          Contains information of processes seen during the trace
+        ''',
+        group='Misc',
+        columns={
+            'cpu':
+                '''the index (0-based) of the CPU core on the device''',
+            'cluster_id':
+                '''the cluster id is shared by CPUs in
+the same cluster''',
+            'processor':
+                '''a string describing this core''',
+            'machine_id':
+                '''
+                  Machine identifier, non-null for CPUs on a remote machine.
+                ''',
         }))
 
 RAW_TABLE = Table(
     python_module=__file__,
     class_name='RawTable',
-    sql_name='raw',
+    sql_name='__intrinsic_raw',
     columns=[
         C('ts', CppInt64(), flags=ColumnFlag.SORTED),
         C('name', CppString()),
-        C('cpu', CppUint32()),
         C('utid', CppTableId(THREAD_TABLE)),
         C('arg_set_id', CppUint32()),
+        C('common_flags', CppUint32()),
+        C('ucpu', CppTableId(CPU_TABLE))
     ],
     tabledoc=TableDoc(
         doc='''
@@ -177,7 +238,7 @@ RAW_TABLE = Table(
           table only exists for debugging purposes and should not be relied on
           in production usecases (i.e. metrics, standard library etc).
         ''',
-        group='Misc',
+        group='Events',
         columns={
             'arg_set_id':
                 ColumnDoc(
@@ -190,26 +251,33 @@ RAW_TABLE = Table(
                   The name of the event. For ftrace events, this will be the
                   ftrace event name.
                 ''',
-            'cpu':
-                'The CPU this event was emitted on.',
             'utid':
-                'The thread this event was emitted on.'
+                'The thread this event was emitted on.',
+            'common_flags':
+                '''
+                  Ftrace event flags for this event. Currently only emitted for
+                  sched_waking events.
+                ''',
+            'ucpu':
+                '''
+                  The unique CPU indentifier.
+                ''',
         }))
 
 FTRACE_EVENT_TABLE = Table(
     python_module=__file__,
     class_name='FtraceEventTable',
-    sql_name='ftrace_event',
+    sql_name='__intrinsic_ftrace_event',
     parent=RAW_TABLE,
     columns=[],
     tabledoc=TableDoc(
         doc='''
-      Contains all the ftrace events in the trace. This table exists only for
-      debugging purposes and should not be relied on in production usecases
-      (i.e. metrics, standard library etc). Note also that this table might
-      be empty if raw ftrace parsing has been disabled.
-    ''',
-        group='Misc',
+          Contains all the ftrace events in the trace. This table exists only
+          for debugging purposes and should not be relied on in production
+          usecases (i.e. metrics, standard library etc). Note also that this
+          table might be empty if raw ftrace parsing has been disabled.
+        ''',
+        group='Events',
         columns={}))
 
 ARG_TABLE = Table(
@@ -251,7 +319,7 @@ METADATA_TABLE = Table(
     ],
     tabledoc=TableDoc(
         doc='''''',
-        group='Misc',
+        group='Metadata',
         columns={
             'name': '''''',
             'key_type': '''''',
@@ -274,7 +342,7 @@ FILEDESCRIPTOR_TABLE = Table(
         doc='''
           Contains information of filedescriptors collected during the trace
         ''',
-        group='Misc',
+        group='Metadata',
         columns={
             'ufd':
                 '''Unique fd. This is != the OS fd.
@@ -308,45 +376,24 @@ EXP_MISSING_CHROME_PROC_TABLE = Table(
         doc='''
           Experimental table, subject to arbitrary breaking changes.
         ''',
-        group='Misc',
+        group='Chrome',
         columns={
             'upid': '''''',
             'reliable_from': ''''''
         }))
 
-CPU_TABLE = Table(
-    python_module=__file__,
-    class_name='CpuTable',
-    sql_name='cpu',
-    columns=[
-        C('cluster_id', CppUint32()),
-        C('processor', CppString()),
-    ],
-    tabledoc=TableDoc(
-        doc='''
-          Contains information of processes seen during the trace
-        ''',
-        group='Misc',
-        columns={
-            'cluster_id':
-                '''the cluster id is shared by CPUs in
-the same cluster''',
-            'processor':
-                '''a string describing this core'''
-        }))
-
 CPU_FREQ_TABLE = Table(
     python_module=__file__,
     class_name='CpuFreqTable',
-    sql_name='cpu_freq',
+    sql_name='__intrinsic_cpu_freq',
     columns=[
-        C('cpu_id', CppTableId(CPU_TABLE)),
+        C('ucpu', CppTableId(CPU_TABLE)),
         C('freq', CppUint32()),
     ],
     tabledoc=TableDoc(
         doc='''''', group='Misc', columns={
-            'cpu_id': '''''',
-            'freq': ''''''
+            'ucpu': '''''',
+            'freq': '''''',
         }))
 
 CLOCK_SNAPSHOT_TABLE = Table(
@@ -359,6 +406,7 @@ CLOCK_SNAPSHOT_TABLE = Table(
         C('clock_name', CppOptional(CppString())),
         C('clock_value', CppInt64()),
         C('snapshot_id', CppUint32()),
+        C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
     ],
     tabledoc=TableDoc(
         doc='''
@@ -379,7 +427,12 @@ otherwise.''',
             'clock_value':
                 '''timestamp of the snapshot in clock time.''',
             'snapshot_id':
-                '''the index of this snapshot (only useful for debugging)'''
+                '''the index of this snapshot (only useful for debugging)''',
+            'machine_id':
+                '''
+                  Machine identifier, non-null for clock snapshots on a remote
+                  machine.
+                ''',
         }))
 
 # Keep this list sorted.
@@ -395,4 +448,5 @@ ALL_TABLES = [
     RAW_TABLE,
     THREAD_TABLE,
     FTRACE_EVENT_TABLE,
+    MACHINE_TABLE,
 ]

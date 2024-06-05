@@ -14,13 +14,16 @@
 
 import m from 'mithril';
 
+import {Time} from '../base/time';
 import {Actions, PostedScrollToRange, PostedTrace} from '../common/actions';
+import {showModal} from '../widgets/modal';
 
 import {initCssConstants} from './css_constants';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
-import {showModal} from './modal';
 import {focusHorizontalRange} from './scroll_helper';
+
+const TRUSTED_ORIGINS_KEY = 'trustedOrigins';
 
 interface PostedTraceWrapped {
   perfetto: PostedTrace;
@@ -32,7 +35,7 @@ interface PostedScrollToRangeWrapped {
 
 // Returns whether incoming traces should be opened automatically or should
 // instead require a user interaction.
-function isTrustedOrigin(origin: string): boolean {
+export function isTrustedOrigin(origin: string): boolean {
   const TRUSTED_ORIGINS = [
     'https://chrometto.googleplex.com',
     'https://uma.googleplex.com',
@@ -40,11 +43,46 @@ function isTrustedOrigin(origin: string): boolean {
   ];
   if (origin === window.origin) return true;
   if (TRUSTED_ORIGINS.includes(origin)) return true;
+  if (isUserTrustedOrigin(origin)) return true;
 
   const hostname = new URL(origin).hostname;
-  if (hostname.endsWith('corp.google.com')) return true;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+  if (hostname.endsWith('.corp.google.com')) return true;
+  if (hostname.endsWith('.c.googlers.com')) return true;
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]'
+  ) {
+    return true;
+  }
   return false;
+}
+
+// Returns whether the user saved this as an always-trusted origin.
+function isUserTrustedOrigin(hostname: string): boolean {
+  const trustedOrigins = window.localStorage.getItem(TRUSTED_ORIGINS_KEY);
+  if (trustedOrigins === null) return false;
+  try {
+    return JSON.parse(trustedOrigins).includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+// Saves the given hostname as a trusted origin.
+// This is used for user convenience: if it fails for any reason, it's not a
+// big deal.
+function saveUserTrustedOrigin(hostname: string) {
+  const s = window.localStorage.getItem(TRUSTED_ORIGINS_KEY);
+  let origins: string[];
+  try {
+    origins = JSON.parse(s || '[]');
+    if (origins.includes(hostname)) return;
+    origins.push(hostname);
+    window.localStorage.setItem(TRUSTED_ORIGINS_KEY, JSON.stringify(origins));
+  } catch (e) {
+    console.warn('unable to save trusted origins to localStorage', e);
+  }
 }
 
 // Returns whether we should ignore a given message based on the value of
@@ -87,8 +125,10 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   // * closes itself
   const fromOpenee = (messageEvent.source as WindowProxy).opener === window;
 
-  if (messageEvent.source === null ||
-      !(fromOpener || fromIframeHost || fromOpenee)) {
+  if (
+    messageEvent.source === null ||
+    !(fromOpener || fromIframeHost || fromOpenee)
+  ) {
     // This can happen if an extension tries to postMessage.
     return;
   }
@@ -134,9 +174,10 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     postedTrace = {title: 'External trace', buffer: messageEvent.data};
   } else {
     console.warn(
-        'Unknown postMessage() event received. If you are trying to open a ' +
+      'Unknown postMessage() event received. If you are trying to open a ' +
         'trace via postMessage(), this is a bug in your code. If not, this ' +
-        'could be due to some Chrome extension.');
+        'could be due to some Chrome extension.',
+    );
     console.log('origin:', messageEvent.origin, 'data:', messageEvent.data);
     return;
   }
@@ -162,6 +203,11 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     globals.dispatch(Actions.openTraceFromBuffer(postedTrace));
   };
 
+  const trustAndOpenTrace = () => {
+    saveUserTrustedOrigin(messageEvent.origin);
+    openTrace();
+  };
+
   // If the origin is trusted open the trace directly.
   if (isTrustedOrigin(messageEvent.origin)) {
     openTrace();
@@ -171,13 +217,15 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   // If not ask the user if they expect this and trust the origin.
   showModal({
     title: 'Open trace?',
-    content:
-        m('div',
-          m('div', `${messageEvent.origin} is trying to open a trace file.`),
-          m('div', 'Do you trust the origin and want to proceed?')),
+    content: m(
+      'div',
+      m('div', `${messageEvent.origin} is trying to open a trace file.`),
+      m('div', 'Do you trust the origin and want to proceed?'),
+    ),
     buttons: [
-      {text: 'NO', primary: true},
-      {text: 'YES', primary: false, action: openTrace},
+      {text: 'No', primary: true},
+      {text: 'Yes', primary: false, action: openTrace},
+      {text: 'Always trust', primary: false, action: trustAndOpenTrace},
     ],
   });
 }
@@ -199,12 +247,14 @@ function sanitizeString(str: string): string {
 }
 
 function isTraceViewerReady(): boolean {
-  return !!(globals.getCurrentEngine()?.ready);
+  return !!globals.getCurrentEngine()?.ready;
 }
 
 const _maxScrollToRangeAttempts = 20;
 async function scrollToTimeRange(
-    postedScrollToRange: PostedScrollToRange, maxAttempts?: number) {
+  postedScrollToRange: PostedScrollToRange,
+  maxAttempts?: number,
+) {
   const ready = isTraceViewerReady();
   if (!ready) {
     if (maxAttempts === undefined) {
@@ -216,28 +266,33 @@ async function scrollToTimeRange(
     }
     setTimeout(scrollToTimeRange, 200, postedScrollToRange, maxAttempts + 1);
   } else {
-    focusHorizontalRange(
-        postedScrollToRange.timeStart,
-        postedScrollToRange.timeEnd,
-        postedScrollToRange.viewPercentage);
+    const start = Time.fromSeconds(postedScrollToRange.timeStart);
+    const end = Time.fromSeconds(postedScrollToRange.timeEnd);
+    focusHorizontalRange(start, end, postedScrollToRange.viewPercentage);
   }
 }
 
-function isPostedScrollToRange(obj: unknown):
-    obj is PostedScrollToRangeWrapped {
+function isPostedScrollToRange(
+  obj: unknown,
+): obj is PostedScrollToRangeWrapped {
   const wrapped = obj as PostedScrollToRangeWrapped;
   if (wrapped.perfetto === undefined) {
     return false;
   }
-  return wrapped.perfetto.timeStart !== undefined ||
-      wrapped.perfetto.timeEnd !== undefined;
+  return (
+    wrapped.perfetto.timeStart !== undefined ||
+    wrapped.perfetto.timeEnd !== undefined
+  );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function isPostedTraceWrapped(obj: any): obj is PostedTraceWrapped {
   const wrapped = obj as PostedTraceWrapped;
   if (wrapped.perfetto === undefined) {
     return false;
   }
-  return wrapped.perfetto.buffer !== undefined &&
-      wrapped.perfetto.title !== undefined;
+  return (
+    wrapped.perfetto.buffer !== undefined &&
+    wrapped.perfetto.title !== undefined
+  );
 }

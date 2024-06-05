@@ -13,7 +13,8 @@
 // limitations under the License.
 
 export class BigintMath {
-  static INT64_MAX: bigint = (2n ** 63n) - 1n;
+  static INT64_MAX: bigint = 2n ** 63n - 1n;
+  static INT64_MIN: bigint = -(2n ** 63n);
 
   // Returns the smallest integral power of 2 that is not smaller than n.
   // If n is less than or equal to 0, returns 1.
@@ -23,44 +24,72 @@ export class BigintMath {
       result <<= 1n;
     }
     return result;
-  };
+  }
 
   // Returns the largest integral power of 2 which is not greater than n.
   // If n is less than or equal to 0, returns 1.
   static bitFloor(n: bigint): bigint {
     let result = 1n;
-    while ((result << 1n) <= n) {
+    while (result << 1n <= n) {
       result <<= 1n;
     }
     return result;
-  };
-
-  // Returns the largest integral multiple of step which is not larger than n.
-  // If step is less than or equal to 0, returns n.
-  static quantizeFloor(n: bigint, step: bigint): bigint {
-    step = BigintMath.max(1n, step);
-    return step * (n / step);
   }
 
-  // Return the integral multiple of step which is closest to n.
+  // Returns the largest integral value x where 2^x is not greater than n.
+  static log2(n: bigint): number {
+    let result = 1n;
+    let log2 = 0;
+    while (result << 1n <= n) {
+      result <<= 1n;
+      ++log2;
+    }
+    return log2;
+  }
+
+  // Returns the integral multiple of step which is closest to n.
   // If step is less than or equal to 0, returns n.
-  static quantize(n: bigint, step: bigint): bigint {
+  static quant(n: bigint, step: bigint): bigint {
     step = BigintMath.max(1n, step);
     const halfStep = step / 2n;
     return step * ((n + halfStep) / step);
   }
 
-  // Return the greater of a and b
+  // Returns the largest integral multiple of step which is not larger than n.
+  // If step is less than or equal to 0, returns n.
+  static quantFloor(n: bigint, step: bigint): bigint {
+    step = BigintMath.max(1n, step);
+    if (n >= 0) {
+      return n - (n % step);
+    } else {
+      // If we're negative, just subtract one more "step", unless we're already
+      // aligned to a step then do nothing.
+      return n - (n % step) - (n % step === 0n ? 0n : step);
+    }
+  }
+
+  // Returns the smallest integral multiple of step which is not smaller than n.
+  // If step is less than or equal to 0, returns n.
+  static quantCeil(n: bigint, step: bigint): bigint {
+    step = BigintMath.max(1n, step);
+    if (n >= 0) {
+      return n - (n % step) + (n % step === 0n ? 0n : step);
+    } else {
+      return n - (n % step);
+    }
+  }
+
+  // Returns the greater of a and b.
   static max(a: bigint, b: bigint): bigint {
     return a > b ? a : b;
   }
 
-  // Return the smaller of a and b
+  // Returns the smaller of a and b.
   static min(a: bigint, b: bigint): bigint {
     return a < b ? a : b;
   }
 
-  // Returns the number of 1 bits in n
+  // Returns the number of 1 bits in n.
   static popcount(n: bigint): number {
     if (n < 0n) {
       throw Error(`Can\'t get popcount of negative number ${n}`);
@@ -73,5 +102,15 @@ export class BigintMath {
       n >>= 1n;
     }
     return count;
+  }
+
+  // Return the ratio between two bigints as a number.
+  static ratio(dividend: bigint, divisor: bigint): number {
+    return Number(dividend) / Number(divisor);
+  }
+
+  // Calculates the absolute value of a n.
+  static abs(n: bigint) {
+    return n < 0n ? -1n * n : n;
   }
 }

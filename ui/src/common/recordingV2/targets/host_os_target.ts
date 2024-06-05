@@ -26,12 +26,13 @@ import {
 import {
   isLinux,
   isMacOs,
+  isWindows,
   WEBSOCKET_CLOSED_ABNORMALLY_CODE,
 } from '../recording_utils';
 import {TracedTracingSession} from '../traced_tracing_session';
 
 export class HostOsTarget implements RecordingTargetV2 {
-  private readonly targetType: 'LINUX'|'MACOS';
+  private readonly targetType: 'LINUX' | 'MACOS' | 'WINDOWS';
   private readonly name: string;
   private websocket: WebSocket;
   private streams = new Set<HostOsByteStream>();
@@ -39,18 +40,23 @@ export class HostOsTarget implements RecordingTargetV2 {
   private onDisconnect: OnDisconnectCallback = (_) => {};
 
   constructor(
-      websocketUrl: string,
-      private maybeClearTarget: (target: HostOsTarget) => void,
-      private onTargetChange: OnTargetChangeCallback) {
+    websocketUrl: string,
+    private maybeClearTarget: (target: HostOsTarget) => void,
+    private onTargetChange: OnTargetChangeCallback,
+  ) {
     if (isMacOs(navigator.userAgent)) {
       this.name = 'MacOS';
       this.targetType = 'MACOS';
     } else if (isLinux(navigator.userAgent)) {
       this.name = 'Linux';
       this.targetType = 'LINUX';
+    } else if (isWindows(navigator.userAgent)) {
+      this.name = 'Windows Desktop';
+      this.targetType = 'WINDOWS';
     } else {
       throw new RecordingError(
-          'Host OS target created on an unsupported operating system.');
+        'Host OS target created on an unsupported operating system.',
+      );
     }
 
     this.websocket = new WebSocket(websocketUrl);
@@ -73,14 +79,17 @@ export class HostOsTarget implements RecordingTargetV2 {
     return true;
   }
 
-  async createTracingSession(tracingSessionListener: TracingSessionListener):
-      Promise<TracingSession> {
+  async createTracingSession(
+    tracingSessionListener: TracingSessionListener,
+  ): Promise<TracingSession> {
     this.onDisconnect = tracingSessionListener.onDisconnect;
 
     const osStream = await HostOsByteStream.create(this.getUrl());
     this.streams.add(osStream);
-    const tracingSession =
-        new TracedTracingSession(osStream, tracingSessionListener);
+    const tracingSession = new TracedTracingSession(
+      osStream,
+      tracingSessionListener,
+    );
     await tracingSession.initConnection();
 
     if (!this.dataSources) {
@@ -92,10 +101,12 @@ export class HostOsTarget implements RecordingTargetV2 {
 
   // Starts a tracing session in order to fetch data sources from the
   // device. Then, it cancels the session.
-  async fetchTargetInfo(tracingSessionListener: TracingSessionListener):
-      Promise<void> {
-    const tracingSession =
-        await this.createTracingSession(tracingSessionListener);
+  async fetchTargetInfo(
+    tracingSessionListener: TracingSessionListener,
+  ): Promise<void> {
+    const tracingSession = await this.createTracingSession(
+      tracingSessionListener,
+    );
     tracingSession.cancel();
   }
 
@@ -128,9 +139,9 @@ export class HostOsTarget implements RecordingTargetV2 {
   private onClose(ev: CloseEvent): void {
     if (ev.code === WEBSOCKET_CLOSED_ABNORMALLY_CODE) {
       console.info(
-          `It's safe to ignore the 'WebSocket connection to ${
-              this.getUrl()} error above, if present. It occurs when ` +
-          'checking the connection to the local Websocket server.');
+        `It's safe to ignore the 'WebSocket connection to ${this.getUrl()} error above, if present. It occurs when ` +
+          'checking the connection to the local Websocket server.',
+      );
     }
     this.disconnect();
   }

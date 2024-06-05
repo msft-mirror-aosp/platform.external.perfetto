@@ -43,6 +43,26 @@ if (enable_perfetto_ui) {
   }
 }
 
+# Depended upon by Chrome to do proto -> JSON conversion of traces.
+# Must be small binary size as all code here needs to be shipped in
+# Chrome.
+source_set("export_json") {
+  sources = [
+    "export_json.cc",
+    "export_json.h",
+  ]
+  deps = [
+    ":storage_minimal",
+    "../../gn:default_deps",
+    "../../include/perfetto/ext/trace_processor:export_json",
+    "../base",
+    "importers/json:minimal",
+    "storage",
+    "types",
+  ]
+  public_deps = [ "../../include/perfetto/ext/trace_processor:export_json" ]
+}
+
 source_set("metatrace") {
   sources = [
     "tp_metatrace.cc",
@@ -89,6 +109,8 @@ source_set("storage_minimal") {
     "trace_processor_storage.cc",
     "trace_processor_storage_impl.cc",
     "trace_processor_storage_impl.h",
+    "trace_reader_registry.cc",
+    "trace_reader_registry.h",
     "virtual_destructors.cc",
   ]
   deps = [
@@ -101,6 +123,7 @@ source_set("storage_minimal") {
     "importers/ftrace:minimal",
     "importers/fuchsia:fuchsia_record",
     "importers/memory_tracker:graph_processor",
+    "importers/perf:tracker",
     "importers/proto:gen_cc_chrome_track_event_descriptor",
     "importers/proto:gen_cc_track_event_descriptor",
     "importers/proto:minimal",
@@ -112,26 +135,9 @@ source_set("storage_minimal") {
     "util:descriptors",
     "util:gzip",
     "util:proto_to_args_parser",
-    "util:stack_traces_util",
-    "views",
+    "util:trace_type",
   ]
   public_deps = [ "../../include/perfetto/trace_processor:storage" ]
-}
-
-source_set("export_json") {
-  sources = [
-    "export_json.cc",
-    "export_json.h",
-  ]
-  deps = [
-    ":storage_minimal",
-    "../../gn:default_deps",
-    "../base",
-    "importers/json:minimal",
-    "storage",
-    "types",
-  ]
-  public_deps = [ "../../include/perfetto/ext/trace_processor:export_json" ]
 }
 
 if (enable_perfetto_trace_processor_sqlite) {
@@ -154,35 +160,42 @@ if (enable_perfetto_trace_processor_sqlite) {
       "../../protos/perfetto/common:zero",
       "../../protos/perfetto/trace:zero",
       "../../protos/perfetto/trace/perfetto:zero",
+      "../../protos/perfetto/trace_processor:zero",
       "../base",
       "../protozero",
       "db",
       "importers/android_bugreport",
       "importers/common",
+      "importers/etw:full",
       "importers/ftrace:full",
       "importers/fuchsia:full",
       "importers/gzip:full",
       "importers/json:full",
       "importers/json:minimal",
       "importers/ninja",
+      "importers/perf",
       "importers/proto:full",
       "importers/proto:minimal",
       "importers/systrace:full",
+      "importers/zip:full",
       "metrics",
-      "prelude/functions",
-      "prelude/operators",
-      "prelude/table_functions",
-      "prelude/tables_views",
+      "perfetto_sql/engine",
+      "perfetto_sql/intrinsics/functions",
+      "perfetto_sql/intrinsics/operators",
+      "perfetto_sql/intrinsics/table_functions",
+      "perfetto_sql/prelude",
+      "perfetto_sql/stdlib",
       "sqlite",
-      "stdlib:gen_amalgamated_stdlib",
       "storage",
       "tables",
       "types",
       "util",
       "util:gzip",
+      "util:protozero_to_json",
       "util:protozero_to_text",
+      "util:regex",
       "util:stdlib",
-      "views",
+      "util:trace_type",
     ]
     public_deps = [
       "../../gn:sqlite",  # iterator_impl.h includes sqlite3.h.
@@ -202,6 +215,7 @@ if (enable_perfetto_trace_processor_sqlite) {
       "../base",
       "../base:version",
       "metrics",
+      "rpc:stdiod",
       "util",
       "util:stdlib",
     ]
@@ -211,12 +225,9 @@ if (enable_perfetto_trace_processor_sqlite) {
     if (enable_perfetto_trace_processor_httpd) {
       deps += [ "rpc:httpd" ]
     }
-    sources = [
-      "trace_processor_shell.cc",
-      "util/proto_to_json.cc",
-      "util/proto_to_json.h",
-    ]
-    if (perfetto_build_standalone && !is_perfetto_build_generator) {
+    sources = [ "trace_processor_shell.cc" ]
+    if ((perfetto_build_standalone || build_with_chromium) &&
+        !is_perfetto_build_generator) {
       data_deps = [
         # The diff testing framework depends on these descriptors.
         "../../protos/perfetto/metrics:descriptor",
@@ -235,12 +246,14 @@ perfetto_unittest_source_set("top_level_unittests") {
   sources = [
     "forwarding_trace_parser_unittest.cc",
     "ref_counted_unittest.cc",
+    "trace_blob_unittest.cc",
   ]
   deps = [
     ":storage_minimal",
     "../../gn:default_deps",
     "../../gn:gtest_and_gmock",
     "../../include/perfetto/trace_processor",
+    "util:trace_type",
   ]
 
   if (enable_perfetto_trace_processor_json && !is_win) {
@@ -250,6 +263,7 @@ perfetto_unittest_source_set("top_level_unittests") {
     deps += [
       ":export_json",
       "../../gn:jsoncpp",
+      "../../include/perfetto/ext/trace_processor:export_json",
       "containers",
       "importers/common",
       "importers/proto:minimal",
@@ -268,11 +282,13 @@ perfetto_unittest_source_set("unittests") {
     ":top_level_unittests",
     "containers:unittests",
     "db:unittests",
+    "db/column:unittests",
     "importers/android_bugreport:unittests",
     "importers/common:unittests",
     "importers/ftrace:unittests",
     "importers/fuchsia:unittests",
     "importers/memory_tracker:unittests",
+    "importers/perf:unittests",
     "importers/proto:unittests",
     "importers/syscalls:unittests",
     "importers/systrace:unittests",
@@ -281,16 +297,16 @@ perfetto_unittest_source_set("unittests") {
     "tables:unittests",
     "types:unittests",
     "util:unittests",
-    "views:unittests",
   ]
   if (enable_perfetto_trace_processor_json) {
     deps += [ "importers/json:unittests" ]
   }
   if (enable_perfetto_trace_processor_sqlite) {
     deps += [
-      "prelude/functions:unittests",
-      "prelude/operators:unittests",
-      "prelude/table_functions:unittests",
+      "perfetto_sql/engine:unittests",
+      "perfetto_sql/intrinsics/functions:unittests",
+      "perfetto_sql/intrinsics/operators:unittests",
+      "perfetto_sql/intrinsics/table_functions:unittests",
       "sqlite:unittests",
     ]
   }

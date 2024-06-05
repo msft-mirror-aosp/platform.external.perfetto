@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 
-import {fromNs} from '../common/time';
+import {Time} from '../base/time';
 
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
@@ -24,16 +24,20 @@ import {
   TickType,
   timeScaleForVisibleWindow,
 } from './gridline_helper';
-import {Panel, PanelSize} from './panel';
+import {PanelSize} from './panel';
+import {Panel} from './panel_container';
 
 // This is used to display the summary of search results.
-export class TickmarkPanel extends Panel {
-  view() {
+export class TickmarkPanel implements Panel {
+  readonly kind = 'panel';
+  readonly selectable = false;
+
+  render(): m.Children {
     return m('.tickbar');
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
-    const {visibleWindowTime, visibleTimeScale} = globals.frontendLocalState;
+    const {visibleTimeScale} = globals.timeline;
 
     ctx.fillStyle = '#999';
     ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
@@ -43,13 +47,15 @@ export class TickmarkPanel extends Panel {
     ctx.rect(TRACK_SHELL_WIDTH, 0, size.width - TRACK_SHELL_WIDTH, size.height);
     ctx.clip();
 
-    const span = globals.frontendLocalState.visibleWindow.timestampSpan;
-    if (size.width > TRACK_SHELL_WIDTH && span.duration > 0n) {
+    const visibleSpan = globals.timeline.visibleTimeSpan;
+    if (size.width > TRACK_SHELL_WIDTH && visibleSpan.duration > 0n) {
       const maxMajorTicks = getMaxMajorTicks(size.width - TRACK_SHELL_WIDTH);
       const map = timeScaleForVisibleWindow(TRACK_SHELL_WIDTH, size.width);
-      for (const {type, time} of new TickGenerator(
-               span, maxMajorTicks, globals.state.traceTime.start)) {
-        const px = Math.floor(map.tpTimeToPx(time));
+
+      const offset = globals.timestampOffset();
+      const tickGen = new TickGenerator(visibleSpan, maxMajorTicks, offset);
+      for (const {type, time} of tickGen) {
+        const px = Math.floor(map.timeToPx(time));
         if (type === TickType.MAJOR) {
           ctx.fillRect(px, 0, 1, size.height);
         }
@@ -58,36 +64,38 @@ export class TickmarkPanel extends Panel {
 
     const data = globals.searchSummary;
     for (let i = 0; i < data.tsStarts.length; i++) {
-      const tStart = data.tsStarts[i];
-      const tEnd = data.tsEnds[i];
-      if (tEnd <= visibleWindowTime.start.seconds ||
-          tStart >= visibleWindowTime.end.seconds) {
+      const tStart = Time.fromRaw(data.tsStarts[i]);
+      const tEnd = Time.fromRaw(data.tsEnds[i]);
+      if (!visibleSpan.intersects(tStart, tEnd)) {
         continue;
       }
       const rectStart =
-          Math.max(visibleTimeScale.secondsToPx(tStart), 0) + TRACK_SHELL_WIDTH;
-      const rectEnd = visibleTimeScale.secondsToPx(tEnd) + TRACK_SHELL_WIDTH;
+        Math.max(visibleTimeScale.timeToPx(tStart), 0) + TRACK_SHELL_WIDTH;
+      const rectEnd = visibleTimeScale.timeToPx(tEnd) + TRACK_SHELL_WIDTH;
       ctx.fillStyle = '#ffe263';
       ctx.fillRect(
-          Math.floor(rectStart),
-          0,
-          Math.ceil(rectEnd - rectStart),
-          size.height);
+        Math.floor(rectStart),
+        0,
+        Math.ceil(rectEnd - rectStart),
+        size.height,
+      );
     }
     const index = globals.state.searchIndex;
-    if (index !== -1) {
-      const startSec = fromNs(globals.currentSearchResults.tsStarts[index]);
-      const triangleStart =
-          Math.max(visibleTimeScale.secondsToPx(startSec), 0) +
+    if (index !== -1 && index < globals.currentSearchResults.tses.length) {
+      const start = globals.currentSearchResults.tses[index];
+      if (start !== -1n) {
+        const triangleStart =
+          Math.max(visibleTimeScale.timeToPx(Time.fromRaw(start)), 0) +
           TRACK_SHELL_WIDTH;
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.moveTo(triangleStart, size.height);
-      ctx.lineTo(triangleStart - 3, 0);
-      ctx.lineTo(triangleStart + 3, 0);
-      ctx.lineTo(triangleStart, size.height);
-      ctx.fill();
-      ctx.closePath();
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(triangleStart, size.height);
+        ctx.lineTo(triangleStart - 3, 0);
+        ctx.lineTo(triangleStart + 3, 0);
+        ctx.lineTo(triangleStart, size.height);
+        ctx.fill();
+        ctx.closePath();
+      }
     }
 
     ctx.restore();

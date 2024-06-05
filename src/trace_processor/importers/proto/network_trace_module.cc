@@ -21,7 +21,7 @@
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 #include "src/trace_processor/importers/common/async_track_set_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
-#include "src/trace_processor/importers/proto/packet_sequence_state.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/tcp_state.h"
@@ -63,8 +63,12 @@ NetworkTraceModule::NetworkTraceModule(TraceProcessorContext* context)
       net_arg_uid_(context->storage->InternString("socket_uid")),
       net_arg_local_port_(context->storage->InternString("local_port")),
       net_arg_remote_port_(context->storage->InternString("remote_port")),
+      net_arg_icmp_type_(context->storage->InternString("packet_icmp_type")),
+      net_arg_icmp_code_(context->storage->InternString("packet_icmp_code")),
       net_ipproto_tcp_(context->storage->InternString("IPPROTO_TCP")),
       net_ipproto_udp_(context->storage->InternString("IPPROTO_UDP")),
+      net_ipproto_icmp_(context->storage->InternString("IPPROTO_ICMP")),
+      net_ipproto_icmpv6_(context->storage->InternString("IPPROTO_ICMPV6")),
       packet_count_(context->storage->InternString("packet_count")) {
   RegisterForField(TracePacket::kNetworkPacketFieldNumber, context);
   RegisterForField(TracePacket::kNetworkPacketBundleFieldNumber, context);
@@ -74,18 +78,17 @@ ModuleResult NetworkTraceModule::TokenizePacket(
     const protos::pbzero::TracePacket::Decoder& decoder,
     TraceBlobView*,
     int64_t ts,
-    PacketSequenceState* state,
+    RefPtr<PacketSequenceStateGeneration> state,
     uint32_t field_id) {
   if (field_id != TracePacket::kNetworkPacketBundleFieldNumber) {
     return ModuleResult::Ignored();
   }
 
-  auto seq_state = state->current_generation();
   NetworkPacketBundle::Decoder evt(decoder.network_packet_bundle());
 
   ConstBytes context = evt.ctx();
   if (evt.has_iid()) {
-    auto* interned = seq_state->LookupInternedMessage<
+    auto* interned = state->LookupInternedMessage<
         protos::pbzero::InternedData::kPacketContextFieldNumber,
         protos::pbzero::NetworkPacketContext>(evt.iid());
     if (!interned) {
@@ -184,13 +187,23 @@ void NetworkTraceModule::ParseGenericEvent(
   context_->slice_tracker->Scoped(
       ts, track_id, name_id, title_id, dur, [&](ArgsTracker::BoundInserter* i) {
         StringId ip_proto;
-        if (evt.ip_proto() == kIpprotoTcp) {
-          ip_proto = net_ipproto_tcp_;
-        } else if (evt.ip_proto() == kIpprotoUdp) {
-          ip_proto = net_ipproto_udp_;
-        } else {
-          base::StackString<32> proto("IPPROTO (%d)", evt.ip_proto());
-          ip_proto = context_->storage->InternString(proto.string_view());
+        switch (evt.ip_proto()) {
+          case kIpprotoTcp:
+            ip_proto = net_ipproto_tcp_;
+            break;
+          case kIpprotoUdp:
+            ip_proto = net_ipproto_udp_;
+            break;
+          case kIpprotoIcmp:
+            ip_proto = net_ipproto_icmp_;
+            break;
+          case kIpprotoIcmpv6:
+            ip_proto = net_ipproto_icmpv6_;
+            break;
+          default: {
+            base::StackString<32> proto("IPPROTO (%d)", evt.ip_proto());
+            ip_proto = context_->storage->InternString(proto.string_view());
+          }
         }
 
         i->AddArg(net_arg_ip_proto_, Variadic::String(ip_proto));
@@ -201,13 +214,25 @@ void NetworkTraceModule::ParseGenericEvent(
                   Variadic::String(
                       context_->storage->InternString(tag.string_view())));
 
-        base::StackString<12> flags = GetTcpFlagMask(evt.tcp_flags());
-        i->AddArg(net_arg_tcp_flags_,
-                  Variadic::String(
-                      context_->storage->InternString(flags.string_view())));
+        if (evt.has_tcp_flags()) {
+          base::StackString<12> flags = GetTcpFlagMask(evt.tcp_flags());
+          i->AddArg(net_arg_tcp_flags_,
+                    Variadic::String(
+                        context_->storage->InternString(flags.string_view())));
+        }
 
-        i->AddArg(net_arg_local_port_, Variadic::Integer(evt.local_port()));
-        i->AddArg(net_arg_remote_port_, Variadic::Integer(evt.remote_port()));
+        if (evt.has_local_port()) {
+          i->AddArg(net_arg_local_port_, Variadic::Integer(evt.local_port()));
+        }
+        if (evt.has_remote_port()) {
+          i->AddArg(net_arg_remote_port_, Variadic::Integer(evt.remote_port()));
+        }
+        if (evt.has_icmp_type()) {
+          i->AddArg(net_arg_icmp_type_, Variadic::Integer(evt.icmp_type()));
+        }
+        if (evt.has_icmp_code()) {
+          i->AddArg(net_arg_icmp_code_, Variadic::Integer(evt.icmp_code()));
+        }
         extra_args(i);
       });
 }
@@ -232,11 +257,12 @@ void NetworkTraceModule::ParseNetworkPacketBundle(int64_t ts, ConstBytes blob) {
   });
 }
 
-void NetworkTraceModule::PushPacketBufferForSort(int64_t timestamp,
-                                                 PacketSequenceState* state) {
+void NetworkTraceModule::PushPacketBufferForSort(
+    int64_t timestamp,
+    RefPtr<PacketSequenceStateGeneration> state) {
   std::vector<uint8_t> v = packet_buffer_.SerializeAsArray();
   context_->sorter->PushTracePacket(
-      timestamp, state->current_generation(),
+      timestamp, std::move(state),
       TraceBlobView(TraceBlob::CopyFrom(v.data(), v.size())));
   packet_buffer_.Reset();
 }

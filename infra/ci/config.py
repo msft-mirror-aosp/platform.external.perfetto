@@ -67,7 +67,8 @@ GCE_SCOPES = [
 JOB_CONFIGS = {
     'linux-clang-x86_64-debug': {
         'PERFETTO_TEST_GN_ARGS': 'is_debug=true is_hermetic_clang=false '
-                                 'non_hermetic_clang_stdlib="libc++"',
+                                 'non_hermetic_clang_stdlib="libc++" '
+                                 'enable_perfetto_merged_protos_check=true',
         'PERFETTO_TEST_SCRIPT': 'test/ci/linux_tests.sh',
     },
     'linux-clang-x86_64-tsan': {
@@ -97,11 +98,6 @@ JOB_CONFIGS = {
             'is_debug=false target_os="android" target_cpu="arm"',
         'PERFETTO_TEST_SCRIPT':
             'test/ci/android_tests.sh',
-    },
-    'android-clang-arm-asan': {
-        'PERFETTO_TEST_GN_ARGS': 'is_debug=false target_os="android" '
-                                 'target_cpu="arm" is_asan=true',
-        'PERFETTO_TEST_SCRIPT': 'test/ci/android_tests.sh',
     },
     'linux-clang-x86_64-libfuzzer': {
         'PERFETTO_TEST_GN_ARGS': 'is_debug=false is_fuzzer=true is_asan=true',

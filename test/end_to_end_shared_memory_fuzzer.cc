@@ -23,11 +23,11 @@
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/tracing/core/producer.h"
 #include "perfetto/ext/tracing/core/trace_writer.h"
-#include "perfetto/ext/tracing/ipc/default_socket.h"
 #include "perfetto/ext/tracing/ipc/producer_ipc_client.h"
 #include "perfetto/ext/tracing/ipc/service_ipc_host.h"
 #include "perfetto/tracing/core/data_source_config.h"
 #include "perfetto/tracing/core/data_source_descriptor.h"
+#include "perfetto/tracing/default_socket.h"
 #include "protos/perfetto/trace/test_event.pbzero.h"
 #include "src/base/test/test_task_runner.h"
 #include "test/test_helper.h"
@@ -96,7 +96,10 @@ class FakeProducer : public Producer {
 
   void StopDataSource(DataSourceInstanceID) override {}
   void OnTracingSetup() override {}
-  void Flush(FlushRequestID, const DataSourceInstanceID*, size_t) override {}
+  void Flush(FlushRequestID,
+             const DataSourceInstanceID*,
+             size_t,
+             FlushFlags) override {}
   void ClearIncrementalState(const DataSourceInstanceID*, size_t) override {}
 
  private:

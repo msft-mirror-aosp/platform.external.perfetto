@@ -28,7 +28,8 @@ from google.protobuf import text_format, message_factory, descriptor_pool
 from python.generators.diff_tests.testing import TestCase, TestType, BinaryProto
 from python.generators.diff_tests.utils import (
     ColorFormatter, create_message_factory, get_env, get_trace_descriptor_path,
-    read_all_tests, serialize_python_trace, serialize_textproto_trace)
+    read_all_tests, serialize_python_trace, serialize_textproto_trace,
+    modify_trace)
 
 ROOT_DIR = os.path.dirname(
     os.path.dirname(
@@ -130,7 +131,8 @@ class TestResults:
         f"{c.green('[  PASSED  ]')} "
         f"{tests_no - len(self.test_failures)} tests.\n")
     if len(self.test_failures) > 0:
-      res += (f"{c.red('[  FAILED  ]')} " f"{len(self.test_failures)} tests.\n")
+      res += (f"{c.red('[  FAILED  ]')} "
+              f"{len(self.test_failures)} tests.\n")
       for failure in self.test_failures:
         res += f"{c.red('[  FAILED  ]')} {failure}\n"
     return res
@@ -149,6 +151,7 @@ class TestCaseRunner:
   trace_processor_path: str
   trace_descriptor_path: str
   colors: ColorFormatter
+  override_sql_module_paths: List[str]
 
   def __output_to_text_proto(self, actual: str, out: BinaryProto) -> str:
     """Deserializes a binary proto and returns its text representation.
@@ -207,6 +210,8 @@ class TestCaseRunner:
         tmp_perf_file.name,
         trace_path,
     ]
+    for sql_module_path in self.override_sql_module_paths:
+      cmd += ['--override-sql-module', sql_module_path]
     tp = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -239,7 +244,7 @@ class TestCaseRunner:
                       stderr.decode('utf8'), tp.returncode, perf_lines)
 
   # Run a query based Diff Test.
-  def __run_query_test(self, trace_path: str) -> TestResult:
+  def __run_query_test(self, trace_path: str, keep_query: bool) -> TestResult:
     # Fetch expected text.
     if self.test.expected_path:
       with open(self.test.expected_path, 'r') as expected_file:
@@ -267,6 +272,8 @@ class TestCaseRunner:
         tmp_perf_file.name,
         trace_path,
     ]
+    for sql_module_path in self.override_sql_module_paths:
+      cmd += ['--override-sql-module', sql_module_path]
     tp = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -274,7 +281,7 @@ class TestCaseRunner:
         env=get_env(ROOT_DIR))
     (stdout, stderr) = tp.communicate()
 
-    if not self.test.blueprint.is_query_file():
+    if not self.test.blueprint.is_query_file() and not keep_query:
       tmp_query_file.close()
       os.remove(tmp_query_file.name)
     perf_lines = [line.decode('utf8') for line in tmp_perf_file.readlines()]
@@ -322,6 +329,19 @@ class TestCaseRunner:
       with open(gen_trace_file.name, 'w') as trace_file:
         trace_file.write(self.test.blueprint.trace.contents)
 
+    if self.test.blueprint.trace_modifier is not None:
+      if gen_trace_file:
+        # Overwrite |gen_trace_file|.
+        modify_trace(self.trace_descriptor_path, extension_descriptor_paths,
+                     gen_trace_file.name, gen_trace_file.name,
+                     self.test.blueprint.trace_modifier)
+      else:
+        # Create |gen_trace_file| to save the modified trace.
+        gen_trace_file = tempfile.NamedTemporaryFile(delete=False)
+        modify_trace(self.trace_descriptor_path, extension_descriptor_paths,
+                     self.test.trace_path, gen_trace_file.name,
+                     self.test.blueprint.trace_modifier)
+
     if gen_trace_file:
       trace_path = os.path.realpath(gen_trace_file.name)
     else:
@@ -330,7 +350,7 @@ class TestCaseRunner:
     str = f"{self.colors.yellow('[ RUN      ]')} {self.test.name}\n"
 
     if self.test.type == TestType.QUERY:
-      result = self.__run_query_test(trace_path)
+      result = self.__run_query_test(trace_path, keep_input)
     elif self.test.type == TestType.METRIC:
       result = self.__run_metrics_test(
           trace_path,
@@ -348,7 +368,8 @@ class TestCaseRunner:
 
     def write_cmdlines():
       res = ""
-      if not gen_trace_file:
+      if self.test.trace_path and (self.test.trace_path.endswith('.textproto')
+                                   or self.test.trace_path.endswith('.py')):
         res += 'Command to generate trace:\n'
         res += 'tools/serialize_test_trace.py '
         res += '--descriptor {} {} > {}\n'.format(
@@ -359,6 +380,7 @@ class TestCaseRunner:
       return res
 
     if result.exit_code != 0 or not result.passed:
+      result.passed = False
       str += result.stderr
 
       if result.exit_code == 0:
@@ -380,11 +402,9 @@ class TestCaseRunner:
 
   # Run a TestCase.
   def execute(self, extension_descriptor_paths: List[str],
-              metrics_descriptor: str, keep_input: bool,
+              metrics_descriptor_paths: List[str], keep_input: bool,
               rebase: bool) -> Tuple[str, str, TestResult]:
-    if metrics_descriptor:
-      metrics_descriptor_paths = [metrics_descriptor]
-    else:
+    if not metrics_descriptor_paths:
       out_path = os.path.dirname(self.trace_processor_path)
       metrics_protos_path = os.path.join(out_path, 'gen', 'protos', 'perfetto',
                                          'metrics')
@@ -415,8 +435,9 @@ class DiffTestsRunner:
   test_runners: List[TestCaseRunner]
 
   def __init__(self, name_filter: str, trace_processor_path: str,
-               trace_descriptor: str, no_colors: bool):
-    self.tests = read_all_tests(name_filter, ROOT_DIR)
+               trace_descriptor: str, no_colors: bool,
+               override_sql_module_paths: List[str], test_dir: str):
+    self.tests = read_all_tests(name_filter, test_dir)
     self.trace_processor_path = trace_processor_path
 
     out_path = os.path.dirname(self.trace_processor_path)
@@ -427,26 +448,23 @@ class DiffTestsRunner:
     for test in self.tests:
       self.test_runners.append(
           TestCaseRunner(test, self.trace_processor_path,
-                         self.trace_descriptor_path, color_formatter))
+                         self.trace_descriptor_path, color_formatter,
+                         override_sql_module_paths))
 
-  def run_all_tests(self, metrics_descriptor: str, keep_input: bool,
+  def run_all_tests(self, metrics_descriptor_paths: List[str],
+                    chrome_extensions: str, test_extensions: str,
+                    winscope_extensions: str, keep_input: bool,
                     rebase: bool) -> TestResults:
     perf_results = []
     failures = []
     rebased = []
     test_run_start = datetime.datetime.now()
 
-    out_path = os.path.dirname(self.trace_processor_path)
-    chrome_extensions = os.path.join(out_path, 'gen', 'protos', 'third_party',
-                                     'chromium',
-                                     'chrome_track_event.descriptor')
-    test_extensions = os.path.join(out_path, 'gen', 'protos', 'perfetto',
-                                   'trace', 'test_extensions.descriptor')
-
     with concurrent.futures.ProcessPoolExecutor() as e:
       fut = [
-          e.submit(test.execute, [chrome_extensions, test_extensions],
-                   metrics_descriptor, keep_input, rebase)
+          e.submit(test.execute,
+                   [chrome_extensions, test_extensions, winscope_extensions],
+                   metrics_descriptor_paths, keep_input, rebase)
           for test in self.test_runners
       ]
       for res in concurrent.futures.as_completed(fut):

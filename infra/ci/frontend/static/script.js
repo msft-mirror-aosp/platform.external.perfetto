@@ -28,7 +28,6 @@ const JOB_TYPES = [
   { id: 'linux-clang-x86_64-bazel', label: 'bazel' },
   { id: 'ui-clang-x86_64-release', label: 'rel' },
   { id: 'android-clang-arm-release', label: 'rel' },
-  { id: 'android-clang-arm-asan', label: 'asan' },
 ];
 
 const STATS_LINK =
@@ -39,7 +38,8 @@ const state = {
   gerritCls: [],
 
   // A map of sha1 -> Gerrit commit object.
-  // See https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html#get-commit
+  // See
+  // https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html#get-commit
   gerritCommits: {},
 
   // A map of git-log ranges to commit objects:
@@ -56,7 +56,7 @@ const state = {
   // Maps 'worker id' -> DB wokrker object, as per /ci/workers.
   dbWorker: {},
 
-  // Maps 'master-YYMMDD' -> DB branch object, as perf /ci/branches/xxx.
+  // Maps 'main-YYMMDD' -> DB branch object, as per /ci/branches/xxx.
   dbBranches: {},
   getBranchKeys: () => Object.keys(state.dbBranches).sort().reverse(),
 
@@ -68,11 +68,10 @@ const state = {
 
   // Lines that will be appended to the terminal on the next redraw() cycle.
   termLines: [
-    'Hover a CL icon to see the log tail.',
-    'Click on it to load the full log.'
+    'Hover a CL icon to see the log tail.', 'Click on it to load the full log.'
   ],
-  termJobId: undefined, // The job id currently being shown by the terminal.
-  termClear: false,     // If true the next redraw will clear the terminal.
+  termJobId: undefined,  // The job id currently being shown by the terminal.
+  termClear: false,      // If true the next redraw will clear the terminal.
   redrawPending: false,
 
   // State for the Jobs page. These are arrays of job ids.
@@ -81,14 +80,14 @@ const state = {
   jobsRecent: [],
 
   // Firebase DB listeners (the objects returned by the .ref() operator).
-  realTimeLogRef: undefined, // Ref for the real-time log streaming.
+  realTimeLogRef: undefined,  // Ref for the real-time log streaming.
   workersRef: undefined,
   jobsRunningRef: undefined,
   jobsQueuedRef: undefined,
   jobsRecentRef: undefined,
-  clRefs: {},    // '1234-1' -> Ref subscribed to updates on the given cl.
-  jobRefs: {},   // '....-arm-asan' -> Ref subscribed updates on the given job.
-  branchRefs: {} // 'master' -> Ref subscribed updates on the given branch.
+  clRefs: {},     // '1234-1' -> Ref subscribed to updates on the given cl.
+  jobRefs: {},    // '....-arm-asan' -> Ref subscribed updates on the given job.
+  branchRefs: {}  // 'main' -> Ref subscribed updates on the given branch.
 };
 
 let term = undefined;
@@ -108,7 +107,7 @@ function main() {
 
   setInterval(fetchGerritCLs, 15000);
   fetchGerritCLs();
-  fetchCIStatusForBranch('master');
+  fetchCIStatusForBranch('main');
 }
 
 // -----------------------------------------------------------------------------
@@ -193,7 +192,7 @@ var CLsPageRenderer = {
                 m('td[rowspan=4]', 'Status'),
                 m('td[rowspan=4]', 'Owner'),
                 m('td[rowspan=4]', 'Updated'),
-                m('td[colspan=11]', 'Bots'),
+                m('td[colspan=10]', 'Bots'),
               ),
               m('tr',
                 m('td[colspan=9]', 'linux'),
@@ -203,7 +202,7 @@ var CLsPageRenderer = {
                 m('td', 'gcc7'),
                 m('td[colspan=7]', 'clang'),
                 m('td[colspan=1]', 'ui'),
-                m('td[colspan=2]', 'clang-arm'),
+                m('td[colspan=1]', 'clang-arm'),
               ),
               m('tr#cls_header',
                 JOB_TYPES.map(job => m(`td#${job.id}`, job.label))
@@ -232,7 +231,7 @@ function getLastUpdate(lastUpdate) {
     return lastUpdateMins + ' mins ago';
   if (lastUpdateMins < 60 * 24)
     return Math.ceil(lastUpdateMins / 60) + ' hours ago';
-  return lastUpdate.toLocaleDateString();
+  return lastUpdate.toISOString().substr(0, 10);
 }
 
 function renderCLRow(cl) {
@@ -562,7 +561,7 @@ function stripEmail(email) {
 async function fetchGerritCLs() {
   console.log('Fetching CL list from Gerrit');
   let uri = '/gerrit/changes/?-age:7days';
-  uri += '+-is:abandoned+branch:master&o=DETAILED_ACCOUNTS&o=CURRENT_REVISION';
+  uri += '+-is:abandoned+branch:main&o=DETAILED_ACCOUNTS&o=CURRENT_REVISION';
   const response = await fetch(uri);
   state.gerritCls = [];
   if (response.status !== 200) {
@@ -652,12 +651,16 @@ function fetchCIStatusForJob(jobId) {
 function fetchCIStatusForBranch(branch) {
   if (branch in state.branchRefs) return;  // Already have a listener.
   const db = firebase.database();
-  const ref = db.ref('/ci/branches').orderByKey().limitToLast(20);
+  const ref = db.ref('/ci/branches')
+                  .orderByKey()
+                  .startAt('main')
+                  .endAt('maio')
+                  .limitToLast(20);
   state.branchRefs[branch] = ref;
   ref.on('value', (e) => {
     const resp = e.val();
     if (!resp) return;
-    // key looks like 'master-YYYYMMDDHHMMSS', where YMD is the commit datetime.
+    // key looks like 'main-YYYYMMDDHHMMSS', where YMD is the commit datetime.
     // Iterate in most-recent-first order.
     const keys = Object.keys(resp).sort().reverse();
     for (let i = 0; i < keys.length; i++) {
