@@ -2769,6 +2769,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/wattson/arm_dsu.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_freq.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle_offsets.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/system_state.sql",
     ],
 )
@@ -3208,6 +3209,17 @@ perfetto_cc_proto_descriptor(
     ],
     outs = [
         "src/traceconv/trace.descriptor.h",
+    ],
+)
+
+# GN target: //src/traceconv:gen_cc_winscope_descriptor
+perfetto_cc_proto_descriptor(
+    name = "src_traceconv_gen_cc_winscope_descriptor",
+    deps = [
+        ":protos_perfetto_trace_android_winscope_descriptor",
+    ],
+    outs = [
+        "src/traceconv/winscope.descriptor.h",
     ],
 )
 
@@ -5002,6 +5014,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/compaction.proto",
         "protos/perfetto/trace/ftrace/cpuhp.proto",
         "protos/perfetto/trace/ftrace/cros_ec.proto",
+        "protos/perfetto/trace/ftrace/dcvsh.proto",
         "protos/perfetto/trace/ftrace/dma_fence.proto",
         "protos/perfetto/trace/ftrace/dmabuf_heap.proto",
         "protos/perfetto/trace/ftrace/dpu.proto",
@@ -5026,6 +5039,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
         "protos/perfetto/trace/ftrace/lowmemorykiller.proto",
@@ -6565,6 +6579,7 @@ perfetto_cc_binary(
                ":src_trace_processor_perfetto_sql_prelude_prelude",
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
                ":src_traceconv_gen_cc_trace_descriptor",
+               ":src_traceconv_gen_cc_winscope_descriptor",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
