@@ -31,8 +31,6 @@ namespace perfetto::trace_redaction {
 
 FtraceEventFilter::~FtraceEventFilter() = default;
 
-FtraceEventWriter::~FtraceEventWriter() = default;
-
 bool FilterFtracesUsingAllowlist::Includes(const Context& context,
                                            protozero::Field event) const {
   PERFETTO_DCHECK(!context.ftrace_packet_allow_list.empty());
@@ -84,12 +82,17 @@ bool FilterFtraceUsingSuspendResume::Includes(const Context&,
          kTimekeepingFreeze == action_str;
 }
 
-base::Status WriteFtracesPassthrough::WriteTo(
-    const Context&,
-    protozero::Field event,
-    protos::pbzero::FtraceEventBundle* message) const {
-  proto_util::AppendField(event, message);
-  return base::OkStatus();
+bool FilterRss::Includes(const Context& context, protozero::Field event) const {
+  protos::pbzero::FtraceEvent::Decoder event_decoder(event.as_bytes());
+
+  if (event_decoder.has_rss_stat_throttled() || event_decoder.has_rss_stat()) {
+    // The event's pid is unsigned, but tids are always signed.
+    auto pid = static_cast<int32_t>(event_decoder.pid());
+    return context.timeline->PidConnectsToUid(event_decoder.timestamp(), pid,
+                                              *context.package_uid);
+  }
+
+  return true;
 }
 
 base::Status RedactFtraceEvents::Transform(const Context& context,
@@ -98,7 +101,11 @@ base::Status RedactFtraceEvents::Transform(const Context& context,
     return base::ErrStatus("RedactFtraceEvents: null or empty packet.");
   }
 
-  if (!HasFtraceEvent(*packet)) {
+  protozero::ProtoDecoder packet_decoder(*packet);
+  auto ftrace_events = packet_decoder.FindField(
+      protos::pbzero::TracePacket::kFtraceEventsFieldNumber);
+
+  if (!ftrace_events.valid()) {
     return base::OkStatus();
   }
 
@@ -109,7 +116,7 @@ base::Status RedactFtraceEvents::Transform(const Context& context,
   for (auto it = decoder.ReadField(); it.valid(); it = decoder.ReadField()) {
     if (it.id() == protos::pbzero::TracePacket::kFtraceEventsFieldNumber) {
       RETURN_IF_ERROR(
-          OnFtraceEvents(context, it.as_bytes(), message->set_ftrace_events()));
+          OnFtraceEvents(context, it, message->set_ftrace_events()));
     } else {
       proto_util::AppendField(it, message.get());
     }
@@ -120,41 +127,17 @@ base::Status RedactFtraceEvents::Transform(const Context& context,
   return base::OkStatus();
 }
 
-bool RedactFtraceEvents::HasFtraceEvent(const std::string& bytes) const {
-  protozero::ProtoDecoder packet(bytes);
-
-  auto field =
-      packet.FindField(protos::pbzero::TracePacket::kFtraceEventsFieldNumber);
-
-  if (!field.valid()) {
-    return false;
-  }
-
-  protozero::ProtoDecoder events(field.as_bytes());
-
-  // Because kEventFieldNumber is a repeated field, FindField() doesn't work.
-  for (auto it = events.ReadField(); it.valid(); it = events.ReadField()) {
-    if (it.id() == protos::pbzero::FtraceEventBundle::kEventFieldNumber) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 base::Status RedactFtraceEvents::OnFtraceEvents(
     const Context& context,
-    protozero::ConstBytes bytes,
+    protozero::Field ftrace_events,
     protos::pbzero::FtraceEventBundle* message) const {
-  protozero::ProtoDecoder bundle(bytes);
+  protozero::ProtoDecoder decoder(ftrace_events.as_bytes());
 
-  for (auto it = bundle.ReadField(); it.valid(); it = bundle.ReadField()) {
-    if (it.id() == protos::pbzero::FtraceEventBundle::kEventFieldNumber) {
-      if (filter_->Includes(context, it)) {
-        RETURN_IF_ERROR(writer_->WriteTo(context, it, message));
-      }
-    } else {
-      proto_util::AppendField(it, message);
+  for (auto field = decoder.ReadField(); field.valid();
+       field = decoder.ReadField()) {
+    if (field.id() != protos::pbzero::FtraceEventBundle::kEventFieldNumber ||
+        filter_->Includes(context, field)) {
+      proto_util::AppendField(field, message);
     }
   }
 

@@ -36,9 +36,13 @@ source_set("trace_redaction") {
     "collect_timeline_events.h",
     "filter_packet_using_allowlist.cc",
     "filter_packet_using_allowlist.h",
+    "filtering.cc",
+    "filtering.h",
     "find_package_uid.cc",
     "find_package_uid.h",
     "frame_cookie.h",
+    "modify.cc",
+    "modify.h",
     "modify_process_trees.cc",
     "modify_process_trees.h",
     "populate_allow_lists.cc",
@@ -129,7 +133,6 @@ perfetto_unittest_source_set("unittests") {
     "prune_package_list_unittest.cc",
     "redact_process_events_unittest.cc",
     "redact_sched_events_unittest.cc",
-    "suspend_resume_unittest.cc",
     "verify_integrity_unittest.cc",
   ]
   deps = [
