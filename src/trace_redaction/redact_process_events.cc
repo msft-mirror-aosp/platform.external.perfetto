@@ -77,8 +77,8 @@ base::Status RedactProcessEvents::OnFtraceEvents(
 
   for (auto it = decoder.ReadField(); it.valid(); it = decoder.ReadField()) {
     if (it.id() == protos::pbzero::FtraceEventBundle::kEventFieldNumber) {
-      OnFtraceEvent(context, cpu.as_int32(), it.as_bytes(), &shared_comm,
-                    message->add_event());
+      RETURN_IF_ERROR(OnFtraceEvent(context, cpu.as_int32(), it.as_bytes(),
+                                    &shared_comm, message->add_event()));
     } else {
       proto_util::AppendField(it, message);
     }
@@ -87,11 +87,6 @@ base::Status RedactProcessEvents::OnFtraceEvents(
   return base::OkStatus();
 }
 
-// TODO(b/336807771): There is a pid on the ftrace event. This is the
-// process/thread invoking the action. In the case of a new task, its the
-// process/thread forking and starting the task. Becuase this case is so
-// common, if it needs to be modified (e.g. thread merging), it will behandled
-// there.
 base::Status RedactProcessEvents::OnFtraceEvent(
     const Context& context,
     int32_t cpu,
@@ -114,19 +109,19 @@ base::Status RedactProcessEvents::OnFtraceEvent(
   for (auto it = decoder.ReadField(); it.valid(); it = decoder.ReadField()) {
     switch (it.id()) {
       case protos::pbzero::FtraceEvent::kSchedProcessFreeFieldNumber:
-        OnProcessFree(context, ts.as_uint64(), cpu, it.as_bytes(), shared_comm,
-                      message);
+        RETURN_IF_ERROR(OnProcessFree(context, ts.as_uint64(), cpu,
+                                      it.as_bytes(), shared_comm, message));
         break;
       case protos::pbzero::FtraceEvent::kTaskNewtaskFieldNumber:
-        OnNewTask(context, ts.as_uint64(), cpu, it.as_bytes(), shared_comm,
-                  message);
+        RETURN_IF_ERROR(OnNewTask(context, ts.as_uint64(), cpu, it.as_bytes(),
+                                  shared_comm, message));
         break;
       case protos::pbzero::FtraceEvent::kTaskRenameFieldNumber:
-        OnProcessRename(context, ts.as_uint64(), cpu, it.as_bytes(),
-                        shared_comm, message);
+        RETURN_IF_ERROR(OnProcessRename(context, ts.as_uint64(), cpu,
+                                        it.as_bytes(), shared_comm, message));
         break;
       case protos::pbzero::FtraceEvent::kPrintFieldNumber:
-        OnPrint(context, ts.as_uint64(), bytes, message);
+        RETURN_IF_ERROR(OnPrint(context, ts.as_uint64(), bytes, message));
         break;
       default:
         proto_util::AppendField(it, message);
@@ -179,7 +174,7 @@ base::Status RedactProcessEvents::OnProcessFree(
   shared_comm->assign(comm.data, comm.size);
 
   PERFETTO_DCHECK(modifier_);
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, shared_comm));
+  modifier_->Modify(context, ts, cpu, &pid, shared_comm);
 
   auto* message = parent_message->set_sched_process_free();
   message->set_pid(pid);
@@ -225,9 +220,9 @@ base::Status RedactProcessEvents::OnNewTask(
         protos::pbzero::TaskNewtaskFtraceEvent::kPidFieldNumber);
   }
 
-  auto clone_flags = decoder.has_clone_flags();
+  auto clone_flags = decoder.clone_flags();
   auto comm = decoder.comm();
-  auto omm_score_adj = decoder.has_oom_score_adj();
+  auto omm_score_adj = decoder.oom_score_adj();
   auto pid = decoder.pid();
 
   PERFETTO_DCHECK(filter_);
@@ -238,7 +233,7 @@ base::Status RedactProcessEvents::OnNewTask(
   shared_comm->assign(comm.data, comm.size);
 
   PERFETTO_DCHECK(modifier_);
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, shared_comm));
+  modifier_->Modify(context, ts, cpu, &pid, shared_comm);
 
   auto* message = parent_message->set_task_newtask();
   message->set_clone_flags(clone_flags);
@@ -302,7 +297,7 @@ base::Status RedactProcessEvents::OnProcessRename(
   shared_comm->assign(old_comm.data, old_comm.size);
 
   PERFETTO_DCHECK(modifier_);
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &noop_pid, shared_comm));
+  modifier_->Modify(context, ts, cpu, &noop_pid, shared_comm);
 
   // Write the old-comm now so shared_comm can be used new-comm.
   message->set_oldcomm(*shared_comm);
@@ -310,7 +305,7 @@ base::Status RedactProcessEvents::OnProcessRename(
   shared_comm->assign(new_comm.data, new_comm.size);
 
   PERFETTO_DCHECK(modifier_);
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, shared_comm));
+  modifier_->Modify(context, ts, cpu, &pid, shared_comm);
 
   message->set_newcomm(*shared_comm);
 

@@ -91,16 +91,7 @@ static base::Status Main(std::string_view input,
   redact_process_events->emplace_modifier<ClearComms>();
   redact_process_events->emplace_filter<ConnectedToPackage>();
 
-  // TODO(vaage): The primitives used to implement thread merging do not work
-  // correctly with other primitives.
-  //
-  //    - ThreadMergeRemapFtraceEventPid
-  //    - ThreadMergeRemapSchedSwitchPid
-  //    - ThreadMergeRemapSchedWakingPid
-  //    - ThreadMergeDropField(kTaskNewtaskFieldNumber)
-  //    - ThreadMergeDropField(kSchedProcessFreeFieldNumber)
-  //
-  // Add these primitives back one-by-one to find the issue.
+  // TODO(vaage): Implement and add thread merging primitives.
 
   // Configure the primitive to remove processes and threads that don't belong
   // to the target package and adds a process and threads for the synth thread
@@ -108,7 +99,7 @@ static base::Status Main(std::string_view input,
   {
     auto* primitive = redactor.emplace_transform<RedactProcessTrees>();
     primitive->emplace_modifier<ProcessTreeCreateSynthThreads>();
-    primitive->emplace_filter<ProcessTreeFilterConnectedToPackage>();
+    primitive->emplace_filter<ConnectedToPackage>();
   }
 
   Context context;
