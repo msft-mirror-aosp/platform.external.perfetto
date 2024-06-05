@@ -15,7 +15,7 @@
 import {Draft} from 'immer';
 
 import {assertExists, assertTrue} from '../base/logging';
-import {duration, Time, time} from '../base/time';
+import {duration, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {
   GenericSliceDetailsTabConfig,
@@ -37,7 +37,6 @@ import {
   performReordering,
 } from './dragndrop_logic';
 import {createEmptyState} from './empty_state';
-import {defaultViewingOption} from './flamegraph_util';
 import {
   MetatraceTrackId,
   traceEventBegin,
@@ -47,9 +46,7 @@ import {
 import {
   AdbRecordingTarget,
   Area,
-  CallsiteInfo,
   EngineMode,
-  FlamegraphStateViewingOption,
   LoadedConfig,
   NewEngineMode,
   OmniboxMode,
@@ -637,13 +634,6 @@ export const StateActions = {
         type: args.type,
       },
     };
-    this.openFlamegraph(state, {
-      type: args.type,
-      start: Time.ZERO,
-      end: args.ts,
-      upids: [args.upid],
-      viewingOption: defaultViewingOption(args.type),
-    });
   },
 
   selectPerfSamples(
@@ -667,35 +657,6 @@ export const StateActions = {
         type: args.type,
       },
     };
-    this.openFlamegraph(state, {
-      type: args.type,
-      start: args.leftTs,
-      end: args.rightTs,
-      upids: [args.upid],
-      viewingOption: defaultViewingOption(args.type),
-    });
-  },
-
-  openFlamegraph(
-    state: StateDraft,
-    args: {
-      upids: number[];
-      start: time;
-      end: time;
-      type: ProfileType;
-      viewingOption: FlamegraphStateViewingOption;
-    },
-  ): void {
-    state.currentFlamegraphState = {
-      kind: 'FLAMEGRAPH_STATE',
-      upids: args.upids,
-      start: args.start,
-      end: args.end,
-      type: args.type,
-      viewingOption: args.viewingOption,
-      focusRegex: '',
-      expandedCallsiteByViewingOption: {},
-    };
   },
 
   selectCpuProfileSample(
@@ -713,43 +674,14 @@ export const StateActions = {
     };
   },
 
-  expandFlamegraphState(
-    state: StateDraft,
-    args: {
-      expandedCallsite?: CallsiteInfo;
-      viewingOption: FlamegraphStateViewingOption;
-    },
-  ): void {
-    if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.expandedCallsiteByViewingOption[
-      args.viewingOption
-    ] = args.expandedCallsite;
-  },
-
-  changeViewFlamegraphState(
-    state: StateDraft,
-    args: {viewingOption: FlamegraphStateViewingOption},
-  ): void {
-    if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.viewingOption = args.viewingOption;
-  },
-
-  changeFocusFlamegraphState(
-    state: StateDraft,
-    args: {focusRegex: string},
-  ): void {
-    if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.focusRegex = args.focusRegex;
-  },
-
-  selectChromeSlice(
+  selectSlice(
     state: StateDraft,
     args: {id: number; trackKey: string; table?: string; scroll?: boolean},
   ): void {
     state.selection = {
       kind: 'legacy',
       legacySelection: {
-        kind: 'CHROME_SLICE',
+        kind: 'SLICE',
         id: args.id,
         trackKey: args.trackKey,
         table: args.table,
