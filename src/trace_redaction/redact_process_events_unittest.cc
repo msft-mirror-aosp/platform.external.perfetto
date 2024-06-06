@@ -17,6 +17,7 @@
 #include "src/trace_redaction/redact_process_events.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "protos/perfetto/trace/ftrace/ftrace.gen.h"
+#include "protos/perfetto/trace/ftrace/power.gen.h"
 #include "protos/perfetto/trace/ftrace/sched.gen.h"
 #include "src/base/test/status_matchers.h"
 #include "test/gtest_and_gmock.h"
@@ -331,11 +332,12 @@ TEST_F(RedactProcessFree, DropsCommOutsidePackage) {
   ASSERT_TRUE(process_free.comm().empty());
 }
 
-TEST_F(RedactProcessFree, DropsCommAtProcessFree) {
+TEST_F(RedactProcessFree, KeepsCommAtProcessFree) {
   redact_.emplace_modifier<ClearComms>();
 
-  // The new task is for Pid A. Pid A is part of Uid A. Keep Uid A; But, Pid A
-  // ends at kTimeB (that's when the free event occurs). Drop comm.
+  // The new task is for Pid A. Pid A is part of Uid A. Keep Uid A; Process free
+  // marks the end of Pid A, but process free is inclusive and Pid A is only
+  // free after the event.
   context_.package_uid = kUidA;
 
   context_.timeline->Append(ProcessThreadTimeline::Event::Close(kTimeB, kPidA));
@@ -359,7 +361,7 @@ TEST_F(RedactProcessFree, DropsCommAtProcessFree) {
   ASSERT_EQ(process_free.pid(), kPidA);
 
   ASSERT_TRUE(process_free.has_comm());
-  ASSERT_TRUE(process_free.comm().empty());
+  ASSERT_EQ(process_free.comm(), kCommA);
 }
 
 TEST_F(RedactProcessFree, KeepTaskInPackage) {
@@ -542,6 +544,191 @@ TEST_F(RedactRenameTest, DropTaskOutsidePackage) {
   // The task should have been removed, but the event will still remain.
   const auto& event = packet.ftrace_events().event().at(0);
   ASSERT_FALSE(event.has_task_rename());
+}
+
+class RedactPrintTest : public testing::Test {
+ protected:
+  void SetUp() {
+    auto* events = packet_.mutable_ftrace_events();
+    events->set_cpu(kCpu);
+
+    auto* event = events->add_event();
+    event->set_timestamp(kTimeB);
+    event->set_pid(kPidA);
+
+    // The rename event pid will match the ftrace event pid.
+    auto* print = event->mutable_print();
+    print->set_buf(std::string(kCommA));
+    print->set_ip(0);
+
+    context_.timeline = std::make_unique<ProcessThreadTimeline>();
+
+    context_.timeline->Append(
+        ProcessThreadTimeline::Event::Open(kTimeA, kPidA, kNoParent, kUidA));
+    context_.timeline->Append(
+        ProcessThreadTimeline::Event::Open(kTimeA, kPidB, kNoParent, kUidB));
+    context_.timeline->Sort();
+
+    redact_.emplace_modifier<DoNothing>();
+    redact_.emplace_filter<AllowAll>();
+  }
+
+  RedactProcessEvents redact_;
+  protos::gen::TracePacket packet_;
+  Context context_;
+};
+
+TEST_F(RedactPrintTest, KeepTaskInsidePackage) {
+  redact_.emplace_filter<ConnectedToPackage>();
+
+  // The rename task is for Pid A. Pid A is part of Uid A. Keep Uid A; keep
+  // comm.
+  context_.package_uid = kUidA;
+
+  auto packet_str = packet_.SerializeAsString();
+  ASSERT_OK(redact_.Transform(context_, &packet_str));
+
+  protos::gen::TracePacket packet;
+  ASSERT_TRUE(packet.ParseFromString(packet_str));
+
+  ASSERT_TRUE(packet.has_ftrace_events());
+  ASSERT_EQ(packet.ftrace_events().event().size(), 1u);
+
+  const auto& event = packet.ftrace_events().event().at(0);
+  ASSERT_TRUE(event.has_print());
+}
+
+TEST_F(RedactPrintTest, DropTaskOutsidePackage) {
+  redact_.emplace_filter<ConnectedToPackage>();
+
+  // The rename task is for Pid A. Pid A is part of Uid A. Keep Uid B; drop
+  // task.
+  context_.package_uid = kUidB;
+
+  auto packet_str = packet_.SerializeAsString();
+  ASSERT_OK(redact_.Transform(context_, &packet_str));
+
+  protos::gen::TracePacket packet;
+  ASSERT_TRUE(packet.ParseFromString(packet_str));
+
+  ASSERT_TRUE(packet.has_ftrace_events());
+  ASSERT_EQ(packet.ftrace_events().event().size(), 1u);
+
+  // The task should have been removed, but the event will still remain.
+  const auto& event = packet.ftrace_events().event().at(0);
+  ASSERT_FALSE(event.has_print());
+}
+
+class RedactSuspendResumeTest : public testing::Test {
+ protected:
+  void SetUp() {
+    auto* events = packet_.mutable_ftrace_events();
+    events->set_cpu(kCpu);
+
+    for (const auto& action : {"syscore_suspend", "syscore_resume",
+                               "timekeeping_freeze", "not-allowed"}) {
+      auto* event = events->add_event();
+      event->set_timestamp(kTimeB);
+      event->set_pid(kPidA);
+
+      auto* suspend_resume = event->mutable_suspend_resume();
+      suspend_resume->set_action(action);
+      suspend_resume->set_start(0);
+      suspend_resume->set_val(3);
+    }
+
+    context_.timeline = std::make_unique<ProcessThreadTimeline>();
+
+    context_.timeline->Append(
+        ProcessThreadTimeline::Event::Open(kTimeA, kPidA, kNoParent, kUidA));
+    context_.timeline->Append(
+        ProcessThreadTimeline::Event::Open(kTimeA, kPidB, kNoParent, kUidB));
+    context_.timeline->Sort();
+
+    redact_.emplace_modifier<DoNothing>();
+    redact_.emplace_filter<AllowAll>();
+  }
+
+  RedactProcessEvents redact_;
+  protos::gen::TracePacket packet_;
+  Context context_;
+};
+
+TEST_F(RedactSuspendResumeTest, KeepTaskInsidePackage) {
+  redact_.emplace_filter<ConnectedToPackage>();
+
+  context_.package_uid = kUidA;
+
+  auto packet_str = packet_.SerializeAsString();
+  ASSERT_OK(redact_.Transform(context_, &packet_str));
+
+  protos::gen::TracePacket packet;
+  ASSERT_TRUE(packet.ParseFromString(packet_str));
+
+  ASSERT_TRUE(packet.has_ftrace_events());
+  ASSERT_EQ(packet.ftrace_events().event().size(), 4u);
+}
+
+// Only actions in the allowlist should be allowed.
+//
+// TODO(vaage): The allowlist is not configurable right now. If moved into the
+// context, it could be configured.
+TEST_F(RedactSuspendResumeTest, FiltersByAllowlist) {
+  redact_.emplace_filter<ConnectedToPackage>();
+
+  context_.package_uid = kUidA;
+
+  auto packet_str = packet_.SerializeAsString();
+  ASSERT_OK(redact_.Transform(context_, &packet_str));
+
+  protos::gen::TracePacket packet;
+  ASSERT_TRUE(packet.ParseFromString(packet_str));
+
+  ASSERT_TRUE(packet.has_ftrace_events());
+  ASSERT_EQ(packet.ftrace_events().event().size(), 4u);
+
+  {
+    const auto& event = packet.ftrace_events().event().at(0);
+    ASSERT_TRUE(event.has_suspend_resume());
+    ASSERT_EQ(event.suspend_resume().action(), "syscore_suspend");
+  }
+
+  {
+    const auto& event = packet.ftrace_events().event().at(1);
+    ASSERT_TRUE(event.has_suspend_resume());
+    ASSERT_EQ(event.suspend_resume().action(), "syscore_resume");
+  }
+
+  {
+    const auto& event = packet.ftrace_events().event().at(2);
+    ASSERT_TRUE(event.has_suspend_resume());
+    ASSERT_EQ(event.suspend_resume().action(), "timekeeping_freeze");
+  }
+
+  // The fourth entry is an invalid action. While the other entries are valid
+  // and are retained, this one should be dropped.
+  ASSERT_FALSE(packet.ftrace_events().event().at(3).has_suspend_resume());
+}
+
+TEST_F(RedactSuspendResumeTest, DropTaskOutsidePackage) {
+  redact_.emplace_filter<ConnectedToPackage>();
+
+  context_.package_uid = kUidB;
+
+  auto packet_str = packet_.SerializeAsString();
+  ASSERT_OK(redact_.Transform(context_, &packet_str));
+
+  protos::gen::TracePacket packet;
+  ASSERT_TRUE(packet.ParseFromString(packet_str));
+
+  ASSERT_TRUE(packet.has_ftrace_events());
+  ASSERT_EQ(packet.ftrace_events().event().size(), 4u);
+
+  // The task should have been removed, but the event will still remain.
+  ASSERT_FALSE(packet.ftrace_events().event().at(0).has_suspend_resume());
+  ASSERT_FALSE(packet.ftrace_events().event().at(1).has_suspend_resume());
+  ASSERT_FALSE(packet.ftrace_events().event().at(2).has_suspend_resume());
+  ASSERT_FALSE(packet.ftrace_events().event().at(3).has_suspend_resume());
 }
 
 }  // namespace perfetto::trace_redaction

@@ -14,30 +14,36 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_REDACTION_SUSPEND_RESUME_H_
-#define SRC_TRACE_REDACTION_SUSPEND_RESUME_H_
+#include <cstdint>
 
-#include "src/trace_redaction/scrub_ftrace_events.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
+
+#ifndef SRC_TRACE_REDACTION_FILTERING_H_
+#define SRC_TRACE_REDACTION_FILTERING_H_
 
 namespace perfetto::trace_redaction {
 
-// Updates allowlists to include suspend-resume events and which events to allow
-// through.
-class AllowSuspendResume : public BuildPrimitive {
+class PidFilter {
  public:
-  base::Status Build(Context* context) const override;
+  virtual ~PidFilter();
+
+  virtual bool Includes(const Context& context,
+                        uint64_t ts,
+                        int32_t pid) const = 0;
 };
 
-// Filters ftrace events based on the suspend-resume event.
-class FilterSuspendResume : public FtraceEventFilter {
+class ConnectedToPackage : public PidFilter {
  public:
-  base::Status VerifyContext(const Context& context) const override;
+  bool Includes(const Context& context,
+                uint64_t ts,
+                int32_t pid) const override;
+};
 
-  bool KeepEvent(const Context& context,
-                 protozero::ConstBytes bytes) const override;
+class AllowAll : public PidFilter {
+ public:
+  bool Includes(const Context&, uint64_t, int32_t) const override;
 };
 
 }  // namespace perfetto::trace_redaction
 
-#endif  // SRC_TRACE_REDACTION_SUSPEND_RESUME_H_
+#endif  // SRC_TRACE_REDACTION_FILTERING_H_

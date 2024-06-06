@@ -106,10 +106,6 @@ std::string_view InternTable::Find(size_t index) const {
 // collection of ftrace event messages) because data in a sched_switch message
 // is needed in order to know if the event should be added to the bundle.
 
-SchedEventModifier::~SchedEventModifier() = default;
-
-SchedEventFilter::~SchedEventFilter() = default;
-
 base::Status RedactSchedEvents::Transform(const Context& context,
                                           std::string* packet) const {
   PERFETTO_DCHECK(modifier_);
@@ -268,7 +264,7 @@ base::Status RedactSchedEvents::OnFtraceEventSwitch(
 
   scratch_str->assign(prev_comm.data, prev_comm.size);
 
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &prev_pid, scratch_str));
+  modifier_->Modify(context, ts, cpu, &prev_pid, scratch_str);
 
   message->set_prev_comm(*scratch_str);                // FieldNumber = 1
   message->set_prev_pid(prev_pid);                     // FieldNumber = 2
@@ -277,7 +273,7 @@ base::Status RedactSchedEvents::OnFtraceEventSwitch(
 
   scratch_str->assign(next_comm.data, next_comm.size);
 
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &next_pid, scratch_str));
+  modifier_->Modify(context, ts, cpu, &next_pid, scratch_str);
 
   message->set_next_comm(*scratch_str);              // FieldNumber = 5
   message->set_next_pid(next_pid);                   // FieldNumber = 6
@@ -334,7 +330,7 @@ base::Status RedactSchedEvents::OnFtraceEventWaking(
 
   scratch_str->assign(comm.data, comm.size);
 
-  RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, scratch_str));
+  modifier_->Modify(context, ts, cpu, &pid, scratch_str);
 
   auto message = parent_message->set_sched_waking();
   message->set_comm(*scratch_str);                     // FieldNumber = 1
@@ -447,7 +443,7 @@ base::Status RedactSchedEvents::OnCompSchedSwitch(
 
     scratch_str.assign(comm);
 
-    RETURN_IF_ERROR(modifier_->Modify(context, ts, cpu, &pid, &scratch_str));
+    modifier_->Modify(context, ts, cpu, &pid, &scratch_str);
 
     auto found = intern_table->Push(scratch_str.data(), scratch_str.size());
 
@@ -625,43 +621,6 @@ base::Status RedactSchedEvents::OnCompactSchedWaking(
   compact_sched_message->set_waking_timestamp(var_timestamp);
 
   return base::OkStatus();
-}
-
-// Switch event transformation: Clear the comm value if the thread/process is
-// not part of the target packet.
-base::Status ClearComms::Modify(const Context& context,
-                                uint64_t ts,
-                                int32_t,
-                                int32_t* pid,
-                                std::string* comm) const {
-  PERFETTO_DCHECK(pid);
-  PERFETTO_DCHECK(comm);
-
-  if (!context.timeline->PidConnectsToUid(ts, *pid, *context.package_uid)) {
-    comm->clear();
-  }
-
-  return base::OkStatus();
-}
-
-base::Status DoNothing::Modify(const Context&,
-                               uint64_t,
-                               int32_t,
-                               int32_t*,
-                               std::string*) const {
-  return base::OkStatus();
-}
-
-bool ConnectedToPackage::Includes(const Context& context,
-                                  uint64_t ts,
-                                  int32_t wakee) const {
-  PERFETTO_DCHECK(context.package_uid.has_value());
-
-  return context.timeline->PidConnectsToUid(ts, wakee, *context.package_uid);
-}
-
-bool AllowAll::Includes(const Context&, uint64_t, int32_t) const {
-  return true;
 }
 
 }  // namespace perfetto::trace_redaction
