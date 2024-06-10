@@ -28,7 +28,6 @@ import {
   selectionToLegacySelection,
   Selection,
   LegacySelection,
-  ProfileType,
 } from '../core/selection_manager';
 
 export {
@@ -42,7 +41,7 @@ export {
   LegacySelection,
   AreaSelection,
   ProfileType,
-  ChromeSliceSelection,
+  ThreadSliceSelection,
   CpuProfileSampleSelection,
 } from '../core/selection_manager';
 
@@ -80,8 +79,6 @@ export interface VisibleState extends Timestamped {
   end: time;
   resolution: duration;
 }
-
-export type AreaById = Area & {id: string};
 
 export interface Area {
   start: time;
@@ -152,7 +149,12 @@ export const MAX_TIME = 180;
 // 53. Remove android log state.
 // 54. Remove traceTime.
 // 55. Rename TrackGroupState.id -> TrackGroupState.key.
-export const STATE_VERSION = 55;
+// 56. Renamed chrome slice to thread slice everywhere.
+// 57. Remove flamegraph related code from state.
+// 58. Remove area map.
+// 59. Deprecate old area selection type.
+// 60. Deprecate old note selection type.
+export const STATE_VERSION = 60;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -187,56 +189,6 @@ export type UtidToTrackSortKey = {
     sortKey: PrimaryTrackSortKey;
   };
 };
-
-export enum FlamegraphStateViewingOption {
-  SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY = 'SPACE',
-  ALLOC_SPACE_MEMORY_ALLOCATED_KEY = 'ALLOC_SPACE',
-  OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS',
-  OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS',
-  PERF_SAMPLES_KEY = 'PERF_SAMPLES',
-  DOMINATOR_TREE_OBJ_SIZE_KEY = 'DOMINATED_OBJ_SIZE',
-  DOMINATOR_TREE_OBJ_COUNT_KEY = 'DOMINATED_OBJ_COUNT',
-}
-
-const HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS = [
-  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_SIZE_KEY,
-  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_COUNT_KEY,
-] as const;
-
-export type HeapGraphDominatorTreeViewingOption =
-  (typeof HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS)[number];
-
-export function isHeapGraphDominatorTreeViewingOption(
-  option: FlamegraphStateViewingOption,
-): option is HeapGraphDominatorTreeViewingOption {
-  return (
-    HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS as readonly FlamegraphStateViewingOption[]
-  ).includes(option);
-}
-
-export interface FlamegraphState {
-  kind: 'FLAMEGRAPH_STATE';
-  upids: number[];
-  start: time;
-  end: time;
-  type: ProfileType;
-  viewingOption: FlamegraphStateViewingOption;
-  focusRegex: string;
-  expandedCallsiteByViewingOption: {[key: string]: CallsiteInfo | undefined};
-}
-
-export interface CallsiteInfo {
-  id: number;
-  parentId: number;
-  depth: number;
-  name?: string;
-  totalSize: number;
-  selfSize: number;
-  mapping: string;
-  merged: boolean;
-  highlighted: boolean;
-  location?: string;
-}
 
 export interface TraceFileSource {
   type: 'FILE';
@@ -328,10 +280,11 @@ export interface Note {
   text: string;
 }
 
-export interface AreaNote {
-  noteType: 'AREA';
+export interface SpanNote {
+  noteType: 'SPAN';
   id: string;
-  areaId: string;
+  start: time;
+  end: time;
   color: string;
   text: string;
 }
@@ -386,7 +339,8 @@ export interface PivotTableResult {
 
 // Input parameters to check whether the pivot table needs to be re-queried.
 export interface PivotTableAreaState {
-  areaId: string;
+  start: time;
+  end: time;
   tracks: string[];
 }
 
@@ -474,18 +428,17 @@ export interface State {
   trackGroups: ObjectByKey<TrackGroupState>;
   tracks: ObjectByKey<TrackState>;
   utidToThreadSortKey: UtidToTrackSortKey;
-  areas: ObjectById<AreaById>;
   aggregatePreferences: ObjectById<AggregationState>;
   scrollingTracks: string[];
   pinnedTracks: string[];
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
   queries: ObjectById<QueryConfig>;
-  notes: ObjectById<Note | AreaNote>;
+  notes: ObjectById<Note | SpanNote>;
   status: Status;
   selection: Selection;
-  currentFlamegraphState: FlamegraphState | null;
   traceConversionInProgress: boolean;
+  flamegraphModalDismissed: boolean;
 
   /**
    * This state is updated on the frontend at 60Hz and eventually syncronised to
@@ -521,7 +474,6 @@ export interface State {
   recordingInProgress: boolean;
   recordingCancelled: boolean;
   extensionInstalled: boolean;
-  flamegraphModalDismissed: boolean;
   recordingTarget: RecordingTarget;
   availableAdbDevices: AdbRecordingTarget[];
   lastRecordingError?: string;

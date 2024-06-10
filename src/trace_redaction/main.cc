@@ -19,26 +19,20 @@
 #include "src/trace_redaction/collect_frame_cookies.h"
 #include "src/trace_redaction/collect_system_info.h"
 #include "src/trace_redaction/collect_timeline_events.h"
-#include "src/trace_redaction/filter_ftrace_using_allowlist.h"
 #include "src/trace_redaction/filter_packet_using_allowlist.h"
-#include "src/trace_redaction/filter_print_events.h"
-#include "src/trace_redaction/filter_sched_waking_events.h"
-#include "src/trace_redaction/filter_task_rename.h"
 #include "src/trace_redaction/find_package_uid.h"
+#include "src/trace_redaction/merge_threads.h"
 #include "src/trace_redaction/populate_allow_lists.h"
 #include "src/trace_redaction/prune_package_list.h"
-#include "src/trace_redaction/redact_ftrace_event.h"
-#include "src/trace_redaction/redact_sched_switch.h"
-#include "src/trace_redaction/redact_task_newtask.h"
-#include "src/trace_redaction/remap_scheduling_events.h"
-#include "src/trace_redaction/remove_process_free_comm.h"
-#include "src/trace_redaction/scrub_ftrace_events.h"
+#include "src/trace_redaction/redact_ftrace_events.h"
+#include "src/trace_redaction/redact_process_events.h"
+#include "src/trace_redaction/redact_process_trees.h"
+#include "src/trace_redaction/redact_sched_events.h"
 #include "src/trace_redaction/scrub_process_stats.h"
-#include "src/trace_redaction/scrub_process_trees.h"
 #include "src/trace_redaction/scrub_trace_packet.h"
-#include "src/trace_redaction/suspend_resume.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 #include "src/trace_redaction/trace_redactor.h"
+#include "src/trace_redaction/verify_integrity.h"
 
 namespace perfetto::trace_redaction {
 
@@ -48,6 +42,12 @@ static base::Status Main(std::string_view input,
                          std::string_view package_name) {
   TraceRedactor redactor;
 
+  // VerifyIntegrity breaks the CollectPrimitive pattern. Instead of writing to
+  // the context, its job is to read trace packets and return errors if any
+  // packet does not look "correct". This primitive is added first in an effort
+  // to detect and react to bad input before other collectors run.
+  redactor.emplace_collect<VerifyIntegrity>();
+
   // Add all collectors.
   redactor.emplace_collect<FindPackageUid>();
   redactor.emplace_collect<CollectTimelineEvents>();
@@ -56,62 +56,105 @@ static base::Status Main(std::string_view input,
 
   // Add all builders.
   redactor.emplace_build<PopulateAllowlists>();
-  redactor.emplace_build<AllowSuspendResume>();
   redactor.emplace_build<ReduceFrameCookies>();
   redactor.emplace_build<BuildSyntheticThreads>();
 
-  // Add all transforms.
-  auto* scrub_packet = redactor.emplace_transform<ScrubTracePacket>();
-  scrub_packet->emplace_back<FilterPacketUsingAllowlist>();
-  scrub_packet->emplace_back<FilterFrameEvents>();
+  {
+    auto* primitive = redactor.emplace_transform<ScrubTracePacket>();
+    primitive->emplace_back<FilterPacketUsingAllowlist>();
+    primitive->emplace_back<FilterFrameEvents>();
+  }
 
-  auto* scrub_ftrace_events = redactor.emplace_transform<ScrubFtraceEvents>();
-  scrub_ftrace_events->emplace_back<FilterFtraceUsingAllowlist>();
-  scrub_ftrace_events->emplace_back<FilterPrintEvents>();
-  scrub_ftrace_events->emplace_back<FilterSchedWakingEvents>();
-  scrub_ftrace_events->emplace_back<FilterTaskRename>();
-  scrub_ftrace_events->emplace_back<FilterSuspendResume>();
+  {
+    auto* primitive = redactor.emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_ftrace_filter<FilterFtracesUsingAllowlist>();
+    primitive->emplace_post_filter_modifier<DoNothing>();
+  }
 
-  // Scrub packets and ftrace events first as they will remove the largest
-  // chucks of data from the trace. This will reduce the amount of data that the
-  // other primitives need to operate on.
-  redactor.emplace_transform<ScrubProcessTrees>();
+  {
+    auto* primitive = redactor.emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_ftrace_filter<FilterRss>();
+    primitive->emplace_post_filter_modifier<DoNothing>();
+  }
+
+  {
+    auto* primitive = redactor.emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_ftrace_filter<FilterFtraceUsingSuspendResume>();
+    primitive->emplace_post_filter_modifier<DoNothing>();
+  }
+
   redactor.emplace_transform<PrunePackageList>();
-  redactor.emplace_transform<ScrubProcessStats>();
 
-  auto* comms_harness = redactor.emplace_transform<RedactSchedSwitchHarness>();
-  comms_harness->emplace_transform<ClearComms>();
+  // Process stats includes per-process information, such as:
+  //
+  //   processes {
+  //   pid: 1
+  //   vm_size_kb: 11716992
+  //   vm_rss_kb: 5396
+  //   rss_anon_kb: 2896
+  //   rss_file_kb: 1728
+  //   rss_shmem_kb: 772
+  //   vm_swap_kb: 4236
+  //   vm_locked_kb: 0
+  //   vm_hwm_kb: 6720
+  //   oom_score_adj: -1000
+  // }
+  //
+  // Use the ConnectedToPackage primitive to ensure only the target package has
+  // stats in the trace.
+  {
+    auto* primitive = redactor.emplace_transform<ScrubProcessStats>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
 
-  auto* redact_ftrace_events = redactor.emplace_transform<RedactFtraceEvent>();
-  redact_ftrace_events
-      ->emplace_back<RemoveProcessFreeComm::kFieldId, RemoveProcessFreeComm>();
+  // Redacts all switch and waking events. This should use the same modifier and
+  // filter as the process events (see below).
+  {
+    auto* primitive = redactor.emplace_transform<RedactSchedEvents>();
+    primitive->emplace_modifier<ClearComms>();
+    primitive->emplace_waking_filter<ConnectedToPackage>();
+  }
 
-  // By default, the comm value is cleared. However, when thread merging is
-  // enabled (kTaskNewtaskFieldNumber + ThreadMergeDropField), the event is
-  // dropped, meaning that this primitive was effectivly a no-op. This primitive
-  // remains so that removing thread merging won't leak thread names via new
-  // task events.
-  auto* redact_new_task =
-      redact_ftrace_events
-          ->emplace_back<RedactTaskNewTask::kFieldId, RedactTaskNewTask>();
-  redact_new_task->emplace_back<ClearComms>();
+  // Redacts all new task, rename task, process free events. This should use the
+  // same modifier and filter as the schedule events (see above).
+  {
+    auto* primitive = redactor.emplace_transform<RedactProcessEvents>();
+    primitive->emplace_modifier<ClearComms>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
 
-  // This set of transformations will change pids. This will break the
-  // connections between pids and the timeline (the synth threads are not in the
-  // timeline). If a transformation uses the timeline, it must be before this
-  // transformation.
-  auto* redact_sched_events = redactor.emplace_transform<RedactFtraceEvent>();
-  redact_sched_events->emplace_back<ThreadMergeRemapFtraceEventPid::kFieldId,
-                                    ThreadMergeRemapFtraceEventPid>();
-  redact_sched_events->emplace_back<ThreadMergeRemapSchedSwitchPid::kFieldId,
-                                    ThreadMergeRemapSchedSwitchPid>();
-  redact_sched_events->emplace_back<ThreadMergeRemapSchedWakingPid::kFieldId,
-                                    ThreadMergeRemapSchedWakingPid>();
-  redact_sched_events->emplace_back<
-      ThreadMergeDropField::kTaskNewtaskFieldNumber, ThreadMergeDropField>();
-  redact_sched_events
-      ->emplace_back<ThreadMergeDropField::kSchedProcessFreeFieldNumber,
-                     ThreadMergeDropField>();
+  // Merge Threads (part 1): Remove all waking events that connected to the
+  // target package. Change the pids not connected to the target package.
+  {
+    auto* primitive = redactor.emplace_transform<RedactSchedEvents>();
+    primitive->emplace_modifier<MergeThreadsPids>();
+    primitive->emplace_waking_filter<ConnectedToPackage>();
+  }
+
+  // Merge Threads (part 2): Drop all process events not belonging to the
+  // target package. No modification is needed.
+  {
+    auto* primitive = redactor.emplace_transform<RedactProcessEvents>();
+    primitive->emplace_modifier<DoNothing>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
+
+  // Merge Threads (part 3): Replace ftrace event's pid (not the task's pid)
+  // for all pids not connected to the target package.
+  {
+    auto* primitive = redactor.emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_post_filter_modifier<MergeThreadsPids>();
+    primitive->emplace_ftrace_filter<AllowAll>();
+  }
+
+  // Configure the primitive to remove processes and threads that don't belong
+  // to the target package and adds a process and threads for the synth thread
+  // group and threads.
+  {
+    auto* primitive = redactor.emplace_transform<RedactProcessTrees>();
+    primitive->emplace_modifier<ProcessTreeCreateSynthThreads>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
 
   Context context;
   context.package_name = package_name;
