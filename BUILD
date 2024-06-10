@@ -1803,6 +1803,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/additional_modules.h",
         "src/trace_processor/importers/proto/android_camera_event_module.cc",
         "src/trace_processor/importers/proto/android_camera_event_module.h",
+        "src/trace_processor/importers/proto/android_input_event_module.cc",
+        "src/trace_processor/importers/proto/android_input_event_module.h",
         "src/trace_processor/importers/proto/android_probes_module.cc",
         "src/trace_processor/importers/proto/android_probes_module.h",
         "src/trace_processor/importers/proto/android_probes_parser.cc",
@@ -2389,6 +2391,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.cc",
         "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.h",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.h",
         "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.cc",
         "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.h",
         "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.cc",
@@ -2767,9 +2771,8 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_wattson_wattson",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/wattson/arm_dsu.sql",
-        "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_freq.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle.sql",
-        "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle_offsets.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/device_infos.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/system_state.sql",
     ],
 )

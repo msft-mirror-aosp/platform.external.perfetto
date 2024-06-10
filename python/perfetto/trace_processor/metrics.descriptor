@@ -182,20 +182,19 @@ Rprotos/perfetto/metrics/android/sysui_update_notif_on_ui_mode_changed_metric.pr
 name (	Rname
 dur_ms (RdurMs
 dur_ns (RdurNs
-“
-6protos/perfetto/metrics/android/process_metadata.protoperfetto.protos"Ü
+˝
+6protos/perfetto/metrics/android/process_metadata.protoperfetto.protos"±
 AndroidProcessMetadata
 name (	Rname
 uid (RuidI
-package (2/.perfetto.protos.AndroidProcessMetadata.PackageRpackageY
-packages_for_uid (2/.perfetto.protos.AndroidProcessMetadata.PackageRpackagesForUid
+package (2/.perfetto.protos.AndroidProcessMetadata.PackageRpackage
 pid	 (Rpidv
 Package!
 package_name (	RpackageName(
 apk_version_code (RapkVersionCode
 
 debuggable (R
-debuggableJJJJ
+debuggableJJJJJ	
 Ÿ
 Cprotos/perfetto/metrics/android/android_frame_timeline_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"»
 AndroidFrameTimelineMetric!
@@ -992,8 +991,8 @@ maxRuntime$
 name (	RnameY
 threads (2?.perfetto.protos.AndroidSimpleperfMetric.PerfEventMetric.ThreadRthreads
 total (Rtotal
-ÑC
-4protos/perfetto/metrics/android/startup_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"ÇB
+èC
+4protos/perfetto/metrics/android/startup_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"çB
 AndroidStartupMetricG
 startup (2-.perfetto.protos.AndroidStartupMetric.StartupRstartupÛ
 TaskStateBreakdown$
@@ -1122,17 +1121,18 @@ launch_dur (R	launchDur
 BROADCAST_DISPATCHED_COUNT
 BROADCAST_RECEIVED_COUNT
 STARTUP_RUNNING_CONCURRENT+
-'MAIN_THREAD_BINDER_TRANSCATIONS_BLOCKEDÉ
+'MAIN_THREAD_BINDER_TRANSCATIONS_BLOCKEDé
 ThresholdValue
 value (RvalueV
 unit (2B.perfetto.protos.AndroidStartupMetric.ThresholdValue.ThresholdUnitRunit'
-higher_expected (RhigherExpected"Z
+higher_expected (RhigherExpected"e
 ThresholdUnit
 THRESHOLD_UNIT_UNSPECIFIED 
 NS
 
 PERCENTAGE
-TRUE_OR_FALSE5
+TRUE_OR_FALSE	
+COUNT5
 ActualValue
 value (Rvalue
 dur (Rdur|
