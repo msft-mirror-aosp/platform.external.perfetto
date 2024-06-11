@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-syntax = "proto2";
-
-package perfetto.protos;
-
-message WinscopeExtensions {
-  extensions 1 to 5;
+int main(int, char**) {
+  return 0;
 }
