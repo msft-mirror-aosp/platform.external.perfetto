@@ -46,11 +46,6 @@ android_startup {
         apk_version_code: 123
         debuggable: false
       }
-      packages_for_uid {
-        package_name: "com.google.android.calendar"
-        apk_version_code: 123
-        debuggable: false
-      }
       pid: 3
     }
     event_timestamps {
@@ -69,6 +64,15 @@ android_startup {
     slow_start_reason_with_details {
       reason_id: MAIN_THREAD_TIME_SPENT_IN_RUNNABLE
       reason: "Main Thread - Time spent in Runnable state"
+      expected_value {
+        value: 15
+        unit: PERCENTAGE
+        higher_expected: false
+      }
+      actual_value {
+        value: 57
+        dur: 4
+      }
       launch_dur: 7
     }
   }
@@ -120,11 +124,6 @@ android_startup {
         apk_version_code: 123
         debuggable: false
       }
-      packages_for_uid {
-        package_name: "com.google.android.calendar"
-        apk_version_code: 123
-        debuggable: false
-      }
       pid: 4
     }
     event_timestamps {
@@ -143,6 +142,15 @@ android_startup {
     slow_start_reason_with_details {
       reason_id: MAIN_THREAD_TIME_SPENT_IN_RUNNABLE
       reason: "Main Thread - Time spent in Runnable state"
+      expected_value {
+        value: 15
+        unit: PERCENTAGE
+        higher_expected: false
+      }
+      actual_value {
+        value: 57
+        dur: 4
+      }
       launch_dur: 7
     }
   }

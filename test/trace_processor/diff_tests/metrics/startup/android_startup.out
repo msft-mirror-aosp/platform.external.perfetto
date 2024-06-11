@@ -42,11 +42,6 @@ android_startup {
         apk_version_code: 123
         debuggable: false
       }
-      packages_for_uid {
-        package_name: "com.google.android.calendar"
-        apk_version_code: 123
-        debuggable: false
-      },
       pid: 3
     }
     report_fully_drawn {
@@ -70,6 +65,15 @@ android_startup {
     slow_start_reason_with_details {
       reason_id: MAIN_THREAD_TIME_SPENT_IN_RUNNABLE
       reason: "Main Thread - Time spent in Runnable state"
+      expected_value {
+        value: 15
+        unit: PERCENTAGE
+        higher_expected: false
+      }
+      actual_value {
+        value: 74
+        dur: 80
+      }
       launch_dur: 108
     }
     startup_type: "warm"

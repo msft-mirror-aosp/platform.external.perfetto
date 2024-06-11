@@ -64,6 +64,19 @@
                           PERFETTO_NULL)                               \
   }
 
+// Implementation of the PERFETTO_TE macro. If `CAT` is enabled, emits the
+// tracing event specified by the params.
+//
+// Uses `?:` instead of `if` because this might be used as an expression, where
+// statements are not allowed.
+#define PERFETTO_I_TE_IMPL(CAT, ...)                                    \
+  ((PERFETTO_UNLIKELY(PERFETTO_ATOMIC_LOAD_EXPLICIT(                    \
+       (CAT).enabled, PERFETTO_MEMORY_ORDER_RELAXED)))                  \
+       ? (PerfettoTeHlCall((CAT).impl,                                  \
+                           PERFETTO_I_TE_HL_MACRO_PARAMS(__VA_ARGS__)), \
+          0)                                                            \
+       : 0)
+
 #ifndef __cplusplus
 #define PERFETTO_I_TE_COMPOUND_LITERAL_ADDR(STRUCT, ...) \
   &(struct STRUCT)__VA_ARGS__
@@ -77,6 +90,11 @@
   reinterpret_cast<struct PerfettoTeHlExtra*>( \
       PERFETTO_I_TE_COMPOUND_LITERAL_ADDR(STRUCT, __VA_ARGS__))
 #endif
+
+#define PERFETTO_I_TE_CONCAT2(a, b) a##b
+#define PERFETTO_I_TE_CONCAT(a, b) PERFETTO_I_TE_CONCAT2(a, b)
+// Generate a unique name with a given prefix.
+#define PERFETTO_I_TE_UID(prefix) PERFETTO_I_TE_CONCAT(prefix, __LINE__)
 
 struct PerfettoTeHlMacroNameAndType {
   const char* name;
@@ -307,14 +325,84 @@ static inline void PerfettoTeHlCall(struct PerfettoTeCategoryImpl* cat,
 // PERFETTO_TE(PERFETTO_TE_DYNAMIC_CATEGORY, PERFETTO_TE_INSTANT("instant"),
 //             PERFETTO_TE_DYNAMIC_CATEGORY_STRING("category"));
 //
-#define PERFETTO_TE(CAT, ...)                                       \
-  do {                                                              \
-    if (PERFETTO_UNLIKELY(PERFETTO_ATOMIC_LOAD_EXPLICIT(            \
-            (CAT).enabled, PERFETTO_MEMORY_ORDER_RELAXED))) {       \
-      PERFETTO_I_TE_STATIC_ASSERT_NUM_PARAMS(__VA_ARGS__);          \
-      PerfettoTeHlCall((CAT).impl,                                  \
-                       PERFETTO_I_TE_HL_MACRO_PARAMS(__VA_ARGS__)); \
-    }                                                               \
+#define PERFETTO_TE(CAT, ...)                            \
+  do {                                                   \
+    PERFETTO_I_TE_STATIC_ASSERT_NUM_PARAMS(__VA_ARGS__); \
+    (void)PERFETTO_I_TE_IMPL(CAT, __VA_ARGS__);          \
   } while (0)
+
+#ifdef __cplusplus
+
+// Begins a slice named `const char* NAME` on the current thread track.
+//
+// This is supposed to be used with PERFETTO_TE_SCOPED(). The implementation is
+// identical to PERFETTO_TE_SLICE_BEGIN(): this has a different name to
+// highlight the fact that PERFETTO_TE_SCOPED() also adds a
+// PERFETTO_TE_SLICE_END().
+#define PERFETTO_TE_SLICE(NAME) \
+  { NAME, PERFETTO_TE_TYPE_SLICE_BEGIN }
+
+namespace perfetto::internal {
+template <typename F>
+class TeCleanup {
+ public:
+  explicit TeCleanup(F&& f) PERFETTO_ALWAYS_INLINE : f_(std::forward<F>(f)) {}
+
+  ~TeCleanup() PERFETTO_ALWAYS_INLINE { f_(); }
+
+ private:
+  TeCleanup(const TeCleanup&) = delete;
+  TeCleanup(TeCleanup&&) = delete;
+  TeCleanup& operator=(const TeCleanup&) = delete;
+  TeCleanup& operator=(TeCleanup&&) = delete;
+  F f_;
+};
+
+template <typename F>
+TeCleanup<F> MakeTeCleanup(F&& f) {
+  return TeCleanup<F>(std::forward<F>(f));
+}
+
+}  // namespace perfetto::internal
+
+// ------------------------
+// PERFETTO_TE_SCOPED macro
+// ------------------------
+//
+// Emits an event immediately and a PERFETTO_TE_SLICE_END event when the current
+// scope terminates.
+//
+// All the extra params are added only to the event emitted immediately, not to
+// the END event.
+//
+// TRACK params are not supported.
+//
+// This
+// {
+//   PERFETTO_TE_SCOPED(category, PERFETTO_TE_SLICE("name"), ...);
+//   ...
+// }
+// is equivalent to
+// {
+//   PERFETTO_TE(category, PERFETTO_TE_SLICE_BEGIN("name"), ...);
+//   ...
+//   PERFETTO_TE(category, PERFETTO_TE_SLICE_END());
+// }
+//
+// Examples:
+//
+// PERFETTO_TE_SCOPED(category, PERFETTO_TE_SLICE("name"));
+// PERFETTO_TE_SCOPED(category, PERFETTO_TE_SLICE("name"),
+//                    PERFETTO_TE_ARG_UINT64("count", 42));
+//
+#define PERFETTO_TE_SCOPED(CAT, ...)                          \
+  auto PERFETTO_I_TE_UID(perfetto_i_te_cleanup) =             \
+      (PERFETTO_I_TE_IMPL(CAT, __VA_ARGS__),                  \
+       perfetto::internal::MakeTeCleanup([&] {                \
+         PERFETTO_I_TE_STATIC_ASSERT_NUM_PARAMS(__VA_ARGS__); \
+         PERFETTO_TE(CAT, PERFETTO_TE_SLICE_END());           \
+       }))
+
+#endif  // __cplusplus
 
 #endif  // INCLUDE_PERFETTO_PUBLIC_TE_MACROS_H_
