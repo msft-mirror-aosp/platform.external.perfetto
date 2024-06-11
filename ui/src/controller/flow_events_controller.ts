@@ -13,17 +13,18 @@
 // limitations under the License.
 
 import {Time} from '../base/time';
-import {Area, getLegacySelection} from '../common/state';
+import {AreaSelection, getLegacySelection} from '../common/state';
 import {featureFlags} from '../core/feature_flags';
 import {Flow, globals} from '../frontend/globals';
 import {publishConnectedFlows, publishSelectedFlows} from '../frontend/publish';
 import {asSliceSqlId} from '../frontend/sql_types';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, STR_NULL} from '../trace_processor/query_result';
-import {SLICE_TRACK_KIND} from '../core_plugins/chrome_slices/chrome_slice_track';
+import {THREAD_SLICE_TRACK_KIND} from '../core_plugins/thread_slice/thread_slice_track';
 import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../core_plugins/frames';
 
 import {Controller} from './controller';
+import {Monitor} from '../base/monitor';
 
 export interface FlowEventsControllerArgs {
   engine: Engine;
@@ -39,9 +40,7 @@ const SHOW_INDIRECT_PRECEDING_FLOWS_FLAG = featureFlags.register({
 });
 
 export class FlowEventsController extends Controller<'main'> {
-  private lastSelectedSliceId?: number;
-  private lastSelectedArea?: Area;
-  private lastSelectedKind: 'CHROME_SLICE' | 'AREA' | 'NONE' = 'NONE';
+  private readonly monitor = new Monitor([() => globals.state.selection]);
 
   constructor(private args: FlowEventsControllerArgs) {
     super('main');
@@ -305,15 +304,6 @@ export class FlowEventsController extends Controller<'main'> {
   }
 
   sliceSelected(sliceId: number) {
-    if (
-      this.lastSelectedKind === 'CHROME_SLICE' &&
-      this.lastSelectedSliceId === sliceId
-    ) {
-      return;
-    }
-    this.lastSelectedSliceId = sliceId;
-    this.lastSelectedKind = 'CHROME_SLICE';
-
     const connectedFlows = SHOW_INDIRECT_PRECEDING_FLOWS_FLAG.get()
       ? `(
            select * from directly_connected_flow(${sliceId})
@@ -363,21 +353,7 @@ export class FlowEventsController extends Controller<'main'> {
     );
   }
 
-  areaSelected(areaId: string) {
-    const area = globals.state.areas[areaId];
-    if (
-      this.lastSelectedKind === 'AREA' &&
-      this.lastSelectedArea &&
-      this.lastSelectedArea.tracks.join(',') === area.tracks.join(',') &&
-      this.lastSelectedArea.end === area.end &&
-      this.lastSelectedArea.start === area.start
-    ) {
-      return;
-    }
-
-    this.lastSelectedArea = area;
-    this.lastSelectedKind = 'AREA';
-
+  private areaSelected(area: AreaSelection) {
     const trackIds: number[] = [];
 
     for (const uiTrackId of area.tracks) {
@@ -386,7 +362,7 @@ export class FlowEventsController extends Controller<'main'> {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
         const kind = trackInfo?.kind;
         if (
-          kind === SLICE_TRACK_KIND ||
+          kind === THREAD_SLICE_TRACK_KIND ||
           kind === ACTUAL_FRAMES_SLICE_TRACK_KIND
         ) {
           if (trackInfo?.trackIds) {
@@ -443,24 +419,32 @@ export class FlowEventsController extends Controller<'main'> {
   }
 
   refreshVisibleFlows() {
-    const selection = getLegacySelection(globals.state);
-    if (!selection) {
-      this.lastSelectedKind = 'NONE';
+    if (!this.monitor.ifStateChanged()) {
+      return;
+    }
+
+    const selection = globals.state.selection;
+    if (selection.kind === 'empty') {
       publishConnectedFlows([]);
       publishSelectedFlows([]);
       return;
     }
 
+    const legacySelection = getLegacySelection(globals.state);
     // TODO(b/155483804): This is a hack as annotation slices don't contain
     // flows. We should tidy this up when fixing this bug.
-    if (selection.kind === 'CHROME_SLICE' && selection.table !== 'annotation') {
-      this.sliceSelected(selection.id);
+    if (
+      legacySelection &&
+      legacySelection.kind === 'SLICE' &&
+      legacySelection.table !== 'annotation'
+    ) {
+      this.sliceSelected(legacySelection.id);
     } else {
       publishConnectedFlows([]);
     }
 
-    if (selection.kind === 'AREA') {
-      this.areaSelected(selection.areaId);
+    if (selection.kind === 'area') {
+      this.areaSelected(selection);
     } else {
       publishSelectedFlows([]);
     }

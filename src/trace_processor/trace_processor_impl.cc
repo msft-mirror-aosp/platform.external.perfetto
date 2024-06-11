@@ -85,6 +85,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/utils.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/window_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/window_operator.h"
@@ -766,6 +767,10 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   engine_->sqlite_engine()->RegisterVirtualTableModule<SliceMipmapOperator>(
       "__intrinsic_slice_mipmap",
       std::make_unique<SliceMipmapOperator::Context>(engine_.get()));
+  engine_->sqlite_engine()
+      ->RegisterVirtualTableModule<IntervalIntersectOperator>(
+          "__intrinsic_ii_with_interval_tree",
+          std::make_unique<IntervalIntersectOperator::Context>(engine_.get()));
 
   // Initalize the tables and views in the prelude.
   InitializePreludeTablesViews(db);
@@ -854,6 +859,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->symbol_table());
   RegisterStaticTable(storage->heap_profile_allocation_table());
   RegisterStaticTable(storage->cpu_profile_stack_sample_table());
+  RegisterStaticTable(storage->perf_session_table());
   RegisterStaticTable(storage->perf_sample_table());
   RegisterStaticTable(storage->stack_profile_callsite_table());
   RegisterStaticTable(storage->stack_profile_mapping_table());
@@ -864,6 +870,9 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->android_log_table());
   RegisterStaticTable(storage->android_dumpstate_table());
   RegisterStaticTable(storage->android_game_intervention_list_table());
+  RegisterStaticTable(storage->android_key_events_table());
+  RegisterStaticTable(storage->android_motion_events_table());
+  RegisterStaticTable(storage->android_input_event_dispatch_table());
 
   RegisterStaticTable(storage->vulkan_memory_allocations_table());
 
@@ -871,6 +880,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   RegisterStaticTable(storage->expected_frame_timeline_slice_table());
   RegisterStaticTable(storage->actual_frame_timeline_slice_table());
+
+  RegisterStaticTable(storage->android_network_packets_table());
 
   RegisterStaticTable(storage->v8_isolate_table());
   RegisterStaticTable(storage->v8_js_script_table());
