@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#include "protos/perfetto/trace/ftrace/ftrace_event.pbzero.h"
-#include "protos/perfetto/trace/ftrace/ftrace_event_bundle.pbzero.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
 
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
@@ -37,6 +35,12 @@ class VerifyIntegrity : public CollectPrimitive {
   base::Status OnFtraceEvents(const protozero::ConstBytes bytes) const;
 
   base::Status OnFtraceEvent(const protozero::ConstBytes bytes) const;
+
+  base::Status OnTraceStats(const Context::VerifyConfig& config,
+                            const protozero::ConstBytes bytes) const;
+
+  base::Status OnBufferStats(const Context::VerifyConfig& config,
+                             const protozero::ConstBytes bytes) const;
 };
 
 }  // namespace perfetto::trace_redaction

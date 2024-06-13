@@ -22,8 +22,6 @@ import {
 } from '../frontend/pivot_table_types';
 import {PrimaryTrackSortKey} from '../public/index';
 
-import {Direction} from '../core/event_set';
-
 import {
   selectionToLegacySelection,
   Selection,
@@ -79,8 +77,6 @@ export interface VisibleState extends Timestamped {
   end: time;
   resolution: duration;
 }
-
-export type AreaById = Area & {id: string};
 
 export interface Area {
   start: time;
@@ -153,7 +149,10 @@ export const MAX_TIME = 180;
 // 55. Rename TrackGroupState.id -> TrackGroupState.key.
 // 56. Renamed chrome slice to thread slice everywhere.
 // 57. Remove flamegraph related code from state.
-export const STATE_VERSION = 57;
+// 58. Remove area map.
+// 59. Deprecate old area selection type.
+// 60. Deprecate old note selection type.
+export const STATE_VERSION = 60;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -210,6 +209,10 @@ export interface TraceArrayBufferSource {
   uuid?: string;
   // if |localOnly| is true then the trace should not be shared or downloaded.
   localOnly?: boolean;
+
+  // The set of extra args, keyed by plugin, that can be passed when opening the
+  // trace via postMessge deep-linking. See post_message_handler.ts for details.
+  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
 }
 
 export interface TraceUrlSource {
@@ -279,10 +282,11 @@ export interface Note {
   text: string;
 }
 
-export interface AreaNote {
-  noteType: 'AREA';
+export interface SpanNote {
+  noteType: 'SPAN';
   id: string;
-  areaId: string;
+  start: time;
+  end: time;
   color: string;
   text: string;
 }
@@ -337,11 +341,10 @@ export interface PivotTableResult {
 
 // Input parameters to check whether the pivot table needs to be re-queried.
 export interface PivotTableAreaState {
-  areaId: string;
+  start: time;
+  end: time;
   tracks: string[];
 }
-
-export type SortDirection = keyof typeof Direction;
 
 export interface PivotTableState {
   // Currently selected area, if null, pivot table is not going to be visible.
@@ -425,14 +428,13 @@ export interface State {
   trackGroups: ObjectByKey<TrackGroupState>;
   tracks: ObjectByKey<TrackState>;
   utidToThreadSortKey: UtidToTrackSortKey;
-  areas: ObjectById<AreaById>;
   aggregatePreferences: ObjectById<AggregationState>;
   scrollingTracks: string[];
   pinnedTracks: string[];
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
   queries: ObjectById<QueryConfig>;
-  notes: ObjectById<Note | AreaNote>;
+  notes: ObjectById<Note | SpanNote>;
   status: Status;
   selection: Selection;
   traceConversionInProgress: boolean;
