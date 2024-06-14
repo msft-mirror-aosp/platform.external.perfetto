@@ -24,6 +24,8 @@ if (enable_perfetto_grpc) {
     deps = [
       "../../gn:default_deps",
       "../../gn:grpc",
+      "../../protos/perfetto/bigtrace:orchestrator_grpc",
+      "../../protos/perfetto/bigtrace:worker_grpc",
       "../base",
     ]
   }
@@ -33,6 +35,7 @@ if (enable_perfetto_grpc) {
     deps = [
       "../../gn:default_deps",
       "../../gn:grpc",
+      "../../protos/perfetto/bigtrace:worker_grpc",
       "../base",
     ]
   }
