@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_REDACTION_TRACE_REDACTION_FRAMEWORK_H_
 #define SRC_TRACE_REDACTION_TRACE_REDACTION_FRAMEWORK_H_
 
+#include <bitset>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -135,8 +136,8 @@ class Context {
   // running any primitives.
   std::string package_name;
 
-  // With Android, packages are treated as users. This means they use uid as
-  // identifiers.
+  // The package list maps a package name to a uid. It is possible for multiple
+  // package names to map to the same uid, for example:
   //
   //    packages {
   //      name: "com.google.android.gms"
@@ -242,9 +243,12 @@ class Context {
   //    - protos::pbzero::TracePacket::kProcessStatsFieldNumber
   //    - protos::pbzero::TracePacket::kClockSnapshotFieldNumber
   //
-  // Because "data" is a "one of", if no field in "trace_packet_allow_list" can
-  // be found, it packet should be removed.
-  base::FlatSet<uint32_t> trace_packet_allow_list;
+  // If the mask is set to 0x00, all fields would be removed. This should not
+  // happen as some metadata provides context between packets.
+  //
+  // TracePacket has kForTestingFieldNumber which is set to 900.
+  using TracePacketMask = std::bitset<1024>;
+  TracePacketMask packet_mask;
 
   // Ftrace packets contain a "one of" entry called "event". Within the scope of
   // a ftrace event, the event can be considered the payload and other other
@@ -283,7 +287,10 @@ class Context {
   //
   //  3.  In this example, a cpu_idle event populates the one-of slot in the
   //      ftrace event
-  base::FlatSet<uint32_t> ftrace_packet_allow_list;
+  //
+  // Ftrace event has kMaliMaliPMMCURESETWAITFieldNumber which is set to 532.
+  using FtraceEventMask = std::bitset<1024>;
+  FtraceEventMask ftrace_mask;
 
   //  message SuspendResumeFtraceEvent {
   //    optional string action = 1 [(datapol.semantic_type) = ST_NOT_REQUIRED];
