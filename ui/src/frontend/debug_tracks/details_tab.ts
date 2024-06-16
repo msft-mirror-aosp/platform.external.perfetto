@@ -16,23 +16,15 @@ import m from 'mithril';
 
 import {duration, Time, time} from '../../base/time';
 import {raf} from '../../core/raf_scheduler';
-import {BottomTab, NewBottomTabArgs} from '../../frontend/bottom_tab';
-import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {hasArgs, renderArguments} from '../../frontend/slice_args';
-import {getSlice, SliceDetails, sliceRef} from '../../frontend/sql/slice';
-import {asSliceSqlId, Utid} from '../../frontend/sql_types';
-import {sqlValueToString} from '../../frontend/sql_utils';
-import {
-  getProcessName,
-  getThreadName,
-} from '../../frontend/thread_and_process_info';
-import {
-  getThreadState,
-  ThreadState,
-  threadStateRef,
-} from '../../frontend/thread_state';
-import {DurationWidget} from '../../frontend/widgets/duration';
-import {Timestamp} from '../../frontend/widgets/timestamp';
+import {BottomTab, NewBottomTabArgs} from '../bottom_tab';
+import {GenericSliceDetailsTabConfig} from '../generic_slice_details_tab';
+import {hasArgs, renderArguments} from '../slice_args';
+import {getSlice, SliceDetails, sliceRef} from '../sql/slice';
+import {asSliceSqlId, Utid} from '../sql_types';
+import {getProcessName, getThreadName} from '../thread_and_process_info';
+import {getThreadState, ThreadState, threadStateRef} from '../thread_state';
+import {DurationWidget} from '../widgets/duration';
+import {Timestamp} from '../widgets/timestamp';
 import {
   ColumnType,
   durationFromSql,
@@ -40,11 +32,13 @@ import {
   STR,
   timeFromSql,
 } from '../../trace_processor/query_result';
+import {sqlValueToReadableString} from '../../trace_processor/sql_utils';
 import {DetailsShell} from '../../widgets/details_shell';
 import {GridLayout} from '../../widgets/grid_layout';
 import {Section} from '../../widgets/section';
 import {dictToTree, dictToTreeNodes, Tree, TreeNode} from '../../widgets/tree';
-import {ARG_PREFIX} from '../../frontend/debug_tracks';
+
+export const ARG_PREFIX = 'arg_';
 
 function sqlValueToNumber(value?: ColumnType): number | undefined {
   if (typeof value === 'bigint') return Number(value);
@@ -215,7 +209,7 @@ export class DebugSliceDetailsTab extends BottomTab<GenericSliceDetailsTabConfig
       sqlValueToNumber(this.data.args['id']),
       this.data.ts,
       this.data.dur,
-      sqlValueToString(this.data.args['table_name']),
+      sqlValueToReadableString(this.data.args['table_name']),
       sqlValueToUtid(this.data.args['utid']),
     );
 
@@ -224,7 +218,7 @@ export class DebugSliceDetailsTab extends BottomTab<GenericSliceDetailsTabConfig
         sqlValueToNumber(this.data.args['slice_id']),
       this.data.ts,
       this.data.dur,
-      sqlValueToString(this.data.args['table_name']),
+      sqlValueToReadableString(this.data.args['table_name']),
       sqlValueToNumber(this.data.args['track_id']),
     );
 
@@ -251,7 +245,7 @@ export class DebugSliceDetailsTab extends BottomTab<GenericSliceDetailsTabConfig
 
     const args: {[key: string]: m.Child} = {};
     for (const key of Object.keys(this.data.args)) {
-      args[key] = sqlValueToString(this.data.args[key]);
+      args[key] = sqlValueToReadableString(this.data.args[key]);
     }
 
     return m(

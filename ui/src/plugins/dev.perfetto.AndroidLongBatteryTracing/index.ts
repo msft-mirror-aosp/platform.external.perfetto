@@ -24,6 +24,15 @@ import {
   SimpleCounterTrackConfig,
 } from '../../frontend/simple_counter_track';
 
+interface ContainedTrace {
+  uuid: string;
+  subscription: string;
+  trigger: string;
+  // NB: these are millis.
+  ts: number;
+  dur: number;
+}
+
 const DEFAULT_NETWORK = `
   with base as (
       select
@@ -557,7 +566,7 @@ const HIGH_CPU = `
   with_ratio as (
     select
       ts,
-      iif(dur is null, 0, 100.0 * cpu_dur / dur) as value,
+      iif(dur is null, 0, max(0, 100.0 * cpu_dur / dur)) as value,
       case cluster when 0 then 'little' when 1 then 'mid' when 2 then 'big' else 'cl-' || cluster end as cluster,
       case
           when uid = 0 then 'AID_ROOT'
@@ -1259,7 +1268,7 @@ class AndroidLongBatteryTracing implements Plugin {
             str_value AS name,
             ifnull(
             (select package_name from package_list where uid = int_value % 100000),
-            int_value) as package
+            "uid="||int_value) as package
         FROM android_battery_stats_event_slices
         WHERE track_name = "battery_stats.longwake"`,
       undefined,
@@ -1723,6 +1732,38 @@ class AndroidLongBatteryTracing implements Plugin {
     );
   }
 
+  async addContainedTraces(
+    ctx: PluginContextTrace,
+    containedTraces: ContainedTrace[],
+  ): Promise<void> {
+    const bySubscription = new Map<string, ContainedTrace[]>();
+    for (const trace of containedTraces) {
+      if (!bySubscription.has(trace.subscription)) {
+        bySubscription.set(trace.subscription, []);
+      }
+      bySubscription.get(trace.subscription)!.push(trace);
+    }
+
+    bySubscription.forEach((traces, subscription) =>
+      this.addSliceTrack(
+        ctx,
+        subscription,
+        traces
+          .map(
+            (t) => `SELECT
+          CAST(${t.ts} * 1e6 AS int) AS ts,
+          CAST(${t.dur} * 1e6 AS int) AS dur,
+          '${t.trigger === '' ? 'Trace' : t.trigger}' AS name,
+          'http://go/trace-uuid/${t.uuid}' AS link
+        `,
+          )
+          .join(' UNION ALL '),
+        'Other traces',
+        ['link'],
+      ),
+    );
+  }
+
   async findFeatures(e: Engine): Promise<Set<string>> {
     const features = new Set<string>();
 
@@ -1762,6 +1803,9 @@ class AndroidLongBatteryTracing implements Plugin {
   async addTracks(ctx: PluginContextTrace): Promise<void> {
     const features: Set<string> = await this.findFeatures(ctx.engine);
 
+    const containedTraces = (ctx.openerPluginArgs?.containedTraces ??
+      []) as ContainedTrace[];
+
     await this.addNetworkSummary(ctx, features),
       await this.addModemDetail(ctx, features);
     await this.addKernelWakelocks(ctx, features);
@@ -1769,6 +1813,7 @@ class AndroidLongBatteryTracing implements Plugin {
     await this.addDeviceState(ctx, features);
     await this.addHighCpu(ctx, features);
     await this.addBluetooth(ctx, features);
+    await this.addContainedTraces(ctx, containedTraces);
   }
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
