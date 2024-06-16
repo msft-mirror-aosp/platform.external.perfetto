@@ -1765,6 +1765,8 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_importers_proto_winscope_full",
     srcs = [
+        "src/trace_processor/importers/proto/winscope/android_input_event_parser.cc",
+        "src/trace_processor/importers/proto/winscope/android_input_event_parser.h",
         "src/trace_processor/importers/proto/winscope/protolog_messages_tracker.cc",
         "src/trace_processor/importers/proto/winscope/protolog_messages_tracker.h",
         "src/trace_processor/importers/proto/winscope/protolog_parser.cc",
@@ -2040,6 +2042,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/android_blocking_calls_unagg.sql",
         "src/trace_processor/metrics/sql/android/android_boot.sql",
         "src/trace_processor/metrics/sql/android/android_boot_unagg.sql",
+        "src/trace_processor/metrics/sql/android/android_broadcasts.sql",
         "src/trace_processor/metrics/sql/android/android_camera.sql",
         "src/trace_processor/metrics/sql/android/android_camera_unagg.sql",
         "src/trace_processor/metrics/sql/android/android_cpu.sql",
@@ -2389,6 +2392,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.cc",
         "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.h",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.h",
         "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.cc",
         "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.h",
         "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.cc",
@@ -2767,9 +2772,8 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_wattson_wattson",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/wattson/arm_dsu.sql",
-        "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_freq.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle.sql",
-        "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle_offsets.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/device_infos.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/system_state.sql",
     ],
 )
@@ -4611,6 +4615,7 @@ perfetto_proto_library(
         "protos/perfetto/metrics/android/android_blocking_calls_unagg.proto",
         "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_boot_unagg.proto",
+        "protos/perfetto/metrics/android/android_broadcasts_metric.proto",
         "protos/perfetto/metrics/android/android_frame_timeline_metric.proto",
         "protos/perfetto/metrics/android/android_garbage_collection_unagg_metric.proto",
         "protos/perfetto/metrics/android/android_oom_adjuster_metric.proto",
@@ -4783,7 +4788,6 @@ perfetto_proto_library(
     name = "protos_perfetto_trace_android_protos",
     srcs = [
         "protos/perfetto/trace/android/android_game_intervention_list.proto",
-        "protos/perfetto/trace/android/android_input_event.proto",
         "protos/perfetto/trace/android/android_log.proto",
         "protos/perfetto/trace/android/android_system_property.proto",
         "protos/perfetto/trace/android/camera_event.proto",
@@ -4842,6 +4846,7 @@ perfetto_proto_descriptor(
 perfetto_proto_library(
     name = "protos_perfetto_trace_android_winscope_extensions_protos",
     srcs = [
+        "protos/perfetto/trace/android/android_input_event.proto",
         "protos/perfetto/trace/android/graphics/pixelformat.proto",
         "protos/perfetto/trace/android/inputmethodeditor.proto",
         "protos/perfetto/trace/android/inputmethodservice/inputmethodservice.proto",
