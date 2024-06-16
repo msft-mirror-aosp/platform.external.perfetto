@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {SortDirection} from '../base/comparison_utils';
+import {AsyncDisposable} from '../base/disposable';
 import {isString} from '../base/object_utils';
-import {SortDirection} from '../common/state';
-import {Engine} from '../trace_processor/engine';
-import {ColumnType, NUM} from '../trace_processor/query_result';
+import {sqliteString} from '../base/string_utils';
+
+import {Engine} from './engine';
+import {NUM, SqlValue} from './query_result';
 
 export interface OrderClause {
   fieldName: string;
@@ -97,9 +100,11 @@ export function fromNumNull(n: number | null): number | undefined {
   return n;
 }
 
-export function sqlValueToString(val: ColumnType): string;
-export function sqlValueToString(val?: ColumnType): string | undefined;
-export function sqlValueToString(val?: ColumnType): string | undefined {
+// Given a SqlValue, return a string representation of it to display to the
+// user.
+export function sqlValueToReadableString(val: SqlValue): string;
+export function sqlValueToReadableString(val?: SqlValue): string | undefined;
+export function sqlValueToReadableString(val?: SqlValue): string | undefined {
   if (val === undefined) return undefined;
   if (val instanceof Uint8Array) {
     return `<blob length=${val.length}>`;
@@ -108,6 +113,30 @@ export function sqlValueToString(val?: ColumnType): string | undefined {
     return 'NULL';
   }
   return val.toString();
+}
+
+// Given a SqlValue, return a string representation (properly escaped, if
+// necessary) of it to be used in a SQL query.
+export function sqlValueToSqliteString(val: SqlValue): string {
+  if (val instanceof Uint8Array) {
+    throw new Error("Can't pass blob back to trace processor as value");
+  }
+  if (val === null) {
+    return 'NULL';
+  }
+  if (typeof val === 'string') {
+    return sqliteString(val);
+  }
+  return `${val}`;
+}
+
+// Return a SQL predicate that can be used to compare with the given `value`,
+// correctly handling NULLs.
+export function matchesSqlValue(value: SqlValue): string {
+  if (value === null) {
+    return 'IS NULL';
+  }
+  return `= ${sqlValueToSqliteString(value)}`;
 }
 
 export async function getTableRowCount(
@@ -123,4 +152,74 @@ export async function getTableRowCount(
   return result.firstRow({
     count: NUM,
   }).count;
+}
+
+export {SqlValue};
+
+/**
+ * Asynchronously creates a 'perfetto' table using the given engine and returns
+ * an disposable object to handle its cleanup.
+ *
+ * @param engine - The database engine to execute the query.
+ * @param tableName - The name of the table to be created.
+ * @param expression - The SQL expression to define the table.
+ * @returns An AsyncDisposable which drops the created table when disposed.
+ *
+ * @example
+ * const engine = new Engine();
+ * const tableName = 'my_perfetto_table';
+ * const expression = 'SELECT * FROM source_table';
+ *
+ * const table = await createPerfettoTable(engine, tableName, expression);
+ *
+ * // Use the table...
+ *
+ * // Cleanup the table when done
+ * await table.disposeAsync();
+ */
+export async function createPerfettoTable(
+  engine: Engine,
+  tableName: string,
+  expression: string,
+): Promise<AsyncDisposable> {
+  await engine.query(`CREATE PERFETTO TABLE ${tableName} AS ${expression}`);
+  return {
+    disposeAsync: async () => {
+      await engine.tryQuery(`DROP TABLE IF EXISTS ${tableName}`);
+    },
+  };
+}
+
+/**
+ * Asynchronously creates a SQL view using the given engine and returns an
+ * disposable object to handle its cleanup.
+ *
+ * @param engine - The database engine to execute the query.
+ * @param viewName - The name of the view to be created.
+ * @param expression - The SQL expression to define the table.
+ * @returns An AsyncDisposable which drops the created table when disposed.
+ *
+ * @example
+ * const engine = new Engine();
+ * const viewName = 'my_view';
+ * const expression = 'SELECT * FROM source_table';
+ *
+ * const view = await createView(engine, viewName, expression);
+ *
+ * // Use the view...
+ *
+ * // Cleanup the view when done
+ * await view.disposeAsync();
+ */
+export async function createView(
+  engine: Engine,
+  viewName: string,
+  expression: string,
+): Promise<AsyncDisposable> {
+  await engine.query(`CREATE VIEW ${viewName} AS ${expression}`);
+  return {
+    disposeAsync: async () => {
+      await engine.tryQuery(`DROP VIEW IF EXISTS ${viewName}`);
+    },
+  };
 }
