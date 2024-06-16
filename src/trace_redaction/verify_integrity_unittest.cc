@@ -18,6 +18,7 @@
 #include "src/base/test/status_matchers.h"
 #include "test/gtest_and_gmock.h"
 
+#include "protos/perfetto/common/trace_stats.gen.h"
 #include "protos/perfetto/trace/ftrace/ftrace_event.gen.h"
 #include "protos/perfetto/trace/ftrace/ftrace_event_bundle.gen.h"
 #include "protos/perfetto/trace/trace_packet.gen.h"
@@ -209,6 +210,126 @@ TEST_F(VerifyIntegrityUnitTest, InvalidPacketProcessStatsMissingTime) {
   packet.mutable_process_stats();
 
   ASSERT_FALSE(Verify(packet).ok());
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketTraceStatsFlushFailed) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->set_flushes_failed(true);
+
+  ASSERT_FALSE(Verify(packet).ok());
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketTraceStatsNoFlushFailed) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->set_flushes_failed(false);
+
+  ASSERT_OK(Verify(packet));
+}
+
+TEST_F(VerifyIntegrityUnitTest, ValidPacketFinalFlushSucceeded) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->set_final_flush_outcome(
+      protos::gen::TraceStats::FINAL_FLUSH_SUCCEEDED);
+
+  ASSERT_OK(Verify(packet));
+}
+
+TEST_F(VerifyIntegrityUnitTest, ValidPacketFinalFlushUnspecified) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->set_final_flush_outcome(
+      protos::gen::TraceStats::FINAL_FLUSH_UNSPECIFIED);
+
+  ASSERT_OK(Verify(packet));
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketFinalFlushFailed) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->set_final_flush_outcome(
+      protos::gen::TraceStats::FINAL_FLUSH_FAILED);
+
+  ASSERT_FALSE(Verify(packet).ok());
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketBufferStatsPatchesFailed) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->add_buffer_stats()->set_patches_failed(3);
+
+  ASSERT_FALSE(Verify(packet).ok());
+}
+
+TEST_F(VerifyIntegrityUnitTest, ValidPacketBufferStatsNoPatchesFailed) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->add_buffer_stats()->set_patches_failed(0);
+
+  ASSERT_OK(Verify(packet));
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketBufferStatsAbiViolation) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->add_buffer_stats()->set_abi_violations(3);
+
+  ASSERT_FALSE(Verify(packet).ok());
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketBufferStatsNoAbiViolation) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()->add_buffer_stats()->set_abi_violations(0);
+
+  ASSERT_OK(Verify(packet));
+}
+
+TEST_F(VerifyIntegrityUnitTest, InvalidPacketBufferStatsTraceWriterPacketLoss) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()
+      ->add_buffer_stats()
+      ->set_trace_writer_packet_loss(3);
+
+  ASSERT_EQ(packet.trace_stats().buffer_stats_size(), 1);
+
+  ASSERT_FALSE(Verify(packet).ok());
+}
+
+TEST_F(VerifyIntegrityUnitTest,
+       InvalidPacketBufferStatsNoTraceWriterPacketLoss) {
+  protos::gen::TracePacket packet;
+
+  packet.set_trusted_uid(kValid);
+
+  packet.mutable_trace_stats()
+      ->add_buffer_stats()
+      ->set_trace_writer_packet_loss(0);
+
+  ASSERT_OK(Verify(packet));
 }
 
 TEST_F(VerifyIntegrityUnitTest, ValidPacketProcessStats) {
