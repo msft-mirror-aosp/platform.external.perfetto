@@ -68,6 +68,7 @@
 #include "src/trace_processor/metrics/sql/amalgamated_sql_metrics.h"
 #include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
 #include "src/trace_processor/perfetto_sql/engine/table_pointer_module.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/array.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/base64.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/clock_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
@@ -80,11 +81,13 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/sqlite3_str_split.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/stack_functions.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/struct.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/structural_tree_partition.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/to_ftrace.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/utils.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/window_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/window_operator.h"
@@ -183,6 +186,8 @@ void BuildBoundsTable(sqlite3* db, std::pair<int64_t, int64_t> bounds) {
 
 class ValueAtMaxTs : public SqliteAggregateFunction<ValueAtMaxTs> {
  public:
+  static constexpr char kName[] = "VALUE_AT_MAX_TS";
+  static constexpr int kArgCount = 2;
   struct Context {
     bool initialized;
     int value_type;
@@ -245,8 +250,7 @@ class ValueAtMaxTs : public SqliteAggregateFunction<ValueAtMaxTs> {
   }
 
   static void Final(sqlite3_context* ctx) {
-    Context* fn_ctx =
-        reinterpret_cast<Context*>(sqlite3_aggregate_context(ctx, 0));
+    auto* fn_ctx = static_cast<Context*>(sqlite3_aggregate_context(ctx, 0));
     if (!fn_ctx) {
       sqlite::result::Null(ctx);
       return;
@@ -260,8 +264,8 @@ class ValueAtMaxTs : public SqliteAggregateFunction<ValueAtMaxTs> {
 };
 
 void RegisterValueAtMaxTsFunction(PerfettoSqlEngine& engine) {
-  base::Status status = engine.RegisterSqliteAggregateFunction<ValueAtMaxTs>(
-      "VALUE_AT_MAX_TS", 2, nullptr);
+  base::Status status =
+      engine.RegisterSqliteAggregateFunction<ValueAtMaxTs>(nullptr);
   if (!status.ok()) {
     PERFETTO_ELOG("Error initializing VALUE_AT_MAX_TS");
   }
@@ -718,32 +722,42 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   {
     base::Status status = RegisterLastNonNullFunction(*engine_);
     if (!status.ok())
-      PERFETTO_ELOG("%s", status.c_message());
+      PERFETTO_FATAL("%s", status.c_message());
   }
   {
     base::Status status = RegisterStackFunctions(engine_.get(), &context_);
     if (!status.ok())
-      PERFETTO_ELOG("%s", status.c_message());
+      PERFETTO_FATAL("%s", status.c_message());
   }
   {
     base::Status status = PprofFunctions::Register(*engine_, &context_);
     if (!status.ok())
-      PERFETTO_ELOG("%s", status.c_message());
+      PERFETTO_FATAL("%s", status.c_message());
   }
   {
     base::Status status = RegisterLayoutFunctions(*engine_);
     if (!status.ok())
-      PERFETTO_ELOG("%s", status.c_message());
+      PERFETTO_FATAL("%s", status.c_message());
   }
   {
     base::Status status = RegisterMathFunctions(*engine_);
     if (!status.ok())
-      PERFETTO_ELOG("%s", status.c_message());
+      PERFETTO_FATAL("%s", status.c_message());
   }
   {
     base::Status status = RegisterBase64Functions(*engine_);
     if (!status.ok())
-      PERFETTO_ELOG("%s", status.c_message());
+      PERFETTO_FATAL("%s", status.c_message());
+  }
+  {
+    base::Status status = RegisterArrayFunctions(*engine_);
+    if (!status.ok())
+      PERFETTO_FATAL("%s", status.c_message());
+  }
+  {
+    base::Status status = RegisterStructFunctions(*engine_);
+    if (!status.ok())
+      PERFETTO_FATAL("%s", status.c_message());
   }
 
   TraceStorage* storage = context_.storage.get();
@@ -766,6 +780,10 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   engine_->sqlite_engine()->RegisterVirtualTableModule<SliceMipmapOperator>(
       "__intrinsic_slice_mipmap",
       std::make_unique<SliceMipmapOperator::Context>(engine_.get()));
+  engine_->sqlite_engine()
+      ->RegisterVirtualTableModule<IntervalIntersectOperator>(
+          "__intrinsic_ii_with_interval_tree",
+          std::make_unique<IntervalIntersectOperator::Context>(engine_.get()));
 
   // Initalize the tables and views in the prelude.
   InitializePreludeTablesViews(db);
@@ -783,7 +801,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   {
     base::Status status =
         engine_->RegisterSqliteAggregateFunction<metrics::RepeatedField>(
-            "RepeatedField", 1, nullptr);
+            nullptr);
     if (!status.ok())
       PERFETTO_ELOG("%s", status.c_message());
   }
@@ -865,6 +883,9 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->android_log_table());
   RegisterStaticTable(storage->android_dumpstate_table());
   RegisterStaticTable(storage->android_game_intervention_list_table());
+  RegisterStaticTable(storage->android_key_events_table());
+  RegisterStaticTable(storage->android_motion_events_table());
+  RegisterStaticTable(storage->android_input_event_dispatch_table());
 
   RegisterStaticTable(storage->vulkan_memory_allocations_table());
 
@@ -872,6 +893,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   RegisterStaticTable(storage->expected_frame_timeline_slice_table());
   RegisterStaticTable(storage->actual_frame_timeline_slice_table());
+
+  RegisterStaticTable(storage->android_network_packets_table());
 
   RegisterStaticTable(storage->v8_isolate_table());
   RegisterStaticTable(storage->v8_js_script_table());
@@ -955,12 +978,10 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   // Value table aggregate functions.
   engine_->RegisterSqliteAggregateFunction<Dfs>(
-      Dfs::kName, Dfs::kArgCount, context_.storage->mutable_string_pool());
+      context_.storage->mutable_string_pool());
   engine_->RegisterSqliteAggregateFunction<DominatorTree>(
-      DominatorTree::kName, DominatorTree::kArgCount,
       context_.storage->mutable_string_pool());
   engine_->RegisterSqliteAggregateFunction<StructuralTreePartition>(
-      StructuralTreePartition::kName, StructuralTreePartition::kArgCount,
       context_.storage->mutable_string_pool());
 
   // Metrics.
