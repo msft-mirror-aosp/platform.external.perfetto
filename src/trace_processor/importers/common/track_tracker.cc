@@ -21,6 +21,7 @@
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 
 namespace perfetto {
@@ -46,6 +47,8 @@ const char* GetNameForGroup(TrackTracker::Group group) {
       return "Thermals";
     case TrackTracker::Group::kClockFrequency:
       return "Clock Freqeuncy";
+    case TrackTracker::Group::kBatteryMitigation:
+      return "Battery Mitigation";
     case TrackTracker::Group::kSizeSentinel:
       PERFETTO_FATAL("Unexpected size passed as group");
   }
@@ -455,10 +458,11 @@ TrackId TrackTracker::CreateGpuCounterTrack(StringId name,
   return context_->storage->mutable_gpu_counter_track_table()->Insert(row).id;
 }
 
-TrackId TrackTracker::CreatePerfCounterTrack(StringId name,
-                                             uint32_t perf_session_id,
-                                             uint32_t cpu,
-                                             bool is_timebase) {
+TrackId TrackTracker::CreatePerfCounterTrack(
+    StringId name,
+    tables::PerfSessionTable::Id perf_session_id,
+    uint32_t cpu,
+    bool is_timebase) {
   tables::PerfCounterTrackTable::Row row(name);
   row.perf_session_id = perf_session_id;
   row.cpu = cpu;
