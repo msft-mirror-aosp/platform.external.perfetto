@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Disposable, DisposableCallback} from '../base/disposable';
-import {DetailsPanel, TabDescriptor} from '../public';
+import {Disposable} from '../base/disposable';
+import {DetailsPanel, LegacyDetailsPanel, TabDescriptor} from '../public';
 
 export interface ResolvedTab {
   uri: string;
@@ -27,7 +27,8 @@ export interface ResolvedTab {
 export class TabManager implements Disposable {
   private _registry = new Map<string, TabDescriptor>();
   private _defaultTabs = new Set<string>();
-  private _detailsPanelsRegistry = new Set<DetailsPanel>();
+  private _legacyDetailsPanelRegistry = new Set<LegacyDetailsPanel>();
+  private _detailsPanelRegistry = new Set<DetailsPanel>();
   private _currentTabs = new Map<string, TabDescriptor>();
 
   dispose(): void {
@@ -40,23 +41,30 @@ export class TabManager implements Disposable {
 
   registerTab(desc: TabDescriptor): Disposable {
     this._registry.set(desc.uri, desc);
-    return new DisposableCallback(() => {
-      this._registry.delete(desc.uri);
-    });
+    return {
+      dispose: () => this._registry.delete(desc.uri),
+    };
   }
 
   addDefaultTab(uri: string): Disposable {
     this._defaultTabs.add(uri);
-    return new DisposableCallback(() => {
-      this._defaultTabs.delete(uri);
-    });
+    return {
+      dispose: () => this._defaultTabs.delete(uri),
+    };
+  }
+
+  registerLegacyDetailsPanel(section: LegacyDetailsPanel): Disposable {
+    this._legacyDetailsPanelRegistry.add(section);
+    return {
+      dispose: () => this._legacyDetailsPanelRegistry.delete(section),
+    };
   }
 
   registerDetailsPanel(section: DetailsPanel): Disposable {
-    this._detailsPanelsRegistry.add(section);
-    return new DisposableCallback(() => {
-      this._detailsPanelsRegistry.delete(section);
-    });
+    this._detailsPanelRegistry.add(section);
+    return {
+      dispose: () => this._detailsPanelRegistry.delete(section),
+    };
   }
 
   resolveTab(uri: string): TabDescriptor | undefined {
@@ -71,8 +79,12 @@ export class TabManager implements Disposable {
     return Array.from(this._defaultTabs);
   }
 
+  get legacyDetailsPanels(): LegacyDetailsPanel[] {
+    return Array.from(this._legacyDetailsPanelRegistry);
+  }
+
   get detailsPanels(): DetailsPanel[] {
-    return Array.from(this._detailsPanelsRegistry);
+    return Array.from(this._detailsPanelRegistry);
   }
 
   /**

@@ -42,9 +42,9 @@ CREATE_TABLE_ALLOWLIST = {
         'android_blocking_calls_cuj_calls'
     ],
     ('/android'
-    '/android_blocking_calls_unagg.sql'): [
-        'filtered_processes_with_non_zero_blocking_calls',
-        'process_info', 'android_blocking_calls_unagg_calls'
+     '/android_blocking_calls_unagg.sql'): [
+        'filtered_processes_with_non_zero_blocking_calls', 'process_info',
+        'android_blocking_calls_unagg_calls'
     ],
     '/android/jank/cujs.sql': ['android_jank_cuj'],
     '/chrome/gesture_flow_event.sql': [
@@ -74,6 +74,7 @@ def match_drop_view_pattern_to_dict(sql: str,
 
 
 def check(path: str, metrics_sources: str) -> List[str]:
+  errors = []
   with open(path) as f:
     sql = f.read()
 
@@ -93,17 +94,15 @@ def check(path: str, metrics_sources: str) -> List[str]:
           f'prevent the file from crashing if the metric is rerun.\n'
           f'Offending file: {path}\n')
 
-
-
   # Check that CREATE VIEW/TABLE has a matching DROP VIEW/TABLE before it.
   create_table_view_dir = match_create_table_pattern_to_dict(
       sql, CREATE_TABLE_VIEW_PATTERN)
   drop_table_view_dir = match_drop_view_pattern_to_dict(
       sql, DROP_TABLE_VIEW_PATTERN)
-  errors = check_banned_create_table_as(sql,
-                                        path.split(ROOT_DIR)[1],
-                                        metrics_sources.split(ROOT_DIR)[1],
-                                        CREATE_TABLE_ALLOWLIST)
+  errors += check_banned_create_table_as(sql,
+                                         path.split(ROOT_DIR)[1],
+                                         metrics_sources.split(ROOT_DIR)[1],
+                                         CREATE_TABLE_ALLOWLIST)
   errors += check_banned_create_view_as(sql, path.split(ROOT_DIR)[1])
   for name, [line, type] in create_table_view_dir.items():
     if name not in drop_table_view_dir:

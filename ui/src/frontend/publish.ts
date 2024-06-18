@@ -22,9 +22,7 @@ import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {getLegacySelection} from '../common/state';
 
 import {
-  CounterDetails,
   CpuProfileDetails,
-  FlamegraphDetails,
   Flow,
   globals,
   QuantizedLoad,
@@ -74,16 +72,6 @@ export function publishSelectedFlows(selectedFlows: Flow[]) {
 export function publishHttpRpcState(httpRpcState: HttpRpcState) {
   globals.httpRpcState = httpRpcState;
   raf.scheduleFullRedraw();
-}
-
-export function publishCounterDetails(click: CounterDetails) {
-  globals.counterDetails = click;
-  globals.publishRedraw();
-}
-
-export function publishFlamegraphDetails(click: FlamegraphDetails) {
-  globals.flamegraphDetails = click;
-  globals.publishRedraw();
 }
 
 export function publishCpuProfileDetails(details: CpuProfileDetails) {
@@ -189,7 +177,7 @@ export function publishConnectedFlows(connectedFlows: Flow[]) {
   globals.dispatch(Actions.setHighlightedFlowLeftId({flowId: -1}));
   globals.dispatch(Actions.setHighlightedFlowRightId({flowId: -1}));
   const currentSelection = getLegacySelection(globals.state);
-  if (currentSelection?.kind === 'CHROME_SLICE') {
+  if (currentSelection?.kind === 'SLICE') {
     const sliceId = currentSelection.id;
     for (const flow of globals.connectedFlows) {
       if (flow.begin.sliceId === sliceId) {

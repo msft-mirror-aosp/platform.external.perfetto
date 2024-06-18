@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {profileType} from '../..//frontend/flamegraph_panel';
 import {Actions} from '../../common/actions';
 import {ProfileType, LegacySelection} from '../../common/state';
-import {profileType} from '../../controller/flamegraph_controller';
 import {
   BASE_ROW,
   BaseSliceTrack,
@@ -52,10 +52,11 @@ export class HeapProfileTrack extends BaseSliceTrack<HeapProfileTrackTypes> {
   }
 
   getSqlSource(): string {
-    return `select
-      *,
-      0 AS dur,
-      0 AS depth
+    return `
+      select
+        *,
+        0 AS dur,
+        0 AS depth
       from (
         select distinct
           id,
@@ -70,7 +71,8 @@ export class HeapProfileTrack extends BaseSliceTrack<HeapProfileTrackTypes> {
           'graph' AS type
         from heap_graph_object
         where upid = ${this.upid}
-      )`;
+      )
+    `;
   }
 
   getRowSpec(): HeapProfileRow {

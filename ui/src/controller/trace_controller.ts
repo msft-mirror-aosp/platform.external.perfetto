@@ -74,11 +74,6 @@ import {
   CpuProfileControllerArgs,
 } from './cpu_profile_controller';
 import {
-  FlamegraphController,
-  FlamegraphControllerArgs,
-  profileType,
-} from './flamegraph_controller';
-import {
   FlowEventsController,
   FlowEventsControllerArgs,
 } from './flow_events_controller';
@@ -100,6 +95,8 @@ import {
   TraceStream,
 } from '../core/trace_stream';
 import {decideTracks} from './track_decider';
+import {profileType} from '../frontend/flamegraph_panel';
+import {FlamegraphCache} from '../core/flamegraph_cache';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -281,10 +278,6 @@ export class TraceController extends Controller<States> {
           Child('cpuProfile', CpuProfileController, cpuProfileArgs),
         );
 
-        const flamegraphArgs: FlamegraphControllerArgs = {engine};
-        childControllers.push(
-          Child('flamegraph', FlamegraphController, flamegraphArgs),
-        );
         childControllers.push(
           Child('cpu_aggregation', CpuAggregationController, {
             engine,
@@ -351,6 +344,10 @@ export class TraceController extends Controller<States> {
   onDestroy() {
     pluginManager.onTraceClose();
     globals.engines.delete(this.engineId);
+
+    // Invalidate the flamegraph cache.
+    // TODO(stevegolton): migrate this to the new system when it's ready.
+    globals.areaFlamegraphCache = new FlamegraphCache('area');
   }
 
   private async loadTrace(): Promise<EngineMode> {
@@ -578,7 +575,7 @@ export class TraceController extends Controller<States> {
       const reliableRangeStart = await computeTraceReliableRangeStart(engine);
       if (reliableRangeStart > 0) {
         globals.dispatch(
-          Actions.addAutomaticNote({
+          Actions.addNote({
             timestamp: reliableRangeStart,
             color: '#ff0000',
             text: 'Reliable Range Start',
@@ -677,7 +674,7 @@ export class TraceController extends Controller<States> {
       }
       globals.setLegacySelection(
         {
-          kind: 'CHROME_SLICE',
+          kind: 'SLICE',
           id: row.id,
           trackKey,
           table: 'slice',

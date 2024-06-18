@@ -44,9 +44,13 @@ CREATE_TABLE_ALLOWLIST = {
         '_chrome_mojo_slices', '_chrome_java_views', '_chrome_scheduler_tasks',
         '_chrome_tasks'
     ],
-    '/sched/thread_executing_span.sql': ['_wakeup_graph', '_thread_executing_span_graph',
-        '_critical_path'],
-    '/slices/flat_slices.sql': ['_slice_flattened']
+    '/sched/thread_executing_span.sql': [
+        '_wakeup_graph', '_thread_executing_span_graph', '_critical_path'
+    ],
+    '/slices/flat_slices.sql': ['_slice_flattened'],
+    '/wattson/curves/utils.sql': [
+        '_filtered_curves_1d', '_filtered_curves_2d', '_filtered_curves_l3'
+    ],
 }
 
 

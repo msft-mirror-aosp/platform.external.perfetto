@@ -21,19 +21,21 @@ import {Actions} from '../common/actions';
 import {translateState} from '../common/thread_state';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, NUM_NULL, STR_NULL} from '../trace_processor/query_result';
-import {CPU_SLICE_TRACK_KIND} from '../core_plugins/cpu_slices';
-import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
+import {
+  constraintsToQuerySuffix,
+  fromNumNull,
+  SQLConstraints,
+} from '../trace_processor/sql_utils';
 import {Anchor} from '../widgets/anchor';
 
 import {globals} from './globals';
 import {scrollToTrackAndTs} from './scroll_helper';
 import {asUtid, SchedSqlId, ThreadStateSqlId, Utid} from './sql_types';
-import {
-  constraintsToQuerySuffix,
-  fromNumNull,
-  SQLConstraints,
-} from './sql_utils';
 import {getThreadInfo, ThreadInfo} from './thread_and_process_info';
+import {
+  CPU_SLICE_TRACK_KIND,
+  THREAD_STATE_TRACK_KIND,
+} from '../core/track_kinds';
 
 // Representation of a single thread state object, corresponding to
 // a row for the |thread_slice| table.
@@ -153,7 +155,7 @@ export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
   }
   globals.setLegacySelection(
     {
-      kind: 'SLICE',
+      kind: 'SCHED_SLICE',
       id,
       trackKey: trackId,
     },

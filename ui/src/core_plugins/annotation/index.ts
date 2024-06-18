@@ -13,13 +13,11 @@
 // limitations under the License.
 
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
-import {
-  ChromeSliceTrack,
-  SLICE_TRACK_KIND,
-} from '../chrome_slices/chrome_slice_track';
+import {ThreadSliceTrack} from '../../frontend/thread_slice_track';
 import {NUM, NUM_NULL, STR} from '../../trace_processor/query_result';
 import {COUNTER_TRACK_KIND} from '../counter';
 import {TraceProcessorCounterTrack} from '../counter/trace_processor_counter_track';
+import {THREAD_SLICE_TRACK_KIND} from '../../public';
 
 class AnnotationPlugin implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -48,12 +46,12 @@ class AnnotationPlugin implements Plugin {
       ctx.registerTrack({
         uri: `perfetto.Annotation#${id}`,
         displayName: name,
-        kind: SLICE_TRACK_KIND,
+        kind: THREAD_SLICE_TRACK_KIND,
         tags: {
           metric: true,
         },
         trackFactory: ({trackKey}) => {
-          return new ChromeSliceTrack(
+          return new ThreadSliceTrack(
             {
               engine: ctx.engine,
               trackKey,
