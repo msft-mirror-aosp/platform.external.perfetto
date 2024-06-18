@@ -20,15 +20,11 @@ import {
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-import {PrimaryTrackSortKey} from '../public/index';
-
-import {Direction} from '../core/event_set';
 
 import {
   selectionToLegacySelection,
   Selection,
   LegacySelection,
-  ProfileType,
 } from '../core/selection_manager';
 
 export {
@@ -36,15 +32,44 @@ export {
   SelectionKind,
   NoteSelection,
   SliceSelection,
-  CounterSelection,
   HeapProfileSelection,
   PerfSamplesSelection,
   LegacySelection,
   AreaSelection,
   ProfileType,
-  ChromeSliceSelection,
+  ThreadSliceSelection,
   CpuProfileSampleSelection,
 } from '../core/selection_manager';
+
+// Tracks within track groups (usually corresponding to processes) are sorted.
+// As we want to group all tracks related to a given thread together, we use
+// two keys:
+// - Primary key corresponds to a priority of a track block (all tracks related
+//   to a given thread or a single track if it's not thread-associated).
+// - Secondary key corresponds to a priority of a given thread-associated track
+//   within its thread track block.
+// Each track will have a sort key, which either a primary sort key
+// (for non-thread tracks) or a tid and secondary sort key (mapping of tid to
+// primary sort key is done independently).
+export enum PrimaryTrackSortKey {
+  DEBUG_TRACK,
+  NULL_TRACK,
+  PROCESS_SCHEDULING_TRACK,
+  PROCESS_SUMMARY_TRACK,
+  EXPECTED_FRAMES_SLICE_TRACK,
+  ACTUAL_FRAMES_SLICE_TRACK,
+  PERF_SAMPLES_PROFILE_TRACK,
+  HEAP_PROFILE_TRACK,
+  MAIN_THREAD,
+  RENDER_THREAD,
+  GPU_COMPLETION_THREAD,
+  CHROME_IO_THREAD,
+  CHROME_COMPOSITOR_THREAD,
+  ORDINARY_THREAD,
+  COUNTER_TRACK,
+  ASYNC_SLICE_TRACK,
+  ORDINARY_TRACK,
+}
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -80,8 +105,6 @@ export interface VisibleState extends Timestamped {
   end: time;
   resolution: duration;
 }
-
-export type AreaById = Area & {id: string};
 
 export interface Area {
   start: time;
@@ -152,7 +175,13 @@ export const MAX_TIME = 180;
 // 53. Remove android log state.
 // 54. Remove traceTime.
 // 55. Rename TrackGroupState.id -> TrackGroupState.key.
-export const STATE_VERSION = 55;
+// 56. Renamed chrome slice to thread slice everywhere.
+// 57. Remove flamegraph related code from state.
+// 58. Remove area map.
+// 59. Deprecate old area selection type.
+// 60. Deprecate old note selection type.
+// 61. Remove params/state from TrackState.
+export const STATE_VERSION = 61;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -188,56 +217,6 @@ export type UtidToTrackSortKey = {
   };
 };
 
-export enum FlamegraphStateViewingOption {
-  SPACE_MEMORY_ALLOCATED_NOT_FREED_KEY = 'SPACE',
-  ALLOC_SPACE_MEMORY_ALLOCATED_KEY = 'ALLOC_SPACE',
-  OBJECTS_ALLOCATED_NOT_FREED_KEY = 'OBJECTS',
-  OBJECTS_ALLOCATED_KEY = 'ALLOC_OBJECTS',
-  PERF_SAMPLES_KEY = 'PERF_SAMPLES',
-  DOMINATOR_TREE_OBJ_SIZE_KEY = 'DOMINATED_OBJ_SIZE',
-  DOMINATOR_TREE_OBJ_COUNT_KEY = 'DOMINATED_OBJ_COUNT',
-}
-
-const HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS = [
-  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_SIZE_KEY,
-  FlamegraphStateViewingOption.DOMINATOR_TREE_OBJ_COUNT_KEY,
-] as const;
-
-export type HeapGraphDominatorTreeViewingOption =
-  (typeof HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS)[number];
-
-export function isHeapGraphDominatorTreeViewingOption(
-  option: FlamegraphStateViewingOption,
-): option is HeapGraphDominatorTreeViewingOption {
-  return (
-    HEAP_GRAPH_DOMINATOR_TREE_VIEWING_OPTIONS as readonly FlamegraphStateViewingOption[]
-  ).includes(option);
-}
-
-export interface FlamegraphState {
-  kind: 'FLAMEGRAPH_STATE';
-  upids: number[];
-  start: time;
-  end: time;
-  type: ProfileType;
-  viewingOption: FlamegraphStateViewingOption;
-  focusRegex: string;
-  expandedCallsiteByViewingOption: {[key: string]: CallsiteInfo | undefined};
-}
-
-export interface CallsiteInfo {
-  id: number;
-  parentId: number;
-  depth: number;
-  name?: string;
-  totalSize: number;
-  selfSize: number;
-  mapping: string;
-  merged: boolean;
-  highlighted: boolean;
-  location?: string;
-}
-
 export interface TraceFileSource {
   type: 'FILE';
   file: File;
@@ -259,6 +238,10 @@ export interface TraceArrayBufferSource {
   uuid?: string;
   // if |localOnly| is true then the trace should not be shared or downloaded.
   localOnly?: boolean;
+
+  // The set of extra args, keyed by plugin, that can be passed when opening the
+  // trace via postMessge deep-linking. See post_message_handler.ts for details.
+  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
 }
 
 export interface TraceUrlSource {
@@ -283,8 +266,6 @@ export interface TrackState {
   labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  params?: unknown;
-  state?: unknown;
   closeable?: boolean;
 }
 
@@ -328,10 +309,11 @@ export interface Note {
   text: string;
 }
 
-export interface AreaNote {
-  noteType: 'AREA';
+export interface SpanNote {
+  noteType: 'SPAN';
   id: string;
-  areaId: string;
+  start: time;
+  end: time;
   color: string;
   text: string;
 }
@@ -386,11 +368,10 @@ export interface PivotTableResult {
 
 // Input parameters to check whether the pivot table needs to be re-queried.
 export interface PivotTableAreaState {
-  areaId: string;
+  start: time;
+  end: time;
   tracks: string[];
 }
-
-export type SortDirection = keyof typeof Direction;
 
 export interface PivotTableState {
   // Currently selected area, if null, pivot table is not going to be visible.
@@ -474,18 +455,17 @@ export interface State {
   trackGroups: ObjectByKey<TrackGroupState>;
   tracks: ObjectByKey<TrackState>;
   utidToThreadSortKey: UtidToTrackSortKey;
-  areas: ObjectById<AreaById>;
   aggregatePreferences: ObjectById<AggregationState>;
   scrollingTracks: string[];
   pinnedTracks: string[];
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
   queries: ObjectById<QueryConfig>;
-  notes: ObjectById<Note | AreaNote>;
+  notes: ObjectById<Note | SpanNote>;
   status: Status;
   selection: Selection;
-  currentFlamegraphState: FlamegraphState | null;
   traceConversionInProgress: boolean;
+  flamegraphModalDismissed: boolean;
 
   /**
    * This state is updated on the frontend at 60Hz and eventually syncronised to
@@ -521,7 +501,6 @@ export interface State {
   recordingInProgress: boolean;
   recordingCancelled: boolean;
   extensionInstalled: boolean;
-  flamegraphModalDismissed: boolean;
   recordingTarget: RecordingTarget;
   availableAdbDevices: AdbRecordingTarget[];
   lastRecordingError?: string;

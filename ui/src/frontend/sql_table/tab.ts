@@ -17,7 +17,7 @@ import m from 'mithril';
 import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
-import {AddDebugTrackMenu} from '../../core_plugins/debug/add_debug_track_menu';
+import {AddDebugTrackMenu} from '../debug_tracks/add_debug_track_menu';
 import {Button} from '../../widgets/button';
 import {DetailsShell} from '../../widgets/details_shell';
 import {Popup, PopupPosition} from '../../widgets/popup';
@@ -29,9 +29,8 @@ import {Engine} from '../../public';
 import {globals} from '../globals';
 import {assertExists} from '../../base/logging';
 import {uuidv4} from '../../base/uuid';
-import {BottomTabToTabAdapter} from '../../public/utils';
-import {Actions} from '../../common/actions';
 import {BottomTab, NewBottomTabArgs} from '../bottom_tab';
+import {addEphemeralTab} from '../../common/addEphemeralTab';
 
 interface SqlTableTabConfig {
   table: SqlTableDescription;
@@ -46,15 +45,7 @@ export function addSqlTableTab(config: SqlTableTabConfig): void {
     uuid: uuidv4(),
   });
 
-  const uri = 'sqlTable#' + uuidv4();
-
-  globals.tabManager.registerTab({
-    uri,
-    content: new BottomTabToTabAdapter(queryResultsTab),
-    isEphemeral: true,
-  });
-
-  globals.dispatch(Actions.showTab({uri}));
+  addEphemeralTab(queryResultsTab, 'sqlTable');
 }
 
 // TODO(stevegolton): Find a way to make this more elegant.
