@@ -39,6 +39,7 @@ namespace {
 
 constexpr uint64_t kDefaultLowRamPerCpuBufferSizeKb = 2 * (1ULL << 10);   // 2mb
 constexpr uint64_t kDefaultHighRamPerCpuBufferSizeKb = 8 * (1ULL << 10);  // 8mb
+constexpr uint64_t kMaxPerCpuBufferSizeKb = 64 * (1ULL << 10);  // 64mb
 
 // Threshold for physical ram size used when deciding on default kernel buffer
 // sizes. We want to detect 8 GB, but the size reported through sysconf is
@@ -586,8 +587,9 @@ FtraceConfigMuxer::FtraceConfigMuxer(
     : ftrace_(ftrace),
       atrace_wrapper_(atrace_wrapper),
       table_(table),
-      syscalls_(syscalls),
+      syscalls_(std::move(syscalls)),
       current_state_(),
+      ds_configs_(),
       vendor_events_(std::move(vendor_events)),
       secondary_instance_(secondary_instance) {}
 FtraceConfigMuxer::~FtraceConfigMuxer() = default;
@@ -962,8 +964,9 @@ void FtraceConfigMuxer::SetupBufferSize(const FtraceConfig& request) {
 }
 
 // Post-conditions:
-// * result >= 1 (should have at least one page per CPU)
-// * If input is 0 output is a good default number
+// 1. result >= 1 (should have at least one page per CPU)
+// 2. result < kMaxTotalBufferSizeKb / (page_size / 1024)
+// 3. If input is 0 output is a good default number
 size_t ComputeCpuBufferSizeInPages(size_t requested_buffer_size_kb,
                                    bool buffer_size_lower_bound,
                                    int64_t sysconf_phys_pages) {
@@ -980,14 +983,18 @@ size_t ComputeCpuBufferSizeInPages(size_t requested_buffer_size_kb,
     actual_size_kb = default_size_kb;
   }
 
+  if (actual_size_kb > kMaxPerCpuBufferSizeKb) {
+    PERFETTO_ELOG(
+        "The requested ftrace buf size (%zu KB) is too big, capping to %" PRIu64
+        " KB",
+        actual_size_kb, kMaxPerCpuBufferSizeKb);
+    actual_size_kb = kMaxPerCpuBufferSizeKb;
+  }
+
   size_t pages = actual_size_kb / (page_sz / 1024);
   return pages ? pages : 1;
 }
 
-// TODO(rsavitski): stop caching the "input" value, as the kernel can and will
-// choose a slightly different buffer size (especially on 6.x kernels). And even
-// then the value might not be exactly page accurate due to scratch pages (more
-// of a concern for the |FtraceController::FlushForInstance| caller).
 size_t FtraceConfigMuxer::GetPerCpuBufferSizePages() {
   return current_state_.cpu_buffer_size_pages;
 }
