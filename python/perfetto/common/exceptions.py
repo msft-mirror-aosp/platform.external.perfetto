@@ -1,4 +1,4 @@
-# Copyright (C) 2023 The Android Open Source Project
+# Copyright (C) 2024 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,14 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
 
-perfetto_sql_source_set("slices") {
-  sources = [
-    "cpu_time.sql",
-    "flat_slices.sql",
-    "hierarchy.sql",
-    "slices.sql",
-    "with_context.sql",
-  ]
-}
+class PerfettoException(Exception):
+
+  def __init__(self, message):
+    super().__init__(message)
