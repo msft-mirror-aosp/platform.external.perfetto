@@ -2,7 +2,31 @@ Unreleased:
   Tracing service and probes:
     *
   SQL Standard library:
-    *
+    * Removed `cpu.cpus` and `cpu.size` modules. The functions inside
+      for guessing core type were inaccurate and often misleading.
+      There is no replacement for these as there is no accurate data
+      source available.
+    * Moved `cpu.utilization` package to `linux.cpu.utilization`. The
+      functionality inside this package only works properly on Linux
+      and Linux derived OSes (e.g. Android).
+    * Moved `cpu.freq` module to `linux.cpu.frequency` and renamed
+      `cpu_freq_counters` to `cpu_frequency_counters` for the same
+      reason as above.
+    * Moved `gpu.frequency` to `android.gpu.frequency` for the same reason as
+      above.
+    * Moved `cpu.idle` module to `linux.cpu.idle` for the same
+      reason as above.
+    * Moved content of `linux.cpu_idle` into `linux.cpu.idle` to make it
+      consistent with above changes.
+    * Moved `memory.android.gpu` to `android.memory.gpu`  to make it consistent
+      with above changes.`
+    * Moved contents of `memory.linux.process` to `linux.memory.process` and
+      `android.memory.process` to make it consistent with above changes.
+    * Moved `memory.linux.high_watermark` to `linux.memory.high_watermark` to
+      make it consistent with above changes.
+    * Moved `memory.heap_graph_dominator_tree` to
+      `android.memory.heap_graph.dominator_tree`. This is to allow for the
+      addition of more modules related to heap graphs.
   Trace Processor:
     *
   UI:
