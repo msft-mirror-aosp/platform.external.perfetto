@@ -87,6 +87,7 @@ class TrackDecider {
   private upidToUuid = new Map<number, string>();
   private utidToUuid = new Map<number, string>();
   private tracksToAdd: AddTrackArgs[] = [];
+  private tracksToPin: string[] = [];
   private addTrackGroupActions: DeferredAction[] = [];
 
   constructor(engine: EngineBase) {
@@ -96,10 +97,10 @@ class TrackDecider {
   async guessCpuSizes(): Promise<Map<number, string>> {
     const cpuToSize = new Map<number, string>();
     await this.engine.query(`
-      include perfetto module cpu.size;
+      include perfetto module viz.core_type;
     `);
     const result = await this.engine.query(`
-      select cpu, cpu_guess_core_type(cpu) as size
+      select cpu, _guess_core_type(cpu) as size
       from cpu_counter_track
       join _counter_track_summary using (id);
     `);
@@ -1393,14 +1394,21 @@ class TrackDecider {
         }
       }
 
+      const key = uuidv4();
+
       this.tracksToAdd.push({
         uri: info.uri,
         name: info.displayName,
+        key,
         // TODO(hjd): Fix how sorting works. Plugins should expose
         // 'sort keys' which the user can use to choose a sort order.
         trackSortKey: info.sortKey ?? PrimaryTrackSortKey.ORDINARY_TRACK,
         trackGroup: groupUuid,
       });
+
+      if (info.isPinned) {
+        this.tracksToPin.push(key);
+      }
     }
   }
 
@@ -1538,6 +1546,11 @@ class TrackDecider {
     this.addTrackGroupActions.push(
       Actions.addTracks({tracks: this.tracksToAdd}),
     );
+
+    // Add the actions to pin any tracks we need to pin
+    for (const trackKey of this.tracksToPin) {
+      this.addTrackGroupActions.push(Actions.toggleTrackPinned({trackKey}));
+    }
 
     const threadOrderingMetadata = await this.computeThreadOrderingMetadata();
     this.addTrackGroupActions.push(

@@ -115,6 +115,19 @@ class PerfettoSqlEngine {
       std::unique_ptr<typename Function::Context> ctx,
       bool deterministic = true);
 
+  // Registers a trace processor C++ function to be runnable from SQL.
+  //
+  // The format of the function is given by the |SqliteFunction|.
+  //
+  // |ctx|:           context object for the function; this object *must*
+  //                  outlive the function so should likely be either static or
+  //                  scoped to the lifetime of TraceProcessor.
+  // |deterministic|: whether this function has deterministic output given the
+  //                  same set of arguments.
+  template <typename Function>
+  base::Status RegisterSqliteFunction(typename Function::UserDataContext* ctx,
+                                      bool deterministic = true);
+
   // Registers a trace processor C++ aggregate function to be runnable from SQL.
   //
   // The format of the function is given by the |SqliteAggregateFunction|.
@@ -159,7 +172,7 @@ class PerfettoSqlEngine {
 
   // Registers a trace processor C++ table with SQLite with an SQL name of
   // |name|.
-  void RegisterStaticTable(const Table&,
+  void RegisterStaticTable(Table*,
                            const std::string& name,
                            Table::Schema schema);
 
@@ -203,8 +216,7 @@ class PerfettoSqlEngine {
            runtime_function_count_ + macros_.size();
   }
 
-  // Find static table (Static or Runtime) registered with engine with provided
-  // name.
+  // Find table (Static or Runtime) registered with engine with provided name.
   const Table* GetTableOrNull(std::string_view name) const {
     if (auto maybe_runtime = GetRuntimeTableOrNull(name); maybe_runtime) {
       return maybe_runtime;
@@ -217,6 +229,21 @@ class PerfettoSqlEngine {
 
   // Find static table registered with engine with provided name.
   const Table* GetStaticTableOrNull(std::string_view) const;
+
+  // Find table (Static or Runtime) registered with engine with provided name.
+  Table* GetMutableTableOrNull(std::string_view name) {
+    if (auto maybe_runtime = GetMutableRuntimeTableOrNull(name);
+        maybe_runtime) {
+      return maybe_runtime;
+    }
+    return GetMutableStaticTableOrNull(name);
+  }
+
+  // Find RuntimeTable registered with engine with provided name.
+  RuntimeTable* GetMutableRuntimeTableOrNull(std::string_view);
+
+  // Find static table registered with engine with provided name.
+  Table* GetMutableStaticTableOrNull(std::string_view);
 
  private:
   base::Status ExecuteCreateFunction(const PerfettoSqlParser::CreateFunction&);
@@ -231,6 +258,8 @@ class PerfettoSqlEngine {
   base::Status ExecuteCreateView(const PerfettoSqlParser::CreateView&);
 
   base::Status ExecuteCreateMacro(const PerfettoSqlParser::CreateMacro&);
+
+  base::Status ExecuteCreateIndex(const PerfettoSqlParser::CreateIndex&);
 
   template <typename Function>
   base::Status RegisterFunctionWithSqlite(
@@ -350,6 +379,15 @@ base::Status PerfettoSqlEngine::RegisterStaticFunction(
   return engine_->RegisterFunction(
       name, argc, perfetto_sql_internal::WrapSqlFunction<Function>, ctx,
       nullptr, deterministic);
+}
+
+template <typename Function>
+base::Status PerfettoSqlEngine::RegisterSqliteFunction(
+    typename Function::UserDataContext* ctx,
+    bool deterministic) {
+  static_function_count_++;
+  return engine_->RegisterFunction(Function::kName, Function::kArgCount,
+                                   Function::Step, ctx, nullptr, deterministic);
 }
 
 template <typename Function>
