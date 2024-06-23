@@ -2515,6 +2515,31 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/gpu:gpu
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_gpu_gpu",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/gpu/frequency.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/gpu/memory.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph:heap_graph
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_tree.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/memory:memory
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_memory_memory",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/process.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/android/startup:startup
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
@@ -2581,11 +2606,9 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/common/args.sql",
         "src/trace_processor/perfetto_sql/stdlib/common/counters.sql",
-        "src/trace_processor/perfetto_sql/stdlib/common/cpus.sql",
         "src/trace_processor/perfetto_sql/stdlib/common/metadata.sql",
         "src/trace_processor/perfetto_sql/stdlib/common/percentiles.sql",
         "src/trace_processor/perfetto_sql/stdlib/common/slices.sql",
-        "src/trace_processor/perfetto_sql/stdlib/common/thread_states.sql",
         "src/trace_processor/perfetto_sql/stdlib/common/timestamps.sql",
     ],
 )
@@ -2598,39 +2621,15 @@ perfetto_filegroup(
     ],
 )
 
-# GN target: //src/trace_processor/perfetto_sql/stdlib/cpu/utilization:utilization
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_cpu_utilization_utilization",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/general.sql",
-        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/process.sql",
-        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/system.sql",
-        "src/trace_processor/perfetto_sql/stdlib/cpu/utilization/thread.sql",
-    ],
-)
-
-# GN target: //src/trace_processor/perfetto_sql/stdlib/cpu:cpu
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_cpu_cpu",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/cpu/cpus.sql",
-        "src/trace_processor/perfetto_sql/stdlib/cpu/freq.sql",
-        "src/trace_processor/perfetto_sql/stdlib/cpu/idle.sql",
-        "src/trace_processor/perfetto_sql/stdlib/cpu/size.sql",
-    ],
-)
-
 # GN target: //src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common:common
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_deprecated_v42_common_common",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/args.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/counters.sql",
-        "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/cpus.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/metadata.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/percentiles.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/slices.sql",
-        "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/thread_states.sql",
         "src/trace_processor/perfetto_sql/stdlib/deprecated/v42/common/timestamps.sql",
     ],
 )
@@ -2640,14 +2639,6 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_export_export",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/export/to_firefox_profile.sql",
-    ],
-)
-
-# GN target: //src/trace_processor/perfetto_sql/stdlib/gpu:gpu
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_gpu_gpu",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/gpu/frequency.sql",
     ],
 )
 
@@ -2670,38 +2661,39 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization:utilization
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_linux_cpu_utilization_utilization",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/general.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/process.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/system.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/thread.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/linux/cpu:cpu
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_linux_cpu_cpu",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/frequency.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/idle.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/linux/memory:memory
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_linux_memory_memory",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/linux/memory/general.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/memory/high_watermark.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/memory/process.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/linux:linux
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_linux",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/linux/cpu_idle.sql",
-    ],
-)
-
-# GN target: //src/trace_processor/perfetto_sql/stdlib/memory/android:android
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_memory_android_android",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/memory/android/gpu.sql",
-    ],
-)
-
-# GN target: //src/trace_processor/perfetto_sql/stdlib/memory/linux:linux
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_memory_linux_linux",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/memory/linux/general.sql",
-        "src/trace_processor/perfetto_sql/stdlib/memory/linux/high_watermark.sql",
-        "src/trace_processor/perfetto_sql/stdlib/memory/linux/process.sql",
-    ],
-)
-
-# GN target: //src/trace_processor/perfetto_sql/stdlib/memory:memory
-perfetto_filegroup(
-    name = "src_trace_processor_perfetto_sql_stdlib_memory_memory",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/memory/heap_graph_dominator_tree.sql",
-    ],
 )
 
 # GN target: //src/trace_processor/perfetto_sql/stdlib/pkvm:pkvm
@@ -2785,6 +2777,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/viz:viz
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_viz_viz",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/viz/core_type.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/wattson:wattson
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_wattson_wattson",
@@ -2808,22 +2808,22 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_android_android",
         ":src_trace_processor_perfetto_sql_stdlib_android_auto_auto",
         ":src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
+        ":src_trace_processor_perfetto_sql_stdlib_android_gpu_gpu",
+        ":src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
+        ":src_trace_processor_perfetto_sql_stdlib_android_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
         ":src_trace_processor_perfetto_sql_stdlib_android_winscope_winscope",
         ":src_trace_processor_perfetto_sql_stdlib_chrome_chrome_sql",
         ":src_trace_processor_perfetto_sql_stdlib_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_counters_counters",
-        ":src_trace_processor_perfetto_sql_stdlib_cpu_cpu",
-        ":src_trace_processor_perfetto_sql_stdlib_cpu_utilization_utilization",
         ":src_trace_processor_perfetto_sql_stdlib_deprecated_v42_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_export_export",
-        ":src_trace_processor_perfetto_sql_stdlib_gpu_gpu",
         ":src_trace_processor_perfetto_sql_stdlib_graphs_graphs",
         ":src_trace_processor_perfetto_sql_stdlib_intervals_intervals",
+        ":src_trace_processor_perfetto_sql_stdlib_linux_cpu_cpu",
+        ":src_trace_processor_perfetto_sql_stdlib_linux_cpu_utilization_utilization",
         ":src_trace_processor_perfetto_sql_stdlib_linux_linux",
-        ":src_trace_processor_perfetto_sql_stdlib_memory_android_android",
-        ":src_trace_processor_perfetto_sql_stdlib_memory_linux_linux",
-        ":src_trace_processor_perfetto_sql_stdlib_memory_memory",
+        ":src_trace_processor_perfetto_sql_stdlib_linux_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
         ":src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
         ":src_trace_processor_perfetto_sql_stdlib_sched_sched",
@@ -2832,6 +2832,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_time_time",
         ":src_trace_processor_perfetto_sql_stdlib_v8_v8",
         ":src_trace_processor_perfetto_sql_stdlib_viz_summary_summary",
+        ":src_trace_processor_perfetto_sql_stdlib_viz_viz",
         ":src_trace_processor_perfetto_sql_stdlib_wattson_wattson",
     ],
     outs = [
