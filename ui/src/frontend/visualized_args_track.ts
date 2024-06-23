@@ -14,36 +14,48 @@
 
 import m from 'mithril';
 
-import {Actions} from '../../common/actions';
-import {globals} from '../../frontend/globals';
-import {Button} from '../../widgets/button';
-import {Icons} from '../../base/semantic_icons';
-import {ThreadSliceTrack} from '../thread_slice/thread_slice_track';
-import {uuidv4Sql} from '../../base/uuid';
-import {NewTrackArgs} from '../../frontend/track';
-import {Disposable, DisposableCallback} from '../../base/disposable';
+import {Actions} from '../common/actions';
+import {globals} from './globals';
+import {Button} from '../widgets/button';
+import {Icons} from '../base/semantic_icons';
+import {ThreadSliceTrack} from './thread_slice_track';
+import {uuidv4Sql} from '../base/uuid';
+import {Engine} from '../trace_processor/engine';
+import {createView} from '../trace_processor/sql_utils';
 
-// Similar to a SliceTrack, but creates a view
+export interface VisualizedArgsTrackAttrs {
+  readonly trackKey: string;
+  readonly engine: Engine;
+  readonly trackId: number;
+  readonly maxDepth: number;
+  readonly argName: string;
+}
+
 export class VisualisedArgsTrack extends ThreadSliceTrack {
-  private viewName: string;
+  private readonly viewName: string;
+  private readonly argName: string;
 
-  constructor(
-    args: NewTrackArgs,
-    trackId: number,
-    maxDepth: number,
-    private argName: string,
-  ) {
+  constructor({
+    trackKey,
+    engine,
+    trackId,
+    maxDepth,
+    argName,
+  }: VisualizedArgsTrackAttrs) {
     const uuid = uuidv4Sql();
     const escapedArgName = argName.replace(/[^a-zA-Z]/g, '_');
     const viewName = `__arg_visualisation_helper_${escapedArgName}_${uuid}_slice`;
-    super(args, trackId, maxDepth, viewName);
+
+    super({engine, trackKey}, trackId, maxDepth, viewName);
     this.viewName = viewName;
+    this.argName = argName;
   }
 
-  async onInit(): Promise<Disposable> {
-    // Create the helper view - just one which is relevant to this slice
-    await this.engine.query(`
-        create view ${this.viewName} as
+  async onInit() {
+    return await createView(
+      this.engine,
+      this.viewName,
+      `
         with slice_with_arg as (
           select
             slice.id,
@@ -64,12 +76,9 @@ export class VisualisedArgsTrack extends ThreadSliceTrack {
           join slice_with_arg s3 on s2.id=s3.id
           ) as depth
         from slice_with_arg s1
-        order by id;
-    `);
-
-    return new DisposableCallback(() => {
-      this.engine.tryQuery(`drop view ${this.viewName}`);
-    });
+        order by id
+      `,
+    );
   }
 
   getTrackShellButtons(): m.Children {

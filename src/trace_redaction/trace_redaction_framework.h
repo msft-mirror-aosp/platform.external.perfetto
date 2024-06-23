@@ -127,29 +127,14 @@ class SyntheticProcess {
 //                        trace packets.
 class Context {
  public:
+  // Each packet will have a trusted uid. This is the package emitting the
+  // event. In production we only expect to see system uids. 9999 is the
+  // last allowed uid (allow all uids less than or equal to 9999).
+  static constexpr int32_t kMaxTrustedUid = 9999;
+
   // The package that should not be redacted. This must be populated before
   // running any primitives.
   std::string package_name;
-
-  struct VerifyConfig {
-    // Each packet will have a trusted uid. This is the package emitting the
-    // event. In production we only expect to see system uids. 9999 is the
-    // last allowed uid (allow all uids less than or equal to 9999).
-    static constexpr int32_t kMaxTrustedUid = 9999;
-
-    // Some test traces will have failed patches because they used:
-    //
-    // trace_config {
-    //   buffers {
-    //   size_kb: 5376
-    //   fill_policy: DISCARD
-    // }
-    //
-    // This flag should only be used in testing.
-    bool verify_failed_patches = true;
-  };
-
-  VerifyConfig verify_config;
 
   // The package list maps a package name to a uid. It is possible for multiple
   // package names to map to the same uid, for example:
@@ -261,9 +246,8 @@ class Context {
   // If the mask is set to 0x00, all fields would be removed. This should not
   // happen as some metadata provides context between packets.
   //
-  // Important note, 128 is used because it's the first power-of-2 after
-  // TracePacket::kMaxFieldNumber.
-  using TracePacketMask = std::bitset<128>;
+  // TracePacket has kForTestingFieldNumber which is set to 900.
+  using TracePacketMask = std::bitset<1024>;
   TracePacketMask packet_mask;
 
   // Ftrace packets contain a "one of" entry called "event". Within the scope of
@@ -303,7 +287,9 @@ class Context {
   //
   //  3.  In this example, a cpu_idle event populates the one-of slot in the
   //      ftrace event
-  using FtraceEventMask = std::bitset<512>;
+  //
+  // Ftrace event has kMaliMaliPMMCURESETWAITFieldNumber which is set to 532.
+  using FtraceEventMask = std::bitset<1024>;
   FtraceEventMask ftrace_mask;
 
   //  message SuspendResumeFtraceEvent {

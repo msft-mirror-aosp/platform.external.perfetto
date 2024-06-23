@@ -30,6 +30,7 @@
 #include <variant>
 #include <vector>
 
+#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/flat_hash_map.h"
@@ -206,14 +207,14 @@ PerfettoSqlEngine::PerfettoSqlEngine(StringPool* pool)
   }
 }
 
-void PerfettoSqlEngine::RegisterStaticTable(const Table& table,
+void PerfettoSqlEngine::RegisterStaticTable(Table* table,
                                             const std::string& table_name,
                                             Table::Schema schema) {
   // Make sure we didn't accidentally leak a state from a previous table
   // creation.
   PERFETTO_CHECK(!static_table_context_->temporary_create_state);
   static_table_context_->temporary_create_state =
-      std::make_unique<DbSqliteModule::State>(&table, std::move(schema));
+      std::make_unique<DbSqliteModule::State>(table, std::move(schema));
 
   base::StackString<1024> sql(
       R"(
@@ -313,6 +314,12 @@ PerfettoSqlEngine::ExecuteUntilLastStatement(SqlSource sql_source) {
       auto sql = macro->sql;
       RETURN_IF_ERROR(ExecuteCreateMacro(*macro));
       source = RewriteToDummySql(sql);
+    } else if (auto* index = std::get_if<PerfettoSqlParser::CreateIndex>(
+                   &parser.statement())) {
+      // TODO(mayzner): Enable.
+      base::ignore_result(index);
+      return base::ErrStatus("CREATE PERFETTO INDEX not implemented");
+      // source = RewriteToDummySql(parser.statement_sql());
     } else {
       // If none of the above matched, this must just be an SQL statement
       // directly executable by SQLite.
@@ -919,8 +926,19 @@ const RuntimeTable* PerfettoSqlEngine::GetRuntimeTableOrNull(
   return state ? state->runtime_table.get() : nullptr;
 }
 
+RuntimeTable* PerfettoSqlEngine::GetMutableRuntimeTableOrNull(
+    std::string_view name) {
+  auto* state = runtime_table_context_->manager.FindStateByName(name);
+  return state ? state->runtime_table.get() : nullptr;
+}
+
 const Table* PerfettoSqlEngine::GetStaticTableOrNull(
     std::string_view name) const {
+  auto* state = static_table_context_->manager.FindStateByName(name);
+  return state ? state->static_table : nullptr;
+}
+
+Table* PerfettoSqlEngine::GetMutableStaticTableOrNull(std::string_view name) {
   auto* state = static_table_context_->manager.FindStateByName(name);
   return state ? state->static_table : nullptr;
 }

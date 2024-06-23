@@ -447,6 +447,7 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   // constraints and only add them to `idx_str` later.
   int limit = -1;
   int offset = -1;
+  bool has_unknown_constraint = false;
 
   cs_idxes.reserve(static_cast<uint32_t>(info->nConstraint));
   for (int i = 0; i < info->nConstraint; ++i) {
@@ -459,6 +460,8 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
         limit = i;
       } else if (c.op == SQLITE_INDEX_CONSTRAINT_OFFSET) {
         offset = i;
+      } else {
+        has_unknown_constraint = true;
       }
       continue;
     }
@@ -597,7 +600,7 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
 
   // LIMIT. Save as "L1" if limit is present and "L0" if not.
   idx_str += "L";
-  if (limit == -1) {
+  if (limit == -1 || has_unknown_constraint) {
     idx_str += "0";
   } else {
     auto& o = info->aConstraintUsage[limit];
@@ -609,7 +612,7 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
 
   // OFFSET. Save as "O1" if offset is present and "O0" if not.
   idx_str += "O";
-  if (offset == -1) {
+  if (offset == -1 || has_unknown_constraint) {
     idx_str += "0";
   } else {
     auto& o = info->aConstraintUsage[offset];
@@ -896,7 +899,7 @@ DbSqliteModule::QueryCost DbSqliteModule::EstimateCost(
   return QueryCost{final_cost, current_row_count};
 }
 
-DbSqliteModule::State::State(const Table* _table, Table::Schema _schema)
+DbSqliteModule::State::State(Table* _table, Table::Schema _schema)
     : State(TableComputation::kStatic, std::move(_schema)) {
   static_table = _table;
 }

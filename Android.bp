@@ -2436,6 +2436,7 @@ cc_test {
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_operators_operators",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_interface",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_table_functions",
+        ":perfetto_src_trace_processor_perfetto_sql_intrinsics_types_types",
         ":perfetto_src_trace_processor_sorter_sorter",
         ":perfetto_src_trace_processor_sqlite_bindings_bindings",
         ":perfetto_src_trace_processor_sqlite_sqlite",
@@ -6477,6 +6478,7 @@ genrule {
         "protos/perfetto/trace/extension_descriptor.proto",
         "protos/perfetto/trace/filesystem/inode_file_map.proto",
         "protos/perfetto/trace/ftrace/android_fs.proto",
+        "protos/perfetto/trace/ftrace/bcl_exynos.proto",
         "protos/perfetto/trace/ftrace/binder.proto",
         "protos/perfetto/trace/ftrace/block.proto",
         "protos/perfetto/trace/ftrace/cgroup.proto",
@@ -6904,6 +6906,7 @@ filegroup {
     name: "perfetto_protos_perfetto_trace_ftrace_cpp",
     srcs: [
         "protos/perfetto/trace/ftrace/android_fs.proto",
+        "protos/perfetto/trace/ftrace/bcl_exynos.proto",
         "protos/perfetto/trace/ftrace/binder.proto",
         "protos/perfetto/trace/ftrace/block.proto",
         "protos/perfetto/trace/ftrace/cgroup.proto",
@@ -6992,6 +6995,7 @@ genrule {
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location perfetto_src_protozero_protoc_plugin_cppgen_plugin) --plugin_out=wrapper_namespace=gen:$(genDir)/external/perfetto/ $(locations :perfetto_protos_perfetto_trace_ftrace_cpp)",
     out: [
         "external/perfetto/protos/perfetto/trace/ftrace/android_fs.gen.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/bcl_exynos.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/binder.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/block.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/cgroup.gen.cc",
@@ -7080,6 +7084,7 @@ genrule {
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location perfetto_src_protozero_protoc_plugin_cppgen_plugin) --plugin_out=wrapper_namespace=gen:$(genDir)/external/perfetto/ $(locations :perfetto_protos_perfetto_trace_ftrace_cpp)",
     out: [
         "external/perfetto/protos/perfetto/trace/ftrace/android_fs.gen.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/bcl_exynos.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/binder.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/block.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/cgroup.gen.h",
@@ -7164,6 +7169,7 @@ filegroup {
     name: "perfetto_protos_perfetto_trace_ftrace_lite",
     srcs: [
         "protos/perfetto/trace/ftrace/android_fs.proto",
+        "protos/perfetto/trace/ftrace/bcl_exynos.proto",
         "protos/perfetto/trace/ftrace/binder.proto",
         "protos/perfetto/trace/ftrace/block.proto",
         "protos/perfetto/trace/ftrace/cgroup.proto",
@@ -7251,6 +7257,7 @@ genrule {
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --cpp_out=lite=true:$(genDir)/external/perfetto/ $(locations :perfetto_protos_perfetto_trace_ftrace_lite)",
     out: [
         "external/perfetto/protos/perfetto/trace/ftrace/android_fs.pb.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/bcl_exynos.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/binder.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/block.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/cgroup.pb.cc",
@@ -7338,6 +7345,7 @@ genrule {
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --cpp_out=lite=true:$(genDir)/external/perfetto/ $(locations :perfetto_protos_perfetto_trace_ftrace_lite)",
     out: [
         "external/perfetto/protos/perfetto/trace/ftrace/android_fs.pb.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/bcl_exynos.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/binder.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/block.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/cgroup.pb.h",
@@ -7422,6 +7430,7 @@ filegroup {
     name: "perfetto_protos_perfetto_trace_ftrace_zero",
     srcs: [
         "protos/perfetto/trace/ftrace/android_fs.proto",
+        "protos/perfetto/trace/ftrace/bcl_exynos.proto",
         "protos/perfetto/trace/ftrace/binder.proto",
         "protos/perfetto/trace/ftrace/block.proto",
         "protos/perfetto/trace/ftrace/cgroup.proto",
@@ -7510,6 +7519,7 @@ genrule {
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location protozero_plugin) --plugin_out=wrapper_namespace=pbzero:$(genDir)/external/perfetto/ $(locations :perfetto_protos_perfetto_trace_ftrace_zero)",
     out: [
         "external/perfetto/protos/perfetto/trace/ftrace/android_fs.pbzero.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/bcl_exynos.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/binder.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/block.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/cgroup.pbzero.cc",
@@ -7598,6 +7608,7 @@ genrule {
     cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location protozero_plugin) --plugin_out=wrapper_namespace=pbzero:$(genDir)/external/perfetto/ $(locations :perfetto_protos_perfetto_trace_ftrace_zero)",
     out: [
         "external/perfetto/protos/perfetto/trace/ftrace/android_fs.pbzero.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/bcl_exynos.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/binder.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/block.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/cgroup.pbzero.h",
@@ -12901,8 +12912,8 @@ filegroup {
         "src/trace_processor/perfetto_sql/intrinsics/functions/base64.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/create_view_function.cc",
-        "src/trace_processor/perfetto_sql/intrinsics/functions/dfs.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/dominator_tree.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/graph_traversal.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/math.cc",
@@ -12911,6 +12922,7 @@ filegroup {
         "src/trace_processor/perfetto_sql/intrinsics/functions/stack_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/structural_tree_partition.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/to_ftrace.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/type_builders.cc",
     ],
 }
 
@@ -13060,6 +13072,11 @@ filegroup {
     ],
 }
 
+// GN: //src/trace_processor/perfetto_sql/intrinsics/types:types
+filegroup {
+    name: "perfetto_src_trace_processor_perfetto_sql_intrinsics_types_types",
+}
+
 // GN: //src/trace_processor/perfetto_sql/prelude:prelude
 genrule {
     name: "perfetto_src_trace_processor_perfetto_sql_prelude_prelude",
@@ -13182,6 +13199,11 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/tracks.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/arm_dsu.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_idle.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_split.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/device.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/grouped.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/ungrouped.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/utils.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/device_infos.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/system_state.sql",
     ],
@@ -14592,6 +14614,7 @@ java_library {
         "protos/perfetto/trace/extension_descriptor.proto",
         "protos/perfetto/trace/filesystem/inode_file_map.proto",
         "protos/perfetto/trace/ftrace/android_fs.proto",
+        "protos/perfetto/trace/ftrace/bcl_exynos.proto",
         "protos/perfetto/trace/ftrace/binder.proto",
         "protos/perfetto/trace/ftrace/block.proto",
         "protos/perfetto/trace/ftrace/cgroup.proto",
@@ -15151,6 +15174,7 @@ cc_test {
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_interface",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_table_functions",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_unittests",
+        ":perfetto_src_trace_processor_perfetto_sql_intrinsics_types_types",
         ":perfetto_src_trace_processor_rpc_rpc",
         ":perfetto_src_trace_processor_rpc_unittests",
         ":perfetto_src_trace_processor_sorter_sorter",
@@ -15899,6 +15923,7 @@ filegroup {
         "protos/perfetto/trace/extension_descriptor.proto",
         "protos/perfetto/trace/filesystem/inode_file_map.proto",
         "protos/perfetto/trace/ftrace/android_fs.proto",
+        "protos/perfetto/trace/ftrace/bcl_exynos.proto",
         "protos/perfetto/trace/ftrace/binder.proto",
         "protos/perfetto/trace/ftrace/block.proto",
         "protos/perfetto/trace/ftrace/cgroup.proto",
@@ -16177,6 +16202,7 @@ cc_binary {
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_operators_operators",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_interface",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_table_functions",
+        ":perfetto_src_trace_processor_perfetto_sql_intrinsics_types_types",
         ":perfetto_src_trace_processor_rpc_httpd",
         ":perfetto_src_trace_processor_rpc_rpc",
         ":perfetto_src_trace_processor_rpc_stdiod",
@@ -16575,6 +16601,7 @@ cc_binary_host {
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_operators_operators",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_interface",
         ":perfetto_src_trace_processor_perfetto_sql_intrinsics_table_functions_table_functions",
+        ":perfetto_src_trace_processor_perfetto_sql_intrinsics_types_types",
         ":perfetto_src_trace_processor_sorter_sorter",
         ":perfetto_src_trace_processor_sqlite_bindings_bindings",
         ":perfetto_src_trace_processor_sqlite_sqlite",
