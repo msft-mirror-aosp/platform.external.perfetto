@@ -18,14 +18,12 @@ import {Actions} from '../../common/actions';
 import {ProfileType, getLegacySelection} from '../../common/state';
 import {TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
-import {FLAMEGRAPH_HOVERED_COLOR} from '../../frontend/flamegraph';
+import {FLAMEGRAPH_HOVERED_COLOR} from '../../frontend/legacy_flamegraph';
 import {globals} from '../../frontend/globals';
-import {PanelSize} from '../../frontend/panel';
+import {Size} from '../../base/geom';
 import {TimeScale} from '../../frontend/time_scale';
 import {Engine, Track} from '../../public';
 import {LONG} from '../../trace_processor/query_result';
-
-export const PERF_SAMPLES_PROFILE_TRACK_KIND = 'PerfSamplesProfileTrack';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
@@ -98,7 +96,7 @@ export class PerfSamplesProfileTrack implements Track {
     return MARGIN_TOP + RECT_HEIGHT - 1;
   }
 
-  render(ctx: CanvasRenderingContext2D, _size: PanelSize): void {
+  render(ctx: CanvasRenderingContext2D, _size: Size): void {
     const {visibleTimeScale} = globals.timeline;
     const data = this.fetcher.data;
 

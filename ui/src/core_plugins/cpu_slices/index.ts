@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {CPU_SLICE_TRACK_KIND} from '../../public';
 import {SliceDetailsPanel} from '../../frontend/slice_details_panel';
 import {
   Engine,
@@ -21,8 +22,6 @@ import {
 } from '../../public';
 import {NUM, STR_NULL} from '../../trace_processor/query_result';
 import {CpuSliceTrack} from './cpu_slice_track';
-
-export const CPU_SLICE_TRACK_KIND = 'CpuSliceTrack';
 
 class CpuSlices implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -56,10 +55,10 @@ class CpuSlices implements Plugin {
   async guessCpuSizes(engine: Engine): Promise<Map<number, string>> {
     const cpuToSize = new Map<number, string>();
     await engine.query(`
-      include perfetto module cpu.size;
+      include perfetto module viz.core_type;
     `);
     const result = await engine.query(`
-      select cpu, cpu_guess_core_type(cpu) as size
+      select cpu, _guess_core_type(cpu) as size
       from cpu_counter_track
       join _counter_track_summary using (id);
     `);

@@ -13,16 +13,15 @@
 // limitations under the License.
 
 import {TrackData} from '../../common/track_data';
+import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../../public';
+import {LegacyFlamegraphCache} from '../../core/legacy_flamegraph_cache';
 import {
-  FlamegraphCache,
-  FlamegraphDetailsPanel,
+  LegacyFlamegraphDetailsPanel,
   profileType,
-} from '../../frontend/flamegraph_panel';
+} from '../../frontend/legacy_flamegraph_panel';
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
 import {NUM} from '../../trace_processor/query_result';
 import {PerfSamplesProfileTrack} from './perf_samples_profile_track';
-
-export const PERF_SAMPLES_PROFILE_TRACK_KIND = 'PerfSamplesProfileTrack';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
@@ -47,11 +46,11 @@ class PerfSamplesProfilePlugin implements Plugin {
       });
     }
 
-    const cache = new FlamegraphCache('perf_samples');
+    const cache = new LegacyFlamegraphCache('perf_samples');
     ctx.registerDetailsPanel({
       render: (sel) => {
         if (sel.kind === 'PERF_SAMPLES') {
-          return m(FlamegraphDetailsPanel, {
+          return m(LegacyFlamegraphDetailsPanel, {
             cache,
             selection: {
               profileType: profileType(sel.type),
