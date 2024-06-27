@@ -29,20 +29,20 @@ import {PrimaryTrackSortKey} from '../public';
 import {getTrackName} from '../public/utils';
 import {Engine, EngineBase} from '../trace_processor/engine';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../trace_processor/query_result';
-import {ASYNC_SLICE_TRACK_KIND} from '../core_plugins/async_slices';
 import {
   ENABLE_SCROLL_JANK_PLUGIN_V2,
   getScrollJankTracks,
 } from '../core_plugins/chrome_scroll_jank';
 import {decideTracks as scrollJankDecideTracks} from '../core_plugins/chrome_scroll_jank/chrome_tasks_scroll_jank_track';
-import {COUNTER_TRACK_KIND} from '../core_plugins/counter';
+import {decideTracks as screenshotDecideTracks} from '../core_plugins/screenshots';
 import {
   ACTUAL_FRAMES_SLICE_TRACK_KIND,
+  ASYNC_SLICE_TRACK_KIND,
+  COUNTER_TRACK_KIND,
   EXPECTED_FRAMES_SLICE_TRACK_KIND,
-} from '../core_plugins/frames';
-import {decideTracks as screenshotDecideTracks} from '../core_plugins/screenshots';
-import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
-import {THREAD_SLICE_TRACK_KIND} from '../core_plugins/thread_slice/thread_slice_track';
+  THREAD_SLICE_TRACK_KIND,
+  THREAD_STATE_TRACK_KIND,
+} from '../core/track_kinds';
 
 const MEM_DMA_COUNTER_NAME = 'mem.dma_heap';
 const MEM_DMA = 'mem.dma_buffer';
@@ -87,6 +87,7 @@ class TrackDecider {
   private upidToUuid = new Map<number, string>();
   private utidToUuid = new Map<number, string>();
   private tracksToAdd: AddTrackArgs[] = [];
+  private tracksToPin: string[] = [];
   private addTrackGroupActions: DeferredAction[] = [];
 
   constructor(engine: EngineBase) {
@@ -96,10 +97,10 @@ class TrackDecider {
   async guessCpuSizes(): Promise<Map<number, string>> {
     const cpuToSize = new Map<number, string>();
     await this.engine.query(`
-      include perfetto module cpu.size;
+      include perfetto module viz.core_type;
     `);
     const result = await this.engine.query(`
-      select cpu, cpu_guess_core_type(cpu) as size
+      select cpu, _guess_core_type(cpu) as size
       from cpu_counter_track
       join _counter_track_summary using (id);
     `);
@@ -1393,15 +1394,21 @@ class TrackDecider {
         }
       }
 
+      const key = uuidv4();
+
       this.tracksToAdd.push({
         uri: info.uri,
         name: info.displayName,
+        key,
         // TODO(hjd): Fix how sorting works. Plugins should expose
         // 'sort keys' which the user can use to choose a sort order.
         trackSortKey: info.sortKey ?? PrimaryTrackSortKey.ORDINARY_TRACK,
         trackGroup: groupUuid,
-        params: info.params,
       });
+
+      if (info.isPinned) {
+        this.tracksToPin.push(key);
+      }
     }
   }
 
@@ -1539,6 +1546,11 @@ class TrackDecider {
     this.addTrackGroupActions.push(
       Actions.addTracks({tracks: this.tracksToAdd}),
     );
+
+    // Add the actions to pin any tracks we need to pin
+    for (const trackKey of this.tracksToPin) {
+      this.addTrackGroupActions.push(Actions.toggleTrackPinned({trackKey}));
+    }
 
     const threadOrderingMetadata = await this.computeThreadOrderingMetadata();
     this.addTrackGroupActions.push(

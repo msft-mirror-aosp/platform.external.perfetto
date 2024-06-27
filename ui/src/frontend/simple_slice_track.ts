@@ -19,10 +19,10 @@ import {
   CustomSqlTableSliceTrack,
 } from './tracks/custom_sql_table_slice_track';
 import {NamedSliceTrackTypes} from './named_slice_track';
-import {ARG_PREFIX, SliceColumns, SqlDataSource} from './debug_tracks';
+import {SliceColumns, SqlDataSource} from './debug_tracks/debug_tracks';
 import {uuidv4Sql} from '../base/uuid';
-import {DisposableCallback} from '../base/disposable';
-import {DebugSliceDetailsTab} from '../core_plugins/debug/details_tab';
+import {ARG_PREFIX, DebugSliceDetailsTab} from './debug_tracks/details_tab';
+import {createPerfettoTable} from '../trace_processor/sql_utils';
 
 export interface SimpleSliceTrackConfig {
   data: SqlDataSource;
@@ -49,14 +49,18 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
   }
 
   async getSqlDataSource(): Promise<CustomSqlTableDefConfig> {
-    await this.createTrackTable(
-      this.config.data,
-      this.config.columns,
-      this.config.argColumns,
+    const table = await createPerfettoTable(
+      this.engine,
+      this.sqlTableName,
+      this.createTableQuery(
+        this.config.data,
+        this.config.columns,
+        this.config.argColumns,
+      ),
     );
     return {
       sqlTableName: this.sqlTableName,
-      dispose: new DisposableCallback(() => this.destroyTrackTable()),
+      disposable: table,
     };
   }
 
@@ -72,11 +76,11 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
     };
   }
 
-  private async createTrackTable(
+  private createTableQuery(
     data: SqlDataSource,
     sliceColumns: SliceColumns,
     argColumns: string[],
-  ): Promise<void> {
+  ): string {
     // If the view has clashing names (e.g. "name" coming from joining two
     // different tables, we will see names like "name_1", "name_2", but they
     // won't be addressable from the SQL. So we explicitly name them through a
@@ -86,8 +90,7 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
 
     // TODO(altimin): Support removing this table when the track is closed.
     const dur = sliceColumns.dur === '0' ? 0 : sliceColumns.dur;
-    await this.engine.query(`
-      create perfetto table ${this.sqlTableName} as
+    return `
       with data${dataColumns} as (
         ${data.sqlSource}
       ),
@@ -104,10 +107,7 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
         row_number() over (order by ts) as id,
         *
       from prepared_data
-      order by ts;`);
-  }
-
-  private async destroyTrackTable() {
-    await this.engine.tryQuery(`DROP TABLE IF EXISTS ${this.sqlTableName}`);
+      order by ts
+    `;
   }
 }
