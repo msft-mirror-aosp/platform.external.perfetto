@@ -18,10 +18,9 @@
 // The actual service worker code is in src/service_worker.
 // Design doc: http://go/perfetto-offline.
 
+import {getServingRoot} from '../base/http_utils';
 import {reportError} from '../base/logging';
 import {raf} from '../core/raf_scheduler';
-
-import {globals} from './globals';
 
 // We use a dedicated |caches| object to share a global boolean beween the main
 // thread and the SW. SW cannot use local-storage or anything else other than
@@ -54,7 +53,6 @@ class BypassCache {
 }
 
 export class ServiceWorkerController {
-  private _initialWorker: ServiceWorker | null = null;
   private _bypassed = false;
   private _installing = false;
 
@@ -84,13 +82,6 @@ export class ServiceWorkerController {
       this._installing = true;
     } else if (sw.state === 'activated') {
       this._installing = false;
-      // Don't show the notification if the site was served straight
-      // from the network (e.g., on the very first visit or after
-      // Ctrl+Shift+R). In these cases, we are already at the last
-      // version.
-      if (sw !== this._initialWorker && this._initialWorker) {
-        globals.newVersionAvailable = true;
-      }
     }
   }
 
@@ -102,6 +93,10 @@ export class ServiceWorkerController {
   }
 
   async install() {
+    // This must happen before any await, because in continuations
+    // document.currentScript (which getServingRoot() depends on) is null.
+    const versionDir = getServingRoot().split('/').slice(-2)[0];
+
     if (!('serviceWorker' in navigator)) return; // Not supported.
 
     if (location.pathname !== '/') {
@@ -131,11 +126,8 @@ export class ServiceWorkerController {
     // In production cases versionDir == VERSION. We use this here for ease of
     // testing (so we can have /v1.0.0a/ /v1.0.0b/ even if they have the same
     // version code).
-    const versionDir = globals.root.split('/').slice(-2)[0];
     const swUri = `/service_worker.js?v=${versionDir}`;
     navigator.serviceWorker.register(swUri).then((registration) => {
-      this._initialWorker = registration.active;
-
       // At this point there are two options:
       // 1. This is the first time we visit the site (or cache was cleared) and
       //    no SW is installed yet. In this case |installing| will be set.

@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 
-import {Trash} from '../base/disposable';
+import {DisposableStack} from '../base/disposable';
 import {findRef, toHTMLElement} from '../base/dom_utils';
 import {assertExists, assertFalse} from '../base/logging';
 import {time} from '../base/time';
@@ -41,7 +41,7 @@ import {
   FlowEventsRendererArgs,
 } from './flow_events_renderer';
 import {globals} from './globals';
-import {PanelSize} from './panel';
+import {Size} from '../base/geom';
 import {VirtualCanvas} from './virtual_canvas';
 
 const CANVAS_OVERDRAW_PX = 100;
@@ -52,7 +52,7 @@ export interface Panel {
   readonly selectable: boolean;
   readonly trackKey?: string; // Defined if this panel represents are track
   readonly groupKey?: string; // Defined if this panel represents a group - i.e. a group summary track
-  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void;
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size): void;
   getSliceRect?(tStart: time, tDur: time, depth: number): SliceRect | undefined;
 }
 
@@ -103,7 +103,7 @@ export class PanelContainer
 
   private ctx?: CanvasRenderingContext2D;
 
-  private readonly trash = new Trash();
+  private readonly trash = new DisposableStack();
 
   private readonly OVERLAY_REF = 'overlay';
   private readonly PANEL_STACK_REF = 'panel-stack';
@@ -194,12 +194,12 @@ export class PanelContainer
   constructor() {
     const onRedraw = () => this.renderCanvas();
     raf.addRedrawCallback(onRedraw);
-    this.trash.addCallback(() => {
+    this.trash.defer(() => {
       raf.removeRedrawCallback(onRedraw);
     });
 
     perfDisplay.addContainer(this);
-    this.trash.addCallback(() => {
+    this.trash.defer(() => {
       perfDisplay.removeContainer(this);
     });
   }
@@ -216,7 +216,7 @@ export class PanelContainer
     const virtualCanvas = new VirtualCanvas(overlayElement, dom, {
       overdrawPx: CANVAS_OVERDRAW_PX,
     });
-    this.trash.add(virtualCanvas);
+    this.trash.use(virtualCanvas);
     this.virtualCanvas = virtualCanvas;
 
     const ctx = virtualCanvas.canvasElement.getContext('2d');
@@ -242,7 +242,7 @@ export class PanelContainer
     );
 
     // Listen for when the panel stack changes size
-    this.trash.add(
+    this.trash.use(
       new SimpleResizeObserver(panelStackElement, () => {
         attrs.onPanelStackResize?.(
           panelStackElement.clientWidth,
@@ -490,7 +490,7 @@ export class PanelContainer
     panel: Panel,
     renderTime: number,
     ctx: CanvasRenderingContext2D,
-    size: PanelSize,
+    size: Size,
   ) {
     if (!perfDebug()) return;
     let renderStats = this.panelPerfStats.get(panel);

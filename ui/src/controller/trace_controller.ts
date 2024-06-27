@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
 import {BigintMath} from '../base/bigint_math';
 import {assertExists, assertTrue} from '../base/logging';
 import {Duration, duration, Span, time, Time, TimeSpan} from '../base/time';
@@ -95,7 +97,12 @@ import {
   TraceStream,
 } from '../core/trace_stream';
 import {decideTracks} from './track_decider';
-import {FlamegraphCache, profileType} from '../frontend/flamegraph_panel';
+import {profileType} from '../frontend/legacy_flamegraph_panel';
+import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
+import {
+  deserializeAppStatePhase1,
+  deserializeAppStatePhase2,
+} from '../common/state_serialization';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -346,7 +353,7 @@ export class TraceController extends Controller<States> {
 
     // Invalidate the flamegraph cache.
     // TODO(stevegolton): migrate this to the new system when it's ready.
-    globals.areaFlamegraphCache = new FlamegraphCache('area');
+    globals.areaFlamegraphCache = new LegacyFlamegraphCache('area');
   }
 
   private async loadTrace(): Promise<EngineMode> {
@@ -506,6 +513,10 @@ export class TraceController extends Controller<States> {
 
     await defineMaxLayoutDepthSqlFunction(engine);
 
+    if (globals.restoreAppStateAfterTraceLoad) {
+      deserializeAppStatePhase1(globals.restoreAppStateAfterTraceLoad);
+    }
+
     await pluginManager.onTraceLoad(engine, (id) => {
       this.updateStatus(`Running plugin: ${id}`);
     });
@@ -574,7 +585,7 @@ export class TraceController extends Controller<States> {
       const reliableRangeStart = await computeTraceReliableRangeStart(engine);
       if (reliableRangeStart > 0) {
         globals.dispatch(
-          Actions.addAutomaticNote({
+          Actions.addNote({
             timestamp: reliableRangeStart,
             color: '#ff0000',
             text: 'Reliable Range Start',
@@ -583,6 +594,14 @@ export class TraceController extends Controller<States> {
       }
     }
 
+    if (globals.restoreAppStateAfterTraceLoad) {
+      // Wait that plugins have completed their actions and then proceed with
+      // the final phase of app state restore.
+      // TODO(primiano): this can probably be removed once we refactor tracks
+      // to be URI based and can deal with non-existing URIs.
+      deserializeAppStatePhase2(globals.restoreAppStateAfterTraceLoad);
+      globals.restoreAppStateAfterTraceLoad = undefined;
+    }
     return engineMode;
   }
 
