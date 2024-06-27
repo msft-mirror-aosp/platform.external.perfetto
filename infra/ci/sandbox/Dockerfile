@@ -26,11 +26,11 @@ RUN set -ex; \
     apt-get -y install python3 python3-pip git curl sudo lz4 tar ccache tini \
                        libpulse0 libgl1 libxml2 libc6-dev-i386 libtinfo5 \
                        gnupg2 pkg-config zip g++ zlib1g-dev unzip \
-                       python3-distutils gcc-7 g++-7; \
+                       python3-distutils gcc-8 g++-8; \
     apt-get -y install libc++-8-dev libc++abi-8-dev clang-8; \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.7 1; \
-    gcc-7 --version; \
-    g++-7 --version; \
+    gcc-8 --version; \
+    g++-8 --version; \
     clang-8 --version; \
     clang++-8 --version; \
     pip3 install protobuf pandas grpcio; \
@@ -40,7 +40,7 @@ RUN set -ex; \
     rm -rf /var/lib/apt/lists/* /usr/share/man/* /usr/share/doc/*;
 
 RUN set -ex; \
-    curl -LO https://github.com/bazelbuild/bazel/releases/download/2.2.0/bazel-2.2.0-installer-linux-x86_64.sh; \
+    curl -LO https://github.com/bazelbuild/bazel/releases/download/7.0.2/bazel-7.0.2-installer-linux-x86_64.sh; \
     chmod +x bazel-*-installer-linux-x86_64.sh; \
     ./bazel-*-installer-linux-x86_64.sh; \
     rm bazel-*-installer-linux-x86_64.sh; \
