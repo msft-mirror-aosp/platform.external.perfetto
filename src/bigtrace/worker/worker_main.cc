@@ -25,46 +25,42 @@
 #include "perfetto/trace_processor/trace_processor.h"
 #include "protos/perfetto/bigtrace/worker.grpc.pb.h"
 #include "protos/perfetto/bigtrace/worker.pb.h"
+#include "src/bigtrace/worker/worker_impl.h"
+
+#include "perfetto/ext/base/getopt.h"
 
 namespace perfetto {
 namespace bigtrace {
 namespace {
 
-class WorkerImpl final : public protos::BigtraceWorker::Service {
-  grpc::Status QueryTrace(
-      grpc::ServerContext*,
-      const protos::BigtraceQueryTraceArgs* args,
-      protos::BigtraceQueryTraceResponse* response) override {
-    trace_processor::Config config;
-    std::unique_ptr<trace_processor::TraceProcessor> tp =
-        trace_processor::TraceProcessor::CreateInstance(config);
-
-    base::Status status =
-        trace_processor::ReadTrace(tp.get(), args->trace().c_str());
-    if (!status.ok()) {
-      const std::string& error_message = status.c_message();
-      return grpc::Status(grpc::StatusCode::INTERNAL, error_message);
-    }
-    auto iter = tp->ExecuteQuery(args->sql_query());
-    trace_processor::QueryResultSerializer serializer =
-        trace_processor::QueryResultSerializer(std::move(iter));
-
-    std::vector<uint8_t> serialized;
-    for (bool has_more = true; has_more;) {
-      serialized.clear();
-      has_more = serializer.Serialize(&serialized);
-      response->add_result()->ParseFromArray(
-          serialized.data(), static_cast<int>(serialized.size()));
-    }
-    response->set_trace(args->trace());
-
-    return grpc::Status::OK;
-  }
+struct CommandLineOptions {
+  std::string port;
 };
 
-base::Status WorkerMain(int, char**) {
+CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
+  CommandLineOptions command_line_options;
+  static option long_options[] = {{"port", required_argument, nullptr, 'p'},
+                                  {nullptr, 0, nullptr, 0}};
+  int c;
+  while ((c = getopt_long(argc, argv, "w:", long_options, nullptr)) != -1) {
+    switch (c) {
+      case 'p':
+        command_line_options.port = optarg;
+        break;
+      default:
+        PERFETTO_ELOG("Usage: %s --port=port", argv[0]);
+        break;
+    }
+  }
+  return command_line_options;
+}
+
+base::Status WorkerMain(int argc, char** argv) {
   // Setup the Worker Server
-  std::string server_address("localhost:5052");
+  CommandLineOptions options = ParseCommandLineOptions(argc, argv);
+  std::string port = !options.port.empty() ? options.port : "5052";
+
+  std::string server_address("localhost:" + port);
   auto service = std::make_unique<WorkerImpl>();
   grpc::ServerBuilder builder;
   builder.RegisterService(service.get());
