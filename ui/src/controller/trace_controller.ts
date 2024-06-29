@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
 import {BigintMath} from '../base/bigint_math';
 import {assertExists, assertTrue} from '../base/logging';
 import {Duration, duration, Span, time, Time, TimeSpan} from '../base/time';
@@ -26,7 +28,12 @@ import {
   isMetatracingEnabled,
 } from '../common/metatracing';
 import {pluginManager} from '../common/plugins';
-import {EngineMode, PendingDeeplinkState, ProfileType} from '../common/state';
+import {
+  EngineConfig,
+  EngineMode,
+  PendingDeeplinkState,
+  ProfileType,
+} from '../common/state';
 import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {
   defaultTraceContext,
@@ -67,6 +74,7 @@ import {CpuAggregationController} from './aggregation/cpu_aggregation_controller
 import {CpuByProcessAggregationController} from './aggregation/cpu_by_process_aggregation_controller';
 import {FrameAggregationController} from './aggregation/frame_aggregation_controller';
 import {SliceAggregationController} from './aggregation/slice_aggregation_controller';
+import {WattsonAggregationController} from './aggregation/wattson_aggregation_controller';
 import {ThreadAggregationController} from './aggregation/thread_aggregation_controller';
 import {Child, Children, Controller} from './controller';
 import {
@@ -95,8 +103,12 @@ import {
   TraceStream,
 } from '../core/trace_stream';
 import {decideTracks} from './track_decider';
-import {profileType} from '../frontend/flamegraph_panel';
-import {FlamegraphCache} from '../core/flamegraph_cache';
+import {profileType} from '../frontend/legacy_flamegraph_panel';
+import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
+import {
+  deserializeAppStatePhase1,
+  deserializeAppStatePhase2,
+} from '../common/state_serialization';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -314,6 +326,12 @@ export class TraceController extends Controller<States> {
           }),
         );
         childControllers.push(
+          Child('wattson_aggregation', WattsonAggregationController, {
+            engine,
+            kind: 'wattson_aggregation',
+          }),
+        );
+        childControllers.push(
           Child('frame_aggregation', FrameAggregationController, {
             engine,
             kind: 'frame_aggregation',
@@ -347,7 +365,7 @@ export class TraceController extends Controller<States> {
 
     // Invalidate the flamegraph cache.
     // TODO(stevegolton): migrate this to the new system when it's ready.
-    globals.areaFlamegraphCache = new FlamegraphCache('area');
+    globals.areaFlamegraphCache = new LegacyFlamegraphCache('area');
   }
 
   private async loadTrace(): Promise<EngineMode> {
@@ -448,7 +466,10 @@ export class TraceController extends Controller<States> {
     // traceUuid will be '' if the trace is not cacheable (URL or RPC).
     const traceUuid = await this.cacheCurrentTrace();
 
-    const traceDetails = await getTraceTimeDetails(this.engine);
+    const traceDetails = await getTraceTimeDetails(this.engine, engineCfg);
+    if (traceDetails.traceTitle) {
+      document.title = `${traceDetails.traceTitle} - Perfetto UI`;
+    }
     publishTraceContext(traceDetails);
 
     const shownJsonWarning =
@@ -506,6 +527,10 @@ export class TraceController extends Controller<States> {
     await this.includeSummaryTables();
 
     await defineMaxLayoutDepthSqlFunction(engine);
+
+    if (globals.restoreAppStateAfterTraceLoad) {
+      deserializeAppStatePhase1(globals.restoreAppStateAfterTraceLoad);
+    }
 
     await pluginManager.onTraceLoad(engine, (id) => {
       this.updateStatus(`Running plugin: ${id}`);
@@ -584,6 +609,14 @@ export class TraceController extends Controller<States> {
       }
     }
 
+    if (globals.restoreAppStateAfterTraceLoad) {
+      // Wait that plugins have completed their actions and then proceed with
+      // the final phase of app state restore.
+      // TODO(primiano): this can probably be removed once we refactor tracks
+      // to be URI based and can deal with non-existing URIs.
+      deserializeAppStatePhase2(globals.restoreAppStateAfterTraceLoad);
+      globals.restoreAppStateAfterTraceLoad = undefined;
+    }
     return engineMode;
   }
 
@@ -1145,7 +1178,10 @@ async function computeVisibleTime(
   return HighPrecisionTimeSpan.fromTime(visibleStart, visibleEnd);
 }
 
-async function getTraceTimeDetails(engine: Engine): Promise<TraceContext> {
+async function getTraceTimeDetails(
+  engine: Engine,
+  engineCfg: EngineConfig,
+): Promise<TraceContext> {
   const traceTime = await getTraceTimeBounds(engine);
 
   // Find the first REALTIME or REALTIME_COARSE clock snapshot.
@@ -1211,8 +1247,38 @@ async function getTraceTimeDetails(engine: Engine): Promise<TraceContext> {
     Time.sub(realtimeOffset, Time.fromSeconds(tzOffMin * 60)),
   );
 
+  let traceTitle = '';
+  let traceUrl = '';
+  switch (engineCfg.source.type) {
+    case 'FILE':
+      // Split on both \ and / (because C:\Windows\paths\are\like\this).
+      traceTitle = engineCfg.source.file.name.split(/[/\\]/).pop()!;
+      const fileSizeMB = Math.ceil(engineCfg.source.file.size / 1e6);
+      traceTitle += ` (${fileSizeMB} MB)`;
+      break;
+    case 'URL':
+      traceUrl = engineCfg.source.url;
+      traceTitle = traceUrl.split('/').pop()!;
+      break;
+    case 'ARRAY_BUFFER':
+      traceTitle = engineCfg.source.title;
+      traceUrl = engineCfg.source.url || '';
+      const arrayBufferSizeMB = Math.ceil(
+        engineCfg.source.buffer.byteLength / 1e6,
+      );
+      traceTitle += ` (${arrayBufferSizeMB} MB)`;
+      break;
+    case 'HTTP_RPC':
+      traceTitle = `RPC @ ${HttpRpcEngine.hostAndPort}`;
+      break;
+    default:
+      break;
+  }
+
   return {
     ...traceTime,
+    traceTitle,
+    traceUrl,
     realtimeOffset,
     utcOffset,
     traceTzOffset,

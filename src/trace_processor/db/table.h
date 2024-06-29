@@ -17,14 +17,18 @@
 #ifndef SRC_TRACE_PROCESSOR_DB_TABLE_H_
 #define SRC_TRACE_PROCESSOR_DB_TABLE_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/base/status.h"
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/status_or.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/ref_counted.h"
@@ -38,8 +42,15 @@
 namespace perfetto::trace_processor {
 
 namespace {
-using OrderedIndexes = column::DataLayerChain::OrderedIndices;
+using OrderedIndices = column::DataLayerChain::OrderedIndices;
+
+OrderedIndices OrderedIndicesFromIndex(const std::vector<uint32_t>& index) {
+  OrderedIndices o;
+  o.data = index.data();
+  o.size = static_cast<uint32_t>(index.size());
+  return o;
 }
+}  // namespace
 
 // Represents a table of data with named, strongly typed columns.
 class Table {
@@ -144,30 +155,56 @@ class Table {
     return Iterator(this, std::move(rm));
   }
 
-  // Returns if there was an index created on column.
-  bool HasIndexOnCol(uint32_t col_idx) const {
-    PERFETTO_DCHECK(col_idx < indexes_.size());
-    return indexes_[col_idx].has_value();
-  }
+  std::optional<OrderedIndices> GetIndex(
+      const std::vector<uint32_t>& cols) const {
+    for (const auto& idx : indexes_) {
+      if (cols.size() >= idx.index.size()) {
+        continue;
+      }
 
-  // Returns OrderedIndices created based on index on the column.
-  const column::DataLayerChain::OrderedIndices GetIndexOnCol(
-      uint32_t col_idx) const {
-    PERFETTO_DCHECK(HasIndexOnCol(col_idx));
-    OrderedIndexes o;
-    o.data = indexes_[col_idx]->data();
-    o.size = static_cast<uint32_t>(indexes_[col_idx]->size());
-    return o;
-  }
-
-  // Adds an index onto column. Returns false if there is already index on this
-  // column.
-  bool SetIndex(uint32_t col_idx, std::vector<uint32_t> index) {
-    if (HasIndexOnCol(col_idx)) {
-      return false;
+      if (std::equal(cols.begin(), cols.end(), idx.columns.begin())) {
+        return OrderedIndicesFromIndex(idx.index);
+      }
     }
-    indexes_[col_idx] = std::move(index);
-    return true;
+    return std::nullopt;
+  }
+
+  // Adds an index onto column.
+  // Returns an error if index already exists and `!replace`.
+  base::Status SetIndex(const std::string& name,
+                        std::vector<uint32_t> col_idxs,
+                        std::vector<uint32_t> index,
+                        bool replace = false) {
+    for (auto& idx : indexes_) {
+      if (idx.name == name) {
+        if (replace) {
+          idx.columns = std::move(col_idxs);
+          idx.index = std::move(index);
+          return base::OkStatus();
+        }
+        return base::ErrStatus(
+            "Index of this name already exists on this table.");
+      }
+    }
+
+    ColumnIndex idx;
+    idx.name = name;
+    idx.columns = std::move(col_idxs);
+    idx.index = std::move(index);
+    indexes_.push_back(std::move(idx));
+    return base::OkStatus();
+  }
+
+  // Removes index from the table.
+  // Returns an error if index doesn't exist.
+  base::Status DropIndex(const std::string& name) {
+    for (uint32_t i = 0; i < indexes_.size(); i++) {
+      if (indexes_[i].name == name) {
+        indexes_.erase(indexes_.begin() + i);
+        return base::OkStatus();
+      }
+    }
+    return base::ErrStatus("Index '%s' not found.", name.c_str());
   }
 
   // Sorts the table using the specified order by constraints.
@@ -239,6 +276,12 @@ class Table {
  private:
   friend class ColumnLegacy;
 
+  struct ColumnIndex {
+    std::string name;
+    std::vector<uint32_t> columns;
+    std::vector<uint32_t> index;
+  };
+
   void CreateChains() const;
 
   Table CopyExceptOverlays() const;
@@ -256,7 +299,7 @@ class Table {
   std::vector<RefPtr<column::DataLayer>> overlay_layers_;
   mutable std::vector<std::unique_ptr<column::DataLayerChain>> chains_;
 
-  std::vector<std::optional<std::vector<uint32_t>>> indexes_;
+  std::vector<ColumnIndex> indexes_;
 };
 
 }  // namespace perfetto::trace_processor
