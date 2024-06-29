@@ -179,6 +179,8 @@ export interface LegacySelectionArgs {
 }
 
 export interface TraceContext {
+  traceTitle: string; // File name and size of the current trace.
+  traceUrl: string; // URL of the Trace.
   readonly start: time;
   readonly end: time;
 
@@ -203,6 +205,8 @@ export interface TraceContext {
 }
 
 export const defaultTraceContext: TraceContext = {
+  traceTitle: '',
+  traceUrl: '',
   start: Time.ZERO,
   end: Time.fromSeconds(10),
   realtimeOffset: Time.ZERO,
@@ -493,7 +497,7 @@ class Globals {
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
-    return this.getJobStatusMap().get(name) || ConversionJobStatus.NotRunning;
+    return this.getJobStatusMap().get(name) ?? ConversionJobStatus.NotRunning;
   }
 
   setConversionJobStatus(name: ConversionJobName, status: ConversionJobStatus) {
