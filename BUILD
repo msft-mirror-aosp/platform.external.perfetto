@@ -2352,6 +2352,8 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/intrinsics/functions/graph_traversal.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.h",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/interval_intersect.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/interval_intersect.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/math.cc",
@@ -2533,6 +2535,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_tree.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/excluded_refs.sql",
     ],
 )
 
