@@ -26,7 +26,7 @@ import {
   findRootSize,
   mergeCallsites,
   viewingOptions,
-} from '../common/flamegraph_util';
+} from '../common/legacy_flamegraph_util';
 import {ProfileType} from '../common/state';
 import {raf} from '../core/raf_scheduler';
 import {Button} from '../widgets/button';
@@ -36,7 +36,7 @@ import {Popup} from '../widgets/popup';
 import {EmptyState} from '../widgets/empty_state';
 import {Spinner} from '../widgets/spinner';
 
-import {Flamegraph, NodeRendering} from './flamegraph';
+import {Flamegraph, NodeRendering} from './legacy_flamegraph';
 import {globals} from './globals';
 import {debounce} from './rate_limiters';
 import {Router} from './router';
@@ -50,7 +50,7 @@ import {arrayEquals} from '../base/array_utils';
 import {getCurrentTrace} from './sidebar';
 import {convertTraceToPprofAndDownload} from './trace_converter';
 import {AsyncLimiter} from '../base/async_limiter';
-import {FlamegraphCache} from '../core/flamegraph_cache';
+import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
 
 const HEADER_HEIGHT = 30;
 
@@ -127,7 +127,7 @@ export interface FlamegraphSelectionParams {
 }
 
 interface FlamegraphDetailsPanelAttrs {
-  cache: FlamegraphCache;
+  cache: LegacyFlamegraphCache;
   selection: FlamegraphSelectionParams;
 }
 
@@ -147,7 +147,7 @@ interface FlamegraphState {
   }>;
 }
 
-export class FlamegraphDetailsPanel
+export class LegacyFlamegraphDetailsPanel
   implements m.ClassComponent<FlamegraphDetailsPanelAttrs>
 {
   private undebouncedFocusRegex = '';
@@ -204,7 +204,7 @@ export class FlamegraphDetailsPanel
       this.state.result = undefined;
       const state = this.state;
       this.queryLimiter.schedule(() => {
-        return FlamegraphDetailsPanel.fetchQueryResults(
+        return LegacyFlamegraphDetailsPanel.fetchQueryResults(
           assertExists(this.getCurrentEngine()),
           attrs.cache,
           state,
@@ -227,7 +227,7 @@ export class FlamegraphDetailsPanel
       );
       this.state.result.renderResults = mergeCallsites(
         expanded,
-        FlamegraphDetailsPanel.getMinSizeDisplayed(
+        LegacyFlamegraphDetailsPanel.getMinSizeDisplayed(
           expanded,
           selected?.totalSize,
         ),
@@ -458,16 +458,16 @@ export class FlamegraphDetailsPanel
 
   private static async fetchQueryResults(
     engine: Engine,
-    cache: FlamegraphCache,
+    cache: LegacyFlamegraphCache,
     state: FlamegraphState,
   ) {
-    const table = await FlamegraphDetailsPanel.prepareViewsAndTables(
+    const table = await LegacyFlamegraphDetailsPanel.prepareViewsAndTables(
       engine,
       cache,
       state,
     );
     const queryResults =
-      await FlamegraphDetailsPanel.getFlamegraphDataFromTables(
+      await LegacyFlamegraphDetailsPanel.getFlamegraphDataFromTables(
         engine,
         table,
         state.viewingOption,
@@ -491,7 +491,7 @@ export class FlamegraphDetailsPanel
 
   private static async prepareViewsAndTables(
     engine: Engine,
-    cache: FlamegraphCache,
+    cache: LegacyFlamegraphCache,
     state: FlamegraphState,
   ): Promise<string> {
     const flamegraphType = getFlamegraphType(state.selection.profileType);
@@ -584,7 +584,7 @@ export class FlamegraphDetailsPanel
 
   private static async loadHeapGraphDominatorTreeQuery(
     engine: Engine,
-    cache: FlamegraphCache,
+    cache: LegacyFlamegraphCache,
     upid: number,
     timestamp: time,
   ) {
