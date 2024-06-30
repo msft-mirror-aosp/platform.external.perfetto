@@ -208,6 +208,24 @@ PerfettoSqlEngine::PerfettoSqlEngine(StringPool* pool)
   }
 }
 
+base::StatusOr<SqliteEngine::PreparedStatement>
+PerfettoSqlEngine::PrepareSqliteStatement(SqlSource sql_source) {
+  PerfettoSqlParser parser(std::move(sql_source), macros_);
+  if (!parser.Next()) {
+    return base::ErrStatus("No statement found to prepare");
+  }
+  auto* sqlite = std::get_if<PerfettoSqlParser::SqliteSql>(&parser.statement());
+  if (!sqlite) {
+    return base::ErrStatus("Statement was not a valid SQLite statement");
+  }
+  SqliteEngine::PreparedStatement stmt =
+      engine_->PrepareStatement(parser.statement_sql());
+  if (parser.Next()) {
+    return base::ErrStatus("Too many statements found to prepare");
+  }
+  return std::move(stmt);
+}
+
 void PerfettoSqlEngine::RegisterStaticTable(Table* table,
                                             const std::string& table_name,
                                             Table::Schema schema) {
@@ -315,9 +333,13 @@ PerfettoSqlEngine::ExecuteUntilLastStatement(SqlSource sql_source) {
       auto sql = macro->sql;
       RETURN_IF_ERROR(ExecuteCreateMacro(*macro));
       source = RewriteToDummySql(sql);
-    } else if (auto* index = std::get_if<PerfettoSqlParser::CreateIndex>(
+    } else if (auto* create_index = std::get_if<PerfettoSqlParser::CreateIndex>(
                    &parser.statement())) {
-      RETURN_IF_ERROR(ExecuteCreateIndex(*index));
+      RETURN_IF_ERROR(ExecuteCreateIndex(*create_index));
+      source = RewriteToDummySql(parser.statement_sql());
+    } else if (auto* drop_index = std::get_if<PerfettoSqlParser::DropIndex>(
+                   &parser.statement())) {
+      RETURN_IF_ERROR(ExecuteDropIndex(*drop_index));
       source = RewriteToDummySql(parser.statement_sql());
     } else {
       // If none of the above matched, this must just be an SQL statement
@@ -601,42 +623,46 @@ base::Status PerfettoSqlEngine::ExecuteInclude(
 
 base::Status PerfettoSqlEngine::ExecuteCreateIndex(
     const PerfettoSqlParser::CreateIndex& index) {
-  // TODO(mayzner): Enable after implementing DROP.
-  if (index.replace) {
-    return base::ErrStatus("CREATE PERFETTO INDEX: Index can't be replaced");
-  }
-
-  // TODO(mayzner): Enable after implementing support for multiple columns.
-  if (index.col_names.size() != 1) {
-    return base::ErrStatus(
-        "CREATE PERFETTO INDEX: Index takes exactly one take column");
-  }
-
   Table* t = GetMutableTableOrNull(index.table_name);
   if (!t) {
     return base::ErrStatus("CREATE PERFETTO INDEX: Table '%s' not found",
                            index.table_name.c_str());
   }
 
-  const std::optional<uint32_t> opt_col =
-      t->ColumnIdxFromName(index.col_names.front());
-  if (!opt_col) {
-    return base::ErrStatus(
-        "CREATE PERFETTO INDEX: Column '%s' not found in table '%s'",
-        index.col_names.front().c_str(), index.table_name.c_str());
+  std::vector<Order> obs;
+  std::vector<uint32_t> col_idxs;
+  for (const std::string& col_name : index.col_names) {
+    const std::optional<uint32_t> opt_col = t->ColumnIdxFromName(col_name);
+    if (!opt_col) {
+      return base::ErrStatus(
+          "CREATE PERFETTO INDEX: Column '%s' not found in table '%s'",
+          index.col_names.front().c_str(), index.table_name.c_str());
+    }
+    Order o;
+    o.col_idx = *opt_col;
+    obs.push_back(o);
+    col_idxs.push_back(*opt_col);
   }
 
-  Order o;
-  o.col_idx = *opt_col;
   Query q;
-  q.orders = {o};
+  q.orders = obs;
   RowMap sorted_rm = t->QueryToRowMap(q);
 
-  PERFETTO_CHECK(sorted_rm.IsIndexVector());
-  std::vector<uint32_t> sorted_indices =
-      std::move(sorted_rm).TakeAsIndexVector();
+  RETURN_IF_ERROR(t->SetIndex(index.name, std::move(col_idxs),
+                              std::move(sorted_rm).TakeAsIndexVector(),
+                              index.replace));
+  return base::OkStatus();
+}
 
-  t->SetIndex(*opt_col, std::move(sorted_indices));
+base::Status PerfettoSqlEngine::ExecuteDropIndex(
+    const PerfettoSqlParser::DropIndex& index) {
+  Table* t = GetMutableTableOrNull(index.table_name);
+  if (!t) {
+    return base::ErrStatus("DROP PERFETTO INDEX: Table '%s' not found",
+                           index.table_name.c_str());
+  }
+
+  RETURN_IF_ERROR(t->DropIndex(index.name));
   return base::OkStatus();
 }
 
