@@ -2352,6 +2352,8 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/intrinsics/functions/graph_traversal.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.h",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/interval_intersect.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/interval_intersect.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/math.cc",
@@ -2471,6 +2473,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_intrinsics_types_types",
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/types/array.h",
+        "src/trace_processor/perfetto_sql/intrinsics/types/interval_tree.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/node.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/row_dataframe.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/struct.h",
@@ -2511,6 +2514,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/frames/jank_type.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/frames/per_frame_metrics.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/frames/timeline.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/frames/timeline_maxsdk28.sql",
@@ -2531,6 +2535,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_tree.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/excluded_refs.sql",
     ],
 )
 
@@ -2538,6 +2543,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_memory_memory",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/dmabuf.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/process.sql",
     ],
 )
