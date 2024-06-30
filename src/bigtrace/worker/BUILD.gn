@@ -12,34 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../gn/perfetto.gni")
-import("../../gn/test.gni")
+import("../../../gn/perfetto.gni")
+import("../../../gn/test.gni")
 
 assert(
     enable_perfetto_trace_processor && enable_perfetto_trace_processor_sqlite)
 
 if (enable_perfetto_grpc) {
-  executable("orchestrator_main") {
-    sources = [ "orchestrator_main.cc" ]
-    deps = [
-      "../../gn:default_deps",
-      "../../gn:grpc",
-      "../../protos/perfetto/bigtrace:orchestrator_grpc",
-      "../../protos/perfetto/bigtrace:worker_grpc",
-      "../base",
-    ]
-  }
-
   executable("worker_main") {
-    sources = [ "worker_main.cc" ]
+    sources = [
+      "worker_impl.cc",
+      "worker_impl.h",
+      "worker_main.cc",
+    ]
     deps = [
-      "../../gn:default_deps",
-      "../../gn:grpc",
-      "../../include/perfetto/ext/trace_processor/rpc:query_result_serializer",
-      "../../protos/perfetto/bigtrace:worker_grpc",
-      "../../src/trace_processor",
-      "../../src/trace_processor/rpc:rpc",
-      "../base",
+      "../../../gn:default_deps",
+      "../../../gn:grpc",
+      "../../../include/perfetto/ext/trace_processor/rpc:query_result_serializer",
+      "../../../protos/perfetto/bigtrace:worker_grpc",
+      "../../../protos/perfetto/bigtrace:worker_lite",
+      "../../../src/trace_processor",
+      "../../../src/trace_processor/rpc:rpc",
+      "../../base",
     ]
   }
 }

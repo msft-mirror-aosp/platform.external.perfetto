@@ -32,6 +32,7 @@
 #include "perfetto/public/compiler.h"
 #include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/types/array.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/types/interval_tree.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/types/node.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/types/row_dataframe.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/types/struct.h"
@@ -270,6 +271,40 @@ struct RowDataframeAgg : public SqliteAggregateFunction<Struct> {
   }
 };
 
+struct IntervalTreeIntervalsAgg
+    : public SqliteAggregateFunction<perfetto_sql::SortedIntervals> {
+  static constexpr char kName[] = "__intrinsic_interval_tree_intervals_agg";
+  static constexpr int kArgCount = 3;
+  struct AggCtx : SqliteAggregateContext<AggCtx> {
+    std::vector<IntervalTree::Interval> intervals;
+  };
+
+  static void Step(sqlite3_context* ctx, int rargc, sqlite3_value** argv) {
+    PERFETTO_DCHECK(rargc == kArgCount);
+
+    auto& agg_ctx = AggCtx::GetOrCreateContextForStep(ctx);
+
+    IntervalTree::Interval interval;
+    interval.id = static_cast<uint32_t>(sqlite::value::Int64(argv[0]));
+    interval.start = static_cast<uint64_t>(sqlite::value::Int64(argv[1]));
+    interval.end =
+        interval.start + static_cast<uint64_t>(sqlite::value::Int64(argv[2]));
+    agg_ctx.intervals.push_back(std::move(interval));
+  }
+
+  static void Final(sqlite3_context* ctx) {
+    auto raw_agg_ctx = AggCtx::GetContextOrNullForFinal(ctx);
+    if (!raw_agg_ctx) {
+      return sqlite::result::Null(ctx);
+    }
+    return sqlite::result::UniquePointer(
+        ctx,
+        std::make_unique<perfetto_sql::SortedIntervals>(
+            std::move(raw_agg_ctx.get()->intervals)),
+        "INTERVAL_TREE_INTERVALS");
+  }
+};
+
 }  // namespace
 
 base::Status RegisterTypeBuilderFunctions(PerfettoSqlEngine& engine) {
@@ -277,6 +312,9 @@ base::Status RegisterTypeBuilderFunctions(PerfettoSqlEngine& engine) {
   RETURN_IF_ERROR(engine.RegisterSqliteFunction<Struct>(nullptr));
   RETURN_IF_ERROR(
       engine.RegisterSqliteAggregateFunction<RowDataframeAgg>(nullptr));
+  RETURN_IF_ERROR(
+      engine.RegisterSqliteAggregateFunction<IntervalTreeIntervalsAgg>(
+          nullptr));
   return engine.RegisterSqliteAggregateFunction<NodeAgg>(nullptr);
 }
 
