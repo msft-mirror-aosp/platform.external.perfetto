@@ -42,21 +42,21 @@ import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {TrackManager} from '../common/track_cache';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
+import {ServiceWorkerController} from './service_worker_controller';
 import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
-
 import {Analytics, initAnalytics} from './analytics';
 import {Timeline} from './frontend_local_state';
 import {Router} from './router';
-import {horizontalScrollToTs} from './scroll_helper';
-import {ServiceWorkerController} from './service_worker_controller';
 import {SliceSqlId} from './sql_types';
 import {PxSpan, TimeScale} from './time_scale';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
 import {Optional, exists} from '../base/utils';
 import {OmniboxManager} from './omnibox_manager';
-import {CallsiteInfo} from '../common/flamegraph_util';
-import {FlamegraphCache} from '../core/flamegraph_cache';
+import {CallsiteInfo} from '../common/legacy_flamegraph_util';
+import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
+import {SerializedAppState} from '../common/state_serialization_schema';
+import {getServingRoot} from '../base/http_utils';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -161,21 +161,6 @@ export interface ThreadDesc {
 }
 type ThreadMap = Map<number, ThreadDesc>;
 
-function getRoot() {
-  // Works out the root directory where the content should be served from
-  // e.g. `http://origin/v1.2.3/`.
-  const script = document.currentScript as HTMLScriptElement;
-
-  // Needed for DOM tests, that do not have script element.
-  if (script === null) {
-    return '';
-  }
-
-  let root = script.src;
-  root = root.substr(0, root.lastIndexOf('/') + 1);
-  return root;
-}
-
 // Options for globals.makeSelection().
 export interface MakeSelectionOpts {
   // Whether to switch to the current selection tab or not. Default = true.
@@ -194,6 +179,8 @@ export interface LegacySelectionArgs {
 }
 
 export interface TraceContext {
+  traceTitle: string; // File name and size of the current trace.
+  traceUrl: string; // URL of the Trace.
   readonly start: time;
   readonly end: time;
 
@@ -218,6 +205,8 @@ export interface TraceContext {
 }
 
 export const defaultTraceContext: TraceContext = {
+  traceTitle: '',
+  traceUrl: '',
   start: Time.ZERO,
   end: Time.fromSeconds(10),
   realtimeOffset: Time.ZERO,
@@ -231,7 +220,7 @@ export const defaultTraceContext: TraceContext = {
  * Global accessors for state/dispatch in the frontend.
  */
 class Globals {
-  readonly root = getRoot();
+  readonly root = getServingRoot();
 
   private _testing = false;
   private _dispatch?: Dispatch = undefined;
@@ -270,7 +259,7 @@ class Globals {
   private _hasFtrace: boolean = false;
 
   omnibox = new OmniboxManager();
-  areaFlamegraphCache = new FlamegraphCache('area');
+  areaFlamegraphCache = new LegacyFlamegraphCache('area');
 
   scrollToTrackKey?: string | number;
   httpRpcState: HttpRpcState = {connected: false};
@@ -278,6 +267,9 @@ class Globals {
   permalinkHash?: string;
 
   traceContext = defaultTraceContext;
+
+  // Used for permalink load by trace_controller.ts.
+  restoreAppStateAfterTraceLoad?: SerializedAppState;
 
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
@@ -505,7 +497,7 @@ class Globals {
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
-    return this.getJobStatusMap().get(name) || ConversionJobStatus.NotRunning;
+    return this.getJobStatusMap().get(name) ?? ConversionJobStatus.NotRunning;
   }
 
   setConversionJobStatus(name: ConversionJobName, status: ConversionJobStatus) {
@@ -825,10 +817,6 @@ class Globals {
     }
 
     return undefined;
-  }
-
-  panToTimestamp(ts: time): void {
-    horizontalScrollToTs(ts);
   }
 }
 
