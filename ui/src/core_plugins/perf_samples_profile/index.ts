@@ -14,11 +14,11 @@
 
 import {TrackData} from '../../common/track_data';
 import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../../public';
-import {FlamegraphCache} from '../../core/flamegraph_cache';
+import {LegacyFlamegraphCache} from '../../core/legacy_flamegraph_cache';
 import {
-  FlamegraphDetailsPanel,
+  LegacyFlamegraphDetailsPanel,
   profileType,
-} from '../../frontend/flamegraph_panel';
+} from '../../frontend/legacy_flamegraph_panel';
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
 import {NUM} from '../../trace_processor/query_result';
 import {PerfSamplesProfileTrack} from './perf_samples_profile_track';
@@ -46,11 +46,11 @@ class PerfSamplesProfilePlugin implements Plugin {
       });
     }
 
-    const cache = new FlamegraphCache('perf_samples');
+    const cache = new LegacyFlamegraphCache('perf_samples');
     ctx.registerDetailsPanel({
       render: (sel) => {
         if (sel.kind === 'PERF_SAMPLES') {
-          return m(FlamegraphDetailsPanel, {
+          return m(LegacyFlamegraphDetailsPanel, {
             cache,
             selection: {
               profileType: profileType(sel.type),
