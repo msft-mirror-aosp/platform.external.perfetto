@@ -17,7 +17,7 @@ import m from 'mithril';
 import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
-import {AddDebugTrackMenu} from '../../core_plugins/debug/add_debug_track_menu';
+import {AddDebugTrackMenu} from '../debug_tracks/add_debug_track_menu';
 import {Button} from '../../widgets/button';
 import {DetailsShell} from '../../widgets/details_shell';
 import {Popup, PopupPosition} from '../../widgets/popup';
@@ -36,6 +36,7 @@ interface SqlTableTabConfig {
   table: SqlTableDescription;
   displayName?: string;
   filters?: Filter[];
+  imports?: string[];
 }
 
 export function addSqlTableTab(config: SqlTableTabConfig): void {
@@ -67,6 +68,7 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
       this.engine,
       this.config.table,
       this.config.filters,
+      this.config.imports,
     );
   }
 

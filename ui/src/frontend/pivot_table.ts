@@ -16,16 +16,12 @@
 
 import m from 'mithril';
 
+import {SortDirection} from '../base/comparison_utils';
 import {sqliteString} from '../base/string_utils';
 import {Actions} from '../common/actions';
 import {DropDirection} from '../common/dragndrop_logic';
 import {COUNT_AGGREGATION} from '../common/empty_state';
-import {
-  Area,
-  PivotTableAreaState,
-  PivotTableResult,
-  SortDirection,
-} from '../common/state';
+import {Area, PivotTableResult} from '../common/state';
 import {raf} from '../core/raf_scheduler';
 import {ColumnType} from '../trace_processor/query_result';
 
@@ -57,7 +53,7 @@ interface PathItem {
 }
 
 interface PivotTableAttrs {
-  selectionArea: PivotTableAreaState;
+  selectionArea: Area;
 }
 
 interface DrillFilter {
@@ -553,7 +549,7 @@ export class PivotTable implements m.ClassComponent<PivotTableAttrs> {
     }
 
     this.renderTree(
-      globals.state.areas[attrs.selectionArea.areaId],
+      attrs.selectionArea,
       [],
       tree,
       state.queryResult,
