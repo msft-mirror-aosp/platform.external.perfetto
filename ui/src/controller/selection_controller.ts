@@ -14,20 +14,16 @@
 
 import {assertTrue} from '../base/logging';
 import {Time, time} from '../base/time';
+import {Optional} from '../base/utils';
 import {Args, ArgValue} from '../common/arg_types';
 import {
   SelectionKind,
   ThreadSliceSelection,
   getLegacySelection,
 } from '../common/state';
+import {THREAD_SLICE_TRACK_KIND} from '../core/track_kinds';
+import {globals, SliceDetails, ThreadStateDetails} from '../frontend/globals';
 import {
-  CounterDetails,
-  globals,
-  SliceDetails,
-  ThreadStateDetails,
-} from '../frontend/globals';
-import {
-  publishCounterDetails,
   publishSliceDetails,
   publishThreadStateDetails,
 } from '../frontend/publish';
@@ -41,7 +37,6 @@ import {
   STR_NULL,
   timeFromSql,
 } from '../trace_processor/query_result';
-import {THREAD_SLICE_TRACK_KIND} from '../core_plugins/thread_slice/thread_slice_track';
 
 import {Controller} from './controller';
 
@@ -73,11 +68,10 @@ export class SelectionController extends Controller<'main'> {
 
   run() {
     const selection = getLegacySelection(globals.state);
-    if (!selection || selection.kind === 'AREA') return;
+    if (!selection) return;
 
     const selectWithId: SelectionKind[] = [
       'SLICE',
-      'COUNTER',
       'SCHED_SLICE',
       'HEAP_PROFILE',
       'THREAD_STATE',
@@ -97,21 +91,7 @@ export class SelectionController extends Controller<'main'> {
 
     if (selectedId === undefined) return;
 
-    if (selection.kind === 'COUNTER') {
-      this.counterDetails(
-        selection.leftTs,
-        selection.rightTs,
-        selection.id,
-      ).then((results) => {
-        if (
-          results !== undefined &&
-          selection.kind === selectedKind &&
-          selection.id === selectedId
-        ) {
-          publishCounterDetails(results);
-        }
-      });
-    } else if (selection.kind === 'SCHED_SLICE') {
+    if (selection.kind === 'SCHED_SLICE') {
       this.schedSliceDetails(selectedId as number);
     } else if (selection.kind === 'THREAD_STATE') {
       this.threadStateDetails(selection.id);
@@ -371,16 +351,17 @@ export class SelectionController extends Controller<'main'> {
   }
 
   async schedSliceDetails(id: number) {
-    const sqlQuery = `SELECT
-      sched.ts,
-      sched.dur,
-      sched.priority,
-      sched.end_state as endState,
-      sched.utid,
-      sched.cpu,
-      thread_state.id as threadStateId
-    FROM sched left join thread_state using(ts, utid, cpu)
-    WHERE sched.id = ${id}`;
+    const sqlQuery = `
+      SELECT
+        ts,
+        dur,
+        priority,
+        end_state as endState,
+        utid,
+        cpu
+      FROM sched
+      WHERE sched.id = ${id}
+    `;
     const result = await this.args.engine.query(sqlQuery);
     // Check selection is still the same on completion of query.
     const selection = getLegacySelection(globals.state);
@@ -392,7 +373,6 @@ export class SelectionController extends Controller<'main'> {
         endState: STR_NULL,
         utid: NUM,
         cpu: NUM,
-        threadStateId: NUM_NULL,
       });
       const ts = Time.fromRaw(row.ts);
       const dur = row.dur;
@@ -400,8 +380,6 @@ export class SelectionController extends Controller<'main'> {
       const endState = row.endState;
       const utid = row.utid;
       const cpu = row.cpu;
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-      const threadStateId = row.threadStateId || undefined;
       const selected: SliceDetails = {
         ts,
         dur,
@@ -410,8 +388,13 @@ export class SelectionController extends Controller<'main'> {
         cpu,
         id,
         utid,
-        threadStateId,
       };
+
+      selected.threadStateId = await getThreadStateForSchedSlice(
+        this.args.engine,
+        id,
+      );
+
       Object.assign(selected, await this.computeThreadDetails(utid));
 
       this.schedulingDetails(ts, utid)
@@ -422,35 +405,6 @@ export class SelectionController extends Controller<'main'> {
           publishSliceDetails(selected);
         });
     }
-  }
-
-  async counterDetails(
-    ts: time,
-    rightTs: time,
-    id: number,
-  ): Promise<CounterDetails> {
-    const counter = await this.args.engine.query(
-      `SELECT value, track_id as trackId FROM counter WHERE id = ${id}`,
-    );
-    const row = counter.iter({
-      value: NUM,
-      trackId: NUM,
-    });
-    const value = row.value;
-    const trackId = row.trackId;
-    // Finding previous value. If there isn't previous one, it will return 0 for
-    // ts and value.
-    const previous = await this.args.engine.query(`SELECT
-          MAX(ts),
-          IFNULL(value, 0) as value
-        FROM counter WHERE ts < ${ts} and track_id = ${trackId}`);
-    const previousValue = previous.firstRow({value: NUM}).value;
-    const endTs = rightTs !== -1n ? rightTs : globals.traceContext.end;
-    const delta = value - previousValue;
-    const duration = endTs - ts;
-    const trackKey = globals.trackManager.trackKeyByTrackId.get(trackId);
-    const name = trackKey ? globals.state.tracks[trackKey].name : undefined;
-    return {startTime: ts, value, delta, duration, name};
   }
 
   async schedulingDetails(ts: time, utid: number) {
@@ -565,5 +519,28 @@ export class SelectionController extends Controller<'main'> {
       details.versionCode = packageDetails.versionCode;
     }
     return details;
+  }
+}
+
+// Get the corresponding thread state slice id for a given sched slice
+async function getThreadStateForSchedSlice(
+  engine: Engine,
+  id: number,
+): Promise<Optional<number>> {
+  const sqlQuery = `
+    SELECT
+      thread_state.id as threadStateId
+    FROM sched
+    JOIN thread_state USING(ts, utid, cpu)
+    WHERE sched.id = ${id}
+  `;
+  const threadStateResult = await engine.query(sqlQuery);
+  if (threadStateResult.numRows() === 1) {
+    const row = threadStateResult.firstRow({
+      threadStateId: NUM,
+    });
+    return row.threadStateId;
+  } else {
+    return undefined;
   }
 }
