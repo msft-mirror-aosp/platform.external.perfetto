@@ -185,9 +185,7 @@ function Instructions(cssClass: string) {
       ? m(
           'button.permalinkconfig',
           {
-            onclick: () => {
-              createPermalink({isRecordingConfig: true});
-            },
+            onclick: () => createPermalink({mode: 'RECORDING_OPTS'}),
           },
           'Share recording settings',
         )
@@ -318,7 +316,7 @@ function RecordingNotes() {
 
 function RecordingSnippet(targetInfo: TargetInfo) {
   // We don't need commands to start tracing on chrome
-  if (isChromeTargetInfo(targetInfo)) {
+  if (isChromeTargetInfo(targetInfo) || targetInfo.targetType === 'WINDOWS') {
     if (controller.getState() > RecordingState.AUTH_P2) {
       // If the UI has started tracing, don't display a message guiding the user
       // to start recording.

@@ -79,6 +79,7 @@ const VERSION_SCRIPT = pjoin(ROOT_DIR, 'tools/write_version_header.py');
 const GEN_IMPORTS_SCRIPT = pjoin(ROOT_DIR, 'tools/gen_ui_imports');
 
 const cfg = {
+  minifyJs: '',
   watch: false,
   verbose: false,
   debug: false,
@@ -140,6 +141,10 @@ const subprocesses = [];
 async function main() {
   const parser = new argparse.ArgumentParser();
   parser.add_argument('--out', {help: 'Output directory'});
+  parser.add_argument('--minify-js', {
+    help: 'Minify js files',
+    choices: ['preserve_comments', 'all'],
+  });
   parser.add_argument('--watch', '-w', {action: 'store_true'});
   parser.add_argument('--serve', '-s', {action: 'store_true'});
   parser.add_argument('--serve-host', {help: '--serve bind host'});
@@ -181,6 +186,9 @@ async function main() {
   cfg.openPerfettoTrace = !!args.open_perfetto_trace;
   cfg.startHttpServer = args.serve;
   cfg.noOverrideGnArgs = !!args.no_override_gn_args;
+  if (args.minify_js) {
+    cfg.minifyJs = args.minify_js;
+  }
   if (args.bigtrace) {
     cfg.outBigtraceDistDir = ensureDir(pjoin(cfg.outDistDir, 'bigtrace'));
   }
@@ -402,14 +410,7 @@ function compileScss() {
 function compileProtos() {
   const dstJs = pjoin(cfg.outGenDir, 'protos.js');
   const dstTs = pjoin(cfg.outGenDir, 'protos.d.ts');
-  // We've ended up pulling in all the protos (via trace.proto,
-  // trace_packet.proto) below which means |dstJs| ends up being
-  // 23k lines/12mb. We should probably not do that.
-  // TODO(hjd): Figure out how to use lazy with pbjs/pbts.
   const inputs = [
-    'protos/perfetto/common/trace_stats.proto',
-    'protos/perfetto/common/tracing_service_capabilities.proto',
-    'protos/perfetto/config/perfetto_config.proto',
     'protos/perfetto/ipc/consumer_port.proto',
     'protos/perfetto/ipc/wire_protocol.proto',
     'protos/perfetto/trace/perfetto/perfetto_metatrace.proto',
@@ -540,6 +541,9 @@ function bundleJs(cfgName) {
   }
   if (cfg.openPerfettoTrace) {
     args.push('--environment', 'ENABLE_OPEN_PERFETTO_TRACE:true');
+  }
+  if (cfg.minifyJs) {
+    args.push('--environment', `MINIFY_JS:${cfg.minifyJs}`);
   }
   args.push(...(cfg.verbose ? [] : ['--silent']));
   if (cfg.watch) {
