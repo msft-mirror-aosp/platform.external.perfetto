@@ -1,4 +1,4 @@
-// Copyright (C) 2023 The Android Open Source Project
+// Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import {renderCell} from './render_cell';
 import {SqlTableState} from './state';
 import {isArgSetIdColumn, SqlTableDescription} from './table_description';
 import {Intent} from '../../widgets/common';
+import {addHistogramTab} from '../charts/histogram/tab';
 
 export interface SqlTableConfig {
   readonly state: SqlTableState;
@@ -118,8 +119,8 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
       sorted === 'ASC'
         ? Icons.SortedAsc
         : sorted === 'DESC'
-        ? Icons.SortedDesc
-        : Icons.ContextMenu;
+          ? Icons.SortedDesc
+          : Icons.ContextMenu;
     return m(
       PopupMenu2,
       {
@@ -153,7 +154,25 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
           icon: Icons.Hide,
           onclick: () => this.state.hideColumnAtIndex(index),
         }),
+      m(MenuItem, {
+        label: 'Create histogram',
+        icon: Icons.Chart,
+        onclick: () => {
+          addHistogramTab(
+            {
+              sqlColumn: column.alias,
+              columnTitle: column.title,
+              filters: this.state.getFilters(),
+              tableDisplay: this.table.displayName,
+              query: this.state.buildSqlSelectStatement().selectStatement,
+            },
+            this.engine,
+          );
+        },
+      }),
+      // Menu items before divider apply to selected column
       m(MenuDivider),
+      // Menu items after divider apply to entire table
       m(
         MenuItem,
         {label: 'Add column', icon: Icons.AddColumn},

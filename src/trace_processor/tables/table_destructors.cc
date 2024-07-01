@@ -40,6 +40,9 @@ namespace tables {
 AndroidDumpstateTable::~AndroidDumpstateTable() = default;
 AndroidGameInterventionListTable::~AndroidGameInterventionListTable() = default;
 AndroidLogTable::~AndroidLogTable() = default;
+AndroidKeyEventsTable::~AndroidKeyEventsTable() = default;
+AndroidMotionEventsTable::~AndroidMotionEventsTable() = default;
+AndroidInputEventDispatchTable::~AndroidInputEventDispatchTable() = default;
 
 // counter_tables_py.h
 CounterTable::~CounterTable() = default;
@@ -94,6 +97,7 @@ GraphicsFrameSliceTable::~GraphicsFrameSliceTable() = default;
 ExpectedFrameTimelineSliceTable::~ExpectedFrameTimelineSliceTable() = default;
 ActualFrameTimelineSliceTable::~ActualFrameTimelineSliceTable() = default;
 ExperimentalFlatSliceTable::~ExperimentalFlatSliceTable() = default;
+AndroidNetworkPacketsTable::~AndroidNetworkPacketsTable() = default;
 
 // track_tables_py.h
 TrackTable::~TrackTable() = default;
