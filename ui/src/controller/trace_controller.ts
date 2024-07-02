@@ -95,7 +95,8 @@ import {
   TraceStream,
 } from '../core/trace_stream';
 import {decideTracks} from './track_decider';
-import {FlamegraphCache, profileType} from '../frontend/flamegraph_panel';
+import {profileType} from '../frontend/flamegraph_panel';
+import {FlamegraphCache} from '../core/flamegraph_cache';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -574,7 +575,7 @@ export class TraceController extends Controller<States> {
       const reliableRangeStart = await computeTraceReliableRangeStart(engine);
       if (reliableRangeStart > 0) {
         globals.dispatch(
-          Actions.addAutomaticNote({
+          Actions.addNote({
             timestamp: reliableRangeStart,
             color: '#ff0000',
             text: 'Reliable Range Start',
