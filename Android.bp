@@ -10381,6 +10381,50 @@ genrule {
     ],
 }
 
+// GN: //protos/third_party/pprof:cpp
+filegroup {
+    name: "perfetto_protos_third_party_pprof_cpp",
+    srcs: [
+        "protos/third_party/pprof/profile.proto",
+    ],
+}
+
+// GN: //protos/third_party/pprof:cpp
+genrule {
+    name: "perfetto_protos_third_party_pprof_cpp_gen",
+    srcs: [
+        ":perfetto_protos_third_party_pprof_cpp",
+    ],
+    tools: [
+        "aprotoc",
+        "perfetto_src_protozero_protoc_plugin_cppgen_plugin",
+    ],
+    cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location perfetto_src_protozero_protoc_plugin_cppgen_plugin) --plugin_out=wrapper_namespace=gen:$(genDir)/external/perfetto/ $(locations :perfetto_protos_third_party_pprof_cpp)",
+    out: [
+        "external/perfetto/protos/third_party/pprof/profile.gen.cc",
+    ],
+}
+
+// GN: //protos/third_party/pprof:cpp
+genrule {
+    name: "perfetto_protos_third_party_pprof_cpp_gen_headers",
+    srcs: [
+        ":perfetto_protos_third_party_pprof_cpp",
+    ],
+    tools: [
+        "aprotoc",
+        "perfetto_src_protozero_protoc_plugin_cppgen_plugin",
+    ],
+    cmd: "mkdir -p $(genDir)/external/perfetto/ && $(location aprotoc) --proto_path=external/perfetto --plugin=protoc-gen-plugin=$(location perfetto_src_protozero_protoc_plugin_cppgen_plugin) --plugin_out=wrapper_namespace=gen:$(genDir)/external/perfetto/ $(locations :perfetto_protos_third_party_pprof_cpp)",
+    out: [
+        "external/perfetto/protos/third_party/pprof/profile.gen.h",
+    ],
+    export_include_dirs: [
+        ".",
+        "protos",
+    ],
+}
+
 // GN: //protos/third_party/pprof:zero
 filegroup {
     name: "perfetto_protos_third_party_pprof_zero",
@@ -12917,6 +12961,7 @@ filegroup {
         "src/trace_processor/perfetto_sql/intrinsics/functions/graph_scan.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/graph_traversal.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/import.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/interval_intersect.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/math.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.cc",
@@ -13015,7 +13060,6 @@ filegroup {
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_sched_upid.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_slice_layout.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/flamegraph_construction_algorithms.cc",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/interval_intersect.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.cc",
     ],
 }
@@ -13121,7 +13165,12 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/android/io.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/job_scheduler.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/dmabuf.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/class_tree.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_class_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_tree.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/excluded_refs.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/helpers.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/raw_dominator_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/process.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/monitor_contention.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/network_packets.sql",
@@ -13736,6 +13785,8 @@ filegroup {
 filegroup {
     name: "perfetto_src_traceconv_unittests",
     srcs: [
+        "src/traceconv/pprof_reader.cc",
+        "src/traceconv/trace_to_pprof_unittest.cc",
         "src/traceconv/trace_to_text_unittest.cc",
     ],
 }
@@ -15031,6 +15082,7 @@ cc_test {
         ":perfetto_protos_perfetto_trace_translation_cpp_gen",
         ":perfetto_protos_perfetto_trace_translation_lite_gen",
         ":perfetto_protos_perfetto_trace_translation_zero_gen",
+        ":perfetto_protos_third_party_pprof_cpp_gen",
         ":perfetto_protos_third_party_pprof_zero_gen",
         ":perfetto_protos_third_party_simpleperf_zero_gen",
         ":perfetto_protos_third_party_statsd_config_zero_gen",
@@ -15411,6 +15463,7 @@ cc_test {
         "perfetto_protos_perfetto_trace_translation_cpp_gen_headers",
         "perfetto_protos_perfetto_trace_translation_lite_gen_headers",
         "perfetto_protos_perfetto_trace_translation_zero_gen_headers",
+        "perfetto_protos_third_party_pprof_cpp_gen_headers",
         "perfetto_protos_third_party_pprof_zero_gen_headers",
         "perfetto_protos_third_party_simpleperf_zero_gen_headers",
         "perfetto_protos_third_party_statsd_config_zero_gen_headers",
