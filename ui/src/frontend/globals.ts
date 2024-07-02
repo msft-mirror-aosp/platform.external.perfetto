@@ -46,8 +46,7 @@ import {ServiceWorkerController} from './service_worker_controller';
 import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {Analytics, initAnalytics} from './analytics';
-import {Timeline} from './frontend_local_state';
-import {Router} from './router';
+import {Timeline} from './timeline';
 import {SliceSqlId} from './sql_types';
 import {PxSpan, TimeScale} from './time_scale';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
@@ -179,6 +178,8 @@ export interface LegacySelectionArgs {
 }
 
 export interface TraceContext {
+  traceTitle: string; // File name and size of the current trace.
+  traceUrl: string; // URL of the Trace.
   readonly start: time;
   readonly end: time;
 
@@ -203,6 +204,8 @@ export interface TraceContext {
 }
 
 export const defaultTraceContext: TraceContext = {
+  traceTitle: '',
+  traceUrl: '',
   start: Time.ZERO,
   end: Time.fromSeconds(10),
   realtimeOffset: Time.ZERO,
@@ -245,7 +248,6 @@ class Globals {
   private _metricError?: string = undefined;
   private _metricResult?: MetricResult = undefined;
   private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
-  private _router?: Router = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
   private _cmdManager = new CommandManager();
@@ -263,6 +265,13 @@ class Globals {
   permalinkHash?: string;
 
   traceContext = defaultTraceContext;
+
+  setTraceContext(traceCtx: TraceContext): void {
+    this.traceContext = traceCtx;
+    const {start, end} = this.traceContext;
+    const traceSpan = new TimeSpan(start, end);
+    this._timeline = new Timeline(this._store, traceSpan);
+  }
 
   // Used for permalink load by trace_controller.ts.
   restoreAppStateAfterTraceLoad?: SerializedAppState;
@@ -286,10 +295,13 @@ class Globals {
 
   engines = new Map<string, EngineBase>();
 
-  initialize(dispatch: Dispatch, router: Router) {
+  constructor() {
+    const {start, end} = defaultTraceContext;
+    this._timeline = new Timeline(this._store, new TimeSpan(start, end));
+  }
+
+  initialize(dispatch: Dispatch) {
     this._dispatch = dispatch;
-    this._router = router;
-    this._timeline = new Timeline();
 
     setPerfHooks(
       () => this.state.perfDebug,
@@ -322,10 +334,6 @@ class Globals {
   // Only initialises the store - useful for testing.
   initStore(initialState: State) {
     this._store = createStore(initialState);
-  }
-
-  get router(): Router {
-    return assertExists(this._router);
   }
 
   get publishRedraw(): () => void {
@@ -493,7 +501,7 @@ class Globals {
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
-    return this.getJobStatusMap().get(name) || ConversionJobStatus.NotRunning;
+    return this.getJobStatusMap().get(name) ?? ConversionJobStatus.NotRunning;
   }
 
   setConversionJobStatus(name: ConversionJobName, status: ConversionJobStatus) {
@@ -701,12 +709,6 @@ class Globals {
     return new TimeSpan(start, end);
   }
 
-  // Get the state version of the visible time bounds
-  stateVisibleTime(): Span<time, duration> {
-    const {start, end} = this.state.frontendLocalState.visibleState;
-    return new TimeSpan(start, end);
-  }
-
   // How many pixels to use for one quanta of horizontal resolution
   get quantPx(): number {
     const quantPx = (self as {} as {quantPx: number | undefined}).quantPx;
@@ -855,7 +857,7 @@ export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<
   if (exists(range)) {
     return new TimeSpan(range.start, range.end);
   } else {
-    return globals.stateVisibleTime();
+    return globals.timeline.visibleTimeSpan;
   }
 }
 
