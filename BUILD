@@ -2447,8 +2447,6 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_slice_layout.h",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/flamegraph_construction_algorithms.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/flamegraph_construction_algorithms.h",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/interval_intersect.cc",
-        "src/trace_processor/perfetto_sql/intrinsics/table_functions/interval_intersect.h",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.cc",
         "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.h",
     ],
@@ -2473,8 +2471,8 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_intrinsics_types_types",
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/types/array.h",
-        "src/trace_processor/perfetto_sql/intrinsics/types/interval_tree.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/node.h",
+        "src/trace_processor/perfetto_sql/intrinsics/types/partitioned_intervals.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/row_dataframe.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/struct.h",
         "src/trace_processor/perfetto_sql/intrinsics/types/value.h",
@@ -2534,8 +2532,12 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/class_tree.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_class_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/excluded_refs.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/helpers.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/raw_dominator_tree.sql",
     ],
 )
 
