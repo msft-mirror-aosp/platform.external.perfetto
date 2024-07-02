@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Size, Vector} from '../base/geom';
 import {isString} from '../base/object_utils';
-import {globals} from '../frontend/globals';
 
 export function cropText(str: string, charWidth: number, rectWidth: number) {
   let displayText = '';
@@ -116,8 +116,8 @@ export function drawIncompleteSlice(
 
 export function drawTrackHoverTooltip(
   ctx: CanvasRenderingContext2D,
-  pos: {x: number; y: number},
-  maxHeight: number,
+  pos: Vector,
+  trackSize: Size,
   text: string,
   text2?: string,
 ) {
@@ -127,7 +127,7 @@ export function drawTrackHoverTooltip(
 
   // TODO(hjd): Avoid measuring text all the time (just use monospace?)
   const textMetrics = ctx.measureText(text);
-  const text2Metrics = ctx.measureText(text2 || '');
+  const text2Metrics = ctx.measureText(text2 ?? '');
 
   // Padding on each side of the box containing the tooltip:
   const paddingPx = 4;
@@ -154,15 +154,15 @@ export function drawTrackHoverTooltip(
   y -= 10;
 
   // Ensure the box is on screen:
-  const endPx = globals.timeline.visibleTimeScale.pxSpan.end;
+  const endPx = trackSize.width;
   if (x + width > endPx) {
     x -= x + width - endPx;
   }
   if (y < 0) {
     y = 0;
   }
-  if (y + height > maxHeight) {
-    y -= y + height - maxHeight;
+  if (y + height > trackSize.height) {
+    y -= y + height - trackSize.height;
   }
 
   // Draw everything:
