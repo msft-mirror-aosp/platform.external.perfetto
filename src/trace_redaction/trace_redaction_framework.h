@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_REDACTION_TRACE_REDACTION_FRAMEWORK_H_
 #define SRC_TRACE_REDACTION_TRACE_REDACTION_FRAMEWORK_H_
 
+#include <bitset>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -126,29 +127,14 @@ class SyntheticProcess {
 //                        trace packets.
 class Context {
  public:
+  // Each packet will have a trusted uid. This is the package emitting the
+  // event. In production we only expect to see system uids. 9999 is the
+  // last allowed uid (allow all uids less than or equal to 9999).
+  static constexpr int32_t kMaxTrustedUid = 9999;
+
   // The package that should not be redacted. This must be populated before
   // running any primitives.
   std::string package_name;
-
-  struct VerifyConfig {
-    // Each packet will have a trusted uid. This is the package emitting the
-    // event. In production we only expect to see system uids. 9999 is the
-    // last allowed uid (allow all uids less than or equal to 9999).
-    static constexpr int32_t kMaxTrustedUid = 9999;
-
-    // Some test traces will have failed patches because they used:
-    //
-    // trace_config {
-    //   buffers {
-    //   size_kb: 5376
-    //   fill_policy: DISCARD
-    // }
-    //
-    // This flag should only be used in testing.
-    bool verify_failed_patches = true;
-  };
-
-  VerifyConfig verify_config;
 
   // The package list maps a package name to a uid. It is possible for multiple
   // package names to map to the same uid, for example:
@@ -257,9 +243,12 @@ class Context {
   //    - protos::pbzero::TracePacket::kProcessStatsFieldNumber
   //    - protos::pbzero::TracePacket::kClockSnapshotFieldNumber
   //
-  // Because "data" is a "one of", if no field in "trace_packet_allow_list" can
-  // be found, it packet should be removed.
-  base::FlatSet<uint32_t> trace_packet_allow_list;
+  // If the mask is set to 0x00, all fields would be removed. This should not
+  // happen as some metadata provides context between packets.
+  //
+  // TracePacket has kForTestingFieldNumber which is set to 900.
+  using TracePacketMask = std::bitset<1024>;
+  TracePacketMask packet_mask;
 
   // Ftrace packets contain a "one of" entry called "event". Within the scope of
   // a ftrace event, the event can be considered the payload and other other
@@ -298,7 +287,10 @@ class Context {
   //
   //  3.  In this example, a cpu_idle event populates the one-of slot in the
   //      ftrace event
-  base::FlatSet<uint32_t> ftrace_packet_allow_list;
+  //
+  // Ftrace event has kMaliMaliPMMCURESETWAITFieldNumber which is set to 532.
+  using FtraceEventMask = std::bitset<1024>;
+  FtraceEventMask ftrace_mask;
 
   //  message SuspendResumeFtraceEvent {
   //    optional string action = 1 [(datapol.semantic_type) = ST_NOT_REQUIRED];

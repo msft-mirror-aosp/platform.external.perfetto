@@ -19,11 +19,11 @@ import {Icons} from '../base/semantic_icons';
 import {exists} from '../base/utils';
 import {Engine} from '../trace_processor/engine';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../trace_processor/query_result';
+import {fromNumNull} from '../trace_processor/sql_utils';
 import {Anchor} from '../widgets/anchor';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 
 import {Upid, Utid} from './sql_types';
-import {fromNumNull} from './sql_utils';
 
 // Interface definitions for process and thread-related information
 // and functions to extract them from SQL.
@@ -57,13 +57,13 @@ export async function getProcessInfo(
   const result: ProcessInfo = {
     upid,
     pid: it.pid,
-    name: it.name || undefined,
+    name: it.name ?? undefined,
   };
 
   if (it.pid === null) {
     return result;
   }
-  result.pid = it.pid || undefined;
+  result.pid = it.pid ?? undefined;
 
   if (it.uid === undefined) {
     return result;
@@ -83,7 +83,7 @@ export async function getProcessInfo(
       versionCode: NUM,
     });
     result.packageName = packageDetails.packageName;
-    result.versionCode = packageDetails.versionCode || undefined;
+    result.versionCode = packageDetails.versionCode ?? undefined;
   }
   return result;
 }
@@ -156,9 +156,36 @@ export async function getThreadInfo(
   return {
     utid,
     tid: it.tid,
-    name: it.name || undefined,
+    name: it.name ?? undefined,
     process: upid ? await getProcessInfo(engine, upid) : undefined,
   };
+}
+
+export function renderThreadRef(info: ThreadInfo): m.Children {
+  const name = info.name;
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getThreadName(info)),
+    },
+    exists(name) &&
+      m(MenuItem, {
+        icon: Icons.Copy,
+        label: 'Copy thread name',
+        onclick: () => copyToClipboard(name),
+      }),
+    exists(info.tid) &&
+      m(MenuItem, {
+        icon: Icons.Copy,
+        label: 'Copy tid',
+        onclick: () => copyToClipboard(`${info.tid}`),
+      }),
+    m(MenuItem, {
+      icon: Icons.Copy,
+      label: 'Copy utid',
+      onclick: () => copyToClipboard(`${info.utid}`),
+    }),
+  );
 }
 
 export function getThreadName(info?: ThreadInfo): string | undefined {

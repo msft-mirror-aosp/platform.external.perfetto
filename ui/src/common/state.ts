@@ -13,16 +13,13 @@
 // limitations under the License.
 
 import {BigintMath} from '../base/bigint_math';
-import {duration, time} from '../base/time';
+import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {
   Aggregation,
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-import {PrimaryTrackSortKey} from '../public/index';
-
-import {Direction} from '../core/event_set';
 
 import {
   selectionToLegacySelection,
@@ -35,7 +32,6 @@ export {
   SelectionKind,
   NoteSelection,
   SliceSelection,
-  CounterSelection,
   HeapProfileSelection,
   PerfSamplesSelection,
   LegacySelection,
@@ -44,6 +40,36 @@ export {
   ThreadSliceSelection,
   CpuProfileSampleSelection,
 } from '../core/selection_manager';
+
+// Tracks within track groups (usually corresponding to processes) are sorted.
+// As we want to group all tracks related to a given thread together, we use
+// two keys:
+// - Primary key corresponds to a priority of a track block (all tracks related
+//   to a given thread or a single track if it's not thread-associated).
+// - Secondary key corresponds to a priority of a given thread-associated track
+//   within its thread track block.
+// Each track will have a sort key, which either a primary sort key
+// (for non-thread tracks) or a tid and secondary sort key (mapping of tid to
+// primary sort key is done independently).
+export enum PrimaryTrackSortKey {
+  DEBUG_TRACK,
+  NULL_TRACK,
+  PROCESS_SCHEDULING_TRACK,
+  PROCESS_SUMMARY_TRACK,
+  EXPECTED_FRAMES_SLICE_TRACK,
+  ACTUAL_FRAMES_SLICE_TRACK,
+  PERF_SAMPLES_PROFILE_TRACK,
+  HEAP_PROFILE_TRACK,
+  MAIN_THREAD,
+  RENDER_THREAD,
+  GPU_COMPLETION_THREAD,
+  CHROME_IO_THREAD,
+  CHROME_COMPOSITOR_THREAD,
+  ORDINARY_THREAD,
+  COUNTER_TRACK,
+  ASYNC_SLICE_TRACK,
+  ORDINARY_TRACK,
+}
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -59,10 +85,6 @@ export interface ObjectByKey<Class extends {key: string}> {
   [key: string]: Class;
 }
 
-export interface Timestamped {
-  lastUpdate: number;
-}
-
 export type OmniboxMode = 'SEARCH' | 'COMMAND';
 
 export interface OmniboxState {
@@ -73,12 +95,6 @@ export interface OmniboxState {
 
 // This is simply an arbitrarily large number to default to.
 export const RESOLUTION_DEFAULT = BigintMath.bitFloor(1_000_000_000_000n);
-
-export interface VisibleState extends Timestamped {
-  start: time;
-  end: time;
-  resolution: duration;
-}
 
 export interface Area {
   start: time;
@@ -154,7 +170,8 @@ export const MAX_TIME = 180;
 // 58. Remove area map.
 // 59. Deprecate old area selection type.
 // 60. Deprecate old note selection type.
-export const STATE_VERSION = 60;
+// 61. Remove params/state from TrackState.
+export const STATE_VERSION = 61;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
@@ -211,6 +228,10 @@ export interface TraceArrayBufferSource {
   uuid?: string;
   // if |localOnly| is true then the trace should not be shared or downloaded.
   localOnly?: boolean;
+
+  // The set of extra args, keyed by plugin, that can be passed when opening the
+  // trace via postMessge deep-linking. See post_message_handler.ts for details.
+  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
 }
 
 export interface TraceUrlSource {
@@ -235,8 +256,6 @@ export interface TrackState {
   labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  params?: unknown;
-  state?: unknown;
   closeable?: boolean;
 }
 
@@ -261,10 +280,6 @@ export interface QueryConfig {
   id: string;
   engineId?: string;
   query: string;
-}
-
-export interface FrontendLocalState {
-  visibleState: VisibleState;
 }
 
 export interface Status {
@@ -343,8 +358,6 @@ export interface PivotTableAreaState {
   end: time;
   tracks: string[];
 }
-
-export type SortDirection = keyof typeof Direction;
 
 export interface PivotTableState {
   // Currently selected area, if null, pivot table is not going to be visible.
@@ -439,14 +452,6 @@ export interface State {
   selection: Selection;
   traceConversionInProgress: boolean;
   flamegraphModalDismissed: boolean;
-
-  /**
-   * This state is updated on the frontend at 60Hz and eventually syncronised to
-   * the controller at 10Hz. When the controller sends state updates to the
-   * frontend the frontend has special logic to pick whichever version of this
-   * key is most up to date.
-   */
-  frontendLocalState: FrontendLocalState;
 
   // Show track perf debugging overlay
   perfDebug: boolean;

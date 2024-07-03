@@ -282,8 +282,8 @@ current_ua (R	currentUa$
 timestamp_ns (RtimestampNs
 duration_ns (R
 durationNs
-»
-;protos/perfetto/metrics/android/android_blocking_call.protoperfetto.protos"˜
+Ñ
+;protos/perfetto/metrics/android/android_blocking_call.protoperfetto.protos"≥
 AndroidBlockingCall
 name (	Rname
 cnt (Rcnt 
@@ -298,7 +298,12 @@ totalDurNs
 
 max_dur_ns (RmaxDurNs
 
-min_dur_ns (RminDurNs
+min_dur_ns (RminDurNs
+
+avg_dur_ms	 (RavgDurMs
+
+avg_dur_ns
+ (RavgDurNs
 §
 Wprotos/perfetto/metrics/android/android_sysui_notifications_blocking_calls_metric.protoperfetto.protos;protos/perfetto/metrics/android/android_blocking_call.proto"{
 ,AndroidSysUINotificationsBlockingCallsMetricK
@@ -413,13 +418,19 @@ totalDurMs
 avg_dur_ms (RavgDurMsM
 UpdatePowerState3
 avg_runtime_micro_secs (RavgRuntimeMicroSecsJ
-à
-5protos/perfetto/metrics/android/dma_heap_metric.protoperfetto.protos"Ω
+·
+5protos/perfetto/metrics/android/dma_heap_metric.protoperfetto.protos"ñ
 AndroidDmaHeapMetric$
 avg_size_bytes (RavgSizeBytes$
 min_size_bytes (RminSizeBytes$
 max_size_bytes (RmaxSizeBytes3
-total_alloc_size_bytes (RtotalAllocSizeBytes
+total_alloc_size_bytes (RtotalAllocSizeBytes*
+total_delta_bytes (RtotalDeltaBytesW
+process_stats (22.perfetto.protos.AndroidDmaHeapMetric.ProcessStatsRprocessStatsR
+ProcessStats!
+process_name (	RprocessName
+delta_bytes (R
+deltaBytes
 •
 1protos/perfetto/metrics/android/dvfs_metric.protoperfetto.protos"ﬁ
 AndroidDvfsMetric`
@@ -1003,8 +1014,8 @@ maxRuntime$
 name (	RnameY
 threads (2?.perfetto.protos.AndroidSimpleperfMetric.PerfEventMetric.ThreadRthreads
 total (Rtotal
-èC
-4protos/perfetto/metrics/android/startup_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"çB
+–C
+4protos/perfetto/metrics/android/startup_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"ŒB
 AndroidStartupMetricG
 startup (2-.perfetto.protos.AndroidStartupMetric.StartupRstartupÛ
 TaskStateBreakdown$
@@ -1147,16 +1158,20 @@ PERCENTAGE
 COUNT5
 ActualValue
 value (Rvalue
-dur (Rdur|
+dur (Rdurõ
 TraceSliceSection'
 start_timestamp (RstartTimestamp#
 end_timestamp (RendTimestamp
-slice_id (RsliceIdÉ
+slice_id (RsliceId
+
+slice_name (	R	sliceName§
 TraceThreadSection'
 start_timestamp (RstartTimestamp#
 end_timestamp (RendTimestamp
 thread_utid (R
-threadUtidÔ
+threadUtid
+thread_name (	R
+threadNameÔ
 Startup
 
 startup_id (R	startupId!

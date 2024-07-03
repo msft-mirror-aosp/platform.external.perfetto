@@ -24,7 +24,7 @@ import {TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {PanelSize} from '../../frontend/panel';
+import {Size} from '../../base/geom';
 import {Engine, Track} from '../../public';
 import {LONG, NUM, QueryResult} from '../../trace_processor/query_result';
 import {uuidv4Sql} from '../../base/uuid';
@@ -186,7 +186,7 @@ export class ProcessSchedulingTrack implements Track {
     return TRACK_HEIGHT;
   }
 
-  render(ctx: CanvasRenderingContext2D, size: PanelSize): void {
+  render(ctx: CanvasRenderingContext2D, size: Size): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
     const {visibleTimeScale, visibleTimeSpan} = globals.timeline;
     const data = this.fetcher.data;
@@ -247,15 +247,14 @@ export class ProcessSchedulingTrack implements Track {
     }
 
     const hoveredThread = globals.threads.get(this.utidHoveredInThisTrack);
-    const height = this.getHeight();
     if (hoveredThread !== undefined && this.mousePos !== undefined) {
       const tidText = `T: ${hoveredThread.threadName} [${hoveredThread.tid}]`;
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (hoveredThread.pid) {
         const pidText = `P: ${hoveredThread.procName} [${hoveredThread.pid}]`;
-        drawTrackHoverTooltip(ctx, this.mousePos, height, pidText, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, size, pidText, tidText);
       } else {
-        drawTrackHoverTooltip(ctx, this.mousePos, height, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, size, tidText);
       }
     }
   }

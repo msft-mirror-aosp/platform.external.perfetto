@@ -102,22 +102,23 @@ from diff_tests.parser.zip.tests import Zip
 from diff_tests.stdlib.android.frames_tests import Frames
 from diff_tests.stdlib.android.startups_tests import Startups
 from diff_tests.stdlib.android.tests import AndroidStdlib
+from diff_tests.stdlib.android.gpu import AndroidGpu
+from diff_tests.stdlib.android.memory import AndroidMemory
 from diff_tests.stdlib.chrome.chrome_stdlib_testsuites import CHROME_STDLIB_TESTSUITES
 from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.counters.tests import StdlibCounterIntervals
-from diff_tests.stdlib.cpu.tests import Cpu
 from diff_tests.stdlib.dynamic_tables.tests import DynamicTables
 from diff_tests.stdlib.export.tests import ExportTests
-from diff_tests.stdlib.gpu.tests import Gpu
 from diff_tests.stdlib.graphs.dominator_tree_tests import DominatorTree
 from diff_tests.stdlib.graphs.partition_tests import GraphPartitionTests
+from diff_tests.stdlib.graphs.scan_tests import GraphScanTests
 from diff_tests.stdlib.graphs.search_tests import GraphSearchTests
 from diff_tests.stdlib.intervals.intersect_tests import IntervalsIntersect
 from diff_tests.stdlib.intervals.tests import StdlibIntervals
-from diff_tests.stdlib.linux.tests import LinuxStdlib
-from diff_tests.stdlib.memory.heap_graph_dominator_tree_tests import HeapGraphDominatorTree
-from diff_tests.stdlib.memory.tests import Memory
+from diff_tests.stdlib.linux.cpu import LinuxCpu
+from diff_tests.stdlib.linux.memory import Memory
+from diff_tests.stdlib.android.heap_graph_tests import HeapGraph
 from diff_tests.stdlib.pkvm.tests import Pkvm
 from diff_tests.stdlib.prelude.math_functions_tests import PreludeMathFunctions
 from diff_tests.stdlib.prelude.pprof_functions_tests import PreludePprofFunctions
@@ -269,12 +270,14 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
     chrome_stdlib_tests += test_suite.fetch()
 
   stdlib_tests = [
+      *AndroidMemory(index_path, 'stdlib/android', 'AndroidMemory').fetch(),
+      *AndroidGpu(index_path, 'stdlib/android', 'AndroidGpu').fetch(),
       *AndroidStdlib(index_path, 'stdlib/android', 'AndroidStdlib').fetch(),
-      *Cpu(index_path, 'stdlib/cpu', 'Cpu').fetch(),
+      *LinuxCpu(index_path, 'stdlib/linux/cpu', 'LinuxCpu').fetch(),
       *DominatorTree(index_path, 'stdlib/graphs', 'DominatorTree').fetch(),
+      *GraphScanTests(index_path, 'stdlib/graphs', 'GraphScan').fetch(),
       *ExportTests(index_path, 'stdlib/export', 'ExportTests').fetch(),
       *Frames(index_path, 'stdlib/android', 'Frames').fetch(),
-      *Gpu(index_path, 'stdlib/gpu', 'Gpu').fetch(),
       *GraphSearchTests(index_path, 'stdlib/graphs',
                         'GraphSearchTests').fetch(),
       *GraphPartitionTests(index_path, 'stdlib/graphs',
@@ -283,12 +286,11 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
                               'StdlibCounterIntervals').fetch(),
       *DynamicTables(index_path, 'stdlib/dynamic_tables',
                      'DynamicTables').fetch(),
-      *LinuxStdlib(index_path, 'stdlib/linux', 'LinuxStdlib').fetch(),
-      *Memory(index_path, 'stdlib/memory', 'Memory').fetch(),
+      *Memory(index_path, 'stdlib/linux', 'Memory').fetch(),
       *PreludeMathFunctions(index_path, 'stdlib/prelude',
                             'PreludeMathFunctions').fetch(),
-      *HeapGraphDominatorTree(index_path, 'stdlib/memory',
-                              'HeapGraphDominatorTree').fetch(),
+      *HeapGraph(index_path, 'stdlib/android',
+                 'HeapGraphDominatorTree').fetch(),
       *PreludePprofFunctions(index_path, 'stdlib/prelude',
                              'PreludePprofFunctions').fetch(),
       *PreludeWindowFunctions(index_path, 'stdlib/prelude',
