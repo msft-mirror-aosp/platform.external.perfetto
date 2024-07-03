@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
+FROM debian
 
-perfetto_sql_source_set("viz") {
-  sources = [
-    "core_type.sql",
-    "flamegraph.sql",
-  ]
-  deps = [ "summary" ]
-}
+RUN apt update && apt install -y git python3 curl build-essential
+RUN  git clone --depth 1 https://android.googlesource.com/platform/external/perfetto/
+WORKDIR /perfetto
+RUN tools/install-build-deps --grpc
+RUN tools/gn gen out/dist '--args=is_clang=true \
+                                  enable_perfetto_grpc=true \
+                                  is_debug=false'
+RUN tools/ninja -C out/dist worker_main
+
+CMD ["/perfetto/out/dist/worker_main", "-s", "0.0.0.0:5052"]
