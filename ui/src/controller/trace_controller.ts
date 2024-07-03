@@ -14,7 +14,6 @@
 
 import m from 'mithril';
 
-import {BigintMath} from '../base/bigint_math';
 import {assertExists, assertTrue} from '../base/logging';
 import {Duration, duration, Span, time, Time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
@@ -36,7 +35,6 @@ import {
 } from '../common/state';
 import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {
-  defaultTraceContext,
   globals,
   QuantizedLoad,
   ThreadDesc,
@@ -48,7 +46,6 @@ import {
   publishMetricError,
   publishOverviewData,
   publishThreads,
-  publishTraceContext,
 } from '../frontend/publish';
 import {addQueryResultsTab} from '../frontend/query_result_tab';
 import {Router} from '../frontend/router';
@@ -74,7 +71,10 @@ import {CpuAggregationController} from './aggregation/cpu_aggregation_controller
 import {CpuByProcessAggregationController} from './aggregation/cpu_by_process_aggregation_controller';
 import {FrameAggregationController} from './aggregation/frame_aggregation_controller';
 import {SliceAggregationController} from './aggregation/slice_aggregation_controller';
-import {WattsonAggregationController} from './aggregation/wattson_aggregation_controller';
+import {WattsonEstimateAggregationController} from './aggregation/wattson/estimate_aggregation_controller';
+import {WattsonThreadAggregationController} from './aggregation/wattson/thread_aggregation_controller';
+import {WattsonProcessAggregationController} from './aggregation/wattson/process_aggregation_controller';
+import {WattsonPackageAggregationController} from './aggregation/wattson/package_aggregation_controller';
 import {ThreadAggregationController} from './aggregation/thread_aggregation_controller';
 import {Child, Children, Controller} from './controller';
 import {
@@ -326,10 +326,44 @@ export class TraceController extends Controller<States> {
           }),
         );
         childControllers.push(
-          Child('wattson_aggregation', WattsonAggregationController, {
-            engine,
-            kind: 'wattson_aggregation',
-          }),
+          Child(
+            'wattson_estimate_aggregation',
+            WattsonEstimateAggregationController,
+            {
+              engine,
+              kind: 'wattson_estimate_aggregation',
+            },
+          ),
+        );
+        childControllers.push(
+          Child(
+            'wattson_thread_aggregation',
+            WattsonThreadAggregationController,
+            {
+              engine,
+              kind: 'wattson_thread_aggregation',
+            },
+          ),
+        );
+        childControllers.push(
+          Child(
+            'wattson_process_aggregation',
+            WattsonProcessAggregationController,
+            {
+              engine,
+              kind: 'wattson_process_aggregation',
+            },
+          ),
+        );
+        childControllers.push(
+          Child(
+            'wattson_package_aggregation',
+            WattsonPackageAggregationController,
+            {
+              engine,
+              kind: 'wattson_package_aggregation',
+            },
+          ),
         );
         childControllers.push(
           Child('frame_aggregation', FrameAggregationController, {
@@ -470,7 +504,7 @@ export class TraceController extends Controller<States> {
     if (traceDetails.traceTitle) {
       document.title = `${traceDetails.traceTitle} - Perfetto UI`;
     }
-    publishTraceContext(traceDetails);
+    globals.setTraceContext(traceDetails);
 
     const shownJsonWarning =
       window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) !== null;
@@ -507,17 +541,8 @@ export class TraceController extends Controller<States> {
       isJsonTrace,
       this.engine,
     );
-    // We don't know the resolution at this point. However this will be
-    // replaced in 50ms so a guess is fine.
-    const resolution = visibleTimeSpan.duration.divide(1000).toTime();
-    actions.push(
-      Actions.setVisibleTraceTime({
-        start: visibleTimeSpan.start.toTime(),
-        end: visibleTimeSpan.end.toTime(),
-        lastUpdate: Date.now() / 1000,
-        resolution: BigintMath.max(resolution, 1n),
-      }),
-    );
+
+    globals.timeline.updateVisibleTime(visibleTimeSpan);
 
     globals.dispatchMultiple(actions);
     Router.navigate(`#!/viewer?local_cache_key=${traceUuid}`);
@@ -1092,15 +1117,8 @@ export class TraceController extends Controller<States> {
       return;
     }
 
-    const res = (visualEnd - visualStart) / 1000n;
-
-    globals.dispatch(
-      Actions.setVisibleTraceTime({
-        start: visualStart,
-        end: visualEnd,
-        resolution: BigintMath.max(res, 1n),
-        lastUpdate: Date.now() / 1000,
-      }),
+    globals.timeline.updateVisibleTime(
+      HighPrecisionTimeSpan.fromTime(visualStart, visualEnd),
     );
   }
 }
@@ -1130,26 +1148,6 @@ async function computeVisibleTime(
   isJsonTrace: boolean,
   engine: Engine,
 ): Promise<Span<HighPrecisionTime>> {
-  // if we have non-default visible state, update the visible time to it
-  const previousVisibleState = globals.stateVisibleTime();
-  const defaultTraceSpan = new TimeSpan(
-    defaultTraceContext.start,
-    defaultTraceContext.end,
-  );
-  if (
-    !(
-      previousVisibleState.start === defaultTraceSpan.start &&
-      previousVisibleState.end === defaultTraceSpan.end
-    ) &&
-    previousVisibleState.start >= traceStart &&
-    previousVisibleState.end <= traceEnd
-  ) {
-    return HighPrecisionTimeSpan.fromTime(
-      previousVisibleState.start,
-      previousVisibleState.end,
-    );
-  }
-
   // initialise visible time to the trace time bounds
   let visibleStart = traceStart;
   let visibleEnd = traceEnd;
@@ -1262,7 +1260,7 @@ async function getTraceTimeDetails(
       break;
     case 'ARRAY_BUFFER':
       traceTitle = engineCfg.source.title;
-      traceUrl = engineCfg.source.url || '';
+      traceUrl = engineCfg.source.url ?? '';
       const arrayBufferSizeMB = Math.ceil(
         engineCfg.source.buffer.byteLength / 1e6,
       );

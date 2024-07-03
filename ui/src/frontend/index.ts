@@ -78,21 +78,9 @@ class FrontendApi {
   }
 
   private handleStoreUpdate = (store: Store<State>, oldState: State) => {
-    const newState = store.state;
-
-    // If the visible time in the global state has been updated more
-    // recently than the visible time handled by the frontend @ 60fps,
-    // update it. This typically happens when restoring the state from a
-    // permalink.
-    globals.timeline.mergeState(newState.frontendLocalState);
-
-    // Only redraw if something other than the frontendLocalState changed.
-    let key: keyof State;
-    for (key in store.state) {
-      if (key !== 'frontendLocalState' && oldState[key] !== newState[key]) {
-        raf.scheduleFullRedraw();
-        break;
-      }
+    // Only redraw if something actually changed
+    if (oldState !== store.state) {
+      raf.scheduleFullRedraw();
     }
 
     // Run in microtask to avoid avoid reentry
@@ -252,27 +240,12 @@ function main() {
     frontendApi.dispatchMultiple([action]);
   };
 
-  const router = new Router({
-    '/': HomePage,
-    '/viewer': ViewerPage,
-    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
-    '/query': QueryPage,
-    '/insights': InsightsPage,
-    '/flags': FlagsPage,
-    '/metrics': MetricsPage,
-    '/info': TraceInfoPage,
-    '/widgets': WidgetsPage,
-    '/viz': VizPage,
-    '/plugins': PluginsPage,
-  });
-  router.onRouteChanged = routeChange;
-
   // These need to be set before globals.initialize.
   const route = Router.parseUrl(window.location.href);
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  globals.initialize(dispatch, router);
+  globals.initialize(dispatch);
 
   globals.serviceWorkerController.install();
 
@@ -338,8 +311,23 @@ function onCssLoaded() {
   // And replace it with the root <main> element which will be used by mithril.
   document.body.innerHTML = '';
 
+  const router = new Router({
+    '/': HomePage,
+    '/viewer': ViewerPage,
+    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
+    '/query': QueryPage,
+    '/insights': InsightsPage,
+    '/flags': FlagsPage,
+    '/metrics': MetricsPage,
+    '/info': TraceInfoPage,
+    '/widgets': WidgetsPage,
+    '/viz': VizPage,
+    '/plugins': PluginsPage,
+  });
+  router.onRouteChanged = routeChange;
+
   raf.domRedraw = () => {
-    m.render(document.body, m(App, globals.router.resolve()));
+    m.render(document.body, m(App, router.resolve()));
   };
 
   if (
