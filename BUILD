@@ -367,6 +367,7 @@ perfetto_cc_library(
                ":src_trace_processor_perfetto_sql_prelude_prelude",
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
+           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib +
@@ -1830,6 +1831,10 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/heap_graph_tracker.h",
         "src/trace_processor/importers/proto/metadata_module.cc",
         "src/trace_processor/importers/proto/metadata_module.h",
+        "src/trace_processor/importers/proto/pixel_modem_module.cc",
+        "src/trace_processor/importers/proto/pixel_modem_module.h",
+        "src/trace_processor/importers/proto/pixel_modem_parser.cc",
+        "src/trace_processor/importers/proto/pixel_modem_parser.h",
         "src/trace_processor/importers/proto/statsd_module.cc",
         "src/trace_processor/importers/proto/statsd_module.h",
         "src/trace_processor/importers/proto/string_encoding_utils.cc",
@@ -2601,6 +2606,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/android/statsd.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/suspend.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/thread.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/version.sql",
     ],
 )
 
@@ -2794,6 +2800,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_viz_viz",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/viz/core_type.sql",
+        "src/trace_processor/perfetto_sql/stdlib/viz/flamegraph.sql",
     ],
 )
 
@@ -6217,6 +6224,7 @@ perfetto_cc_library(
                ":src_trace_processor_perfetto_sql_prelude_prelude",
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
+           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib +
@@ -6390,6 +6398,7 @@ perfetto_cc_binary(
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
            PERFETTO_CONFIG.deps.linenoise +
+           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.protobuf_full +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
@@ -6631,6 +6640,7 @@ perfetto_cc_binary(
                ":src_traceconv_gen_cc_trace_descriptor",
                ":src_traceconv_gen_cc_winscope_descriptor",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
+           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib +
