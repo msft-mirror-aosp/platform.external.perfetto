@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright (C) 2024 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
+cd $PROJECT_ROOT/src/bigtrace
 
-perfetto_sql_source_set("graphs") {
-  sources = [
-    "critical_path.sql",
-    "dominator_tree.sql",
-    "partition.sql",
-    "scan.sql",
-    "search.sql",
-  ]
-}
+minikube start
+eval $(minikube docker-env)
+
+docker build -t orchestrator_image ./orchestrator
+docker build -t worker_image ./worker
+
+minikube kubectl -- apply -f worker-deployment.yaml
+minikube kubectl -- apply -f worker-service.yaml
+minikube kubectl -- apply -f orchestrator-deployment.yaml
+minikube kubectl -- apply -f orchestrator-service.yaml
+
+eval $(minikube docker-env -u)

@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
-
-perfetto_sql_source_set("graphs") {
-  sources = [
-    "critical_path.sql",
-    "dominator_tree.sql",
-    "partition.sql",
-    "scan.sql",
-    "search.sql",
-  ]
-}
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+spec:
+  type: NodePort
+  ports:
+  - protocol: TCP
+    nodePort: 30051
+    port: 5051
+    targetPort: 5051
+  selector:
+    app: orchestrator-deployment
