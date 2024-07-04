@@ -12,14 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
-
-perfetto_sql_source_set("graphs") {
-  sources = [
-    "critical_path.sql",
-    "dominator_tree.sql",
-    "partition.sql",
-    "scan.sql",
-    "search.sql",
-  ]
-}
+services:
+  worker:
+    deploy:
+      mode: replicated
+      replicas: 3
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+  orchestrator:
+    container_name: orchestrator
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "5051:5051"
+    depends_on:
+      - worker
