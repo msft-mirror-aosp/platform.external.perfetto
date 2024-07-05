@@ -13,6 +13,7 @@
 // limitations under the License.
 
 // Keep this import first.
+import '../base/disposable_polyfill';
 import '../base/static_initializers';
 import '../gen/all_plugins';
 import '../gen/all_core_plugins';
@@ -71,40 +72,6 @@ const CSP_WS_PERMISSIVE_PORT = featureFlags.register({
     'https://ui.perfetto.dev/#!/?rpc_port=1234',
   defaultValue: false,
 });
-
-class FrontendApi {
-  constructor() {
-    globals.store.subscribe(this.handleStoreUpdate);
-  }
-
-  private handleStoreUpdate = (store: Store<State>, oldState: State) => {
-    // Only redraw if something actually changed
-    if (oldState !== store.state) {
-      raf.scheduleFullRedraw();
-    }
-
-    // Run in microtask to avoid avoid reentry
-    setTimeout(runControllers, 0);
-  };
-
-  dispatchMultiple(actions: DeferredAction[]) {
-    const edits = actions.map((action) => {
-      return traceEvent(
-        `action.${action.type}`,
-        () => {
-          return (draft: Draft<State>) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (StateActions as any)[action.type](draft, action.args);
-          };
-        },
-        {
-          args: flattenArgs(action.args),
-        },
-      );
-    });
-    globals.store.edit(edits);
-  }
-}
 
 function setExtensionAvailability(available: boolean) {
   globals.dispatch(
@@ -236,20 +203,16 @@ function main() {
   initWasm(globals.root);
   initController(extensionLocalChannel.port1);
 
-  const dispatch = (action: DeferredAction) => {
-    frontendApi.dispatchMultiple([action]);
-  };
-
   // These need to be set before globals.initialize.
   const route = Router.parseUrl(window.location.href);
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  globals.initialize(dispatch);
+  globals.initialize(stateActionDispatcher);
 
   globals.serviceWorkerController.install();
 
-  const frontendApi = new FrontendApi();
+  globals.store.subscribe(scheduleRafAndRunControllersOnStateChange);
   globals.publishRedraw = () => raf.scheduleFullRedraw();
 
   // We proxy messages between the extension and the controller because the
@@ -424,6 +387,36 @@ function maybeChangeRpcPortFromFragment() {
       HttpRpcEngine.rpcPort = route.args.rpc_port;
     }
   }
+}
+
+function stateActionDispatcher(actions: DeferredAction[]) {
+  const edits = actions.map((action) => {
+    return traceEvent(
+      `action.${action.type}`,
+      () => {
+        return (draft: Draft<State>) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (StateActions as any)[action.type](draft, action.args);
+        };
+      },
+      {
+        args: flattenArgs(action.args),
+      },
+    );
+  });
+  globals.store.edit(edits);
+}
+
+function scheduleRafAndRunControllersOnStateChange(
+  store: Store<State>,
+  oldState: State,
+) {
+  // Only redraw if something actually changed
+  if (oldState !== store.state) {
+    raf.scheduleFullRedraw();
+  }
+  // Run in a separate task to avoid avoid reentry.
+  setTimeout(runControllers, 0);
 }
 
 main();

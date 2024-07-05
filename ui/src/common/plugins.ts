@@ -14,9 +14,8 @@
 
 import {v4 as uuidv4} from 'uuid';
 
-import {Disposable, DisposableStack} from '../base/disposable';
 import {Registry} from '../base/registry';
-import {Span, duration, time} from '../base/time';
+import {Span, TimeSpan, duration, time} from '../base/time';
 import {TraceContext, globals} from '../frontend/globals';
 import {
   Command,
@@ -43,9 +42,9 @@ import {Flag, featureFlags} from '../core/feature_flags';
 import {assertExists} from '../base/logging';
 import {raf} from '../core/raf_scheduler';
 import {defaultPlugins} from '../core/default_plugins';
-import {HighPrecisionTimeSpan} from './high_precision_time';
 import {PromptOption} from '../frontend/omnibox_manager';
 import {horizontalScrollToTs} from '../frontend/scroll_helper';
+import {DisposableStack} from '../base/disposable_stack';
 
 // Every plugin gets its own PluginContext. This is how we keep track
 // what each plugin is doing and how we can blame issues on particular
@@ -90,7 +89,7 @@ export class PluginContextImpl implements PluginContext, Disposable {
 
   constructor(readonly pluginId: string) {}
 
-  dispose(): void {
+  [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
   }
@@ -329,8 +328,7 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     },
 
     setViewportTime(start: time, end: time): void {
-      const interval = HighPrecisionTimeSpan.fromTime(start, end);
-      globals.timeline.updateVisibleTime(interval);
+      globals.timeline.updateVisibleTime(new TimeSpan(start, end));
     },
 
     get viewport(): Span<time, duration> {
@@ -338,7 +336,7 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     },
   };
 
-  dispose(): void {
+  [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
   }
@@ -508,7 +506,7 @@ export class PluginManager {
     await doPluginTraceUnload(pluginDetails);
 
     plugin.onDeactivate && plugin.onDeactivate(context);
-    context.dispose();
+    context[Symbol.dispose]();
 
     this._plugins.delete(id);
 
@@ -615,7 +613,7 @@ async function doPluginTraceUnload(
 
   if (traceContext) {
     plugin.onTraceUnload && (await plugin.onTraceUnload(traceContext));
-    traceContext.dispose();
+    traceContext[Symbol.dispose]();
     pluginDetails.traceContext = undefined;
   }
 }

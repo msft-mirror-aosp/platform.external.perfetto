@@ -19,5 +19,6 @@ perfetto_sql_source_set("linux") {
   deps = [
     "cpu",
     "memory",
+    "perf",
   ]
 }
