@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ColumnDef} from '../../common/aggregation_data';
-import {Area, Sorting} from '../../common/state';
-import {globals} from '../../frontend/globals';
-import {Engine} from '../../trace_processor/engine';
-import {CPUSS_ESTIMATE_TRACK_KIND} from '../../core/track_kinds';
-import {AggregationController} from './aggregation_controller';
+import {ColumnDef} from '../../../common/aggregation_data';
+import {Area, Sorting} from '../../../common/state';
+import {globals} from '../../../frontend/globals';
+import {Engine} from '../../../trace_processor/engine';
+import {CPUSS_ESTIMATE_TRACK_KIND} from '../../../core/track_kinds';
+import {AggregationController} from '../aggregation_controller';
 
-export class WattsonAggregationController extends AggregationController {
+export class WattsonEstimateAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
@@ -52,7 +52,7 @@ export class WattsonAggregationController extends AggregationController {
       CREATE PERFETTO TABLE _ss_converted_to_mw AS
       SELECT *,
         ((IFNULL(l3_hit_value, 0) + IFNULL(l3_miss_value, 0)) * 1000 / dur)
-          + static_curve as scuinterconnect_curve
+          + static_curve as dsu_curve
       FROM _system_state_curves;
 
       DROP TABLE IF EXISTS _ui_selection_window;
@@ -78,7 +78,8 @@ export class WattsonAggregationController extends AggregationController {
       query += `
         SELECT
         '${estimateTrack}' as name,
-        ROUND(SUM(${estimateTrack}_curve * dur) / ${duration}, 2) as value
+        ROUND(SUM(${estimateTrack}_curve * dur) / ${duration}, 2) as power,
+        ROUND(SUM(${estimateTrack}_curve * dur) / 1000000000, 2) as energy
         FROM _windowed_cpuss_estimate
       `;
     });
@@ -96,10 +97,17 @@ export class WattsonAggregationController extends AggregationController {
         columnId: 'name',
       },
       {
-        title: 'Average estimate (mW)',
+        title: 'Average estimated power (mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
-        columnId: 'value',
+        columnId: 'power',
+      },
+      {
+        title: 'Total estimated energy (mWs)',
+        kind: 'NUMBER',
+        columnConstructor: Float64Array,
+        columnId: 'energy',
+        sum: true,
       },
     ];
   }
@@ -107,7 +115,7 @@ export class WattsonAggregationController extends AggregationController {
   async getExtra() {}
 
   getTabName() {
-    return 'Power Estimates';
+    return 'Wattson estimates';
   }
 
   getDefaultSorting(): Sorting {

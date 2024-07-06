@@ -15,7 +15,7 @@
 import m from 'mithril';
 
 import {searchSegment} from '../base/binary_search';
-import {AsyncDisposable, AsyncDisposableStack} from '../base/disposable';
+
 import {assertTrue, assertUnreachable} from '../base/logging';
 import {Time, time} from '../base/time';
 import {uuidv4Sql} from '../base/uuid';
@@ -32,6 +32,7 @@ import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
 import {Size} from '../base/geom';
 import {NewTrackArgs} from './track';
+import {AsyncDisposableStack} from '../base/disposable_stack';
 
 function roundAway(n: number): number {
   const exp = Math.ceil(Math.log10(Math.max(Math.abs(n), 1)));
@@ -622,7 +623,7 @@ export abstract class BaseCounterTrack implements Track {
       }
 
       // Draw the tooltip.
-      drawTrackHoverTooltip(ctx, this.mousePos, this.getHeight(), text);
+      drawTrackHoverTooltip(ctx, this.mousePos, size, text);
     }
 
     // Write the Y scale on the top left corner.
@@ -685,7 +686,7 @@ export abstract class BaseCounterTrack implements Track {
   }
 
   async onDestroy(): Promise<void> {
-    await this.trash.disposeAsync();
+    await this.trash.asyncDispose();
   }
 
   // Compute the range of values to display and range label.
