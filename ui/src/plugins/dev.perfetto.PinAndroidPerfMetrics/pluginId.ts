@@ -1,4 +1,4 @@
-// Copyright (C) 2019 The Android Open Source Project
+// Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const util = require('util');
-
-module.exports._TextDecoder = util.TextDecoder;
-module.exports._TextEncoder = util.TextEncoder;
+// Common Plugin ID to avoid circular dependencies
+export const PLUGIN_ID = 'dev.perfetto.PinAndroidPerfMetrics';

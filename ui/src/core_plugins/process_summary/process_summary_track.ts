@@ -107,7 +107,7 @@ export class ProcessSummaryTrack implements Track {
   }
 
   async onUpdate(): Promise<void> {
-    this.fetcher.requestDataForCurrentTime();
+    await this.fetcher.requestDataForCurrentTime();
   }
 
   async onBoundsChange(
@@ -176,7 +176,7 @@ export class ProcessSummaryTrack implements Track {
         'window',
       )}; drop table if exists ${this.tableName('span')}`,
     );
-    this.fetcher.dispose();
+    this.fetcher[Symbol.dispose]();
   }
 
   getHeight(): number {
