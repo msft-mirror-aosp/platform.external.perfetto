@@ -113,7 +113,7 @@ export class ProcessSchedulingTrack implements Track {
   }
 
   async onDestroy(): Promise<void> {
-    this.fetcher.dispose();
+    this.fetcher[Symbol.dispose]();
     await this.engine.tryQuery(`
       drop table process_scheduling_${this.trackUuid}
     `);
@@ -247,15 +247,14 @@ export class ProcessSchedulingTrack implements Track {
     }
 
     const hoveredThread = globals.threads.get(this.utidHoveredInThisTrack);
-    const height = this.getHeight();
     if (hoveredThread !== undefined && this.mousePos !== undefined) {
       const tidText = `T: ${hoveredThread.threadName} [${hoveredThread.tid}]`;
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (hoveredThread.pid) {
         const pidText = `P: ${hoveredThread.procName} [${hoveredThread.pid}]`;
-        drawTrackHoverTooltip(ctx, this.mousePos, height, pidText, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, size, pidText, tidText);
       } else {
-        drawTrackHoverTooltip(ctx, this.mousePos, height, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, size, tidText);
       }
     }
   }
