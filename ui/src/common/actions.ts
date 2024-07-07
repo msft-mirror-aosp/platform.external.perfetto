@@ -61,7 +61,6 @@ import {
   ThreadTrackSortKey,
   TrackSortKey,
   UtidToTrackSortKey,
-  VisibleState,
 } from './state';
 
 type StateDraft = Draft<State>;
@@ -773,10 +772,6 @@ export const StateActions = {
     state.selection = Object.assign({}, state.selection);
   },
 
-  setVisibleTraceTime(state: StateDraft, args: VisibleState): void {
-    state.frontendLocalState.visibleState = {...args};
-  },
-
   setChromeCategories(state: StateDraft, args: {categories: string[]}): void {
     state.chromeCategories = args.categories;
   },
@@ -1014,9 +1009,10 @@ export interface DeferredAction<Args = {}> {
 // DeferredActions<T> has an attribute:
 // (args: Args) => DeferredAction<Args>
 type ActionFunction<Args> = (state: StateDraft, args: Args) => void;
-type DeferredActionFunc<T> = T extends ActionFunction<infer Args>
-  ? (args: Args) => DeferredAction<Args>
-  : never;
+type DeferredActionFunc<T> =
+  T extends ActionFunction<infer Args>
+    ? (args: Args) => DeferredAction<Args>
+    : never;
 type DeferredActions<C> = {
   [P in keyof C]: DeferredActionFunc<C[P]>;
 };

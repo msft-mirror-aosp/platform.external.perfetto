@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {ConversionJobStatus} from '../common/conversion_jobs';
@@ -153,7 +155,7 @@ async function createPermalinkInternal(
  * This is invoked when passing !#?s=fileName to URL.
  * @param gcsFileName the file name of the cloud storage object. This is
  * expected to be a JSON file that respects the schema defined by
- * @type {SerializedPermalink}, @see state_serialization.ts.
+ * PERMALINK_SCHEMA.
  */
 export async function loadPermalink(gcsFileName: string): Promise<void> {
   // Otherwise, this is a request to load the permalink.
