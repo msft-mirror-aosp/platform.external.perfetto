@@ -46,8 +46,7 @@ import {ServiceWorkerController} from './service_worker_controller';
 import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {Analytics, initAnalytics} from './analytics';
-import {Timeline} from './frontend_local_state';
-import {Router} from './router';
+import {Timeline} from './timeline';
 import {SliceSqlId} from './sql_types';
 import {PxSpan, TimeScale} from './time_scale';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
@@ -61,7 +60,7 @@ import {getServingRoot} from '../base/http_utils';
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
 
-type Dispatch = (action: DeferredAction) => void;
+type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
 type QueryResultsStore = Map<string, {} | undefined>;
 type AggregateDataStore = Map<string, AggregateData>;
@@ -223,7 +222,7 @@ class Globals {
   readonly root = getServingRoot();
 
   private _testing = false;
-  private _dispatch?: Dispatch = undefined;
+  private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
   private _timeline?: Timeline = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
@@ -249,7 +248,6 @@ class Globals {
   private _metricError?: string = undefined;
   private _metricResult?: MetricResult = undefined;
   private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
-  private _router?: Router = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
   private _cmdManager = new CommandManager();
@@ -267,6 +265,13 @@ class Globals {
   permalinkHash?: string;
 
   traceContext = defaultTraceContext;
+
+  setTraceContext(traceCtx: TraceContext): void {
+    this.traceContext = traceCtx;
+    const {start, end} = this.traceContext;
+    const traceSpan = new TimeSpan(start, end);
+    this._timeline = new Timeline(this._store, traceSpan);
+  }
 
   // Used for permalink load by trace_controller.ts.
   restoreAppStateAfterTraceLoad?: SerializedAppState;
@@ -290,10 +295,13 @@ class Globals {
 
   engines = new Map<string, EngineBase>();
 
-  initialize(dispatch: Dispatch, router: Router) {
-    this._dispatch = dispatch;
-    this._router = router;
-    this._timeline = new Timeline();
+  constructor() {
+    const {start, end} = defaultTraceContext;
+    this._timeline = new Timeline(this._store, new TimeSpan(start, end));
+  }
+
+  initialize(dispatchMultiple: DispatchMultiple) {
+    this._dispatchMultiple = dispatchMultiple;
 
     setPerfHooks(
       () => this.state.perfDebug,
@@ -328,10 +336,6 @@ class Globals {
     this._store = createStore(initialState);
   }
 
-  get router(): Router {
-    return assertExists(this._router);
-  }
-
   get publishRedraw(): () => void {
     return this._publishRedraw || (() => {});
   }
@@ -348,15 +352,12 @@ class Globals {
     return assertExists(this._store);
   }
 
-  get dispatch(): Dispatch {
-    return assertExists(this._dispatch);
+  dispatch(action: DeferredAction) {
+    this.dispatchMultiple([action]);
   }
 
-  dispatchMultiple(actions: DeferredAction[]): void {
-    const dispatch = this.dispatch;
-    for (const action of actions) {
-      dispatch(action);
-    }
+  dispatchMultiple(actions: DeferredAction[]) {
+    assertExists(this._dispatchMultiple)(actions);
   }
 
   get timeline() {
@@ -632,7 +633,7 @@ class Globals {
   }
 
   resetForTesting() {
-    this._dispatch = undefined;
+    this._dispatchMultiple = undefined;
     this._timeline = undefined;
     this._serviceWorkerController = undefined;
 
@@ -702,12 +703,6 @@ class Globals {
 
   stateTraceTimeTP(): Span<time, duration> {
     const {start, end} = this.traceContext;
-    return new TimeSpan(start, end);
-  }
-
-  // Get the state version of the visible time bounds
-  stateVisibleTime(): Span<time, duration> {
-    const {start, end} = this.state.frontendLocalState.visibleState;
     return new TimeSpan(start, end);
   }
 
@@ -859,7 +854,7 @@ export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<
   if (exists(range)) {
     return new TimeSpan(range.start, range.end);
   } else {
-    return globals.stateVisibleTime();
+    return globals.timeline.visibleTimeSpan;
   }
 }
 
