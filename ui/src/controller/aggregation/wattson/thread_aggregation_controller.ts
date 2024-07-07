@@ -32,17 +32,17 @@ export class WattsonThreadAggregationController extends AggregationController {
     `);
     if (deviceInfo.firstRow({isValid: NUM}).isValid === 0) return false;
 
-    const estimateThreads: number[] = [];
+    const selectedCpus: number[] = [];
     for (const trackKey of area.tracks) {
       const track = globals.state.tracks[trackKey];
       if (track?.uri) {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
         if (trackInfo?.kind === CPU_SLICE_TRACK_KIND) {
-          exists(trackInfo.cpu) && estimateThreads.push(trackInfo.cpu);
+          exists(trackInfo.cpu) && selectedCpus.push(trackInfo.cpu);
         }
       }
     }
-    if (estimateThreads.length === 0) return false;
+    if (selectedCpus.length === 0) return false;
 
     const duration = area.end - area.start;
     const queryPrefix = `
@@ -52,7 +52,7 @@ export class WattsonThreadAggregationController extends AggregationController {
         ${area.start} as ts,
         ${duration} as dur;
     `;
-    engine.query(this.getEstimateThreadsQuery(queryPrefix, estimateThreads));
+    engine.query(this.getEstimateThreadsQuery(queryPrefix, selectedCpus));
 
     return true;
   }
@@ -64,14 +64,11 @@ export class WattsonThreadAggregationController extends AggregationController {
   // 1. Window and associate thread with proper Wattson estimate slice
   // 2. Group all threads over time on a per CPU basis
   // 3. Group all threads over all CPUs
-  getEstimateThreadsQuery(
-    queryPrefix: string,
-    estimateThread: number[],
-  ): string {
+  getEstimateThreadsQuery(queryPrefix: string, selectedCpu: number[]): string {
     let query = queryPrefix;
 
     // Estimate and total per UTID per CPU
-    estimateThread.forEach((cpu) => {
+    selectedCpu.forEach((cpu) => {
       query += `
         -- Threads filtered by CPU
         DROP TABLE IF EXISTS _per_cpu_threads;
@@ -117,7 +114,7 @@ export class WattsonThreadAggregationController extends AggregationController {
       CREATE PERFETTO TABLE _total_per_thread AS
       WITH _unioned_per_thread_per_cpu AS (
     `;
-    estimateThread.forEach((cpu, i) => {
+    selectedCpu.forEach((cpu, i) => {
       query += i != 0 ? `UNION ALL\n` : ``;
       query += `SELECT * from _total_per_thread_cpu${cpu}\n`;
     });
@@ -136,10 +133,10 @@ export class WattsonThreadAggregationController extends AggregationController {
     // Final table outputted in UI
     query += `
       CREATE VIEW ${this.kind} AS
-      SELECT tpt.*, thread.name as t_name, process.name as p_name, thread.upid
+      SELECT tpt.*, thread.name as t_name, thread.upid
       FROM _total_per_thread as tpt
       JOIN thread on tpt.utid = thread.utid
-      JOIN process on thread.upid = process.upid;
+      LEFT JOIN process on thread.upid = process.upid;
     `;
 
     return query;
@@ -148,28 +145,22 @@ export class WattsonThreadAggregationController extends AggregationController {
   getColumnDefinitions(): ColumnDef[] {
     return [
       {
-        title: 'Process Name',
-        kind: 'STRING',
-        columnConstructor: Uint16Array,
-        columnId: 'p_name',
-      },
-      {
         title: 'Thread Name',
         kind: 'STRING',
         columnConstructor: Uint16Array,
         columnId: 't_name',
       },
       {
-        title: 'UPID',
-        kind: 'NUMBER',
-        columnConstructor: Uint16Array,
-        columnId: 'upid',
-      },
-      {
         title: 'UTID',
         kind: 'NUMBER',
         columnConstructor: Uint16Array,
         columnId: 'utid',
+      },
+      {
+        title: 'UPID',
+        kind: 'NUMBER',
+        columnConstructor: Uint16Array,
+        columnId: 'upid',
       },
       {
         title: 'Occurences',
@@ -184,16 +175,17 @@ export class WattsonThreadAggregationController extends AggregationController {
         columnId: 'dur',
       },
       {
-        title: 'Average estimate (mW)',
+        title: 'Average estimated power (mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'avg_mw',
       },
       {
-        title: 'Total estimate (mWs)',
+        title: 'Total estimated energy (mWs)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'total_mws',
+        sum: true,
       },
     ];
   }

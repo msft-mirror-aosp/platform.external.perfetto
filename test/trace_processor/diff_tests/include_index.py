@@ -71,7 +71,7 @@ from diff_tests.parser.fuchsia.tests import Fuchsia
 from diff_tests.parser.graphics.tests import GraphicsParser
 from diff_tests.parser.graphics.tests_drm_related_ftrace_events import GraphicsDrmRelatedFtraceEvents
 from diff_tests.parser.graphics.tests_gpu_trace import GraphicsGpuTrace
-from diff_tests.parser.json.tests import JsonTests
+from diff_tests.parser.json.tests import JsonParser
 from diff_tests.parser.memory.tests import MemoryParser
 from diff_tests.parser.network.tests import NetworkParser
 from diff_tests.parser.parsing.tests import Parsing
@@ -110,6 +110,7 @@ from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.counters.tests import StdlibCounterIntervals
 from diff_tests.stdlib.dynamic_tables.tests import DynamicTables
 from diff_tests.stdlib.export.tests import ExportTests
+from diff_tests.stdlib.graphs.critical_path_tests import CriticalPathTests
 from diff_tests.stdlib.graphs.dominator_tree_tests import DominatorTree
 from diff_tests.stdlib.graphs.partition_tests import GraphPartitionTests
 from diff_tests.stdlib.graphs.scan_tests import GraphScanTests
@@ -169,7 +170,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *GraphicsGpuTrace(index_path, 'parser/graphics',
                         'GraphicsGpuTrace').fetch(),
       *GraphicsParser(index_path, 'parser/graphics', 'GraphicsParser').fetch(),
-      *JsonTests(index_path, 'parser/json', 'JsonParser').fetch(),
+      *JsonParser(index_path, 'parser/json', 'JsonParser').fetch(),
       *MemoryParser(index_path, 'parser/memory', 'MemoryParser').fetch(),
       *NetworkParser(index_path, 'parser/network', 'NetworkParser').fetch(),
       *PowerEnergyBreakdown(index_path, 'parser/power',
@@ -227,7 +228,8 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ParsingTracedStats(index_path, 'parser/parsing',
                           'ParsingTracedStats').fetch(),
       *Zip(index_path, 'parser/zip', 'Zip').fetch(),
-      *AndroidInputEvent(index_path, 'parser/android', 'AndroidInputEvent').fetch(),
+      *AndroidInputEvent(index_path, 'parser/android',
+                         'AndroidInputEvent').fetch(),
   ]
 
   metrics_tests = [
@@ -275,6 +277,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *AndroidStdlib(index_path, 'stdlib/android', 'AndroidStdlib').fetch(),
       *LinuxCpu(index_path, 'stdlib/linux/cpu', 'LinuxCpu').fetch(),
       *DominatorTree(index_path, 'stdlib/graphs', 'DominatorTree').fetch(),
+      *CriticalPathTests(index_path, 'stdlib/graphs', 'CriticalPath').fetch(),
       *GraphScanTests(index_path, 'stdlib/graphs', 'GraphScan').fetch(),
       *ExportTests(index_path, 'stdlib/export', 'ExportTests').fetch(),
       *Frames(index_path, 'stdlib/android', 'Frames').fetch(),
