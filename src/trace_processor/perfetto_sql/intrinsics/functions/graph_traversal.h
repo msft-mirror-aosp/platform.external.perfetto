@@ -25,7 +25,9 @@ class PerfettoSqlEngine;
 class StringPool;
 
 // Registers the following array related functions with SQLite:
-//  * __intrinsic_dfs: an aggregate function which performs a DFS traversal
+//  * __intrinsic_dfs: a scalar function which performs a DFS traversal
+//    of the graph.
+//  * __intrinsic_bfs: a scalar function which performs a BFS traversal
 //    of the graph.
 // TODO(lalitm): once we have some stability here, expand the comments
 // here.

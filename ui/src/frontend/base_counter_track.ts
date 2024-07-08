@@ -15,14 +15,14 @@
 import m from 'mithril';
 
 import {searchSegment} from '../base/binary_search';
-import {AsyncDisposable, AsyncDisposableStack} from '../base/disposable';
+
 import {assertTrue, assertUnreachable} from '../base/logging';
 import {Time, time} from '../base/time';
 import {uuidv4Sql} from '../base/uuid';
 import {drawTrackHoverTooltip} from '../common/canvas_utils';
 import {raf} from '../core/raf_scheduler';
 import {CacheKey} from '../core/timeline_cache';
-import {Track} from '../public';
+import {Track} from '../public/tracks';
 import {Button} from '../widgets/button';
 import {MenuDivider, MenuItem, PopupMenu2} from '../widgets/menu';
 import {Engine} from '../trace_processor/engine';
@@ -30,8 +30,9 @@ import {LONG, NUM} from '../trace_processor/query_result';
 
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
-import {PanelSize} from './panel';
+import {Size} from '../base/geom';
 import {NewTrackArgs} from './track';
+import {AsyncDisposableStack} from '../base/disposable_stack';
 
 function roundAway(n: number): number {
   const exp = Math.ceil(Math.log10(Math.max(Math.abs(n), 1)));
@@ -56,8 +57,9 @@ function toLabel(n: number): string {
   let largestMultiplier;
   let largestUnit;
   [largestMultiplier, largestUnit] = units[0];
+  const absN = Math.abs(n);
   for (const [multiplier, unit] of units) {
-    if (multiplier >= n) {
+    if (multiplier >= absN) {
       break;
     }
     [largestMultiplier, largestUnit] = [multiplier, unit];
@@ -459,7 +461,7 @@ export abstract class BaseCounterTrack implements Track {
     await this.maybeRequestData(rawCountersKey);
   }
 
-  render(ctx: CanvasRenderingContext2D, size: PanelSize) {
+  render(ctx: CanvasRenderingContext2D, size: Size) {
     const {visibleTimeScale: timeScale} = globals.timeline;
 
     // In any case, draw whatever we have (which might be stale/incomplete).
@@ -497,11 +499,6 @@ export abstract class BaseCounterTrack implements Track {
 
     const effectiveHeight = this.getHeight() - MARGIN_TOP;
     const endPx = size.width;
-    const hasZero = yMin < 0 && yMax > 0;
-    let zeroY = effectiveHeight + MARGIN_TOP;
-    if (hasZero) {
-      zeroY = effectiveHeight * (yMax / (yMax - yMin)) + MARGIN_TOP;
-    }
 
     // Use hue to differentiate the scale of the counter value
     const exp = Math.ceil(Math.log10(Math.max(yMax, 1)));
@@ -521,6 +518,14 @@ export abstract class BaseCounterTrack implements Track {
         Math.round(((value - yMin) / yRange) * effectiveHeight)
       );
     };
+    let zeroY;
+    if (yMin >= 0) {
+      zeroY = effectiveHeight + MARGIN_TOP;
+    } else if (yMax < 0) {
+      zeroY = MARGIN_TOP;
+    } else {
+      zeroY = effectiveHeight * (yMax / (yMax - yMin)) + MARGIN_TOP;
+    }
 
     ctx.beginPath();
     const timestamp = Time.fromRaw(timestamps[0]);
@@ -550,7 +555,7 @@ export abstract class BaseCounterTrack implements Track {
     ctx.fill();
     ctx.stroke();
 
-    if (hasZero) {
+    if (yMin < 0 && yMax > 0) {
       // Draw the Y=0 dashed line.
       ctx.strokeStyle = `hsl(${hue}, 10%, 71%)`;
       ctx.beginPath();
@@ -622,7 +627,7 @@ export abstract class BaseCounterTrack implements Track {
       }
 
       // Draw the tooltip.
-      drawTrackHoverTooltip(ctx, this.mousePos, this.getHeight(), text);
+      drawTrackHoverTooltip(ctx, this.mousePos, size, text);
     }
 
     // Write the Y scale on the top left corner.
@@ -685,7 +690,7 @@ export abstract class BaseCounterTrack implements Track {
   }
 
   async onDestroy(): Promise<void> {
-    await this.trash.disposeAsync();
+    await this.trash.asyncDispose();
   }
 
   // Compute the range of values to display and range label.
@@ -709,6 +714,7 @@ export abstract class BaseCounterTrack implements Track {
 
     if (options.yDisplay === 'zero') {
       yMin = Math.min(0, yMin);
+      yMax = Math.max(0, yMax);
     }
 
     if (options.yOverrideMaximum !== undefined) {
@@ -743,8 +749,11 @@ export abstract class BaseCounterTrack implements Track {
         max = Math.exp(max);
         min = Math.exp(min);
       }
-      const n = Math.abs(max - min);
-      yLabel = toLabel(n);
+      if (max < 0) {
+        yLabel = toLabel(min - max);
+      } else {
+        yLabel = toLabel(max - min);
+      }
     }
 
     const unit = this.unit;

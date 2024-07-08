@@ -33,6 +33,35 @@ interface ContainedTrace {
   dur: number;
 }
 
+const PACKAGE_LOOKUP = `
+  create or replace perfetto table package_name_lookup as
+  with installed as (
+    select uid, string_agg(package_name, ',') as name
+    from package_list
+    where uid >= 10000
+    group by 1
+  ),
+  system(uid, name) as (
+    values
+      (0, 'AID_ROOT'),
+      (1000, 'AID_SYSTEM_USER'),
+      (1001, 'AID_RADIO'),
+      (1082, 'AID_ARTD')
+  )
+  select uid, name from installed
+  union all
+  select uid, name from system
+  order by uid;
+
+  -- Adds a "package_name" column by joining on "uid" from the source table.
+  create or replace perfetto macro add_package_name(src TableOrSubquery) returns TableOrSubquery as (
+    select A.*, ifnull(B.name, "uid=" || A.uid) as package_name
+    from $src as A
+    left join package_name_lookup as B
+    on (B.uid = (A.uid % 100000))
+  );
+`;
+
 const DEFAULT_NETWORK = `
   with base as (
       select
@@ -555,28 +584,13 @@ const HIGH_CPU = `
       (lead(time_millis) over (partition by uid, cluster order by ts) - time_millis) * 1000000.0 as cpu_dur
     from base
   ),
-  app_package_list as (
-    select
-      uid,
-      group_concat(package_name) as package_name
-    from package_list
-    where uid >= 10000
-    group by 1
-  ),
   with_ratio as (
     select
       ts,
       iif(dur is null, 0, max(0, 100.0 * cpu_dur / dur)) as value,
       case cluster when 0 then 'little' when 1 then 'mid' when 2 then 'big' else 'cl-' || cluster end as cluster,
-      case
-          when uid = 0 then 'AID_ROOT'
-          when uid = 1000 then 'AID_SYSTEM_USER'
-          when uid = 1001 then 'AID_RADIO'
-          when uid = 1082 then 'AID_ARTD'
-          when pl.package_name is null then 'uid=' || uid
-          else pl.package_name
-      end as pkg
-    from with_windows left join app_package_list pl using(uid)
+      package_name as pkg
+    from add_package_name!(with_windows)
   )
   select ts, sum(value) as value, cluster, pkg
   from with_ratio
@@ -1075,23 +1089,12 @@ const BT_BYTES = `
     where tx_bytes >=0 and rx_bytes >=0
     group by 1,2,3
     having tx_bytes > 0 or rx_bytes > 0
-  ),
-  app_package_list as (
-  select
-    uid,
-    group_concat(package_name) as package_name
-  from package_list
-  where uid >= 10000
-  group by 1
   )
     select
         ts,
         dur,
-        case
-            when pl.package_name is null then 'uid=' || uid
-            else pl.package_name
-        end || ' TX ' || tx_bytes || ' bytes / RX ' || rx_bytes || ' bytes' as name
-    from step3 left join app_package_list pl using(uid)
+        format("%s: TX %d bytes / RX %d bytes", package_name, tx_bytes, rx_bytes) as name
+    from add_package_name!(step3)
 `;
 
 // See go/bt_system_context_report for reference on the bit-twiddling.
@@ -1266,11 +1269,12 @@ class AndroidLongBatteryTracing implements Plugin {
             ts - 60000000000 as ts,
             safe_dur + 60000000000 as dur,
             str_value AS name,
-            ifnull(
-            (select package_name from package_list where uid = int_value % 100000),
-            "uid="||int_value) as package
-        FROM android_battery_stats_event_slices
-        WHERE track_name = "battery_stats.longwake"`,
+            package_name as package
+        FROM add_package_name!((
+          select *, int_value as uid
+          from android_battery_stats_event_slices
+          WHERE track_name = "battery_stats.longwake"
+        ))`,
       undefined,
       ['package'],
     );
@@ -1311,7 +1315,7 @@ class AndroidLongBatteryTracing implements Plugin {
     if (features.has('net.wifi')) {
       this.addCounterTrack(
         ctx,
-        'Wifi total',
+        'Wifi total bytes',
         `select ts, sum(value) as value from network_summary where dev_type = 'wifi' group by 1`,
         groupName,
         {yDisplay: 'log', yRangeSharingKey: 'net_bytes', unit: 'byte'},
@@ -1354,7 +1358,7 @@ class AndroidLongBatteryTracing implements Plugin {
     if (features.has('net.modem')) {
       this.addCounterTrack(
         ctx,
-        'Modem total',
+        'Modem total bytes',
         `select ts, sum(value) as value from network_summary where dev_type = 'modem' group by 1`,
         groupName,
         {yDisplay: 'log', yRangeSharingKey: 'net_bytes', unit: 'byte'},
@@ -1806,8 +1810,9 @@ class AndroidLongBatteryTracing implements Plugin {
     const containedTraces = (ctx.openerPluginArgs?.containedTraces ??
       []) as ContainedTrace[];
 
-    await this.addNetworkSummary(ctx, features),
-      await this.addModemDetail(ctx, features);
+    await ctx.engine.query(PACKAGE_LOOKUP);
+    await this.addNetworkSummary(ctx, features);
+    await this.addModemDetail(ctx, features);
     await this.addKernelWakelocks(ctx, features);
     await this.addWakeups(ctx, features);
     await this.addDeviceState(ctx, features);
