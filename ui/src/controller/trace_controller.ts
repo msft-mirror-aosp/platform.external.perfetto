@@ -19,10 +19,6 @@ import {Duration, duration, Span, time, Time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {cacheTrace} from '../common/cache_manager';
 import {
-  HighPrecisionTime,
-  HighPrecisionTimeSpan,
-} from '../common/high_precision_time';
-import {
   getEnabledMetatracingCategories,
   isMetatracingEnabled,
 } from '../common/metatracing';
@@ -33,7 +29,7 @@ import {
   PendingDeeplinkState,
   ProfileType,
 } from '../common/state';
-import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../core/feature_flags';
+import {featureFlags, Flag} from '../core/feature_flags';
 import {
   globals,
   QuantizedLoad,
@@ -592,9 +588,7 @@ export class TraceController extends Controller<States> {
     globals.dispatch(Actions.maybeExpandOnlyTrackGroup({}));
 
     await this.selectFirstHeapProfile();
-    if (PERF_SAMPLE_FLAG.get()) {
-      await this.selectPerfSample(traceDetails);
-    }
+    await this.selectPerfSample(traceDetails);
 
     const pendingDeeplink = globals.state.pendingDeeplink;
     if (pendingDeeplink !== undefined) {
@@ -1117,9 +1111,7 @@ export class TraceController extends Controller<States> {
       return;
     }
 
-    globals.timeline.updateVisibleTime(
-      HighPrecisionTimeSpan.fromTime(visualStart, visualEnd),
-    );
+    globals.timeline.updateVisibleTime(new TimeSpan(visualStart, visualEnd));
   }
 }
 
@@ -1147,7 +1139,7 @@ async function computeVisibleTime(
   traceEnd: time,
   isJsonTrace: boolean,
   engine: Engine,
-): Promise<Span<HighPrecisionTime>> {
+): Promise<TimeSpan> {
   // initialise visible time to the trace time bounds
   let visibleStart = traceStart;
   let visibleEnd = traceEnd;
@@ -1173,7 +1165,7 @@ async function computeVisibleTime(
     // Avoid moving start of visible window past its end!
     visibleStart = Time.min(ftraceBounds.start, visibleEnd);
   }
-  return HighPrecisionTimeSpan.fromTime(visibleStart, visibleEnd);
+  return new TimeSpan(visibleStart, visibleEnd);
 }
 
 async function getTraceTimeDetails(

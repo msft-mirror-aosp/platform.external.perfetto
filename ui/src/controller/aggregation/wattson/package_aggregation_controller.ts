@@ -59,7 +59,9 @@ export class WattsonPackageAggregationController extends AggregationController {
         ${area.start} as ts,
         ${duration} as dur;
     `;
-    engine.query(this.getEstimatePackageQuery(queryPrefix, selectedCpus));
+    engine.query(
+      this.getEstimatePackageQuery(queryPrefix, selectedCpus, duration),
+    );
 
     return true;
   }
@@ -71,7 +73,11 @@ export class WattsonPackageAggregationController extends AggregationController {
   // 1. Window and associate package with proper Wattson estimate slice
   // 2. Group all packages over time on a per CPU basis
   // 3. Group all packages over all CPUs
-  getEstimatePackageQuery(queryPrefix: string, selectedCpus: number[]): string {
+  getEstimatePackageQuery(
+    queryPrefix: string,
+    selectedCpus: number[],
+    duration: bigint,
+  ): string {
     let query = queryPrefix;
 
     // Estimate and total per UID per CPU
@@ -111,7 +117,7 @@ export class WattsonPackageAggregationController extends AggregationController {
           cpu
         FROM _windowed_thread_curve as _thread_lvl
         JOIN thread on _thread_lvl.utid = thread.utid
-        JOIN android_process_metadata as package on thread.upid = package.upid
+        LEFT JOIN android_process_metadata as package on thread.upid = package.upid
         GROUP BY uid;
       `;
     });
@@ -129,7 +135,7 @@ export class WattsonPackageAggregationController extends AggregationController {
     query += `
       )
       SELECT
-        ROUND(SUM(total_pws) / SUM(dur), 2) as avg_mw,
+        ROUND(SUM(total_pws) / ${duration}, 2) as avg_mw,
         ROUND(SUM(total_pws) / 1000000000, 2) as total_mws,
         ROUND(SUM(dur) / 1000000.0, 2) as dur_ms,
         uid,
@@ -162,16 +168,17 @@ export class WattsonPackageAggregationController extends AggregationController {
         columnId: 'dur_ms',
       },
       {
-        title: 'Average estimate (mW)',
+        title: 'Average estimated power (mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'avg_mw',
       },
       {
-        title: 'Total estimate (mWs)',
+        title: 'Total estimated energy (mWs)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'total_mws',
+        sum: true,
       },
     ];
   }
