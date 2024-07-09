@@ -27,22 +27,23 @@ import {AsyncLimiter} from '../base/async_limiter';
 import {assertExists} from '../base/logging';
 import {Monitor} from '../base/monitor';
 import {featureFlags} from './feature_flags';
+import {uuidv4Sql} from '../base/uuid';
 
 interface QueryFlamegraphMetric {
   // The human readable name of the metric: will be shown to the user to change
   // between metrics.
   readonly name: string;
 
-  // The human readable SI-style unit of `selfValue`. Values will be shown to the
-  // user suffixed with this.
+  // The human readable SI-style unit of `selfValue`. Values will be shown to
+  // the user suffixed with this.
   readonly unit: string;
 
   // SQL statement which need to be run in preparation for being able to execute
   // `statement`.
   readonly dependencySql?: string;
 
-  // A single SQL statement which returns the columns `id`, `parentId`, `name` and
-  // `selfValue`
+  // A single SQL statement which returns the columns `id`, `parentId`, `name`
+  // and `selfValue`
   readonly statement: string;
 }
 
@@ -77,15 +78,14 @@ export interface QueryFlamegraphAttrs {
   readonly metrics: ReadonlyArray<QueryFlamegraphMetric>;
 }
 
-// A Mithril component which wraps the `Flamegraph` widget and fetches the data for the
-// widget by querying an `Engine`.
+// A Mithril component which wraps the `Flamegraph` widget and fetches the data
+// for the widget by querying an `Engine`.
 export class QueryFlamegraph implements m.ClassComponent<QueryFlamegraphAttrs> {
   private selectedMetricName;
   private data?: FlamegraphQueryData;
   private filters: FlamegraphFilters = {
     showStack: [],
     hideStack: [],
-    showFrame: [],
     hideFrame: [],
   };
   private attrs: QueryFlamegraphAttrs;
@@ -145,12 +145,10 @@ async function computeFlamegraphTree(
   {
     showStack,
     hideStack,
-    showFrame,
     hideFrame,
   }: {
     readonly showStack: ReadonlyArray<string>;
     readonly hideStack: ReadonlyArray<string>;
-    readonly showFrame: ReadonlyArray<string>;
     readonly hideFrame: ReadonlyArray<string>;
   },
 ) {
@@ -163,10 +161,6 @@ async function computeFlamegraphTree(
     hideStack.length === 0
       ? 'false'
       : hideStack.map((x) => `name like '%${x}%'`).join(' OR ');
-  const showFrameFilter =
-    showFrame.length === 0
-      ? 'true'
-      : showFrame.map((x) => `name like '%${x}%'`).join(' OR ');
   const hideFrameFilter =
     hideFrame.length === 0
       ? 'false'
@@ -177,108 +171,110 @@ async function computeFlamegraphTree(
   }
   await engine.query(`include perfetto module viz.flamegraph;`);
 
-  const disposable = new AsyncDisposableStack();
-  try {
-    disposable.use(
-      await createPerfettoTable(
-        engine,
-        '_flamegraph_source',
-        `
+  const uuid = uuidv4Sql();
+  await using disposable = new AsyncDisposableStack();
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_source_${uuid}`,
+      `
         select *
         from _viz_flamegraph_prepare_filter!(
           (${sql}),
-          (${showFrameFilter}),
           (${hideFrameFilter}),
           (${showStackFilter}),
           (${hideStackFilter}),
           ${1 << showStack.length}
         )
       `,
-      ),
-    );
-    disposable.use(
-      await createPerfettoTable(
-        engine,
-        '_flamegraph_raw_top_down',
-        `select * from _viz_flamegraph_filter_and_hash!(_flamegraph_source)`,
-      ),
-    );
-    disposable.use(
-      await createPerfettoTable(
-        engine,
-        '_flamegraph_top_down',
-        `
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_raw_top_down_${uuid}`,
+      `
+        select *
+        from _viz_flamegraph_filter_and_hash!(_flamegraph_sourcee_${uuid})
+      `,
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_top_down_${uuid}`,
+      `
         select * from _viz_flamegraph_merge_hashes!(
-          _flamegraph_raw_top_down,
-          _flamegraph_source
+          _flamegraph_raw_top_down_${uuid},
+          _flamegraph_source_${uuid}
         )
       `,
-      ),
-    );
-    disposable.use(
-      await createPerfettoTable(
-        engine,
-        '_flamegraph_raw_bottom_up',
-        `
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_raw_bottom_up_${uuid}`,
+      `
         select *
-        from _viz_flamegraph_accumulate!(_flamegraph_top_down, ${allStackBits})
+        from _viz_flamegraph_accumulate!(
+          _flamegraph_top_down_${uuid},
+          ${allStackBits}
+        )
       `,
-      ),
-    );
-    disposable.use(
-      await createPerfettoTable(
-        engine,
-        '_flamegraph_windowed',
-        `
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_windowed_${uuid}`,
+      `
         select *
         from _viz_flamegraph_local_layout!(
-          _flamegraph_raw_bottom_up,
-          _flamegraph_top_down
+          _flamegraph_raw_bottom_up_${uuid},
+          _flamegraph_top_down_${uuid}
         );
       `,
-      ),
-    );
-    const res = await engine.query(`
-      select *
-      from _viz_flamegraph_global_layout!(
-        _flamegraph_windowed,
-        _flamegraph_raw_bottom_up,
-        _flamegraph_top_down
-      )
-    `);
-    const it = res.iter({
-      id: NUM,
-      parentId: NUM,
-      depth: NUM,
-      name: STR,
-      selfValue: NUM,
-      cumulativeValue: NUM,
-      xStart: NUM,
-      xEnd: NUM,
+    ),
+  );
+  const res = await engine.query(`
+    select *
+    from _viz_flamegraph_global_layout!(
+      _flamegraph_windowed_${uuid},
+      _flamegraph_raw_bottom_up_${uuid},
+      _flamegraph_top_down_${uuid}
+    )
+  `);
+  const it = res.iter({
+    id: NUM,
+    parentId: NUM,
+    depth: NUM,
+    name: STR,
+    selfValue: NUM,
+    cumulativeValue: NUM,
+    xStart: NUM,
+    xEnd: NUM,
+  });
+  let allRootsCumulativeValue = 0;
+  let maxDepth = 0;
+  const nodes = [];
+  for (; it.valid(); it.next()) {
+    nodes.push({
+      id: it.id,
+      parentId: it.parentId,
+      depth: it.depth,
+      name: it.name,
+      selfValue: it.selfValue,
+      cumulativeValue: it.cumulativeValue,
+      xStart: it.xStart,
+      xEnd: it.xEnd,
     });
-    let allRootsCumulativeValue = 0;
-    let maxDepth = 0;
-    const nodes = [];
-    for (; it.valid(); it.next()) {
-      nodes.push({
-        id: it.id,
-        parentId: it.parentId,
-        depth: it.depth,
-        name: it.name,
-        selfValue: it.selfValue,
-        cumulativeValue: it.cumulativeValue,
-        xStart: it.xStart,
-        xEnd: it.xEnd,
-      });
-      if (it.parentId === -1) {
-        allRootsCumulativeValue += it.cumulativeValue;
-      }
-      maxDepth = Math.max(maxDepth, it.depth);
+    if (it.parentId === -1) {
+      allRootsCumulativeValue += it.cumulativeValue;
     }
-    return {nodes, allRootsCumulativeValue, maxDepth};
-  } finally {
-    await disposable.asyncDispose();
+    maxDepth = Math.max(maxDepth, it.depth);
   }
+  return {nodes, allRootsCumulativeValue, maxDepth};
 }
 
 export const USE_NEW_FLAMEGRAPH_IMPL = featureFlags.register({
