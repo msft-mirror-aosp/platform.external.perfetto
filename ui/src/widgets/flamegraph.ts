@@ -29,13 +29,12 @@ import {Button, ButtonBar} from './button';
 
 const LABEL_FONT_STYLE = '12px Roboto Mono';
 const NODE_HEIGHT = 20;
-const MIN_PIXEL_DISPLAYED = 1;
+const MIN_PIXEL_DISPLAYED = 3;
 const FILTER_COMMON_TEXT = `
-- "Show Frame: foo" or "SF: foo" to show only frames containing "foo"
 - "Hide Frame: foo" or "HF: foo" to hide all frames containing "foo"
 - "Show Stack: foo" or "SS: foo" to show only stacks containing "foo"
 - "Hide Stack: foo" or "HS: foo" to hide all stacks containing "foo"
-Frame filters are always evaluated before stack filters.
+Frame filters are evaluated before stack filters.
 `;
 const FILTER_EMPTY_TEXT = `
 Available filters:${FILTER_COMMON_TEXT}
@@ -43,6 +42,8 @@ Available filters:${FILTER_COMMON_TEXT}
 const FILTER_INVALID_TEXT = `
 Invalid filter. Please use the following options:${FILTER_COMMON_TEXT}
 `;
+const LABEL_PADDING_PX = 5;
+const LABEL_MIN_WIDTH_FOR_TEXT_PX = 5;
 
 interface BaseSource {
   readonly queryXStart: number;
@@ -95,7 +96,6 @@ export interface FlamegraphQueryData {
 export interface FlamegraphFilters {
   readonly showStack: ReadonlyArray<string>;
   readonly hideStack: ReadonlyArray<string>;
-  readonly showFrame: ReadonlyArray<string>;
   readonly hideFrame: ReadonlyArray<string>;
 }
 
@@ -139,8 +139,8 @@ export interface FlamegraphAttrs {
  *     fetchData();
  *   },
  *   data,
- *   onFiltersChanged: (showStack, hideStack, showFrame, hideFrame) => {
- *     updateFilters(showStack, hideStack, showFrame, hideFrame);
+ *   onFiltersChanged: (showStack, hideStack, hideFrame) => {
+ *     updateFilters(showStack, hideStack, hideFrame);
  *     data = undefined;
  *     fetchData();
  *   },
@@ -213,7 +213,10 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
       '.pf-flamegraph',
       this.renderFilterBar(attrs),
       m(
-        '.canvas-container',
+        '.canvas-container[ref=canvas-container]',
+        {
+          onscroll: () => scheduleFullRedraw(),
+        },
         m(
           Popup,
           {
@@ -326,6 +329,11 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
   }
 
   private drawCanvas(dom: Element) {
+    // TODO(lalitm): consider migrating to VirtualCanvas to improve performance here.
+    const canvasContainer = findRef(dom, 'canvas-container');
+    if (canvasContainer === null) {
+      return;
+    }
     const canvas = findRef(dom, 'canvas');
     if (canvas === null || !(canvas instanceof HTMLCanvasElement)) {
       return;
@@ -361,6 +369,12 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
       return;
     }
 
+    const containerRect = canvasContainer.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+
+    const yStart = containerRect.top - canvasRect.top;
+    const yEnd = containerRect.bottom - canvasRect.top;
+
     const {allRootsCumulativeValue, nodes} = this.attrs.data;
     const unit = assertExists(this.selectedMetric).unit;
 
@@ -382,6 +396,10 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
     for (let i = 0; i < this.renderNodes.length; i++) {
       const node = this.renderNodes[i];
       const {x, y, width: width, source, state} = node;
+      if (y + NODE_HEIGHT <= yStart || y >= yEnd) {
+        continue;
+      }
+
       const hover = isIntersecting(this.hoveredX, this.hoveredY, node);
       if (hover) {
         hoveredNode = node;
@@ -397,16 +415,18 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
         name = nodes[source.queryIdx].name;
         ctx.fillStyle = generateColor(name, state === 'PARTIAL', hover);
       }
-      ctx.fillRect(x, y, width, NODE_HEIGHT - 1);
-      const labelPaddingPx = 5;
-      const maxLabelWidth = width - labelPaddingPx * 2;
-      ctx.fillStyle = 'black';
-      ctx.fillText(
-        cropText(name, this.labelCharWidth, maxLabelWidth),
-        x + labelPaddingPx,
-        y + (NODE_HEIGHT - 1) / 2,
-        maxLabelWidth,
-      );
+      ctx.fillRect(x, y, width - 1, NODE_HEIGHT - 1);
+
+      const widthNoPadding = width - LABEL_PADDING_PX * 2;
+      if (widthNoPadding >= LABEL_MIN_WIDTH_FOR_TEXT_PX) {
+        ctx.fillStyle = 'black';
+        ctx.fillText(
+          cropText(name, this.labelCharWidth, widthNoPadding),
+          x + LABEL_PADDING_PX,
+          y + (NODE_HEIGHT - 1) / 2,
+          widthNoPadding,
+        );
+      }
       if (this.lastClickedNode?.x === x && this.lastClickedNode?.y === y) {
         ctx.strokeStyle = 'blue';
         ctx.lineWidth = 2;
@@ -417,13 +437,9 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
         ctx.lineTo(x, y + NODE_HEIGHT - 1);
         ctx.lineTo(x, y);
         ctx.stroke();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 0.5;
       }
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x + width, y);
-      ctx.lineTo(x + width, y + NODE_HEIGHT);
-      ctx.stroke();
     }
     if (hoveredNode === undefined) {
       canvas.style.cursor = 'default';
@@ -576,15 +592,6 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
           },
         }),
         m(Button, {
-          label: 'Show Frame',
-          onclick: () => {
-            this.rawFilters = [...this.rawFilters, `Show Frame: ${name}`];
-            this.attrs.onFiltersChanged(computeFilters(this.rawFilters));
-            this.tooltipPos = undefined;
-            scheduleFullRedraw();
-          },
-        }),
-        m(Button, {
           label: 'Hide Frame',
           onclick: () => {
             this.rawFilters = [...this.rawFilters, `Hide Frame: ${name}`];
@@ -721,9 +728,9 @@ function displaySize(totalSize: number, unit: string): string {
   const step = unit === 'B' ? 1024 : 1000;
   const units = [
     ['', 1],
-    ['K', step],
-    ['M', Math.pow(step, 2)],
-    ['G', Math.pow(step, 3)],
+    [unit === 'B' ? 'Ki' : 'K', step],
+    [unit === 'B' ? 'Mi' : 'M', Math.pow(step, 2)],
+    [unit === 'G' ? 'Gi' : 'G', Math.pow(step, 3)],
   ];
   let unitsIndex = Math.trunc(Math.log(totalSize) / Math.log(step));
   unitsIndex = unitsIndex > units.length - 1 ? units.length - 1 : unitsIndex;
@@ -741,8 +748,6 @@ function normalizeFilter(filter: string) {
     return 'Show Stack: ' + filter.split(': ', 2)[1];
   } else if (lower.startsWith('hs: ') || lower.startsWith('hide stack: ')) {
     return 'Hide Stack: ' + filter.split(': ', 2)[1];
-  } else if (lower.startsWith('sf: ') || lower.startsWith('show frame: ')) {
-    return 'Show Frame: ' + filter.split(': ', 2)[1];
   } else if (lower.startsWith('hf: ') || lower.startsWith('hide frame: ')) {
     return 'Hide Frame: ' + filter.split(': ', 2)[1];
   }
@@ -762,9 +767,6 @@ function computeFilters(rawFilters: readonly string[]): FlamegraphFilters {
     showStack,
     hideStack: rawFilters
       .filter((x) => x.startsWith('Hide Stack: '))
-      .map((x) => x.split(': ', 2)[1]),
-    showFrame: rawFilters
-      .filter((x) => x.startsWith('Show Frame: '))
       .map((x) => x.split(': ', 2)[1]),
     hideFrame: rawFilters
       .filter((x) => x.startsWith('Hide Frame: '))

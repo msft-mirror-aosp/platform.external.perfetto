@@ -17,7 +17,6 @@ include perfetto module graphs.scan;
 
 CREATE PERFETTO MACRO _viz_flamegraph_prepare_filter(
   tab TableOrSubquery,
-  show_frame Expr,
   hide_frame Expr,
   show_stack Expr,
   hide_stack Expr,
@@ -28,8 +27,9 @@ AS (
   SELECT
     *,
     IIF($hide_stack, $impossible_stack_bits, $show_stack) AS stackBits,
-    $show_frame AND NOT $hide_frame AS showFrame
+    $hide_frame = 0 AS showFrame
   FROM $tab
+  ORDER BY id
 );
 
 CREATE PERFETTO MACRO _viz_flamegraph_filter_and_hash(
@@ -59,7 +59,7 @@ AS (
       select
         t.id as id,
         IIF(x.showFrame, HASH(t.hash, name), t.hash) AS hash,
-        IIF(x.showFrame, t.hash, null) AS parentHash,
+        IIF(x.showFrame, t.hash, t.parentHash) AS parentHash,
         IIF(x.showFrame, t.depth + 1, t.depth) AS depth,
         IIF(
           x.showFrame,
@@ -150,12 +150,14 @@ AS (
       SUM(b.cumulativeValue) OVER win AS xEnd
     FROM $acc b
     JOIN $tab s USING (id)
+    WHERE b.cumulativeValue > 0
     WINDOW win AS (
       PARTITION BY s.parentId
       ORDER BY b.cumulativeValue DESC
       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
     )
   )
+  ORDER BY id
 );
 
 CREATE PERFETTO MACRO _viz_flamegraph_global_layout(
@@ -165,39 +167,39 @@ CREATE PERFETTO MACRO _viz_flamegraph_global_layout(
 )
 RETURNS TableOrSubquery
 AS (
-  select
+  SELECT
     s.id,
-    ifnull(t.parentId, -1) as parentId,
+    IFNULL(t.parentId, -1) AS parentId,
     t.depth,
-    t.name,
-    t.value as selfValue,
+    IIF(t.name = '', 'unknown', t.name) AS name,
+    t.value AS selfValue,
     b.cumulativeValue,
     s.xStart,
     s.xEnd
-  from _graph_scan!(
+  FROM _graph_scan!(
     (
-      select parentId as source_node_id, id as dest_node_id
-      from $tab
-      where parentId is not null
+      SELECT parentId AS source_node_id, id AS dest_node_id
+      FROM $tab
+      WHERE parentId IS NOT NULL
     ),
     (
-      select b.id as id, w.xStart, w.xEnd
-      from $acc b
-      join $tab t using (id)
-      join $layout w using (id)
-      where t.parentId is null
+      SELECT b.id AS id, w.xStart, w.xEnd
+      FROM $acc b
+      JOIN $tab t USING (id)
+      JOIN $layout w USING (id)
+      WHERE t.parentId IS NULL
     ),
     (xStart, xEnd),
     (
-      select
+      SELECT
         t.id,
-        t.xStart + w.xStart as xStart,
-        t.xStart + w.xEnd as xEnd
-      from $table t
-      join $layout w using (id)
+        t.xStart + w.xStart AS xStart,
+        t.xStart + w.xEnd AS xEnd
+      FROM $table t
+      JOIN $layout w USING (id)
     )
   ) s
-  join $tab t using (id)
-  join $acc b using (id)
-  order by depth, xStart
+  JOIN $tab t USING (id)
+  JOIN $acc b USING (id)
+  ORDER BY depth, xStart
 );
