@@ -19,6 +19,7 @@ import {
   HighPrecisionTimeSpan,
 } from '../common/high_precision_time';
 import {getContainingGroupKey} from '../common/state';
+import {raf} from '../core/raf_scheduler';
 
 import {globals} from './globals';
 
@@ -35,7 +36,7 @@ export function horizontalScrollToTs(ts: time) {
       newStart,
       newStart.add(visibleWindow.duration),
     );
-    globals.timeline.updateVisibleTime(newWindow);
+    globals.timeline.updateVisibleTimeHP(newWindow);
   }
 }
 
@@ -72,13 +73,13 @@ export function focusHorizontalRange(
     const paddingPercentage = 1.0 - viewPercentage;
     const paddingTime = select.duration.multiply(paddingPercentage);
     const halfPaddingTime = paddingTime.divide(2);
-    globals.timeline.updateVisibleTime(select.pad(halfPaddingTime));
+    globals.timeline.updateVisibleTimeHP(select.pad(halfPaddingTime));
     return;
   }
   // If the range is too large to fit on the current zoom level, resize.
   if (select.duration.gt(visible.duration.multiply(0.5))) {
     const paddedRange = select.pad(select.duration.multiply(2));
-    globals.timeline.updateVisibleTime(paddedRange);
+    globals.timeline.updateVisibleTimeHP(paddedRange);
     return;
   }
   // Calculate the new visible window preserving the zoom level.
@@ -103,10 +104,12 @@ export function focusHorizontalRange(
   // level.
   if (view.start.eq(visible.start) && view.end.eq(visible.end)) {
     const padded = select.pad(select.duration.multiply(2));
-    globals.timeline.updateVisibleTime(padded);
+    globals.timeline.updateVisibleTimeHP(padded);
   } else {
-    globals.timeline.updateVisibleTime(view);
+    globals.timeline.updateVisibleTimeHP(view);
   }
+
+  raf.scheduleRedraw();
 }
 
 // Given a track id, find a track with that id and scroll it into view. If the

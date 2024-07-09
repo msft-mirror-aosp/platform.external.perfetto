@@ -19,18 +19,18 @@ import {Duration, duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {getLegacySelection} from '../../common/state';
 import {
-  cropText,
   drawDoubleHeadedArrow,
   drawIncompleteSlice,
   drawTrackHoverTooltip,
 } from '../../common/canvas_utils';
+import {cropText} from '../../base/string_utils';
 import {Color} from '../../core/color';
 import {colorForThread} from '../../core/colorizer';
 import {TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {PanelSize} from '../../frontend/panel';
+import {Size} from '../../base/geom';
 import {Engine, Track} from '../../public';
 import {LONG, NUM} from '../../trace_processor/query_result';
 import {uuidv4Sql} from '../../base/uuid';
@@ -156,14 +156,14 @@ export class CpuSliceTrack implements Track {
     await this.engine.tryQuery(
       `drop table if exists cpu_slice_${this.trackUuid}`,
     );
-    this.fetcher.dispose();
+    this.fetcher[Symbol.dispose]();
   }
 
   getHeight(): number {
     return TRACK_HEIGHT;
   }
 
-  render(ctx: CanvasRenderingContext2D, size: PanelSize): void {
+  render(ctx: CanvasRenderingContext2D, size: Size): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
     const {visibleTimeScale} = globals.timeline;
     const data = this.fetcher.data;
@@ -181,10 +181,10 @@ export class CpuSliceTrack implements Track {
       visibleTimeScale.timeToPx(data.end),
     );
 
-    this.renderSlices(ctx, data);
+    this.renderSlices(ctx, size, data);
   }
 
-  renderSlices(ctx: CanvasRenderingContext2D, data: Data): void {
+  renderSlices(ctx: CanvasRenderingContext2D, size: Size, data: Data): void {
     const {visibleTimeScale, visibleTimeSpan, visibleWindowTime} =
       globals.timeline;
     assertTrue(data.startQs.length === data.endQs.length);
@@ -268,10 +268,8 @@ export class CpuSliceTrack implements Track {
       let title = `[utid:${utid}]`;
       let subTitle = '';
       if (threadInfo) {
-        /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-        if (threadInfo.pid) {
-          /* eslint-enable */
-          let procName = threadInfo.procName || '';
+        if (threadInfo.pid !== undefined && threadInfo.pid !== 0) {
+          let procName = threadInfo.procName ?? '';
           if (procName.startsWith('/')) {
             // Remove folder paths from name
             procName = procName.substring(procName.lastIndexOf('/') + 1);
@@ -371,7 +369,6 @@ export class CpuSliceTrack implements Track {
     }
 
     const hoveredThread = globals.threads.get(this.utidHoveredInThisTrack);
-    const maxHeight = this.getHeight();
     if (hoveredThread !== undefined && this.mousePos !== undefined) {
       const tidText = `T: ${hoveredThread.threadName}
       [${hoveredThread.tid}]`;
@@ -379,9 +376,9 @@ export class CpuSliceTrack implements Track {
       if (hoveredThread.pid) {
         const pidText = `P: ${hoveredThread.procName}
         [${hoveredThread.pid}]`;
-        drawTrackHoverTooltip(ctx, this.mousePos, maxHeight, pidText, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, size, pidText, tidText);
       } else {
-        drawTrackHoverTooltip(ctx, this.mousePos, maxHeight, tidText);
+        drawTrackHoverTooltip(ctx, this.mousePos, size, tidText);
       }
     }
   }

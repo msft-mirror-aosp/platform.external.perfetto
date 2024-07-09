@@ -93,7 +93,6 @@ export function createEmptyState(): State {
     trackGroups: {},
     pinnedTracks: [],
     scrollingTracks: [],
-    areas: {},
     queries: {},
     notes: {},
 
@@ -102,15 +101,6 @@ export function createEmptyState(): State {
       : createEmptyRecordConfig(),
     displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
-
-    frontendLocalState: {
-      visibleState: {
-        start: Time.ZERO,
-        end: Time.fromSeconds(10),
-        lastUpdate: 0,
-        resolution: 0n,
-      },
-    },
 
     omniboxState: {
       omnibox: '',

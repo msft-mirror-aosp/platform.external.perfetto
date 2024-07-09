@@ -52,6 +52,10 @@ SingleSearchResult SelectorOverlay::ChainImpl::SingleSearch(FilterOp op,
 SearchValidationResult SelectorOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue sql_val) const {
+  if (sql_val.is_null() &&
+      !(op == FilterOp::kIsNotNull || op == FilterOp::kIsNull)) {
+    return SearchValidationResult::kNoData;
+  }
   return inner_->ValidateSearchConstraints(op, sql_val);
 }
 
@@ -97,12 +101,12 @@ void SelectorOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
   return inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void SelectorOverlay::ChainImpl::StableSort(SortToken* start,
-                                            SortToken* end,
+void SelectorOverlay::ChainImpl::StableSort(Token* start,
+                                            Token* end,
                                             SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::StableSort");
-  for (SortToken* it = start; it != end; ++it) {
+  for (Token* it = start; it != end; ++it) {
     it->index = selector_->IndexOfNthSet(it->index);
   }
   inner_->StableSort(start, end, direction);

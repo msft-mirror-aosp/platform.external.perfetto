@@ -27,7 +27,7 @@ import {checkerboard} from './checkerboard';
 import {SELECTION_FILL_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {drawGridLines} from './gridline_helper';
-import {PanelSize} from './panel';
+import {Size} from '../base/geom';
 import {Panel} from './panel_container';
 import {verticalScrollToTrack} from './scroll_helper';
 import {drawVerticalLineAtTime} from './vertical_line_helper';
@@ -61,15 +61,14 @@ function getTitleSize(title: string): string | undefined {
   return undefined;
 }
 
-function isPinned(id: string) {
-  return globals.state.pinnedTracks.indexOf(id) !== -1;
+function isTrackPinned(trackKey: string) {
+  return globals.state.pinnedTracks.indexOf(trackKey) !== -1;
 }
 
-function isSelected(id: string) {
-  const selection = getLegacySelection(globals.state);
-  if (selection === null || selection.kind !== 'AREA') return false;
-  const selectedArea = globals.state.areas[selection.areaId];
-  return selectedArea.tracks.includes(id);
+function isTrackSelected(trackKey: string) {
+  const selection = globals.state.selection;
+  if (selection.kind !== 'area') return false;
+  return selection.tracks.includes(trackKey);
 }
 
 interface TrackChipAttrs {
@@ -148,8 +147,8 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
       }
     }
 
-    const currentSelection = getLegacySelection(globals.state);
-    const pinned = isPinned(attrs.trackKey);
+    const currentSelection = globals.state.selection;
+    const pinned = isTrackPinned(attrs.trackKey);
 
     return m(
       `.track-shell[draggable=true]`,
@@ -194,7 +193,7 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
             title: pinned ? 'Unpin' : 'Pin to top',
             compact: true,
           }),
-          currentSelection !== null && currentSelection.kind === 'AREA'
+          currentSelection.kind === 'area'
             ? m(Button, {
                 onclick: (e: MouseEvent) => {
                   globals.dispatch(
@@ -206,10 +205,10 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
                   e.stopPropagation();
                 },
                 compact: true,
-                icon: isSelected(attrs.trackKey)
+                icon: isTrackSelected(attrs.trackKey)
                   ? Icons.Checkbox
                   : Icons.BlankCheckbox,
-                title: isSelected(attrs.trackKey)
+                title: isTrackSelected(attrs.trackKey)
                   ? 'Remove track'
                   : 'Add track to selection',
               })
@@ -461,18 +460,17 @@ export class TrackPanel implements Panel {
     }
   }
 
-  highlightIfTrackSelected(ctx: CanvasRenderingContext2D, size: PanelSize) {
+  highlightIfTrackSelected(ctx: CanvasRenderingContext2D, size: Size) {
     const {visibleTimeScale} = globals.timeline;
-    const selection = getLegacySelection(globals.state);
-    if (!selection || selection.kind !== 'AREA') {
+    const selection = globals.state.selection;
+    if (selection.kind !== 'area') {
       return;
     }
-    const selectedArea = globals.state.areas[selection.areaId];
-    const selectedAreaDuration = selectedArea.end - selectedArea.start;
-    if (selectedArea.tracks.includes(this.attrs.trackKey)) {
+    const selectedAreaDuration = selection.end - selection.start;
+    if (selection.tracks.includes(this.attrs.trackKey)) {
       ctx.fillStyle = SELECTION_FILL_COLOR;
       ctx.fillRect(
-        visibleTimeScale.timeToPx(selectedArea.start) + TRACK_SHELL_WIDTH,
+        visibleTimeScale.timeToPx(selection.start) + TRACK_SHELL_WIDTH,
         0,
         visibleTimeScale.durationToPx(selectedAreaDuration),
         size.height,
@@ -480,7 +478,7 @@ export class TrackPanel implements Panel {
     }
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
     ctx.save();
     canvasClip(
       ctx,
@@ -499,8 +497,7 @@ export class TrackPanel implements Panel {
     if (track !== undefined) {
       const trackSize = {...size, width: size.width - TRACK_SHELL_WIDTH};
       if (!track.getError()) {
-        track.update();
-        track.track.render(ctx, trackSize);
+        track.render(ctx, trackSize);
       }
     } else {
       checkerboard(ctx, size.height, 0, size.width - TRACK_SHELL_WIDTH);
@@ -530,7 +527,7 @@ export class TrackPanel implements Panel {
 export function renderHoveredCursorVertical(
   ctx: CanvasRenderingContext2D,
   visibleTimeScale: TimeScale,
-  size: PanelSize,
+  size: Size,
 ) {
   if (globals.state.hoverCursorTimestamp !== -1n) {
     drawVerticalLineAtTime(
@@ -546,7 +543,7 @@ export function renderHoveredCursorVertical(
 export function renderHoveredNoteVertical(
   ctx: CanvasRenderingContext2D,
   visibleTimeScale: TimeScale,
-  size: PanelSize,
+  size: Size,
 ) {
   if (globals.state.hoveredNoteTimestamp !== -1n) {
     drawVerticalLineAtTime(
@@ -562,7 +559,7 @@ export function renderHoveredNoteVertical(
 export function renderWakeupVertical(
   ctx: CanvasRenderingContext2D,
   visibleTimeScale: TimeScale,
-  size: PanelSize,
+  size: Size,
 ) {
   const currentSelection = getLegacySelection(globals.state);
   if (currentSelection !== null) {
@@ -584,18 +581,18 @@ export function renderWakeupVertical(
 export function renderNoteVerticals(
   ctx: CanvasRenderingContext2D,
   visibleTimeScale: TimeScale,
-  size: PanelSize,
+  size: Size,
 ) {
   // All marked areas should have semi-transparent vertical lines
   // marking the start and end.
   for (const note of Object.values(globals.state.notes)) {
-    if (note.noteType === 'AREA') {
+    if (note.noteType === 'SPAN') {
       const transparentNoteColor =
         'rgba(' + hex.rgb(note.color.substr(1)).toString() + ', 0.65)';
       drawVerticalLineAtTime(
         ctx,
         visibleTimeScale,
-        globals.state.areas[note.areaId].start,
+        note.start,
         size.height,
         transparentNoteColor,
         1,
@@ -603,7 +600,7 @@ export function renderNoteVerticals(
       drawVerticalLineAtTime(
         ctx,
         visibleTimeScale,
-        globals.state.areas[note.areaId].end,
+        note.end,
         size.height,
         transparentNoteColor,
         1,

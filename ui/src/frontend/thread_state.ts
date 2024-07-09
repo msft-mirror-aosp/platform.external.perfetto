@@ -21,19 +21,21 @@ import {Actions} from '../common/actions';
 import {translateState} from '../common/thread_state';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, NUM_NULL, STR_NULL} from '../trace_processor/query_result';
-import {CPU_SLICE_TRACK_KIND} from '../core_plugins/cpu_slices';
-import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
+import {
+  constraintsToQuerySuffix,
+  fromNumNull,
+  SQLConstraints,
+} from '../trace_processor/sql_utils';
 import {Anchor} from '../widgets/anchor';
 
 import {globals} from './globals';
 import {scrollToTrackAndTs} from './scroll_helper';
 import {asUtid, SchedSqlId, ThreadStateSqlId, Utid} from './sql_types';
-import {
-  constraintsToQuerySuffix,
-  fromNumNull,
-  SQLConstraints,
-} from './sql_utils';
 import {getThreadInfo, ThreadInfo} from './thread_and_process_info';
+import {
+  CPU_SLICE_TRACK_KIND,
+  THREAD_STATE_TRACK_KIND,
+} from '../core/track_kinds';
 
 // Representation of a single thread state object, corresponding to
 // a row for the |thread_slice| table.
@@ -97,8 +99,7 @@ export async function getThreadStateFromConstraints(
 
   for (; it.valid(); it.next()) {
     const ioWait = it.ioWait === null ? undefined : it.ioWait > 0;
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-    const wakerUtid = asUtid(it.wakerUtid || undefined);
+    const wakerUtid = asUtid(it.wakerUtid ?? undefined);
 
     // TODO(altimin): Consider fetcing thread / process info using a single
     // query instead of one per row.
@@ -108,8 +109,8 @@ export async function getThreadStateFromConstraints(
       ts: Time.fromRaw(it.ts),
       dur: it.dur,
       cpu: fromNumNull(it.cpu),
-      state: translateState(it.state || undefined, ioWait),
-      blockedFunction: it.blockedFunction || undefined,
+      state: translateState(it.state ?? undefined, ioWait),
+      blockedFunction: it.blockedFunction ?? undefined,
       thread: await getThreadInfo(engine, asUtid(it.utid)),
       wakerThread: wakerUtid
         ? await getThreadInfo(engine, wakerUtid)

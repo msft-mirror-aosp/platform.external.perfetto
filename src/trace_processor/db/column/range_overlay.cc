@@ -51,6 +51,10 @@ SingleSearchResult RangeOverlay::ChainImpl::SingleSearch(FilterOp op,
 SearchValidationResult RangeOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue sql_val) const {
+  if (sql_val.is_null() &&
+      !(op == FilterOp::kIsNotNull || op == FilterOp::kIsNull)) {
+    return SearchValidationResult::kNoData;
+  }
   return inner_->ValidateSearchConstraints(op, sql_val);
 }
 
@@ -119,10 +123,10 @@ void RangeOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
   inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void RangeOverlay::ChainImpl::StableSort(SortToken* start,
-                                         SortToken* end,
+void RangeOverlay::ChainImpl::StableSort(Token* start,
+                                         Token* end,
                                          SortDirection direction) const {
-  for (SortToken* it = start; it != end; ++it) {
+  for (Token* it = start; it != end; ++it) {
     it->index += range_->start;
   }
   inner_->StableSort(start, end, direction);

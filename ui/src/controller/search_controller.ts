@@ -21,12 +21,12 @@ import {
   SearchSummary,
 } from '../common/search_data';
 import {OmniboxState} from '../common/state';
+import {CPU_SLICE_TRACK_KIND} from '../core/track_kinds';
 import {globals} from '../frontend/globals';
 import {publishSearch, publishSearchResult} from '../frontend/publish';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, STR} from '../trace_processor/query_result';
 import {escapeSearchQuery} from '../trace_processor/query_utils';
-import {CPU_SLICE_TRACK_KIND} from '../core_plugins/cpu_slices';
 
 import {Controller} from './controller';
 
@@ -69,18 +69,13 @@ export class SearchController extends Controller<'main'> {
       return;
     }
 
-    const visibleState = globals.state.frontendLocalState.visibleState;
     const omniboxState = globals.state.omniboxState;
-    if (
-      visibleState === undefined ||
-      omniboxState === undefined ||
-      omniboxState.mode === 'COMMAND'
-    ) {
+    if (omniboxState === undefined || omniboxState.mode === 'COMMAND') {
       return;
     }
-    const newSpan = globals.stateVisibleTime();
+    const newSpan = globals.timeline.visibleTimeSpan;
     const newOmniboxState = omniboxState;
-    const newResolution = visibleState.resolution;
+    const newResolution = globals.getCurResolution();
     if (
       this.previousSpan.contains(newSpan) &&
       this.previousResolution === newResolution &&

@@ -82,12 +82,7 @@ SearchValidationResult SetIdStorage::ChainImpl::ValidateSearchConstraints(
     if (op == FilterOp::kIsNotNull) {
       return SearchValidationResult::kAllData;
     }
-    if (op == FilterOp::kIsNull) {
-      return SearchValidationResult::kNoData;
-    }
-    PERFETTO_FATAL(
-        "Invalid filter operation. NULL should only be compared with 'IS NULL' "
-        "and 'IS NOT NULL'");
+    return SearchValidationResult::kNoData;
   }
 
   // FilterOp checks. Switch so that we get a warning if new FilterOp is not
@@ -280,23 +275,21 @@ Range SetIdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   return {};
 }
 
-void SetIdStorage::ChainImpl::StableSort(SortToken* start,
-                                         SortToken* end,
+void SetIdStorage::ChainImpl::StableSort(Token* start,
+                                         Token* end,
                                          SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SetIdStorage::ChainImpl::StableSort");
   switch (direction) {
     case SortDirection::kAscending:
-      std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return (*values_)[a.index] < (*values_)[b.index];
-                       });
+      std::stable_sort(start, end, [this](const Token& a, const Token& b) {
+        return (*values_)[a.index] < (*values_)[b.index];
+      });
       break;
     case SortDirection::kDescending:
-      std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return (*values_)[a.index] > (*values_)[b.index];
-                       });
+      std::stable_sort(start, end, [this](const Token& a, const Token& b) {
+        return (*values_)[a.index] > (*values_)[b.index];
+      });
       break;
   }
 }

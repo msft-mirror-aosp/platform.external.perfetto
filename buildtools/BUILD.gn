@@ -144,7 +144,7 @@ config("protobuf_config") {
   if (is_mac) {
     cflags += [ "-Wno-deprecated-declarations" ]
   }
-  if (!is_clang && !is_win) {  # implies gcc
+  if (is_gcc) {
     cflags += [ "-Wno-stringop-overread" ]
   }
   if (is_win) {
@@ -1492,12 +1492,18 @@ if (enable_perfetto_grpc) {
   config("grpc_absl_config") {
     visibility = _buildtools_visibility
     include_dirs = [ "grpc/src/third_party/abseil-cpp" ]
-    cflags = [ "-Wno-deprecated-builtins" ]
+    cflags = [
+      "-Wno-deprecated-builtins",
+      "-Wno-deprecated-pragma",
+    ]
   }
 
   config("grpc_boringssl_config") {
     visibility = _buildtools_visibility
     include_dirs = [ "grpc/src/third_party/boringssl-with-bazel/src/include" ]
+    if (is_gcc) {
+      cflags = [ "-Wno-stringop-overflow" ]
+    }
   }
 
   config("grpc_upb_config") {
@@ -1517,15 +1523,25 @@ if (enable_perfetto_grpc) {
   config("grpc_internal_config") {
     visibility = _buildtools_visibility
     include_dirs = [
-      "grpc/src/include",
+      "grpc/protobuf_include",
       "grpc/src",
+      "grpc/src/include",
+      "grpc/src/src/core/ext/upb-gen",
+      "grpc/src/src/core/ext/upbdefs-gen",
+      "grpc/src/third_party/abseil-cpp",
       "grpc/src/third_party/address_sorting/include",
       "grpc/src/third_party/re2",
-      "grpc/src/src/core/ext/upb-generated",
-      "grpc/src/src/core/ext/upbdefs-generated",
+      "grpc/src/third_party/upb",
+      "grpc/src/third_party/utf8_range",
       "grpc/src/third_party/xxhash",
     ]
     cflags = [ "-DGRPC_ARES=0" ]
+    if (is_gcc) {
+      cflags += [
+        "-Wno-attributes",
+        "-Wno-return-type",
+      ]
+    }
   }
 
   config("grpc_gen_config") {
@@ -1548,4 +1564,98 @@ if (enable_perfetto_grpc) {
       ]
     }
   }
+
+  config("grpc_public_config") {
+    visibility = _buildtools_visibility
+    cflags = [
+      perfetto_isystem_cflag,
+      rebase_path("grpc/src/include", root_build_dir),
+    ]
+  }
+}
+
+config("pigweed_config") {
+  include_dirs = [
+    "pigweed/pw_assert_log/public",
+    "pigweed/pw_log/public",
+    "pigweed/pw_log_null/public",
+    "pigweed/pw_log_null/public_overrides",
+    "pigweed/pw_assert/public",
+    "pigweed/pw_base64/public",
+    "pigweed/pw_bytes/public",
+    "pigweed/pw_containers/public",
+    "pigweed/pw_polyfill/public",
+    "pigweed/pw_preprocessor/public",
+    "pigweed/pw_result/public",
+    "pigweed/pw_span/public",
+    "pigweed/pw_status/public",
+    "pigweed/pw_string/public",
+    "pigweed/pw_varint/public",
+    "pigweed/stdcompat/public",
+    "pigweed/pw_assert/assert_compatibility_public_overrides",
+    "pigweed/pw_assert_log/check_backend_public_overrides/",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include",
+  ]
+  cflags = [
+    # This header pulls in some warnings in the places where used, use the usual
+    # -isystem trick that suppresses warnings in 3p headers.
+    perfetto_isystem_cflag,
+    rebase_path("pigweed/pw_tokenizer/public", root_build_dir),
+  ]
+  visibility = _buildtools_visibility
+}
+
+source_set("pigweed") {
+  visibility = _buildtools_visibility
+  include_dirs = [ rebase_path("pigweed", root_build_dir) ]
+  sources = [
+    "pigweed/pw_assert/public/pw_assert/assert.h",
+    "pigweed/pw_assert_log/assert_log.cc",
+    "pigweed/pw_base64/base64.cc",
+    "pigweed/pw_base64/public/pw_base64/base64.h",
+    "pigweed/pw_bytes/public/pw_bytes/array.h",
+    "pigweed/pw_bytes/public/pw_bytes/bit.h",
+    "pigweed/pw_bytes/public/pw_bytes/endian.h",
+    "pigweed/pw_bytes/public/pw_bytes/span.h",
+    "pigweed/pw_containers/public/pw_containers/to_array.h",
+    "pigweed/pw_polyfill/public/pw_polyfill/language_feature_macros.h",
+    "pigweed/pw_polyfill/public/pw_polyfill/standard.h",
+    "pigweed/pw_polyfill/public/pw_polyfill/static_assert.h",
+    "pigweed/pw_preprocessor/public/pw_preprocessor/compiler.h",
+    "pigweed/pw_preprocessor/public/pw_preprocessor/util.h",
+    "pigweed/pw_result/public/pw_result/internal/result_internal.h",
+    "pigweed/pw_result/public/pw_result/result.h",
+    "pigweed/pw_span/public/pw_span/internal/config.h",
+    "pigweed/pw_span/public/pw_span/internal/span_impl.h",
+    "pigweed/pw_span/public/pw_span/span.h",
+    "pigweed/pw_status/public/pw_status/internal/config.h",
+    "pigweed/pw_status/public/pw_status/status.h",
+    "pigweed/pw_string/public/pw_string/internal/string_common_functions.inc",
+    "pigweed/pw_string/public/pw_string/internal/string_impl.h",
+    "pigweed/pw_string/public/pw_string/string.h",
+    "pigweed/pw_tokenizer/base64.cc",
+    "pigweed/pw_tokenizer/decode.cc",
+    "pigweed/pw_tokenizer/detokenize.cc",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/base64.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/config.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/detokenize.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/hash.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/internal/decode.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/internal/tokenize_string.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/nested_tokenization.h",
+    "pigweed/pw_tokenizer/public/pw_tokenizer/token_database.h",
+    "pigweed/pw_tokenizer/token_database.cc",
+    "pigweed/pw_varint/public/pw_varint/varint.h",
+    "pigweed/pw_varint/varint.cc",
+    "pigweed/pw_varint/varint_c.c",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include/lib/stdcompat/bit.h",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include/lib/stdcompat/internal/bit.h",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include/lib/stdcompat/internal/type_traits.h",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include/lib/stdcompat/memory.h",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include/lib/stdcompat/type_traits.h",
+    "pigweed/third_party/fuchsia/repo/sdk/lib/stdcompat/include/lib/stdcompat/version.h",
+  ]
+  configs -= [ "//gn/standalone:extra_warnings" ]
+  public_configs = [ ":pigweed_config" ]
+  deps = [ "//gn:default_deps" ]
 }
