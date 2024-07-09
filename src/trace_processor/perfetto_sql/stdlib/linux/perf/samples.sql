@@ -13,27 +13,26 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-CREATE PERFETTO MACRO _perf_callsites_for_samples(samples TableOrSubquery)
+INCLUDE PERFETTO MODULE callstacks.stack_profile;
+
+CREATE PERFETTO MACRO _linux_perf_callstacks_for_samples(
+  samples TableOrSubquery
+)
 RETURNS TableOrSubquery
 AS
 (
-  WITH cs AS MATERIALIZED (
-    SELECT callsite_id, COUNT() cnt FROM $samples GROUP BY 1
+  WITH metrics AS MATERIALIZED (
+    SELECT
+      callsite_id,
+      COUNT() AS self_count
+    FROM $samples
+    GROUP BY callsite_id
   )
   SELECT
     c.id,
-    c.parent_id AS parentId,
-    COALESCE(f.deobfuscated_name, f.name, '[unknown]') AS name,
-    IFNULL((SELECT cnt FROM cs WHERE cs.callsite_id = c.id), 0) AS self_count
-  FROM graph_reachable_dfs!(
-    (
-        SELECT
-          c.id AS source_node_id,
-          c.parent_id AS dest_node_id
-        FROM stack_profile_callsite c
-    ),
-    (SELECT callsite_id AS node_id FROM cs)
-  ) g
-  JOIN stack_profile_callsite c ON c.id = g.node_id
-  JOIN stack_profile_frame f ON c.frame_id = f.id
+    c.parent_id,
+    c.name,
+    IFNULL(m.self_count, 0) AS self_count
+  FROM _callstacks_for_stack_profile_samples!(metrics) c
+  LEFT JOIN metrics m USING (callsite_id)
 );

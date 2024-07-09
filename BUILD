@@ -367,7 +367,6 @@ perfetto_cc_library(
                ":src_trace_processor_perfetto_sql_prelude_prelude",
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
-           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib +
@@ -1831,10 +1830,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/heap_graph_tracker.h",
         "src/trace_processor/importers/proto/metadata_module.cc",
         "src/trace_processor/importers/proto/metadata_module.h",
-        "src/trace_processor/importers/proto/pixel_modem_module.cc",
-        "src/trace_processor/importers/proto/pixel_modem_module.h",
-        "src/trace_processor/importers/proto/pixel_modem_parser.cc",
-        "src/trace_processor/importers/proto/pixel_modem_parser.h",
         "src/trace_processor/importers/proto/statsd_module.cc",
         "src/trace_processor/importers/proto/statsd_module.h",
         "src/trace_processor/importers/proto/string_encoding_utils.cc",
@@ -2546,6 +2541,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/memory/heap_profile:heap_profile
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_memory_heap_profile_heap_profile",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_profile/callstacks.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/android/memory:memory
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_memory_memory",
@@ -2610,6 +2613,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/callstacks:callstacks
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_callstacks_callstacks",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/callstacks/stack_profile.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/chrome:chrome_sql
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_chrome_chrome_sql",
@@ -2664,6 +2675,7 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/graphs/critical_path.sql",
         "src/trace_processor/perfetto_sql/stdlib/graphs/dominator_tree.sql",
+        "src/trace_processor/perfetto_sql/stdlib/graphs/hierarchy.sql",
         "src/trace_processor/perfetto_sql/stdlib/graphs/partition.sql",
         "src/trace_processor/perfetto_sql/stdlib/graphs/scan.sql",
         "src/trace_processor/perfetto_sql/stdlib/graphs/search.sql",
@@ -2838,9 +2850,11 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
         ":src_trace_processor_perfetto_sql_stdlib_android_gpu_gpu",
         ":src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
+        ":src_trace_processor_perfetto_sql_stdlib_android_memory_heap_profile_heap_profile",
         ":src_trace_processor_perfetto_sql_stdlib_android_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
         ":src_trace_processor_perfetto_sql_stdlib_android_winscope_winscope",
+        ":src_trace_processor_perfetto_sql_stdlib_callstacks_callstacks",
         ":src_trace_processor_perfetto_sql_stdlib_chrome_chrome_sql",
         ":src_trace_processor_perfetto_sql_stdlib_common_common",
         ":src_trace_processor_perfetto_sql_stdlib_counters_counters",
@@ -6234,7 +6248,6 @@ perfetto_cc_library(
                ":src_trace_processor_perfetto_sql_prelude_prelude",
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
-           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib +
@@ -6408,7 +6421,6 @@ perfetto_cc_binary(
                ":src_trace_processor_perfetto_sql_stdlib_stdlib",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
            PERFETTO_CONFIG.deps.linenoise +
-           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.protobuf_full +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
@@ -6650,7 +6662,6 @@ perfetto_cc_binary(
                ":src_traceconv_gen_cc_trace_descriptor",
                ":src_traceconv_gen_cc_winscope_descriptor",
            ] + PERFETTO_CONFIG.deps.jsoncpp +
-           PERFETTO_CONFIG.deps.pigweed +
            PERFETTO_CONFIG.deps.sqlite +
            PERFETTO_CONFIG.deps.sqlite_ext_percentile +
            PERFETTO_CONFIG.deps.zlib +
