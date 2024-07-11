@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {BigintMath} from '../base/bigint_math';
 import {assertExists, assertUnreachable} from '../base/logging';
 import {createStore, Store} from '../base/store';
 import {duration, Time, time, TimeSpan} from '../base/time';
@@ -26,20 +25,15 @@ import {
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
 import {MetricResult} from '../common/metric_data';
-import {CurrentSearchResults, SearchSummary} from '../common/search_data';
-import {
-  EngineConfig,
-  RESOLUTION_DEFAULT,
-  State,
-  getLegacySelection,
-} from '../common/state';
+import {CurrentSearchResults} from '../common/search_data';
+import {EngineConfig, State, getLegacySelection} from '../common/state';
 import {TabManager} from '../common/tab_registry';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {TrackManager} from '../common/track_cache';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
-import {EngineBase} from '../trace_processor/engine';
+import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {Analytics, initAnalytics} from './analytics';
 import {Timeline} from './timeline';
@@ -51,6 +45,12 @@ import {CallsiteInfo} from '../common/legacy_flamegraph_util';
 import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
+import {
+  createSearchOverviewTrack,
+  SearchOverviewTrack,
+} from './search_overview_track';
+import {AppContext} from './app_context';
+import {TraceContext} from './trace_context';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -172,32 +172,6 @@ export interface LegacySelectionArgs {
   pendingScrollId: number | undefined;
 }
 
-export interface TraceContext {
-  traceTitle: string; // File name and size of the current trace.
-  traceUrl: string; // URL of the Trace.
-  readonly start: time;
-  readonly end: time;
-
-  // This is the ts value at the time of the Unix epoch.
-  // Normally some large negative value, because the unix epoch is normally in
-  // the past compared to ts=0.
-  readonly realtimeOffset: time;
-
-  // This is the timestamp that we should use for our offset when in UTC mode.
-  // Usually the most recent UTC midnight compared to the trace start time.
-  readonly utcOffset: time;
-
-  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
-  // recorded into the trace, to show timestamps in the device local time.
-  readonly traceTzOffset: time;
-
-  // The list of CPUs in the trace
-  readonly cpus: number[];
-
-  // The number of gpus in the trace
-  readonly gpuCount: number;
-}
-
 export const defaultTraceContext: TraceContext = {
   traceTitle: '',
   traceUrl: '',
@@ -213,7 +187,7 @@ export const defaultTraceContext: TraceContext = {
 /**
  * Global accessors for state/dispatch in the frontend.
  */
-class Globals {
+class Globals implements AppContext {
   readonly root = getServingRoot();
 
   private _testing = false;
@@ -250,6 +224,7 @@ class Globals {
   private _trackManager = new TrackManager(this._store);
   private _selectionManager = new SelectionManager(this._store);
   private _hasFtrace: boolean = false;
+  private _searchOverviewTrack?: SearchOverviewTrack;
 
   omnibox = new OmniboxManager();
   areaFlamegraphCache = new LegacyFlamegraphCache('area');
@@ -258,14 +233,40 @@ class Globals {
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
+  showTraceErrorPopup = true;
 
   traceContext = defaultTraceContext;
 
-  setTraceContext(traceCtx: TraceContext): void {
+  // This is the app's equivalent of a plugin's onTraceLoad() function.
+  // TODO(stevegolton): Eventually initialization that should be done on trace
+  // load should be moved into here, and then we can remove TraceController
+  // entirely
+  async onTraceLoad(engine: Engine, traceCtx: TraceContext): Promise<void> {
     this.traceContext = traceCtx;
-    const {start, end} = this.traceContext;
+
+    const {start, end} = traceCtx;
     const traceSpan = new TimeSpan(start, end);
     this._timeline = new Timeline(this._store, traceSpan);
+
+    // TODO(stevegolton): Even though createSearchOverviewTrack() returns a
+    // disposable, we completely ignore it as we assume the dispose action
+    // includes just dropping some tables, and seeing as this object will live
+    // for the duration of the trace/engine, there's no need to drop anything as
+    // the tables will be dropped along with the trace anyway.
+    //
+    // Note that this is no worse than a lot of the rest of the app where tables
+    // are created with no way to drop them.
+    //
+    // Once we fix the story around loading new traces, we should tidy this up.
+    // We could for example have a matching globals.onTraceUnload() that
+    // performs any tear-down before the old engine is dropped. This might seem
+    // pointless, but it could at least block until any currently running update
+    // cycles complete, to avoid leaving promises open on old engines that will
+    // never resolve.
+    //
+    // Alternatively we could decide that we don't want to support switching
+    // traces at all, in which case we can ignore tear down entirely.
+    this._searchOverviewTrack = await createSearchOverviewTrack(engine, this);
   }
 
   // Used for permalink load by trace_controller.ts.
@@ -281,11 +282,6 @@ class Globals {
     trackKeys: [],
     sources: [],
     totalResults: 0,
-  };
-  searchSummary: SearchSummary = {
-    tsStarts: new BigInt64Array(0),
-    tsEnds: new BigInt64Array(0),
-    count: new Uint8Array(0),
   };
 
   engines = new Map<string, EngineBase>();
@@ -494,6 +490,10 @@ class Globals {
     return this._hasFtrace;
   }
 
+  get searchOverviewTrack() {
+    return this._searchOverviewTrack;
+  }
+
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
     return this.getJobStatusMap().get(name) ?? ConversionJobStatus.NotRunning;
   }
@@ -544,29 +544,6 @@ class Globals {
 
   setAggregateData(kind: string, data: AggregateData) {
     this.aggregateDataStore.set(kind, data);
-  }
-
-  getCurResolution(): duration {
-    // Truncate the resolution to the closest power of 2 (in nanosecond space).
-    // We choose to work in ns space because resolution is consumed be track
-    // controllers for quantization and they rely on resolution to be a power
-    // of 2 in nanosecond form. This is property does not hold if we work in
-    // second space.
-    //
-    // This effectively means the resolution changes approximately every 6 zoom
-    // levels. Logic: each zoom level represents a delta of 0.1 * (visible
-    // window span). Therefore, zooming out by six levels is 1.1^6 ~= 2.
-    // Similarily, zooming in six levels is 0.9^6 ~= 0.5.
-    const timeScale = this.timeline.visibleTimeScale;
-    // TODO(b/186265930): Remove once fixed:
-    if (timeScale.pxSpan.delta === 0) {
-      console.error(`b/186265930: Bad pxToSec suppressed`);
-      return RESOLUTION_DEFAULT;
-    }
-
-    const timePerPx = BigInt(Math.floor(timeScale.pxToDuration(this.quantPx)));
-
-    return BigintMath.bitFloor(timePerPx);
   }
 
   getCurrentEngine(): EngineConfig | undefined {
@@ -683,12 +660,6 @@ class Globals {
   // be cleaned up explicitly.
   shutdown() {
     raf.shutdown();
-  }
-
-  // How many pixels to use for one quanta of horizontal resolution
-  get quantPx(): number {
-    const quantPx = (self as {} as {quantPx: number | undefined}).quantPx;
-    return quantPx ?? 1;
   }
 
   get commandManager(): CommandManager {
