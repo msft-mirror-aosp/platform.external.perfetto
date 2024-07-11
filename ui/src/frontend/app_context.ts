@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {MetricHandler} from './metricUtils';
-import {pinBlockingCallHandlerInstance} from './pinBlockingCall';
-import {pinCujScopedJankInstance} from './pinCujScoped';
-import {pinFullTraceJankInstance} from './fullTraceJankMetricHandler';
+import {CurrentSearchResults} from '../common/search_data';
+import {State} from '../common/state';
+import {Store} from '../public';
+import {Timeline} from './timeline';
+import {TraceContext} from './trace_context';
 
-// TODO: b/337774166 - Add handlers for the metric name categories here
-export const METRIC_HANDLERS: MetricHandler[] = [
-  pinCujScopedJankInstance,
-  pinBlockingCallHandlerInstance,
-  pinFullTraceJankInstance,
-];
+export interface AppContext {
+  readonly store: Store<State>;
+  readonly state: State;
+  readonly traceContext: TraceContext;
+
+  // TODO(stevegolton): This could probably be moved into TraceContext.
+  readonly timeline: Timeline;
+
+  // TODO(stevegolton): Move this into the search subsystem when it exists.
+  readonly currentSearchResults: CurrentSearchResults;
+}
