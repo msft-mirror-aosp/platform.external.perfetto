@@ -16,6 +16,12 @@
 
 INCLUDE PERFETTO MODULE android.process_metadata;
 
+-- Alias the process_metadata_table since unfortunately there are places
+-- depending on it (which we will clean up)
+DROP VIEW IF EXISTS process_metadata_table;
+CREATE PERFETTO VIEW process_metadata_table AS
+SELECT * FROM android_process_metadata;
+
 CREATE OR REPLACE PERFETTO FUNCTION process_metadata_proto(upid INT)
 RETURNS PROTO
 AS

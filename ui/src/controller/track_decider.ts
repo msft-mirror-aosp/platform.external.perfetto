@@ -1067,7 +1067,7 @@ class TrackDecider {
       select upid
       from _process_available_info_summary
       where perf_sample_count > 0
-  `);
+    `);
     for (const it = result.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
       const uuid = this.getUuid(null, upid);
@@ -1082,24 +1082,35 @@ class TrackDecider {
 
   async addThreadPerfSamplesTracks(engine: Engine): Promise<void> {
     const result = await engine.query(`
-      select upid, utid, tid
-      from _thread_available_info_summary
+      select
+        thread.upid,
+        thread.utid,
+        thread.tid,
+        thread.name as threadName
+      from _thread_available_info_summary s
       join thread using (utid)
-      where perf_sample_count > 0
-  `);
+      where s.perf_sample_count > 0
+    `);
     for (
-      const it = result.iter({upid: NUM_NULL, utid: NUM, tid: NUM});
+      const it = result.iter({
+        upid: NUM_NULL,
+        utid: NUM,
+        tid: NUM,
+        threadName: STR_NULL,
+      });
       it.valid();
       it.next()
     ) {
-      const upid = it.upid;
-      const utid = it.utid;
-      const tid = it.tid;
+      const {threadName, upid, utid, tid} = it;
+      const name =
+        threadName === null
+          ? `Thread Callstacks ${tid}`
+          : `${threadName} Callstacks ${tid}`;
       const uuid = this.getUuid(utid, upid);
       this.tracksToAdd.push({
         uri: `perfetto.PerfSamplesProfile#Thread${utid}`,
         trackSortKey: PrimaryTrackSortKey.PERF_SAMPLES_PROFILE_TRACK,
-        name: `Thread Callstacks ${tid}`,
+        name,
         trackGroup: uuid,
       });
     }
@@ -1304,7 +1315,6 @@ class TrackDecider {
       threadName: STR_NULL,
       hasSched: NUM_NULL,
       hasHeapInfo: NUM_NULL,
-      chromeProcessLabels: STR,
     });
     for (; it.valid(); it.next()) {
       const utid = it.utid;
@@ -1337,7 +1347,6 @@ class TrackDecider {
           ? PrimaryTrackSortKey.PROCESS_SCHEDULING_TRACK
           : PrimaryTrackSortKey.PROCESS_SUMMARY_TRACK,
         name: `${upid === null ? tid : pid} summary`,
-        labels: it.chromeProcessLabels.split(','),
       });
 
       const name = getTrackName({
