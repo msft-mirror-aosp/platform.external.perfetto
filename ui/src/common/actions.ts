@@ -69,7 +69,6 @@ export interface AddTrackArgs {
   key?: string;
   uri: string;
   name: string;
-  labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
   closeable?: boolean;
@@ -211,7 +210,6 @@ export const StateActions = {
         name,
         trackSortKey: track.trackSortKey,
         trackGroup: track.trackGroup,
-        labels: track.labels,
         uri: track.uri,
         closeable: track.closeable,
       };
@@ -569,7 +567,8 @@ export const StateActions = {
     state: StateDraft,
     args: {
       id: number;
-      upid: number;
+      utid?: number;
+      upid?: number;
       leftTs: time;
       rightTs: time;
       type: ProfileType;
@@ -580,6 +579,7 @@ export const StateActions = {
       legacySelection: {
         kind: 'PERF_SAMPLES',
         id: args.id,
+        utid: args.utid,
         upid: args.upid,
         leftTs: args.leftTs,
         rightTs: args.rightTs,
