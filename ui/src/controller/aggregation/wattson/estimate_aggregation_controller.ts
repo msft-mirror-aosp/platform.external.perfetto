@@ -18,19 +18,26 @@ import {globals} from '../../../frontend/globals';
 import {Engine} from '../../../trace_processor/engine';
 import {CPUSS_ESTIMATE_TRACK_KIND} from '../../../core/track_kinds';
 import {AggregationController} from '../aggregation_controller';
+import {hasWattsonSupport} from '../../../core/trace_config_utils';
+import {exists} from '../../../base/utils';
 
 export class WattsonEstimateAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
-    const estimateTracks: (string | undefined)[] = [];
+    // Short circuit if Wattson is not supported for this Perfetto trace
+    if (!(await hasWattsonSupport(engine))) return false;
+
+    const estimateTracks: string[] = [];
     for (const trackKey of area.tracks) {
       const track = globals.state.tracks[trackKey];
       if (track?.uri) {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.kind === CPUSS_ESTIMATE_TRACK_KIND) {
-          const estimateTrack = track.uri.toLowerCase().split(`#`).pop();
-          estimateTracks.push(estimateTrack);
+        if (
+          trackInfo?.kind === CPUSS_ESTIMATE_TRACK_KIND &&
+          exists(trackInfo.tags?.wattson)
+        ) {
+          estimateTracks.push(`${trackInfo.tags.wattson}`);
         }
       }
     }
@@ -44,7 +51,7 @@ export class WattsonEstimateAggregationController extends AggregationController 
 
   getEstimateTracksQuery(
     area: Area,
-    estimateTracks: (string | undefined)[],
+    estimateTracks: ReadonlyArray<string>,
   ): string {
     const duration = area.end - area.start;
     let query = `

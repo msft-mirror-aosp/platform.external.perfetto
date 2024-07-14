@@ -107,14 +107,12 @@ type States = 'init' | 'loading_trace' | 'ready';
 const METRICS = [
   'android_ion',
   'android_lmk',
-  'android_dma_heap',
   'android_surfaceflinger',
   'android_batt',
   'android_other_traces',
   'chrome_dropped_frames',
   // TODO(289365196): Reenable:
   // 'chrome_long_latency',
-  'trace_metadata',
   'android_trusty_workqueues',
 ];
 const FLAGGED_METRICS: Array<[Flag, string]> = METRICS.map((m) => {

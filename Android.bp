@@ -2397,6 +2397,7 @@ cc_test {
         ":perfetto_src_trace_processor_db_minimal",
         ":perfetto_src_trace_processor_export_json",
         ":perfetto_src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":perfetto_src_trace_processor_importers_android_bugreport_android_log_event",
         ":perfetto_src_trace_processor_importers_common_common",
         ":perfetto_src_trace_processor_importers_common_parser_types",
         ":perfetto_src_trace_processor_importers_common_trace_parser_hdr",
@@ -5291,6 +5292,7 @@ genrule {
         "protos/perfetto/metrics/android/thread_time_in_state_metric.proto",
         "protos/perfetto/metrics/android/trace_quality.proto",
         "protos/perfetto/metrics/android/unsymbolized_frames.proto",
+        "protos/perfetto/metrics/android/wattson_app_startup.proto",
         "protos/perfetto/metrics/chrome/all_chrome_metrics.proto",
         "protos/perfetto/metrics/chrome/args_class_names.proto",
         "protos/perfetto/metrics/chrome/dropped_frames.proto",
@@ -5384,6 +5386,7 @@ genrule {
         "protos/perfetto/metrics/android/thread_time_in_state_metric.proto",
         "protos/perfetto/metrics/android/trace_quality.proto",
         "protos/perfetto/metrics/android/unsymbolized_frames.proto",
+        "protos/perfetto/metrics/android/wattson_app_startup.proto",
         "protos/perfetto/metrics/metrics.proto",
     ],
     tools: [
@@ -5461,6 +5464,7 @@ genrule {
         "protos/perfetto/metrics/android/thread_time_in_state_metric.proto",
         "protos/perfetto/metrics/android/trace_quality.proto",
         "protos/perfetto/metrics/android/unsymbolized_frames.proto",
+        "protos/perfetto/metrics/android/wattson_app_startup.proto",
         "protos/perfetto/metrics/metrics.proto",
         "protos/perfetto/metrics/webview/all_webview_metrics.proto",
         "protos/perfetto/metrics/webview/webview_jank_approximation.proto",
@@ -12080,8 +12084,19 @@ genrule {
 filegroup {
     name: "perfetto_src_trace_processor_importers_android_bugreport_android_bugreport",
     srcs: [
-        "src/trace_processor/importers/android_bugreport/android_bugreport_parser.cc",
-        "src/trace_processor/importers/android_bugreport/android_log_parser.cc",
+        "src/trace_processor/importers/android_bugreport/android_bugreport_reader.cc",
+        "src/trace_processor/importers/android_bugreport/android_dumpstate_reader.cc",
+        "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.cc",
+        "src/trace_processor/importers/android_bugreport/android_log_reader.cc",
+        "src/trace_processor/importers/android_bugreport/chunked_line_reader.cc",
+    ],
+}
+
+// GN: //src/trace_processor/importers/android_bugreport:android_log_event
+filegroup {
+    name: "perfetto_src_trace_processor_importers_android_bugreport_android_log_event",
+    srcs: [
+        "src/trace_processor/importers/android_bugreport/android_log_event.cc",
     ],
 }
 
@@ -12089,7 +12104,7 @@ filegroup {
 filegroup {
     name: "perfetto_src_trace_processor_importers_android_bugreport_unittests",
     srcs: [
-        "src/trace_processor/importers/android_bugreport/android_log_parser_unittest.cc",
+        "src/trace_processor/importers/android_bugreport/android_log_unittest.cc",
     ],
 }
 
@@ -12517,6 +12532,7 @@ filegroup {
         "src/trace_processor/importers/proto/perf_sample_tracker_unittest.cc",
         "src/trace_processor/importers/proto/profile_packet_sequence_state_unittest.cc",
         "src/trace_processor/importers/proto/proto_trace_parser_impl_unittest.cc",
+        "src/trace_processor/importers/proto/proto_trace_tokenizer_unittest.cc",
         "src/trace_processor/importers/proto/string_encoding_utils_unittests.cc",
     ],
 }
@@ -12807,6 +12823,7 @@ genrule {
         "src/trace_processor/metrics/sql/android/sysui_notif_shade_list_builder_slices.sql",
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
+        "src/trace_processor/metrics/sql/android/wattson_app_startup.sql",
         "src/trace_processor/metrics/sql/chrome/actual_power_by_category.sql",
         "src/trace_processor/metrics/sql/chrome/actual_power_by_rail_mode.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_args_class_names.sql",
@@ -15125,6 +15142,7 @@ cc_test {
         ":perfetto_src_trace_processor_db_unittests",
         ":perfetto_src_trace_processor_export_json",
         ":perfetto_src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":perfetto_src_trace_processor_importers_android_bugreport_android_log_event",
         ":perfetto_src_trace_processor_importers_android_bugreport_unittests",
         ":perfetto_src_trace_processor_importers_common_common",
         ":perfetto_src_trace_processor_importers_common_parser_types",
@@ -16161,6 +16179,7 @@ cc_binary {
         ":perfetto_src_trace_processor_db_minimal",
         ":perfetto_src_trace_processor_export_json",
         ":perfetto_src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":perfetto_src_trace_processor_importers_android_bugreport_android_log_event",
         ":perfetto_src_trace_processor_importers_common_common",
         ":perfetto_src_trace_processor_importers_common_parser_types",
         ":perfetto_src_trace_processor_importers_common_trace_parser_hdr",
@@ -16397,6 +16416,7 @@ cc_binary {
         ":perfetto_src_trace_processor_db_column_column",
         ":perfetto_src_trace_processor_db_compare",
         ":perfetto_src_trace_processor_db_minimal",
+        ":perfetto_src_trace_processor_importers_android_bugreport_android_log_event",
         ":perfetto_src_trace_processor_importers_common_common",
         ":perfetto_src_trace_processor_importers_common_parser_types",
         ":perfetto_src_trace_processor_importers_common_trace_parser_hdr",
@@ -16561,6 +16581,7 @@ cc_binary_host {
         ":perfetto_src_trace_processor_db_minimal",
         ":perfetto_src_trace_processor_export_json",
         ":perfetto_src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":perfetto_src_trace_processor_importers_android_bugreport_android_log_event",
         ":perfetto_src_trace_processor_importers_common_common",
         ":perfetto_src_trace_processor_importers_common_parser_types",
         ":perfetto_src_trace_processor_importers_common_trace_parser_hdr",
