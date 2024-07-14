@@ -26,8 +26,7 @@ import {
   profileType,
 } from '../../frontend/legacy_flamegraph_panel';
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
-import {NUM} from '../../trace_processor/query_result';
-import {PerfSamplesProfileTrack} from './perf_samples_profile_track';
+import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {
   LegacySelection,
   PerfSamplesSelection,
@@ -42,6 +41,11 @@ import {Monitor} from '../../base/monitor';
 import {DetailsShell} from '../../widgets/details_shell';
 import {assertExists} from '../../base/logging';
 import {Timestamp} from '../../frontend/widgets/timestamp';
+import {
+  ProcessPerfSamplesProfileTrack,
+  ThreadPerfSamplesProfileTrack,
+} from './perf_samples_profile_track';
+import {getThreadUriPrefix} from '../../public/utils';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
@@ -49,20 +53,67 @@ export interface Data extends TrackData {
 
 class PerfSamplesProfilePlugin implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    const result = await ctx.engine.query(`
-      select distinct upid, pid
-      from perf_sample join thread using (utid) join process using (upid)
-      where callsite_id is not null
+    const pResult = await ctx.engine.query(`
+      select distinct upid
+      from perf_sample
+      join thread using (utid)
+      where callsite_id is not null and upid is not null
     `);
-    for (const it = result.iter({upid: NUM, pid: NUM}); it.valid(); it.next()) {
+    for (const it = pResult.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
-      const pid = it.pid;
       ctx.registerTrack({
-        uri: `perfetto.PerfSamplesProfile#${upid}`,
-        displayName: `Callstacks ${pid}`,
+        uri: `/process_${upid}/perf_samples_profile`,
+        displayName: `Process Callstacks`,
         kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
         upid,
-        trackFactory: () => new PerfSamplesProfileTrack(ctx.engine, upid),
+        trackFactory: ({trackKey}) =>
+          new ProcessPerfSamplesProfileTrack(
+            {
+              engine: ctx.engine,
+              trackKey,
+            },
+            upid,
+          ),
+      });
+    }
+    const tResult = await ctx.engine.query(`
+      select distinct
+        utid,
+        tid,
+        thread.name as threadName,
+        upid
+      from perf_sample
+      join thread using (utid)
+      where callsite_id is not null
+    `);
+    for (
+      const it = tResult.iter({
+        utid: NUM,
+        tid: NUM,
+        threadName: STR_NULL,
+        upid: NUM_NULL,
+      });
+      it.valid();
+      it.next()
+    ) {
+      const {threadName, utid, tid, upid} = it;
+      const displayName =
+        threadName === null
+          ? `Thread Callstacks ${tid}`
+          : `${threadName} Callstacks ${tid}`;
+      ctx.registerTrack({
+        uri: `${getThreadUriPrefix(upid, utid)}_perf_samples_profile`,
+        displayName,
+        kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
+        utid,
+        trackFactory: ({trackKey}) =>
+          new ThreadPerfSamplesProfileTrack(
+            {
+              engine: ctx.engine,
+              trackKey,
+            },
+            utid,
+          ),
       });
     }
     ctx.registerDetailsPanel(new PerfSamplesFlamegraphDetailsPanel(ctx.engine));
@@ -87,7 +138,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
       this.sel = undefined;
       return undefined;
     }
-    if (!USE_NEW_FLAMEGRAPH_IMPL.get()) {
+    if (!USE_NEW_FLAMEGRAPH_IMPL.get() && sel.upid !== undefined) {
       this.sel = undefined;
       return m(LegacyFlamegraphDetailsPanel, {
         cache: this.cache,
@@ -100,26 +151,39 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
       });
     }
 
-    const {leftTs, rightTs, upid} = sel;
+    const {leftTs, rightTs, upid, utid} = sel;
     this.sel = sel;
     if (this.selMonitor.ifStateChanged()) {
       this.flamegraphAttrs = {
         engine: this.engine,
         metrics: [
           ...metricsFromTableOrSubquery(
-            `
-              (
-                select *
-                from _perf_callsites_for_samples!((
-                  select p.callsite_id
-                  from perf_sample p
-                  join thread t using (utid)
-                  where p.ts >= ${leftTs}
-                    and p.ts <= ${rightTs}
-                    and t.upid = ${upid}
-                ))
-              )
-            `,
+            upid === undefined
+              ? `
+                (
+                  select id, parent_id as parentId, name, self_count
+                  from _linux_perf_callstacks_for_samples!((
+                    select p.callsite_id
+                    from perf_sample p
+                    where p.ts >= ${leftTs}
+                      and p.ts <= ${rightTs}
+                      and p.utid = ${utid}
+                  ))
+                )
+              `
+              : `
+                  (
+                    select id, parent_id as parentId, name, self_count
+                    from _linux_perf_callstacks_for_samples!((
+                      select p.callsite_id
+                      from perf_sample p
+                      join thread t using (utid)
+                      where p.ts >= ${leftTs}
+                        and p.ts <= ${rightTs}
+                        and t.upid = ${upid}
+                    ))
+                  )
+                `,
             [
               {
                 name: 'Perf Samples',
@@ -127,7 +191,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
                 columnName: 'self_count',
               },
             ],
-            'INCLUDE PERFETTO MODULE linux.perf.samples',
+            'include perfetto module linux.perf.samples',
           ),
         ],
       };

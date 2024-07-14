@@ -15,7 +15,7 @@
 import m from 'mithril';
 
 import {assertExists, assertTrue} from '../base/logging';
-import {Duration, duration, Span, time, Time, TimeSpan} from '../base/time';
+import {Duration, time, Time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {cacheTrace} from '../common/cache_manager';
 import {
@@ -29,13 +29,8 @@ import {
   PendingDeeplinkState,
   ProfileType,
 } from '../common/state';
-import {featureFlags, Flag, PERF_SAMPLE_FLAG} from '../core/feature_flags';
-import {
-  globals,
-  QuantizedLoad,
-  ThreadDesc,
-  TraceContext,
-} from '../frontend/globals';
+import {featureFlags, Flag} from '../core/feature_flags';
+import {globals, QuantizedLoad, ThreadDesc} from '../frontend/globals';
 import {
   clearOverviewData,
   publishHasFtrace,
@@ -105,20 +100,19 @@ import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
 } from '../common/state_serialization';
+import {TraceContext} from '../frontend/trace_context';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
 const METRICS = [
   'android_ion',
   'android_lmk',
-  'android_dma_heap',
   'android_surfaceflinger',
   'android_batt',
   'android_other_traces',
   'chrome_dropped_frames',
   // TODO(289365196): Reenable:
   // 'chrome_long_latency',
-  'trace_metadata',
   'android_trusty_workqueues',
 ];
 const FLAGGED_METRICS: Array<[Flag, string]> = METRICS.map((m) => {
@@ -500,7 +494,7 @@ export class TraceController extends Controller<States> {
     if (traceDetails.traceTitle) {
       document.title = `${traceDetails.traceTitle} - Perfetto UI`;
     }
-    globals.setTraceContext(traceDetails);
+    await globals.onTraceLoad(this.engine, traceDetails);
 
     const shownJsonWarning =
       window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) !== null;
@@ -588,9 +582,7 @@ export class TraceController extends Controller<States> {
     globals.dispatch(Actions.maybeExpandOnlyTrackGroup({}));
 
     await this.selectFirstHeapProfile();
-    if (PERF_SAMPLE_FLAG.get()) {
-      await this.selectPerfSample(traceDetails);
-    }
+    await this.selectPerfSample(traceDetails);
 
     const pendingDeeplink = globals.state.pendingDeeplink;
     if (pendingDeeplink !== undefined) {
@@ -638,6 +630,7 @@ export class TraceController extends Controller<States> {
       deserializeAppStatePhase2(globals.restoreAppStateAfterTraceLoad);
       globals.restoreAppStateAfterTraceLoad = undefined;
     }
+
     return engineMode;
   }
 
@@ -792,7 +785,7 @@ export class TraceController extends Controller<States> {
     publishThreads(threads);
   }
 
-  private async loadTimelineOverview(trace: Span<time, duration>) {
+  private async loadTimelineOverview(trace: TimeSpan) {
     clearOverviewData();
     const engine = assertExists<Engine>(this.engine);
     const stepSize = Duration.max(1n, trace.duration / 100n);
@@ -1101,13 +1094,13 @@ export class TraceController extends Controller<States> {
   private zoomPendingDeeplink(visStart: string, visEnd: string) {
     const visualStart = Time.fromRaw(BigInt(visStart));
     const visualEnd = Time.fromRaw(BigInt(visEnd));
-    const traceTime = globals.stateTraceTimeTP();
+    const traceContext = globals.traceContext;
 
     if (
       !(
         visualStart < visualEnd &&
-        traceTime.start <= visualStart &&
-        visualEnd <= traceTime.end
+        traceContext.start <= visualStart &&
+        visualEnd <= traceContext.end
       )
     ) {
       return;
@@ -1279,9 +1272,7 @@ async function getTraceTimeDetails(
   };
 }
 
-async function getTraceTimeBounds(
-  engine: Engine,
-): Promise<Span<time, duration>> {
+async function getTraceTimeBounds(engine: Engine): Promise<TimeSpan> {
   const result = await engine.query(
     `select start_ts as startTs, end_ts as endTs from trace_bounds`,
   );
@@ -1313,9 +1304,7 @@ async function getNumberOfGpus(engine: Engine): Promise<number> {
   return result.firstRow({gpuCount: NUM}).gpuCount;
 }
 
-async function getTracingMetadataTimeBounds(
-  engine: Engine,
-): Promise<Span<time, duration>> {
+async function getTracingMetadataTimeBounds(engine: Engine): Promise<TimeSpan> {
   const queryRes = await engine.query(`select
        name,
        int_value as intValue
