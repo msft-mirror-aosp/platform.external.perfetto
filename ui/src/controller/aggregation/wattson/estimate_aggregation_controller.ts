@@ -18,19 +18,26 @@ import {globals} from '../../../frontend/globals';
 import {Engine} from '../../../trace_processor/engine';
 import {CPUSS_ESTIMATE_TRACK_KIND} from '../../../core/track_kinds';
 import {AggregationController} from '../aggregation_controller';
+import {hasWattsonSupport} from '../../../core/trace_config_utils';
+import {exists} from '../../../base/utils';
 
 export class WattsonEstimateAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
-    const estimateTracks: (string | undefined)[] = [];
+    // Short circuit if Wattson is not supported for this Perfetto trace
+    if (!(await hasWattsonSupport(engine))) return false;
+
+    const estimateTracks: string[] = [];
     for (const trackKey of area.tracks) {
       const track = globals.state.tracks[trackKey];
       if (track?.uri) {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.kind === CPUSS_ESTIMATE_TRACK_KIND) {
-          const estimateTrack = track.uri.toLowerCase().split(`#`).pop();
-          estimateTracks.push(estimateTrack);
+        if (
+          trackInfo?.kind === CPUSS_ESTIMATE_TRACK_KIND &&
+          exists(trackInfo.tags?.wattson)
+        ) {
+          estimateTracks.push(`${trackInfo.tags.wattson}`);
         }
       }
     }
@@ -44,7 +51,7 @@ export class WattsonEstimateAggregationController extends AggregationController 
 
   getEstimateTracksQuery(
     area: Area,
-    estimateTracks: (string | undefined)[],
+    estimateTracks: ReadonlyArray<string>,
   ): string {
     const duration = area.end - area.start;
     let query = `
@@ -52,7 +59,7 @@ export class WattsonEstimateAggregationController extends AggregationController 
       CREATE PERFETTO TABLE _ss_converted_to_mw AS
       SELECT *,
         ((IFNULL(l3_hit_value, 0) + IFNULL(l3_miss_value, 0)) * 1000 / dur)
-          + static_curve as dsu_curve
+          + static_curve as dsu_scu_curve
       FROM _system_state_curves;
 
       DROP TABLE IF EXISTS _ui_selection_window;
@@ -101,6 +108,7 @@ export class WattsonEstimateAggregationController extends AggregationController 
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'power',
+        sum: true,
       },
       {
         title: 'Total estimated energy (mWs)',

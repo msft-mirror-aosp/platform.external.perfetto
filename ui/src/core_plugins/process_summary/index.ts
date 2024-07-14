@@ -13,7 +13,8 @@
 // limitations under the License.
 
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
-import {NUM, NUM_NULL} from '../../trace_processor/query_result';
+import {getThreadOrProcUri} from '../../public/utils';
+import {NUM, NUM_NULL, STR} from '../../trace_processor/query_result';
 
 import {
   Config as ProcessSchedulingTrackConfig,
@@ -44,12 +45,20 @@ class ProcessSummaryPlugin implements Plugin {
         select
           _process_available_info_summary.upid,
           null as utid,
-          pid,
+          process.pid,
           null as tid,
           process.name as processName,
           null as threadName,
           sum_running_dur > 0 as hasSched,
-          android_process_metadata.debuggable as isDebuggable
+          android_process_metadata.debuggable as isDebuggable,
+          ifnull((
+            select group_concat(string_value)
+            from args
+            where
+              process.arg_set_id is not null and
+              arg_set_id = process.arg_set_id and
+              flat_key = 'chrome.process_label'
+          ), '') as chromeProcessLabels
         from _process_available_info_summary
         join process using(upid)
         left join android_process_metadata using(upid)
@@ -65,7 +74,8 @@ class ProcessSummaryPlugin implements Plugin {
           null as processName,
           thread.name threadName,
           sum_running_dur > 0 as hasSched,
-          0 as isDebuggable
+          0 as isDebuggable,
+          '' as chromeProcessLabels
         from _thread_available_info_summary
         join thread using (utid)
         where upid is null
@@ -79,6 +89,7 @@ class ProcessSummaryPlugin implements Plugin {
       tid: NUM_NULL,
       hasSched: NUM_NULL,
       isDebuggable: NUM_NULL,
+      chromeProcessLabels: STR,
     });
     for (; it.valid(); it.next()) {
       const upid = it.upid;
@@ -87,11 +98,11 @@ class ProcessSummaryPlugin implements Plugin {
       const tid = it.tid;
       const hasSched = Boolean(it.hasSched);
       const isDebuggable = Boolean(it.isDebuggable);
+      const labels = it.chromeProcessLabels.split(',');
 
       // Group by upid if present else by utid.
       const pidForColor = pid ?? tid ?? upid ?? utid ?? 0;
-      const type = hasSched ? 'schedule' : 'summary';
-      const uri = `perfetto.ProcessScheduling#${upid}.${utid}.${type}`;
+      const uri = getThreadOrProcUri(upid, utid);
 
       if (hasSched) {
         const config: ProcessSchedulingTrackConfig = {
@@ -110,6 +121,7 @@ class ProcessSummaryPlugin implements Plugin {
           trackFactory: () => {
             return new ProcessSchedulingTrack(ctx.engine, config, cpuCount);
           },
+          labels,
         });
       } else {
         const config: ProcessSummaryTrackConfig = {
@@ -126,6 +138,7 @@ class ProcessSummaryPlugin implements Plugin {
             debuggable: isDebuggable,
           },
           trackFactory: () => new ProcessSummaryTrack(ctx.engine, config),
+          labels,
         });
       }
     }
@@ -177,7 +190,7 @@ class ProcessSummaryPlugin implements Plugin {
     };
 
     ctx.registerTrack({
-      uri: 'perfetto.ProcessSummary#kernel',
+      uri: '/kernel',
       displayName: `Kernel thread summary`,
       kind: PROCESS_SUMMARY_TRACK,
       trackFactory: () => new ProcessSummaryTrack(ctx.engine, config),
