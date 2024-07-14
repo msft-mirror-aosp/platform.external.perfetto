@@ -17,20 +17,16 @@ import {ColumnDef} from '../../../common/aggregation_data';
 import {Area, Sorting} from '../../../common/state';
 import {globals} from '../../../frontend/globals';
 import {Engine} from '../../../trace_processor/engine';
-import {NUM} from '../../../trace_processor/query_result';
 import {CPU_SLICE_TRACK_KIND} from '../../../core/track_kinds';
 import {AggregationController} from '../aggregation_controller';
+import {hasWattsonSupport} from '../../../core/trace_config_utils';
 
 export class WattsonThreadAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
     // Short circuit if Wattson is not supported for this Perfetto trace
-    const deviceInfo = await engine.query(`
-        INCLUDE PERFETTO MODULE wattson.device_infos;
-        SELECT COUNT(*) as isValid FROM _wattson_device
-    `);
-    if (deviceInfo.firstRow({isValid: NUM}).isValid === 0) return false;
+    if (!(await hasWattsonSupport(engine))) return false;
 
     const selectedCpus: number[] = [];
     for (const trackKey of area.tracks) {
@@ -52,7 +48,9 @@ export class WattsonThreadAggregationController extends AggregationController {
         ${area.start} as ts,
         ${duration} as dur;
     `;
-    engine.query(this.getEstimateThreadsQuery(queryPrefix, selectedCpus));
+    engine.query(
+      this.getEstimateThreadsQuery(queryPrefix, selectedCpus, duration),
+    );
 
     return true;
   }
@@ -64,7 +62,11 @@ export class WattsonThreadAggregationController extends AggregationController {
   // 1. Window and associate thread with proper Wattson estimate slice
   // 2. Group all threads over time on a per CPU basis
   // 3. Group all threads over all CPUs
-  getEstimateThreadsQuery(queryPrefix: string, selectedCpu: number[]): string {
+  getEstimateThreadsQuery(
+    queryPrefix: string,
+    selectedCpu: number[],
+    duration: bigint,
+  ): string {
     let query = queryPrefix;
 
     // Estimate and total per UTID per CPU
@@ -121,10 +123,8 @@ export class WattsonThreadAggregationController extends AggregationController {
     query += `
       )
       SELECT
-        ROUND(SUM(total_pws) / SUM(dur), 2) as avg_mw,
+        ROUND(SUM(total_pws) / ${duration}, 2) as avg_mw,
         ROUND(SUM(total_pws) / 1000000000, 2) as total_mws,
-        ROUND(SUM(dur) /1000000.0, 2) as dur,
-        SUM(occurences) as occurences,
         utid
       FROM _unioned_per_thread_per_cpu
       GROUP BY utid;
@@ -133,7 +133,7 @@ export class WattsonThreadAggregationController extends AggregationController {
     // Final table outputted in UI
     query += `
       CREATE VIEW ${this.kind} AS
-      SELECT tpt.*, thread.name as t_name, thread.upid
+      SELECT tpt.*, thread.name as t_name, thread.tid, process.pid
       FROM _total_per_thread as tpt
       JOIN thread on tpt.utid = thread.utid
       LEFT JOIN process on thread.upid = process.upid;
@@ -151,34 +151,23 @@ export class WattsonThreadAggregationController extends AggregationController {
         columnId: 't_name',
       },
       {
-        title: 'UTID',
+        title: 'TID',
         kind: 'NUMBER',
         columnConstructor: Uint16Array,
-        columnId: 'utid',
+        columnId: 'tid',
       },
       {
-        title: 'UPID',
+        title: 'PID',
         kind: 'NUMBER',
         columnConstructor: Uint16Array,
-        columnId: 'upid',
-      },
-      {
-        title: 'Occurences',
-        kind: 'NUMBER',
-        columnConstructor: Uint16Array,
-        columnId: 'occurences',
-      },
-      {
-        title: 'Total Duration (ms)',
-        kind: 'NUMBER',
-        columnConstructor: Float64Array,
-        columnId: 'dur',
+        columnId: 'pid',
       },
       {
         title: 'Average estimated power (mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'avg_mw',
+        sum: true,
       },
       {
         title: 'Total estimated energy (mWs)',
