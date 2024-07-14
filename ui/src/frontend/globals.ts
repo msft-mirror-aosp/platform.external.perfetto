@@ -15,7 +15,7 @@
 import {BigintMath} from '../base/bigint_math';
 import {assertExists, assertUnreachable} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {duration, Span, Time, time, TimeSpan} from '../base/time';
+import {duration, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
 import {Args} from '../common/arg_types';
@@ -25,10 +25,6 @@ import {
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {
-  HighPrecisionTime,
-  HighPrecisionTimeSpan,
-} from '../common/high_precision_time';
 import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults, SearchSummary} from '../common/search_data';
 import {
@@ -48,7 +44,6 @@ import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {Analytics, initAnalytics} from './analytics';
 import {Timeline} from './timeline';
 import {SliceSqlId} from './sql_types';
-import {PxSpan, TimeScale} from './time_scale';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
 import {Optional, exists} from '../base/utils';
 import {OmniboxManager} from './omnibox_manager';
@@ -60,7 +55,7 @@ import {getServingRoot} from '../base/http_utils';
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
 
-type Dispatch = (action: DeferredAction) => void;
+type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
 type QueryResultsStore = Map<string, {} | undefined>;
 type AggregateDataStore = Map<string, AggregateData>;
@@ -222,7 +217,7 @@ class Globals {
   readonly root = getServingRoot();
 
   private _testing = false;
-  private _dispatch?: Dispatch = undefined;
+  private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
   private _timeline?: Timeline = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
@@ -300,15 +295,17 @@ class Globals {
     this._timeline = new Timeline(this._store, new TimeSpan(start, end));
   }
 
-  initialize(dispatch: Dispatch) {
-    this._dispatch = dispatch;
+  initialize(dispatchMultiple: DispatchMultiple) {
+    this._dispatchMultiple = dispatchMultiple;
 
     setPerfHooks(
       () => this.state.perfDebug,
       () => this.dispatch(Actions.togglePerfDebug({})),
     );
 
-    this._serviceWorkerController = new ServiceWorkerController();
+    this._serviceWorkerController = new ServiceWorkerController(
+      getServingRoot(),
+    );
     this._testing =
       /* eslint-disable @typescript-eslint/strict-boolean-expressions */
       self.location && self.location.search.indexOf('testing=1') >= 0;
@@ -352,15 +349,12 @@ class Globals {
     return assertExists(this._store);
   }
 
-  get dispatch(): Dispatch {
-    return assertExists(this._dispatch);
+  dispatch(action: DeferredAction) {
+    this.dispatchMultiple([action]);
   }
 
-  dispatchMultiple(actions: DeferredAction[]): void {
-    const dispatch = this.dispatch;
-    for (const action of actions) {
-      dispatch(action);
-    }
+  dispatchMultiple(actions: DeferredAction[]) {
+    assertExists(this._dispatchMultiple)(actions);
   }
 
   get timeline() {
@@ -570,9 +564,9 @@ class Globals {
       return RESOLUTION_DEFAULT;
     }
 
-    const timePerPx = timeScale.pxDeltaToDuration(this.quantPx);
+    const timePerPx = BigInt(Math.floor(timeScale.pxToDuration(this.quantPx)));
 
-    return BigintMath.bitFloor(timePerPx.toTime('floor'));
+    return BigintMath.bitFloor(timePerPx);
   }
 
   getCurrentEngine(): EngineConfig | undefined {
@@ -636,7 +630,7 @@ class Globals {
   }
 
   resetForTesting() {
-    this._dispatch = undefined;
+    this._dispatchMultiple = undefined;
     this._timeline = undefined;
     this._serviceWorkerController = undefined;
 
@@ -689,24 +683,6 @@ class Globals {
   // be cleaned up explicitly.
   shutdown() {
     raf.shutdown();
-  }
-
-  // Get a timescale that covers the entire trace
-  getTraceTimeScale(pxSpan: PxSpan): TimeScale {
-    const {start, end} = this.traceContext;
-    const traceTime = HighPrecisionTimeSpan.fromTime(start, end);
-    return TimeScale.fromHPTimeSpan(traceTime, pxSpan);
-  }
-
-  // Get the trace time bounds
-  stateTraceTime(): Span<HighPrecisionTime> {
-    const {start, end} = this.traceContext;
-    return HighPrecisionTimeSpan.fromTime(start, end);
-  }
-
-  stateTraceTimeTP(): Span<time, duration> {
-    const {start, end} = this.traceContext;
-    return new TimeSpan(start, end);
   }
 
   // How many pixels to use for one quanta of horizontal resolution
@@ -850,14 +826,12 @@ function findTimeRangeOfSlice(slice: Partial<SliceLike>): {
 
 // Returns the time span of the current selection, or the visible window if
 // there is no current selection.
-export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<
-  Span<time, duration>
-> {
+export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<TimeSpan> {
   const range = await globals.findTimeRangeOfSelection();
   if (exists(range)) {
     return new TimeSpan(range.start, range.end);
   } else {
-    return globals.timeline.visibleTimeSpan;
+    return globals.timeline.visibleWindow.toTimeSpan();
   }
 }
 

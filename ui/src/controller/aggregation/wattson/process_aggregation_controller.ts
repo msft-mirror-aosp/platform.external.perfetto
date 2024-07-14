@@ -52,7 +52,9 @@ export class WattsonProcessAggregationController extends AggregationController {
         ${area.start} as ts,
         ${duration} as dur;
     `;
-    engine.query(this.getEstimateProcessQuery(queryPrefix, selectedCpus));
+    engine.query(
+      this.getEstimateProcessQuery(queryPrefix, selectedCpus, duration),
+    );
 
     return true;
   }
@@ -64,7 +66,11 @@ export class WattsonProcessAggregationController extends AggregationController {
   // 1. Window and associate process with proper Wattson estimate slice
   // 2. Group all processes over time on a per CPU basis
   // 3. Group all processes over all CPUs
-  getEstimateProcessQuery(queryPrefix: string, selectedCpus: number[]): string {
+  getEstimateProcessQuery(
+    queryPrefix: string,
+    selectedCpus: number[],
+    duration: bigint,
+  ): string {
     let query = queryPrefix;
 
     // Estimate and total per UPID per CPU
@@ -101,12 +107,13 @@ export class WattsonProcessAggregationController extends AggregationController {
           SUM(dur) as dur,
           COUNT(dur) as occurences,
           process.upid,
+          process.pid,
           process.name as p_name,
           thread.name as t_name,
           cpu
         FROM _windowed_thread_curve as _thread_lvl
         JOIN thread on _thread_lvl.utid = thread.utid
-        JOIN process on thread.upid = process.upid
+        LEFT JOIN process on thread.upid = process.upid
         GROUP BY thread.upid;
       `;
     });
@@ -124,11 +131,9 @@ export class WattsonProcessAggregationController extends AggregationController {
     query += `
       )
       SELECT
-        ROUND(SUM(total_pws) / SUM(dur), 2) as avg_mw,
+        ROUND(SUM(total_pws) / ${duration}, 2) as avg_mw,
         ROUND(SUM(total_pws) / 1000000000, 2) as total_mws,
-        ROUND(SUM(dur) / 1000000.0, 2) as dur,
-        SUM(occurences) as occurences,
-        upid,
+        pid,
         p_name,
         t_name
       FROM _unioned_per_process_per_cpu
@@ -147,34 +152,23 @@ export class WattsonProcessAggregationController extends AggregationController {
         columnId: 'p_name',
       },
       {
-        title: 'UPID',
+        title: 'PID',
         kind: 'NUMBER',
         columnConstructor: Uint16Array,
-        columnId: 'upid',
+        columnId: 'pid',
       },
       {
-        title: 'Occurences',
-        kind: 'NUMBER',
-        columnConstructor: Uint16Array,
-        columnId: 'occurences',
-      },
-      {
-        title: 'Total Duration (ms)',
-        kind: 'NUMBER',
-        columnConstructor: Float64Array,
-        columnId: 'dur',
-      },
-      {
-        title: 'Average estimate (mW)',
+        title: 'Average estimated power (mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'avg_mw',
       },
       {
-        title: 'Total estimate (mWs)',
+        title: 'Total estimated energy (mWs)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'total_mws',
+        sum: true,
       },
     ];
   }

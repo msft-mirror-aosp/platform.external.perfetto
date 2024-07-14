@@ -113,7 +113,7 @@ export class ProcessSchedulingTrack implements Track {
   }
 
   async onDestroy(): Promise<void> {
-    this.fetcher.dispose();
+    this.fetcher[Symbol.dispose]();
     await this.engine.tryQuery(`
       drop table process_scheduling_${this.trackUuid}
     `);
@@ -188,7 +188,7 @@ export class ProcessSchedulingTrack implements Track {
 
   render(ctx: CanvasRenderingContext2D, size: Size): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
-    const {visibleTimeScale, visibleTimeSpan} = globals.timeline;
+    const {visibleTimeScale, visibleWindow} = globals.timeline;
     const data = this.fetcher.data;
 
     if (data === undefined) return; // Can't possibly draw anything.
@@ -214,7 +214,7 @@ export class ProcessSchedulingTrack implements Track {
       const tEnd = Time.fromRaw(data.ends[i]);
 
       // Cull slices that lie completely outside the visible window
-      if (!visibleTimeSpan.intersects(tStart, tEnd)) continue;
+      if (!visibleWindow.overlaps(tStart, tEnd)) continue;
 
       const utid = data.utids[i];
       const cpu = data.cpus[i];
