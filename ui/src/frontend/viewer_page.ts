@@ -239,20 +239,23 @@ class TraceViewer implements m.ClassComponent {
           tags: trackBundle.tags,
           trackFSM: trackBundle.trackFSM,
           closeable: trackBundle.closeable,
+          chips: trackBundle.chips,
+          pluginId: trackBundle.pluginId,
         });
       },
     );
 
     for (const group of Object.values(globals.state.trackGroups)) {
-      const key = group.summaryTrack;
+      const summaryTrackKey = group.summaryTrack;
       let headerPanel;
-      if (key) {
-        const trackBundle = this.resolveTrack(key);
+      if (summaryTrackKey) {
+        const trackBundle = this.resolveTrack(summaryTrackKey);
         headerPanel = new TrackGroupPanel({
           groupKey: group.key,
           trackFSM: trackBundle.trackFSM,
-          labels: trackBundle.labels,
+          subtitle: trackBundle.subtitle,
           tags: trackBundle.tags,
+          chips: trackBundle.chips,
           collapsed: group.collapsed,
           title: group.name,
         });
@@ -274,6 +277,8 @@ class TraceViewer implements m.ClassComponent {
             tags: trackBundle.tags,
             trackFSM: trackBundle.trackFSM,
             closeable: trackBundle.closeable,
+            chips: trackBundle.chips,
+            pluginId: trackBundle.pluginId,
           });
           childTracks.push(panel);
         }
@@ -332,6 +337,8 @@ class TraceViewer implements m.ClassComponent {
               trackFSM: trackBundle.trackFSM,
               revealOnCreate: true,
               closeable: trackBundle.closeable,
+              chips: trackBundle.chips,
+              pluginId: trackBundle.pluginId,
             });
           }),
         }),
@@ -360,15 +367,17 @@ class TraceViewer implements m.ClassComponent {
       trackDesc && globals.trackManager.resolveTrack(key, trackDesc);
     const trackFSM = trackCacheEntry;
     const tags = trackCacheEntry?.desc.tags;
-    const trackIds = trackCacheEntry?.desc.trackIds;
-    const labels = trackCacheEntry?.desc.labels;
+    const subtitle = trackCacheEntry?.desc.subtitle;
+    const chips = trackCacheEntry?.desc.chips;
+    const plugin = trackCacheEntry?.desc.pluginId;
     return {
       title: name,
+      subtitle,
+      closeable: closeable ?? false,
       tags,
       trackFSM,
-      labels,
-      trackIds,
-      closeable: closeable ?? false,
+      chips,
+      pluginId: plugin,
     };
   }
 
@@ -378,12 +387,13 @@ class TraceViewer implements m.ClassComponent {
 }
 
 interface TrackBundle {
-  title: string;
-  closeable: boolean;
-  trackFSM?: TrackCacheEntry;
-  tags?: TrackTags;
-  labels?: string[];
-  trackIds?: number[];
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly closeable: boolean;
+  readonly trackFSM?: TrackCacheEntry;
+  readonly tags?: TrackTags;
+  readonly chips?: ReadonlyArray<string>;
+  readonly pluginId?: string;
 }
 
 export const ViewerPage = createPage({

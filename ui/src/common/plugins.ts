@@ -126,7 +126,10 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     // Silently ignore if context is dead.
     if (!this.alive) return;
 
-    const dispose = globals.trackManager.registerTrack(trackDesc);
+    const dispose = globals.trackManager.registerTrack({
+      ...trackDesc,
+      pluginId: this.pluginId,
+    });
     this.trash.use(dispose);
   }
 
@@ -224,14 +227,9 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
 
     pinTracksByPredicate(predicate: TrackPredicate) {
       const tracks = Object.values(globals.state.tracks);
-      const groups = globals.state.trackGroups;
       for (const track of tracks) {
-        const tags = {
-          name: track.name,
-          groupName: (track.trackGroup ? groups[track.trackGroup] : undefined)
-            ?.name,
-        };
-        if (predicate(tags) && !isPinned(track.key)) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
+        if (trackDesc && predicate(trackDesc) && !isPinned(track.key)) {
           globals.dispatch(
             Actions.toggleTrackPinned({
               trackKey: track.key,
@@ -244,10 +242,8 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     unpinTracksByPredicate(predicate: TrackPredicate) {
       const tracks = Object.values(globals.state.tracks);
       for (const track of tracks) {
-        const tags = {
-          name: track.name,
-        };
-        if (predicate(tags) && isPinned(track.key)) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
+        if (trackDesc && predicate(trackDesc) && isPinned(track.key)) {
           globals.dispatch(
             Actions.toggleTrackPinned({
               trackKey: track.key,
@@ -260,10 +256,8 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     removeTracksByPredicate(predicate: TrackPredicate) {
       const trackKeysToRemove = Object.values(globals.state.tracks)
         .filter((track) => {
-          const tags = {
-            name: track.name,
-          };
-          return predicate(tags);
+          const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
+          return trackDesc && predicate(trackDesc);
         })
         .map((trackState) => trackState.key);
 
@@ -315,7 +309,7 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
           ? groups[trackState.trackGroup]
           : undefined;
         return {
-          displayName: trackState.name,
+          title: trackState.name,
           uri: trackState.uri,
           key: trackState.key,
           groupName: group?.name,
