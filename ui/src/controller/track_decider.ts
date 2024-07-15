@@ -952,6 +952,7 @@ class TrackDecider {
     const result = await engine.query(`
       select
         thread_track.utid as utid,
+        thread_track.id as trackId,
         thread_track.name as trackName,
         EXTRACT_ARG(thread_track.source_arg_set_id,
                     'is_root_in_scope') as isDefaultTrackForScope,
@@ -965,6 +966,7 @@ class TrackDecider {
 
     const it = result.iter({
       utid: NUM,
+      trackId: NUM,
       trackName: STR_NULL,
       isDefaultTrackForScope: NUM_NULL,
       tid: NUM_NULL,
@@ -972,22 +974,17 @@ class TrackDecider {
       upid: NUM_NULL,
     });
     for (; it.valid(); it.next()) {
-      const utid = it.utid;
-      const trackName = it.trackName;
+      const {utid, trackId, trackName, tid, threadName, upid} = it;
       // Note that !!null === false.
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       const isDefaultTrackForScope = !!it.isDefaultTrackForScope;
-      const tid = it.tid;
-      const threadName = it.threadName;
-      const upid = it.upid;
-
       const uuid = this.getUuid(utid, upid);
 
       const kind = THREAD_SLICE_TRACK_KIND;
       const name = getTrackName({name: trackName, utid, tid, threadName, kind});
 
       this.tracksToAdd.push({
-        uri: `${getThreadUriPrefix(upid, utid)}_slice`,
+        uri: `${getThreadUriPrefix(upid, utid)}_slice_${trackId}`,
         name,
         trackGroup: uuid,
         trackSortKey: {
@@ -1358,9 +1355,10 @@ class TrackDecider {
         tid,
         upid,
       });
+
       const addTrackGroup = Actions.addTrackGroup({
         summaryTrackKey,
-        name,
+        name: stripPathFromExecutable(name),
         key: this.getOrCreateUuid(utid, upid),
         // Perf profiling tracks remain collapsed, otherwise we would have too
         // many expanded process tracks for some perf traces, leading to
@@ -1430,7 +1428,7 @@ class TrackDecider {
 
       this.tracksToAdd.push({
         uri: info.uri,
-        name: info.displayName,
+        name: info.title,
         key,
         // TODO(hjd): Fix how sorting works. Plugins should expose
         // 'sort keys' which the user can use to choose a sort order.
@@ -1663,5 +1661,13 @@ class TrackDecider {
       default:
         return PrimaryTrackSortKey.ORDINARY_THREAD;
     }
+  }
+}
+
+function stripPathFromExecutable(path: string) {
+  if (path[0] === '/') {
+    return path.split('/').slice(-1)[0];
+  } else {
+    return path;
   }
 }
