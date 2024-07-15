@@ -21,7 +21,7 @@ import {ColorScheme} from '../core/colorizer';
 import {PrimaryTrackSortKey} from '../common/state';
 import {Engine} from '../trace_processor/engine';
 import {PromptOption} from '../frontend/omnibox_manager';
-import {LegacyDetailsPanel, TrackDescriptor, TrackTags} from './tracks';
+import {LegacyDetailsPanel, TrackDescriptor} from './tracks';
 import {TraceContext} from '../frontend/trace_context';
 
 export {Engine} from '../trace_processor/engine';
@@ -339,27 +339,27 @@ export interface PluginClass {
 // Describes a reference to a registered track.
 export interface TrackRef {
   // URI of the registered track.
-  uri: string;
+  readonly uri: string;
 
   // A human readable name for this track - displayed in the track shell.
-  displayName: string;
+  readonly title: string;
 
   // Optional: Used to define default sort order for new traces.
   // Note: This will be deprecated soon in favour of tags & sort rules.
-  sortKey?: PrimaryTrackSortKey;
+  readonly sortKey?: PrimaryTrackSortKey;
 
   // Optional: Add tracks to a group with this name.
-  groupName?: string;
+  readonly groupName?: string;
 
   // Optional: Track key
-  key?: string;
+  readonly key?: string;
 
   // Optional: Whether the track is pinned
-  isPinned?: boolean;
+  readonly isPinned?: boolean;
 }
 
 // A predicate for selecting a subset of tracks.
-export type TrackPredicate = (info: TrackTags) => boolean;
+export type TrackPredicate = (info: TrackDescriptor) => boolean;
 
 // Describes a reference to a group of tracks.
 export interface GroupRef {
