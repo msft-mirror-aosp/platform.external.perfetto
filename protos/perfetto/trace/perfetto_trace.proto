@@ -2863,6 +2863,11 @@ enum MeminfoCounters {
   MEMINFO_VMALLOC_CHUNK = 31;
   MEMINFO_CMA_TOTAL = 32;
   MEMINFO_CMA_FREE = 33;
+  MEMINFO_GPU = 34;
+  MEMINFO_ZRAM = 35;
+  MEMINFO_MISC = 36;
+  MEMINFO_ION_HEAP = 37;
+  MEMINFO_ION_HEAP_POOL = 38;
 }
 
 // Counter definitions for Linux's /proc/vmstat.
@@ -12800,8 +12805,11 @@ message TrackEvent {
   extensions 1000 to 1999;
   // Extension range reserved for https://b.corp.google.com/issues/301227627.
   extensions 2000 to 2000;
+  // Extension range reserved for android:
+  // protos/perfetto/trace/android/android_track_event.proto
+  extensions 2001 to 2999;
   // Extension range for future use.
-  extensions 2001 to 9899;
+  extensions 3000 to 9899;
   // Reserved for Perfetto unit and integration tests.
   extensions 9900 to 10000;
 
