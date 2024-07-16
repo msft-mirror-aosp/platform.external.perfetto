@@ -19,7 +19,6 @@ import {exists} from '../../base/utils';
 import {raf} from '../../core/raf_scheduler';
 import {BottomTab, NewBottomTabArgs} from '../../frontend/bottom_tab';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {sqlValueToString} from '../../frontend/sql_utils';
 import {
   ColumnDescriptor,
   numberColumn,
@@ -37,10 +36,12 @@ import {SqlRef} from '../../widgets/sql_ref';
 import {MultiParagraphText, TextParagraph} from '../../widgets/text_paragraph';
 import {dictToTreeNodes, Tree} from '../../widgets/tree';
 
+import {ScrollJankV3TrackKind} from './common';
 import {
   buildScrollOffsetsGraph,
   getInputScrollDeltas,
   getJankIntervals,
+  getPredictorJankDeltas,
   getPresentedScrollDeltas,
 } from './scroll_delta_graph';
 import {
@@ -48,7 +49,6 @@ import {
   getSliceForTrack,
   ScrollJankSlice,
 } from './scroll_jank_slice';
-import {ScrollJankV3TrackKind} from './common';
 
 interface Data {
   // Scroll ID.
@@ -237,6 +237,10 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
         this.engine,
         this.data.id,
       );
+      const predictorDeltas = await getPredictorJankDeltas(
+        this.engine,
+        this.data.id,
+      );
       const jankIntervals = await getJankIntervals(
         this.engine,
         this.data.ts,
@@ -245,6 +249,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
       this.scrollDeltas = buildScrollOffsetsGraph(
         inputDeltas,
         presentedDeltas,
+        predictorDeltas,
         jankIntervals,
       );
 
@@ -338,7 +343,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
         columns: columns,
       });
     } else {
-      return sqlValueToString('None');
+      return 'None';
     }
   }
 
@@ -380,6 +385,11 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
         text: `Grey blocks in the graph represent intervals of jank
                  corresponding with the Chrome Scroll Janks track.`,
       }),
+      m(TextParagraph, {
+        text: `Yellow dots represent frames that were presented (sae as the red
+                 dots), but that we suspect are visible to users as unsmooth
+                 velocity/stutter (predictor jank).`,
+      }),
     );
   }
 
@@ -389,7 +399,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
     }
 
     const details = dictToTreeNodes({
-      'Scroll ID': sqlValueToString(this.data.id),
+      'Scroll ID': this.data.id,
       'Start time': m(Timestamp, {ts: this.data.ts}),
       'Duration': m(DurationWidget, {dur: this.data.dur}),
       'SQL ID': m(SqlRef, {table: 'chrome_scrolls', id: this.config.id}),

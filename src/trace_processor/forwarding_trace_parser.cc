@@ -54,7 +54,6 @@ std::optional<TraceSorter::SortingMode> GetMinimumSortingMode(
     case kSystraceTraceType:
     case kGzipTraceType:
     case kCtraceTraceType:
-    case kZipFile:
       return std::nullopt;
 
     case kPerfDataTraceType:
@@ -63,6 +62,8 @@ std::optional<TraceSorter::SortingMode> GetMinimumSortingMode(
     case kUnknownTraceType:
     case kJsonTraceType:
     case kFuchsiaTraceType:
+    case kZipFile:
+    case kAndroidLogcatTraceType:
       return TraceSorter::SortingMode::kFullSort;
 
     case kProtoTraceType:

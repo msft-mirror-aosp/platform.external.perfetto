@@ -18,13 +18,12 @@
 #define SRC_TRACE_PROCESSOR_CONTAINERS_INTERVAL_TREE_H_
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <map>
-#include <memory>
-#include <optional>
-#include <set>
+#include <utility>
 #include <vector>
+
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/small_vector.h"
 
@@ -73,6 +72,42 @@ class IntervalTree {
 
         if (e > i.start && s < i.end) {
           res.push_back(i.id);
+        }
+      }
+
+      if (e > n->center_ &&
+          n->right_node_ != std::numeric_limits<size_t>::max()) {
+        stack.push_back(&nodes_[n->right_node_]);
+      }
+      if (s < n->center_ &&
+          n->left_node_ != std::numeric_limits<size_t>::max()) {
+        stack.push_back(&nodes_[n->left_node_]);
+      }
+    }
+  }
+
+  // Modifies |res| to contain all overlaps (as Intervals) that overlap interval
+  // (s, e). Has a complexity of O(log(size of tree) + (number of overlaps)).
+  void FindOverlaps(Ts s, Ts e, std::vector<Interval>& res) const {
+    std::vector<const Node*> stack{nodes_.data() + root_};
+    while (!stack.empty()) {
+      const Node* n = stack.back();
+      stack.pop_back();
+
+      for (const Interval& i : n->intervals_) {
+        // As we know that each interval overlaps the center, if the interval
+        // starts after the |end| we know [start,end] can't intersect the
+        // center.
+        if (i.start > e) {
+          break;
+        }
+
+        if (e > i.start && s < i.end) {
+          Interval new_int;
+          new_int.start = std::max(s, i.start);
+          new_int.end = std::min(e, i.end);
+          new_int.id = i.id;
+          res.push_back(new_int);
         }
       }
 
