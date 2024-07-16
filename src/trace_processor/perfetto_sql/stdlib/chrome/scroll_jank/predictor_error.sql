@@ -72,7 +72,7 @@ SELECT
 CREATE PERFETTO TABLE _deltas_and_neighbors AS
 SELECT
   scroll_id,
-  event_latency_id,
+  event_latency_slice_id,
   scroll_update_id,
   ts,
   delta_y,
@@ -86,7 +86,7 @@ FROM chrome_presented_scroll_offsets;
 CREATE PERFETTO TABLE _deltas_and_neighbors_with_threshold AS
 SELECT
   scroll_id,
-  event_latency_id,
+  event_latency_slice_id,
   scroll_update_id,
   ts,
   delta_y,
@@ -102,13 +102,13 @@ WHERE delta_y IS NOT NULL
 
 -- The scrolling offsets and predictor jank values for the actual (applied)
 -- scroll events.
-CREATE PERFETTO TABLE chrome_predictor_jank(
+CREATE PERFETTO TABLE chrome_predictor_error(
   -- An ID that ties all EventLatencies in a particular scroll. (implementation
   -- note: This is the EventLatency TraceId of the GestureScrollbegin).
   scroll_id INT,
   -- An ID for this particular EventLatency regardless of it being presented or
   -- not.
-  event_latency_id INT,
+  event_latency_slice_id INT,
   -- An ID that ties this |event_latency_id| with the Trace Id (another
   -- event_latency_id) that it was presented with.
   scroll_update_id INT,
@@ -116,14 +116,14 @@ CREATE PERFETTO TABLE chrome_predictor_jank(
   present_ts INT,
   -- The delta in raw coordinates between this presented EventLatency and the
   -- previous presented frame.
-  delta_y INT,
+  delta_y DOUBLE,
   -- The pixel offset of this presented EventLatency compared to the initial
   -- one.
-  relative_offset_y INT,
+  relative_offset_y DOUBLE,
   -- The delta in raw coordinates of the previous scroll update event.
-  prev_delta INT,
+  prev_delta DOUBLE,
   -- The delta in raw coordinates of the subsequent scroll update event.
-  next_delta INT,
+  next_delta DOUBLE,
   -- The jank value based on the discrepancy between scroll predictor
   -- coordinates and the actual deltas between scroll update events.
   predictor_jank DOUBLE,
@@ -133,7 +133,7 @@ CREATE PERFETTO TABLE chrome_predictor_jank(
 AS
 SELECT
   scroll_id,
-  event_latency_id,
+  event_latency_slice_id,
   scroll_update_id,
   ts AS present_ts,
   delta_y,

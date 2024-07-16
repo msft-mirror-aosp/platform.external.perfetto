@@ -30,12 +30,7 @@ import {
   ProfileType,
 } from '../common/state';
 import {featureFlags, Flag} from '../core/feature_flags';
-import {
-  globals,
-  QuantizedLoad,
-  ThreadDesc,
-  TraceContext,
-} from '../frontend/globals';
+import {globals, QuantizedLoad, ThreadDesc} from '../frontend/globals';
 import {
   clearOverviewData,
   publishHasFtrace,
@@ -105,20 +100,19 @@ import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
 } from '../common/state_serialization';
+import {TraceContext} from '../frontend/trace_context';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
 const METRICS = [
   'android_ion',
   'android_lmk',
-  'android_dma_heap',
   'android_surfaceflinger',
   'android_batt',
   'android_other_traces',
   'chrome_dropped_frames',
   // TODO(289365196): Reenable:
   // 'chrome_long_latency',
-  'trace_metadata',
   'android_trusty_workqueues',
 ];
 const FLAGGED_METRICS: Array<[Flag, string]> = METRICS.map((m) => {
@@ -500,7 +494,7 @@ export class TraceController extends Controller<States> {
     if (traceDetails.traceTitle) {
       document.title = `${traceDetails.traceTitle} - Perfetto UI`;
     }
-    globals.setTraceContext(traceDetails);
+    await globals.onTraceLoad(this.engine, traceDetails);
 
     const shownJsonWarning =
       window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) !== null;
@@ -636,6 +630,7 @@ export class TraceController extends Controller<States> {
       deserializeAppStatePhase2(globals.restoreAppStateAfterTraceLoad);
       globals.restoreAppStateAfterTraceLoad = undefined;
     }
+
     return engineMode;
   }
 

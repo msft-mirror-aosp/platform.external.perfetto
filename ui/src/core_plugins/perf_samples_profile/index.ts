@@ -26,7 +26,7 @@ import {
   profileType,
 } from '../../frontend/legacy_flamegraph_panel';
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
-import {NUM} from '../../trace_processor/query_result';
+import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {
   LegacySelection,
   PerfSamplesSelection,
@@ -45,6 +45,7 @@ import {
   ProcessPerfSamplesProfileTrack,
   ThreadPerfSamplesProfileTrack,
 } from './perf_samples_profile_track';
+import {getThreadUriPrefix} from '../../public/utils';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
@@ -61,10 +62,12 @@ class PerfSamplesProfilePlugin implements Plugin {
     for (const it = pResult.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
       ctx.registerTrack({
-        uri: `perfetto.PerfSamplesProfile#Process${upid}`,
-        displayName: `Process Callstacks`,
-        kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
-        upid,
+        uri: `/process_${upid}/perf_samples_profile`,
+        title: `Process Callstacks`,
+        tags: {
+          kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
+          upid,
+        },
         trackFactory: ({trackKey}) =>
           new ProcessPerfSamplesProfileTrack(
             {
@@ -76,23 +79,37 @@ class PerfSamplesProfilePlugin implements Plugin {
       });
     }
     const tResult = await ctx.engine.query(`
-      select distinct utid, tid
+      select distinct
+        utid,
+        tid,
+        thread.name as threadName,
+        upid
       from perf_sample
       join thread using (utid)
       where callsite_id is not null
     `);
     for (
-      const it = tResult.iter({utid: NUM, tid: NUM});
+      const it = tResult.iter({
+        utid: NUM,
+        tid: NUM,
+        threadName: STR_NULL,
+        upid: NUM_NULL,
+      });
       it.valid();
       it.next()
     ) {
-      const utid = it.utid;
-      const tid = it.tid;
+      const {threadName, utid, tid, upid} = it;
+      const displayName =
+        threadName === null
+          ? `Thread Callstacks ${tid}`
+          : `${threadName} Callstacks ${tid}`;
       ctx.registerTrack({
-        uri: `perfetto.PerfSamplesProfile#Thread${utid}`,
-        displayName: `Thread Callstacks ${tid}`,
-        kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
-        utid,
+        uri: `${getThreadUriPrefix(upid, utid)}_perf_samples_profile`,
+        title: displayName,
+        tags: {
+          kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
+          utid,
+        },
         trackFactory: ({trackKey}) =>
           new ThreadPerfSamplesProfileTrack(
             {

@@ -32,13 +32,15 @@ class CpuSlices implements Plugin {
 
     for (const cpu of cpus) {
       const size = cpuToSize.get(cpu);
-      const uri = `perfetto.CpuSlices#cpu${cpu}`;
+      const uri = `/sched_cpu${cpu}`;
       const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
       ctx.registerTrack({
         uri,
-        displayName: name,
-        kind: CPU_SLICE_TRACK_KIND,
-        cpu,
+        title: name,
+        tags: {
+          kind: CPU_SLICE_TRACK_KIND,
+          cpu,
+        },
         trackFactory: ({trackKey}) => {
           return new CpuSliceTrack(ctx.engine, trackKey, cpu);
         },

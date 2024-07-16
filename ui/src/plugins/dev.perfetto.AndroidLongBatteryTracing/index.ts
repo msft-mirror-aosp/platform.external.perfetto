@@ -1162,9 +1162,16 @@ class AndroidLongBatteryTracing implements Plugin {
       columns: {ts: 'ts', dur: 'dur', name: 'name'},
       argColumns: columns,
     };
+
+    let uri;
+    if (groupName) {
+      uri = `/${groupName}/long_battery_tracing_${name}`;
+    } else {
+      uri = `/long_battery_tracing_${name}`;
+    }
     ctx.registerStaticTrack({
-      uri: `dev.perfetto.AndroidLongBatteryTracing#${name}`,
-      displayName: name,
+      uri,
+      title: name,
       trackFactory: (trackCtx) => {
         return new SimpleSliceTrack(ctx.engine, trackCtx, config);
       },
@@ -1187,9 +1194,17 @@ class AndroidLongBatteryTracing implements Plugin {
       columns: {ts: 'ts', value: 'value'},
       options,
     };
+
+    let uri;
+    if (groupName) {
+      uri = `/${groupName}/long_battery_tracing_${name}`;
+    } else {
+      uri = `/long_battery_tracing_${name}`;
+    }
+
     ctx.registerStaticTrack({
-      uri: `dev.perfetto.AndroidLongBatteryTracing#${name}`,
-      displayName: name,
+      uri,
+      title: name,
       trackFactory: (trackCtx) => {
         return new SimpleCounterTrack(ctx.engine, trackCtx, config);
       },
