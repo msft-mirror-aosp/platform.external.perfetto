@@ -31,16 +31,13 @@ const LABEL_FONT_STYLE = '12px Roboto Mono';
 const NODE_HEIGHT = 20;
 const MIN_PIXEL_DISPLAYED = 3;
 const FILTER_COMMON_TEXT = `
-- "Hide Frame: foo" or "HF: foo" to hide all frames containing "foo"
-- "Show Stack: foo" or "SS: foo" to show only stacks containing "foo"
+- "Show Stack: foo" or "SS: foo" or "foo" to show only stacks containing "foo"
 - "Hide Stack: foo" or "HS: foo" to hide all stacks containing "foo"
-Frame filters are evaluated before stack filters.
+- "Show From Frame: foo" or "SFF: foo" to show frames containing "foo" and all descendants
+- "Hide Frame: foo" or "HF: foo" to hide all frames containing "foo"
 `;
 const FILTER_EMPTY_TEXT = `
 Available filters:${FILTER_COMMON_TEXT}
-`;
-const FILTER_INVALID_TEXT = `
-Invalid filter. Please use the following options:${FILTER_COMMON_TEXT}
 `;
 const LABEL_PADDING_PX = 5;
 const LABEL_MIN_WIDTH_FOR_TEXT_PX = 5;
@@ -96,6 +93,7 @@ export interface FlamegraphQueryData {
 export interface FlamegraphFilters {
   readonly showStack: ReadonlyArray<string>;
   readonly hideStack: ReadonlyArray<string>;
+  readonly showFromFrame: ReadonlyArray<string>;
   readonly hideFrame: ReadonlyArray<string>;
 }
 
@@ -153,7 +151,6 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
   private rawFilterText: string = '';
   private rawFilters: ReadonlyArray<string> = [];
   private filterFocus: boolean = false;
-  private filterChangeFail: boolean = false;
 
   private dataChangeMonitor = new Monitor([() => this.attrs.data]);
   private zoomRegion?: ZoomRegion;
@@ -475,18 +472,12 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
             value: this.rawFilterText,
             onChange: (value: string) => {
               self.rawFilterText = value;
-              self.filterChangeFail = false;
               scheduleFullRedraw();
             },
             onTagAdd: (tag: string) => {
-              const filter = normalizeFilter(tag);
-              if (filter === undefined) {
-                self.filterChangeFail = true;
-              } else {
-                self.rawFilters = [...self.rawFilters, filter];
-                self.rawFilterText = '';
-                self.attrs.onFiltersChanged(computeFilters(self.rawFilters));
-              }
+              self.rawFilters = [...self.rawFilters, normalizeFilter(tag)];
+              self.rawFilterText = '';
+              self.attrs.onFiltersChanged(computeFilters(self.rawFilters));
               scheduleFullRedraw();
             },
             onTagRemove(index: number) {
@@ -494,31 +485,20 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
               filters.splice(index, 1);
               self.rawFilters = filters;
               self.attrs.onFiltersChanged(computeFilters(self.rawFilters));
-              self.filterChangeFail = false;
               scheduleFullRedraw();
             },
             onfocus() {
               self.filterFocus = true;
-              self.filterChangeFail = false;
             },
             onblur() {
               self.filterFocus = false;
-              self.filterChangeFail = false;
             },
             placeholder: 'Add filter...',
           }),
-          isOpen:
-            self.filterFocus &&
-            (this.rawFilterText.length === 0 || self.filterChangeFail),
+          isOpen: self.filterFocus && this.rawFilterText.length === 0,
           position: PopupPosition.Bottom,
         },
-        m(
-          '.pf-flamegraph-filter-bar-popup-content',
-          (self.rawFilterText === ''
-            ? FILTER_EMPTY_TEXT
-            : FILTER_INVALID_TEXT
-          ).trim(),
-        ),
+        m('.pf-flamegraph-filter-bar-popup-content', FILTER_EMPTY_TEXT.trim()),
       ),
     );
   }
@@ -595,6 +575,15 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
           label: 'Hide Frame',
           onclick: () => {
             this.rawFilters = [...this.rawFilters, `Hide Frame: ${name}`];
+            this.attrs.onFiltersChanged(computeFilters(this.rawFilters));
+            this.tooltipPos = undefined;
+            scheduleFullRedraw();
+          },
+        }),
+        m(Button, {
+          label: 'Show From Frame',
+          onclick: () => {
+            this.rawFilters = [...this.rawFilters, `Show From Frame: ${name}`];
             this.attrs.onFiltersChanged(computeFilters(this.rawFilters));
             this.tooltipPos = undefined;
             scheduleFullRedraw();
@@ -742,32 +731,43 @@ function displaySize(totalSize: number, unit: string): string {
   return `${resultString} ${units[unitsIndex][0]}${unit}`;
 }
 
-function normalizeFilter(filter: string) {
-  const lower = filter.toLowerCase();
-  if (lower.startsWith('ss: ') || lower.startsWith('show stack: ')) {
+function normalizeFilter(filter: string): string {
+  const lwr = filter.toLowerCase();
+  if (lwr.startsWith('ss: ') || lwr.startsWith('show stack: ')) {
     return 'Show Stack: ' + filter.split(': ', 2)[1];
-  } else if (lower.startsWith('hs: ') || lower.startsWith('hide stack: ')) {
+  } else if (lwr.startsWith('hs: ') || lwr.startsWith('hide stack: ')) {
     return 'Hide Stack: ' + filter.split(': ', 2)[1];
-  } else if (lower.startsWith('hf: ') || lower.startsWith('hide frame: ')) {
+  } else if (lwr.startsWith('sff: ') || lwr.startsWith('show from frame: ')) {
+    return 'Show From Frame: ' + filter.split(': ', 2)[1];
+  } else if (lwr.startsWith('hf: ') || lwr.startsWith('hide frame: ')) {
     return 'Hide Frame: ' + filter.split(': ', 2)[1];
   }
-  return undefined;
+  return 'Show Stack: ' + filter;
 }
 
 function computeFilters(rawFilters: readonly string[]): FlamegraphFilters {
   const showStack = rawFilters
     .filter((x) => x.startsWith('Show Stack: '))
     .map((x) => x.split(': ', 2)[1]);
-
   assertTrue(
     showStack.length < 32,
     'More than 32 show stack filters is not supported',
   );
+
+  const showFromFrame = rawFilters
+    .filter((x) => x.startsWith('Show From Frame: '))
+    .map((x) => x.split(': ', 2)[1]);
+  assertTrue(
+    showFromFrame.length < 32,
+    'More than 32 show from frame filters is not supported',
+  );
+
   return {
     showStack,
     hideStack: rawFilters
       .filter((x) => x.startsWith('Hide Stack: '))
       .map((x) => x.split(': ', 2)[1]),
+    showFromFrame,
     hideFrame: rawFilters
       .filter((x) => x.startsWith('Hide Frame: '))
       .map((x) => x.split(': ', 2)[1]),
