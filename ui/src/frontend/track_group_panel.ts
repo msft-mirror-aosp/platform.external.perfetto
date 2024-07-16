@@ -42,12 +42,13 @@ import {PxSpan, TimeScale} from './time_scale';
 import {exists} from '../base/utils';
 
 interface Attrs {
-  groupKey: string;
-  title: string;
-  collapsed: boolean;
-  trackFSM?: TrackCacheEntry;
-  tags?: TrackTags;
-  subtitle?: string;
+  readonly groupKey: string;
+  readonly title: string;
+  readonly collapsed: boolean;
+  readonly trackFSM?: TrackCacheEntry;
+  readonly tags?: TrackTags;
+  readonly subtitle?: string;
+  readonly chips?: ReadonlyArray<string>;
 }
 
 export class TrackGroupPanel implements Panel {
@@ -60,12 +61,7 @@ export class TrackGroupPanel implements Panel {
   }
 
   render(): m.Children {
-    const {groupKey, title, subtitle, tags, collapsed, trackFSM} = this.attrs;
-
-    let name = title;
-    if (name[0] === '/') {
-      name = StripPathFromExecutable(name);
-    }
+    const {groupKey, title, subtitle, chips, collapsed, trackFSM} = this.attrs;
 
     // The shell should be highlighted if the current search result is inside
     // this track group.
@@ -126,7 +122,7 @@ export class TrackGroupPanel implements Panel {
         ),
         m(
           '.title-wrapper',
-          m('h1.track-title', {title: name}, name, renderChips(tags)),
+          m('h1.track-title', {title}, title, chips && renderChips(chips)),
           collapsed && exists(subtitle) && m('h2.track-subtitle', subtitle),
         ),
         m(
@@ -234,8 +230,4 @@ export class TrackGroupPanel implements Panel {
 
     ctx.restore();
   }
-}
-
-function StripPathFromExecutable(path: string) {
-  return path.split('/').slice(-1)[0];
 }
