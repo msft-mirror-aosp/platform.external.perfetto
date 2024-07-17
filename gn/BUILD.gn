@@ -291,7 +291,7 @@ config("protobuf_gen_config") {
     "GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER",
   ]
   cflags = []
-  if (!is_clang && !is_win) {
+  if (is_gcc) {
     cflags += [ "-Wno-deprecated-declarations" ]
   }
   if (is_clang && is_win) {
@@ -371,6 +371,13 @@ if (enable_perfetto_trace_processor_json) {
     } else {
       public_deps = [ "//third_party/jsoncpp:jsoncpp" ]
     }
+  }
+}
+
+if (enable_perfetto_grpc) {
+  group("grpc") {
+    public_configs = [ "//buildtools:grpc_public_config" ]
+    public_deps = [ "//buildtools/grpc:grpc++" ]
   }
 }
 

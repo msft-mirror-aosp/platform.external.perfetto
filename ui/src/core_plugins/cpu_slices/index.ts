@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
+import {CPU_SLICE_TRACK_KIND} from '../../public';
 import {SliceDetailsPanel} from '../../frontend/slice_details_panel';
 import {
   Engine,
@@ -22,8 +25,6 @@ import {
 import {NUM, STR_NULL} from '../../trace_processor/query_result';
 import {CpuSliceTrack} from './cpu_slice_track';
 
-export const CPU_SLICE_TRACK_KIND = 'CpuSliceTrack';
-
 class CpuSlices implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const cpus = ctx.trace.cpus;
@@ -31,13 +32,15 @@ class CpuSlices implements Plugin {
 
     for (const cpu of cpus) {
       const size = cpuToSize.get(cpu);
-      const uri = `perfetto.CpuSlices#cpu${cpu}`;
+      const uri = `/sched_cpu${cpu}`;
       const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
       ctx.registerTrack({
         uri,
-        displayName: name,
-        kind: CPU_SLICE_TRACK_KIND,
-        cpu,
+        title: name,
+        tags: {
+          kind: CPU_SLICE_TRACK_KIND,
+          cpu,
+        },
         trackFactory: ({trackKey}) => {
           return new CpuSliceTrack(ctx.engine, trackKey, cpu);
         },
@@ -49,6 +52,7 @@ class CpuSlices implements Plugin {
         if (sel.kind === 'SCHED_SLICE') {
           return m(SliceDetailsPanel);
         }
+        return undefined;
       },
     });
   }
@@ -56,10 +60,10 @@ class CpuSlices implements Plugin {
   async guessCpuSizes(engine: Engine): Promise<Map<number, string>> {
     const cpuToSize = new Map<number, string>();
     await engine.query(`
-      include perfetto module cpu.size;
+      include perfetto module viz.core_type;
     `);
     const result = await engine.query(`
-      select cpu, cpu_guess_core_type(cpu) as size
+      select cpu, _guess_core_type(cpu) as size
       from cpu_counter_track
       join _counter_track_summary using (id);
     `);

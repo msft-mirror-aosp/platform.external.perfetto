@@ -73,6 +73,10 @@ message AndroidBlockingCall {
     optional int64 max_dur_ns = 7;
     // Minimal duration within the CUJ in nanoseconds
     optional int64 min_dur_ns = 8;
+    // Avg duration within the CUJ
+    optional int64 avg_dur_ms = 9;
+    // Avg duration within the CUJ in nanoseconds
+    optional int64 avg_dur_ns = 10;
 }
 
 // End of protos/perfetto/metrics/android/android_blocking_call.proto
@@ -911,6 +915,13 @@ message AndroidDisplayMetrics {
 
 // dma-buf heap memory stats on Android.
 message AndroidDmaHeapMetric {
+  message ProcessStats {
+    // process that either directly or indirectly allocated the buffers
+    optional string process_name = 1;
+    // Bytes allocated but not freed during this trace
+    optional int32 delta_bytes = 2;
+  }
+
     optional double avg_size_bytes = 1;
     optional double min_size_bytes = 2;
     optional double max_size_bytes = 3;
@@ -918,6 +929,10 @@ message AndroidDmaHeapMetric {
     // Total allocation size.
     // Essentially the sum of positive allocs.
     optional double total_alloc_size_bytes = 4;
+
+    // Total delta size (bytes allocated but not freed during the trace)
+    optional int32 total_delta_bytes = 5;
+    repeated ProcessStats process_stats = 6;
 }
 
 // End of protos/perfetto/metrics/android/dma_heap_metric.proto
@@ -2400,6 +2415,7 @@ message AndroidStartupMetric {
   }
 
   // Contains information for slow startup causes.
+  // Next id: 11.
   message SlowStartReason {
     // Points to reason description and solution.
     enum ReasonId {
@@ -2433,6 +2449,15 @@ message AndroidStartupMetric {
 
     // Brief description for human readability.
     optional string reason = 2;
+
+    // Severity level for a reason.
+    enum SeverityLevel {
+      SEVERITY_UNSPECIFIED = 0;
+      ERROR = 1;
+      WARNING = 2;
+      INFO = 3;
+    }
+    optional SeverityLevel severity = 10;
 
     // Expected value (inherited from threshold definition).
     optional ThresholdValue expected_value = 3;
@@ -2496,6 +2521,8 @@ message AndroidStartupMetric {
     optional int64 end_timestamp = 2;
 
     optional uint32 slice_id = 3;
+
+    optional string slice_name = 4;
   }
 
   // Contains information for a section of a thread.
@@ -2505,6 +2532,8 @@ message AndroidStartupMetric {
     optional int64 end_timestamp = 2;
 
     optional uint32 thread_utid = 3;
+
+    optional string thread_name = 4;
   }
 
   // Next id: 25
@@ -2808,6 +2837,27 @@ message UnsymbolizedFrames {
 
 // End of protos/perfetto/metrics/android/unsymbolized_frames.proto
 
+// Begin of protos/perfetto/metrics/android/wattson_app_startup.proto
+
+message AndroidWattsonTimePeriodMetric {
+  optional int32 metric_version = 1;
+  repeated AndroidWattsonEstimateInfo period_info = 2;
+}
+
+message AndroidWattsonEstimateInfo {
+  optional int32 period_id = 1;
+  optional int64 period_dur = 2;
+  repeated AndroidWattsonRailEstimate rail = 3;
+}
+
+message AndroidWattsonRailEstimate {
+  optional string name = 1;
+  optional float estimate_mw = 2;
+  repeated AndroidWattsonRailEstimate rail = 3;
+}
+
+// End of protos/perfetto/metrics/android/wattson_app_startup.proto
+
 // Begin of protos/perfetto/metrics/metrics.proto
 
 // Trace processor metadata
@@ -2855,7 +2905,7 @@ message TraceAnalysisStats {
 
 // Root message for all Perfetto-based metrics.
 //
-// Next id: 69
+// Next id: 70
 message TraceMetrics {
   reserved 4, 10, 13, 14, 16, 19;
 
@@ -3049,6 +3099,9 @@ message TraceMetrics {
 
   // Android Broadcasts aggregated metrics
   optional AndroidBroadcastsMetric android_broadcasts = 68;
+
+  // Android Wattson app startup metrics.
+  optional AndroidWattsonTimePeriodMetric wattson_app_startup = 69;
 
   // Android
   // Demo extensions.

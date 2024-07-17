@@ -20,7 +20,12 @@ OUT_PATH="out/dist"
 
 export PYTHONUNBUFFERED=1
 
-tools/install-build-deps $INSTALL_BUILD_DEPS_ARGS
+# Avoids re-downloading test data files over and over from network.
+# tools/test_data looks at the PERFETTO_TEST_DATA_CACHE env var.
+export PERFETTO_TEST_DATA_CACHE=/ci/cache/test_data
+mkdir -p $PERFETTO_TEST_DATA_CACHE
+
+tools/install-build-deps $PERFETTO_INSTALL_BUILD_DEPS_ARGS
 
 # Assumes Linux. Windows should use /win/clang instead.
 if [[ -e buildtools/linux64/clang/bin/llvm-symbolizer ]]; then
@@ -36,3 +41,9 @@ rm -rf out/tmp.protoc
 # Performs checks on SQL files.
 tools/check_sql_modules.py
 tools/check_sql_metrics.py
+
+if !(git diff --name-only HEAD^1 HEAD | egrep -qv '^(ui|docs|infra)/'); then
+export UI_DOCS_INFRA_ONLY_CHANGE=1
+else
+export UI_DOCS_INFRA_ONLY_CHANGE=0
+fi
