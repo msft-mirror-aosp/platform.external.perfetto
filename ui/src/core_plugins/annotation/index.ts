@@ -49,11 +49,11 @@ class AnnotationPlugin implements Plugin {
 
       ctx.registerTrack({
         uri: `/annotation_${id}`,
-        displayName: name,
-        kind: THREAD_SLICE_TRACK_KIND,
+        title: name,
         tags: {
-          metric: true,
+          kind: THREAD_SLICE_TRACK_KIND,
         },
+        chips: ['metric'],
         trackFactory: ({trackKey}) => {
           return new ThreadSliceTrack(
             {
@@ -92,11 +92,11 @@ class AnnotationPlugin implements Plugin {
 
       ctx.registerTrack({
         uri: `/annotation_counter_${trackId}`,
-        displayName: name,
-        kind: COUNTER_TRACK_KIND,
+        title: name,
         tags: {
-          metric: true,
+          kind: COUNTER_TRACK_KIND,
         },
+        chips: ['metric'],
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,

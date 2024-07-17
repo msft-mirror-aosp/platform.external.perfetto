@@ -133,7 +133,8 @@ SystemProbesParser::SystemProbesParser(TraceProcessorContext* context)
       cpu_times_softirq_ns_id_(
           context->storage->InternString("cpu.times.softirq_ns")),
       oom_score_adj_id_(context->storage->InternString("oom_score_adj")),
-      cpu_freq_id_(context_->storage->InternString("cpufreq")) {
+      cpu_freq_id_(context_->storage->InternString("cpufreq")),
+      thermal_unit_id_(context->storage->InternString("C")) {
   for (const auto& name : BuildMeminfoCounterNames()) {
     meminfo_strs_id_.emplace_back(context->storage->InternString(name));
   }
@@ -461,6 +462,15 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     context_->event_tracker->PushCounter(
         ts, static_cast<double>(psi.total_ns()), track);
   }
+
+  for (auto it = sys_stats.thermal_zone(); it; ++it) {
+    protos::pbzero::SysStats::ThermalZone::Decoder thermal(*it);
+    StringId track_name = context_->storage->InternString(thermal.type());
+    TrackId track = context_->track_tracker->InternGlobalCounterTrack(
+        TrackTracker::Group::kThermals, track_name, {}, thermal_unit_id_);
+    context_->event_tracker->PushCounter(
+        ts, static_cast<double>(thermal.temp()), track);
+  }
 }
 
 void SystemProbesParser::ParseProcessTree(ConstBytes blob) {
@@ -740,6 +750,14 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
         metadata::android_soc_model,
         Variadic::String(
             context_->storage->InternString(packet.android_soc_model())));
+  }
+
+  if (packet.has_android_hardware_revision()) {
+    context_->metadata_tracker->SetMetadata(
+        metadata::android_hardware_revision,
+        Variadic::String(
+            context_->storage->InternString(
+                packet.android_hardware_revision())));
   }
 
   page_size_ = packet.page_size();

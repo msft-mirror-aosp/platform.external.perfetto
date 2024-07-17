@@ -98,11 +98,14 @@ class ProcessSummaryPlugin implements Plugin {
       const tid = it.tid;
       const hasSched = Boolean(it.hasSched);
       const isDebuggable = Boolean(it.isDebuggable);
-      const labels = it.chromeProcessLabels.split(',');
+      const subtitle = it.chromeProcessLabels;
 
       // Group by upid if present else by utid.
       const pidForColor = pid ?? tid ?? upid ?? utid ?? 0;
       const uri = getThreadOrProcUri(upid, utid);
+
+      const chips: string[] = [];
+      isDebuggable && chips.push('debuggable');
 
       if (hasSched) {
         const config: ProcessSchedulingTrackConfig = {
@@ -113,15 +116,15 @@ class ProcessSummaryPlugin implements Plugin {
 
         ctx.registerTrack({
           uri,
-          displayName: `${upid === null ? tid : pid} schedule`,
-          kind: PROCESS_SCHEDULING_TRACK_KIND,
+          title: `${upid === null ? tid : pid} schedule`,
           tags: {
-            debuggable: isDebuggable,
+            kind: PROCESS_SCHEDULING_TRACK_KIND,
           },
+          chips,
           trackFactory: () => {
             return new ProcessSchedulingTrack(ctx.engine, config, cpuCount);
           },
-          labels,
+          subtitle,
         });
       } else {
         const config: ProcessSummaryTrackConfig = {
@@ -132,13 +135,13 @@ class ProcessSummaryPlugin implements Plugin {
 
         ctx.registerTrack({
           uri,
-          displayName: `${upid === null ? tid : pid} summary`,
-          kind: PROCESS_SUMMARY_TRACK,
+          title: `${upid === null ? tid : pid} summary`,
           tags: {
-            debuggable: isDebuggable,
+            kind: PROCESS_SUMMARY_TRACK,
           },
+          chips,
           trackFactory: () => new ProcessSummaryTrack(ctx.engine, config),
-          labels,
+          subtitle,
         });
       }
     }
@@ -191,8 +194,10 @@ class ProcessSummaryPlugin implements Plugin {
 
     ctx.registerTrack({
       uri: '/kernel',
-      displayName: `Kernel thread summary`,
-      kind: PROCESS_SUMMARY_TRACK,
+      title: `Kernel thread summary`,
+      tags: {
+        kind: PROCESS_SUMMARY_TRACK,
+      },
       trackFactory: () => new ProcessSummaryTrack(ctx.engine, config),
     });
   }

@@ -39,14 +39,16 @@ import {Button} from '../widgets/button';
 import {TrackRenderContext} from '../public/tracks';
 import {calculateResolution} from '../common/resolution';
 import {PxSpan, TimeScale} from './time_scale';
+import {exists} from '../base/utils';
 
 interface Attrs {
-  groupKey: string;
-  title: string;
-  collapsed: boolean;
-  trackFSM?: TrackCacheEntry;
-  tags?: TrackTags;
-  labels?: string[];
+  readonly groupKey: string;
+  readonly title: string;
+  readonly collapsed: boolean;
+  readonly trackFSM?: TrackCacheEntry;
+  readonly tags?: TrackTags;
+  readonly subtitle?: string;
+  readonly chips?: ReadonlyArray<string>;
 }
 
 export class TrackGroupPanel implements Panel {
@@ -59,12 +61,7 @@ export class TrackGroupPanel implements Panel {
   }
 
   render(): m.Children {
-    const {groupKey, title, labels, tags, collapsed, trackFSM} = this.attrs;
-
-    let name = title;
-    if (name[0] === '/') {
-      name = StripPathFromExecutable(name);
-    }
+    const {groupKey, title, subtitle, chips, collapsed, trackFSM} = this.attrs;
 
     // The shell should be highlighted if the current search result is inside
     // this track group.
@@ -96,11 +93,6 @@ export class TrackGroupPanel implements Panel {
       }
     }
 
-    let child = null;
-    if (labels && labels.length > 0) {
-      child = labels.join(', ');
-    }
-
     const error = trackFSM?.getError();
 
     return m(
@@ -130,8 +122,8 @@ export class TrackGroupPanel implements Panel {
         ),
         m(
           '.title-wrapper',
-          m('h1.track-title', {title: name}, name, renderChips(tags)),
-          collapsed && child !== null ? m('h2.track-subtitle', child) : null,
+          m('h1.track-title', {title}, title, chips && renderChips(chips)),
+          collapsed && exists(subtitle) && m('h2.track-subtitle', subtitle),
         ),
         m(
           '.track-buttons',
@@ -160,7 +152,7 @@ export class TrackGroupPanel implements Panel {
               hasError: Boolean(trackFSM.getError()),
               height: this.attrs.trackFSM?.track.getHeight(),
             },
-            !collapsed && child !== null ? m('span', child) : null,
+            !collapsed && subtitle !== null ? m('span', subtitle) : null,
           )
         : null,
     );
@@ -238,8 +230,4 @@ export class TrackGroupPanel implements Panel {
 
     ctx.restore();
   }
-}
-
-function StripPathFromExecutable(path: string) {
-  return path.split('/').slice(-1)[0];
 }

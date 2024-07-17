@@ -175,16 +175,73 @@ class Simpleperf(TestSuite):
         289003,"trace_processor"
         '''))
 
-  # Samples with no CPU are currently ignored (b/352257666)
+  # Counters are not updated for samples with no CPU (b/352257666)
+  def test_perf_with_no_cpu_in_sample_no_counters(self):
+    return DiffTestBlueprint(
+        trace=DataPath('simpleperf/perf_with_synthetic_events.data'),
+        query='''
+        SELECT
+          (
+            SELECT value AS sample_count
+            FROM stats
+            WHERE name = 'perf_counter_skipped_because_no_cpu'
+          ) AS counter_skipped,
+          (SELECT COUNT(*) FROM perf_sample) AS sample_count
+        ''',
+        out=Csv('''
+        "counter_skipped","sample_count"
+        9126,9126
+        '''))
+
   def test_perf_with_no_cpu_in_sample(self):
     return DiffTestBlueprint(
         trace=DataPath('simpleperf/perf_with_synthetic_events.data'),
         query='''
-        SELECT value AS sample_count
-        FROM stats
-        WHERE name = 'perf_samples_skipped'
+        SELECT cpu, COUNT(*) AS count
+        FROM perf_sample
+        WHERE callsite_id IS NOT NULL
+        GROUP BY cpu ORDER BY cpu
         ''',
         out=Csv('''
-        "sample_count"
-        9126
+        "cpu","count"
+        "[NULL]",9126
+        '''))
+
+  def test_linux_perf_unwinding(self):
+    return DiffTestBlueprint(
+        trace=DataPath('simpleperf/linux_perf_with_symbols.zip'),
+        query=Path('stacks_test.sql'),
+        out=Csv('''
+        "name"
+        "main,A"
+        "main,A,B"
+        "main,A,B,C"
+        "main,A,B,C,D"
+        "main,A,B,C,D,E"
+        "main,A,B,C,E"
+        "main,A,B,D"
+        "main,A,B,D,E"
+        "main,A,B,E"
+        "main,A,C"
+        "main,A,C,D"
+        "main,A,C,D,E"
+        "main,A,C,E"
+        "main,A,D"
+        "main,A,D,E"
+        "main,A,E"
+        "main,B"
+        "main,B,C"
+        "main,B,C,D"
+        "main,B,C,D,E"
+        "main,B,C,E"
+        "main,B,D"
+        "main,B,D,E"
+        "main,B,E"
+        "main,C"
+        "main,C,D"
+        "main,C,D,E"
+        "main,C,E"
+        "main,D"
+        "main,D,E"
+        "main,E"
         '''))
