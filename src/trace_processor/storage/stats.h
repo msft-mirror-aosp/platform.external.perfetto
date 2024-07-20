@@ -271,7 +271,9 @@ namespace stats {
   F(perf_unknown_record_type,             kIndexed, kInfo,     kAnalysis, ""), \
   F(perf_record_skipped,                  kSingle,  kError,    kAnalysis, ""), \
   F(perf_samples_skipped,                 kSingle,  kError,    kAnalysis, ""), \
+  F(perf_counter_skipped_because_no_cpu,  kSingle,  kError,    kAnalysis, ""), \
   F(perf_features_skipped,                kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_samples_cpu_mode_unknown,        kSingle,  kError,    kAnalysis, ""), \
   F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,    ""), \
   F(perf_dummy_mapping_used,              kSingle,  kInfo,     kAnalysis, ""), \
   F(perf_invalid_event_id,                kSingle,  kError,    kTrace,    ""), \
@@ -361,6 +363,10 @@ namespace stats {
   F(winscope_viewcapture_missing_interned_string_parse_errors,                 \
                                           kSingle,  kInfo,     kAnalysis,      \
       "Failed to find interned ViewCapture string."),                          \
+  F(winscope_windowmanager_parse_errors, kSingle,  kInfo,     kAnalysis,       \
+      "WindowManager state packet has unknown fields, which results "          \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
   F(jit_unknown_frame,                    kSingle,  kDataLoss, kTrace,         \
       "Indicates that we were unable to determine the function for a frame in "\
       "a jitted memory region"),                                               \
