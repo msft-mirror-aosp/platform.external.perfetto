@@ -222,6 +222,7 @@ perfetto_cc_library(
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":src_trace_processor_importers_android_bugreport_android_log_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -354,6 +355,7 @@ perfetto_cc_library(
                ":src_base_base",
                ":src_base_version",
                ":src_trace_processor_containers_containers",
+               ":src_trace_processor_importers_proto_gen_cc_android_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_chrome_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_config_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_statsd_atoms_descriptor",
@@ -1469,10 +1471,25 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_importers_android_bugreport_android_bugreport",
     srcs = [
-        "src/trace_processor/importers/android_bugreport/android_bugreport_parser.cc",
-        "src/trace_processor/importers/android_bugreport/android_bugreport_parser.h",
-        "src/trace_processor/importers/android_bugreport/android_log_parser.cc",
-        "src/trace_processor/importers/android_bugreport/android_log_parser.h",
+        "src/trace_processor/importers/android_bugreport/android_bugreport_reader.cc",
+        "src/trace_processor/importers/android_bugreport/android_bugreport_reader.h",
+        "src/trace_processor/importers/android_bugreport/android_dumpstate_reader.cc",
+        "src/trace_processor/importers/android_bugreport/android_dumpstate_reader.h",
+        "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.cc",
+        "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.h",
+        "src/trace_processor/importers/android_bugreport/android_log_reader.cc",
+        "src/trace_processor/importers/android_bugreport/android_log_reader.h",
+        "src/trace_processor/importers/android_bugreport/chunked_line_reader.cc",
+        "src/trace_processor/importers/android_bugreport/chunked_line_reader.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/android_bugreport:android_log_event
+perfetto_filegroup(
+    name = "src_trace_processor_importers_android_bugreport_android_log_event",
+    srcs = [
+        "src/trace_processor/importers/android_bugreport/android_log_event.cc",
+        "src/trace_processor/importers/android_bugreport/android_log_event.h",
     ],
 )
 
@@ -1830,6 +1847,12 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/heap_graph_tracker.h",
         "src/trace_processor/importers/proto/metadata_module.cc",
         "src/trace_processor/importers/proto/metadata_module.h",
+        "src/trace_processor/importers/proto/pigweed_detokenizer.cc",
+        "src/trace_processor/importers/proto/pigweed_detokenizer.h",
+        "src/trace_processor/importers/proto/pixel_modem_module.cc",
+        "src/trace_processor/importers/proto/pixel_modem_module.h",
+        "src/trace_processor/importers/proto/pixel_modem_parser.cc",
+        "src/trace_processor/importers/proto/pixel_modem_parser.h",
         "src/trace_processor/importers/proto/statsd_module.cc",
         "src/trace_processor/importers/proto/statsd_module.h",
         "src/trace_processor/importers/proto/string_encoding_utils.cc",
@@ -1848,6 +1871,17 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/v8_tracker.h",
         "src/trace_processor/importers/proto/vulkan_memory_tracker.cc",
         "src/trace_processor/importers/proto/vulkan_memory_tracker.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/proto:gen_cc_android_track_event_descriptor
+perfetto_cc_proto_descriptor(
+    name = "src_trace_processor_importers_proto_gen_cc_android_track_event_descriptor",
+    deps = [
+        ":protos_perfetto_trace_android_android_track_event_descriptor",
+    ],
+    outs = [
+        "src/trace_processor/importers/proto/android_track_event.descriptor.h",
     ],
 )
 
@@ -2158,6 +2192,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/sysui_notif_shade_list_builder_slices.sql",
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
+        "src/trace_processor/metrics/sql/android/wattson_app_startup.sql",
     ],
 )
 
@@ -2577,6 +2612,7 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/android/winscope/inputmethod.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/winscope/viewcapture.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/winscope/windowmanager.sql",
     ],
 )
 
@@ -4158,6 +4194,7 @@ perfetto_proto_library(
         "protos/perfetto/config/android/protolog_config.proto",
         "protos/perfetto/config/android/surfaceflinger_layers_config.proto",
         "protos/perfetto/config/android/surfaceflinger_transactions_config.proto",
+        "protos/perfetto/config/android/windowmanager_config.proto",
     ],
     visibility = [
         PERFETTO_CONFIG.proto_library_visibility,
@@ -4742,6 +4779,7 @@ perfetto_proto_library(
         "protos/perfetto/metrics/android/thread_time_in_state_metric.proto",
         "protos/perfetto/metrics/android/trace_quality.proto",
         "protos/perfetto/metrics/android/unsymbolized_frames.proto",
+        "protos/perfetto/metrics/android/wattson_app_startup.proto",
     ],
     visibility = [
         PERFETTO_CONFIG.proto_library_visibility,
@@ -4855,6 +4893,34 @@ perfetto_proto_library(
     ],
 )
 
+# GN target: //protos/perfetto/trace/android:android_track_event_descriptor
+perfetto_proto_descriptor(
+    name = "protos_perfetto_trace_android_android_track_event_descriptor",
+    deps = [
+        ":protos_perfetto_trace_android_android_track_event_protos",
+    ],
+    outs = [
+        "protos_perfetto_trace_android_android_track_event_descriptor.bin",
+    ],
+)
+
+# GN target: //protos/perfetto/trace/android:android_track_event_source_set
+perfetto_proto_library(
+    name = "protos_perfetto_trace_android_android_track_event_protos",
+    srcs = [
+        "protos/perfetto/trace/android/android_track_event.proto",
+    ],
+    visibility = [
+        PERFETTO_CONFIG.proto_library_visibility,
+    ],
+    deps = [
+        ":protos_perfetto_trace_track_event_protos",
+    ],
+    exports = [
+        ":protos_perfetto_trace_track_event_protos",
+    ],
+)
+
 # GN target: //protos/perfetto/trace/android:source_set
 perfetto_proto_library(
     name = "protos_perfetto_trace_android_protos",
@@ -4919,14 +4985,26 @@ perfetto_proto_library(
     name = "protos_perfetto_trace_android_winscope_extensions_protos",
     srcs = [
         "protos/perfetto/trace/android/android_input_event.proto",
+        "protos/perfetto/trace/android/app/statusbarmanager.proto",
+        "protos/perfetto/trace/android/app/window_configuration.proto",
+        "protos/perfetto/trace/android/content/activityinfo.proto",
+        "protos/perfetto/trace/android/content/configuration.proto",
+        "protos/perfetto/trace/android/content/locale.proto",
         "protos/perfetto/trace/android/graphics/pixelformat.proto",
         "protos/perfetto/trace/android/inputmethodeditor.proto",
         "protos/perfetto/trace/android/inputmethodservice/inputmethodservice.proto",
         "protos/perfetto/trace/android/inputmethodservice/softinputwindow.proto",
+        "protos/perfetto/trace/android/privacy.proto",
+        "protos/perfetto/trace/android/server/animationadapter.proto",
         "protos/perfetto/trace/android/server/inputmethod/inputmethodmanagerservice.proto",
+        "protos/perfetto/trace/android/server/surfaceanimator.proto",
+        "protos/perfetto/trace/android/server/windowcontainerthumbnail.proto",
+        "protos/perfetto/trace/android/server/windowmanagerservice.proto",
         "protos/perfetto/trace/android/typedef.proto",
         "protos/perfetto/trace/android/view/display.proto",
         "protos/perfetto/trace/android/view/displaycutout.proto",
+        "protos/perfetto/trace/android/view/displayinfo.proto",
+        "protos/perfetto/trace/android/view/enums.proto",
         "protos/perfetto/trace/android/view/imefocuscontroller.proto",
         "protos/perfetto/trace/android/view/imeinsetssourceconsumer.proto",
         "protos/perfetto/trace/android/view/inputmethod/editorinfo.proto",
@@ -4938,10 +5016,13 @@ perfetto_proto_library(
         "protos/perfetto/trace/android/view/insetssourceconsumer.proto",
         "protos/perfetto/trace/android/view/insetssourcecontrol.proto",
         "protos/perfetto/trace/android/view/insetsstate.proto",
+        "protos/perfetto/trace/android/view/remote_animation_target.proto",
+        "protos/perfetto/trace/android/view/surface.proto",
         "protos/perfetto/trace/android/view/surfacecontrol.proto",
         "protos/perfetto/trace/android/view/viewrootimpl.proto",
         "protos/perfetto/trace/android/view/windowlayoutparams.proto",
         "protos/perfetto/trace/android/viewcapture.proto",
+        "protos/perfetto/trace/android/windowmanager.proto",
         "protos/perfetto/trace/android/winscope_extensions_impl.proto",
     ],
     visibility = [
@@ -6104,6 +6185,7 @@ perfetto_cc_library(
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":src_trace_processor_importers_android_bugreport_android_log_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -6235,6 +6317,7 @@ perfetto_cc_library(
                ":protozero",
                ":src_base_base",
                ":src_trace_processor_containers_containers",
+               ":src_trace_processor_importers_proto_gen_cc_android_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_chrome_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_config_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_statsd_atoms_descriptor",
@@ -6285,6 +6368,7 @@ perfetto_cc_binary(
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":src_trace_processor_importers_android_bugreport_android_log_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -6407,6 +6491,7 @@ perfetto_cc_binary(
                ":src_base_http_http",
                ":src_base_version",
                ":src_trace_processor_containers_containers",
+               ":src_trace_processor_importers_proto_gen_cc_android_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_chrome_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_config_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_statsd_atoms_descriptor",
@@ -6526,6 +6611,7 @@ perfetto_cc_binary(
         ":src_trace_processor_db_minimal",
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
+        ":src_trace_processor_importers_android_bugreport_android_log_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -6647,6 +6733,7 @@ perfetto_cc_binary(
                ":src_base_base",
                ":src_base_version",
                ":src_trace_processor_containers_containers",
+               ":src_trace_processor_importers_proto_gen_cc_android_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_chrome_track_event_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_config_descriptor",
                ":src_trace_processor_importers_proto_gen_cc_statsd_atoms_descriptor",

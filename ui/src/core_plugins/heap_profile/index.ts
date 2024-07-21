@@ -70,10 +70,12 @@ class HeapProfilePlugin implements Plugin {
     for (const it = result.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
       ctx.registerTrack({
-        uri: `perfetto.HeapProfile#${upid}`,
-        displayName: 'Heap Profile',
-        kind: HEAP_PROFILE_TRACK_KIND,
-        upid,
+        uri: `/process_${upid}/heap_profile`,
+        title: 'Heap Profile',
+        tags: {
+          kind: HEAP_PROFILE_TRACK_KIND,
+          upid,
+        },
         trackFactory: ({trackKey}) => {
           return new HeapProfileTrack(
             {

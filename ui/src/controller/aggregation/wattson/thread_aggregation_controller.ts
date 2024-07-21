@@ -17,28 +17,24 @@ import {ColumnDef} from '../../../common/aggregation_data';
 import {Area, Sorting} from '../../../common/state';
 import {globals} from '../../../frontend/globals';
 import {Engine} from '../../../trace_processor/engine';
-import {NUM} from '../../../trace_processor/query_result';
 import {CPU_SLICE_TRACK_KIND} from '../../../core/track_kinds';
 import {AggregationController} from '../aggregation_controller';
+import {hasWattsonSupport} from '../../../core/trace_config_utils';
 
 export class WattsonThreadAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     await engine.query(`drop view if exists ${this.kind};`);
 
     // Short circuit if Wattson is not supported for this Perfetto trace
-    const deviceInfo = await engine.query(`
-        INCLUDE PERFETTO MODULE wattson.device_infos;
-        SELECT COUNT(*) as isValid FROM _wattson_device
-    `);
-    if (deviceInfo.firstRow({isValid: NUM}).isValid === 0) return false;
+    if (!(await hasWattsonSupport(engine))) return false;
 
     const selectedCpus: number[] = [];
     for (const trackKey of area.tracks) {
       const track = globals.state.tracks[trackKey];
       if (track?.uri) {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.kind === CPU_SLICE_TRACK_KIND) {
-          exists(trackInfo.cpu) && selectedCpus.push(trackInfo.cpu);
+        if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
+          exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
         }
       }
     }
@@ -171,6 +167,7 @@ export class WattsonThreadAggregationController extends AggregationController {
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'avg_mw',
+        sum: true,
       },
       {
         title: 'Total estimated energy (mWs)',

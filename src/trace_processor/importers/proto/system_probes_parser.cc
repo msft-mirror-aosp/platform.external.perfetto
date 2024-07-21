@@ -15,6 +15,7 @@
  */
 
 #include "src/trace_processor/importers/proto/system_probes_parser.h"
+#include <optional>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/string_utils.h"
@@ -132,7 +133,8 @@ SystemProbesParser::SystemProbesParser(TraceProcessorContext* context)
       cpu_times_softirq_ns_id_(
           context->storage->InternString("cpu.times.softirq_ns")),
       oom_score_adj_id_(context->storage->InternString("oom_score_adj")),
-      cpu_freq_id_(context_->storage->InternString("cpufreq")) {
+      cpu_freq_id_(context_->storage->InternString("cpufreq")),
+      thermal_unit_id_(context->storage->InternString("C")) {
   for (const auto& name : BuildMeminfoCounterNames()) {
     meminfo_strs_id_.emplace_back(context->storage->InternString(name));
   }
@@ -460,6 +462,15 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     context_->event_tracker->PushCounter(
         ts, static_cast<double>(psi.total_ns()), track);
   }
+
+  for (auto it = sys_stats.thermal_zone(); it; ++it) {
+    protos::pbzero::SysStats::ThermalZone::Decoder thermal(*it);
+    StringId track_name = context_->storage->InternString(thermal.type());
+    TrackId track = context_->track_tracker->InternGlobalCounterTrack(
+        TrackTracker::Group::kThermals, track_name, {}, thermal_unit_id_);
+    context_->event_tracker->PushCounter(
+        ts, static_cast<double>(thermal.temp()), track);
+  }
 }
 
 void SystemProbesParser::ParseProcessTree(ConstBytes blob) {
@@ -738,7 +749,15 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
     context_->metadata_tracker->SetMetadata(
         metadata::android_soc_model,
         Variadic::String(
-	    context_->storage->InternString(packet.android_soc_model())));
+            context_->storage->InternString(packet.android_soc_model())));
+  }
+
+  if (packet.has_android_hardware_revision()) {
+    context_->metadata_tracker->SetMetadata(
+        metadata::android_hardware_revision,
+        Variadic::String(
+            context_->storage->InternString(
+                packet.android_hardware_revision())));
   }
 
   page_size_ = packet.page_size();
@@ -770,8 +789,11 @@ void SystemProbesParser::ParseCpuInfo(ConstBytes blob) {
 
     last_cpu_freqs = freqs;
 
-    tables::CpuTable::Id ucpu =
-        context_->cpu_tracker->SetCpuInfo(cpu_id, cpu.processor(), cluster_id);
+    std::optional<uint32_t> capacity =
+        cpu.has_capacity() ? std::make_optional(cpu.capacity()) : std::nullopt;
+
+    tables::CpuTable::Id ucpu = context_->cpu_tracker->SetCpuInfo(
+        cpu_id, cpu.processor(), cluster_id, capacity);
 
     for (auto freq_it = cpu.frequencies(); freq_it; freq_it++) {
       uint32_t freq = *freq_it;
