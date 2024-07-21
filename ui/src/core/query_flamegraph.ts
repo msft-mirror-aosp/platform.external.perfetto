@@ -86,6 +86,7 @@ export class QueryFlamegraph implements m.ClassComponent<QueryFlamegraphAttrs> {
   private filters: FlamegraphFilters = {
     showStack: [],
     hideStack: [],
+    showFromFrame: [],
     hideFrame: [],
   };
   private attrs: QueryFlamegraphAttrs;
@@ -142,25 +143,27 @@ async function computeFlamegraphTree(
   engine: Engine,
   dependencySql: string | undefined,
   sql: string,
-  {
-    showStack,
-    hideStack,
-    hideFrame,
-  }: {
-    readonly showStack: ReadonlyArray<string>;
-    readonly hideStack: ReadonlyArray<string>;
-    readonly hideFrame: ReadonlyArray<string>;
-  },
+  {showStack, hideStack, showFromFrame, hideFrame}: FlamegraphFilters,
 ) {
-  const allStackBits = (1 << showStack.length) - 1;
   const showStackFilter =
     showStack.length === 0
       ? '0'
       : showStack.map((x, i) => `((name like '%${x}%') << ${i})`).join(' | ');
+  const showStackBits = (1 << showStack.length) - 1;
+
   const hideStackFilter =
     hideStack.length === 0
       ? 'false'
       : hideStack.map((x) => `name like '%${x}%'`).join(' OR ');
+
+  const showFromFrameFilter =
+    showFromFrame.length === 0
+      ? '0'
+      : showFromFrame
+          .map((x, i) => `((name like '%${x}%') << ${i})`)
+          .join(' | ');
+  const showFromFrameBits = (1 << showFromFrame.length) - 1;
+
   const hideFrameFilter =
     hideFrame.length === 0
       ? 'false'
@@ -173,6 +176,8 @@ async function computeFlamegraphTree(
 
   const uuid = uuidv4Sql();
   await using disposable = new AsyncDisposableStack();
+  // TODO(lalitm): this doesn't need to be called unless we have
+  // a non-empty set of filters.
   disposable.use(
     await createPerfettoTable(
       engine,
@@ -181,32 +186,26 @@ async function computeFlamegraphTree(
         select *
         from _viz_flamegraph_prepare_filter!(
           (${sql}),
-          (${hideFrameFilter}),
           (${showStackFilter}),
           (${hideStackFilter}),
+          (${showFromFrameFilter}),
+          (${hideFrameFilter}),
           ${1 << showStack.length}
         )
       `,
     ),
   );
+  // TODO(lalitm): this doesn't need to be called unless we have
+  // a non-empty set of filters.
   disposable.use(
     await createPerfettoTable(
       engine,
-      `_flamegraph_raw_top_down_${uuid}`,
+      `_flamegraph_filtered_${uuid}`,
       `
         select *
-        from _viz_flamegraph_filter_and_hash!(_flamegraph_source_${uuid})
-      `,
-    ),
-  );
-  disposable.use(
-    await createPerfettoTable(
-      engine,
-      `_flamegraph_top_down_${uuid}`,
-      `
-        select * from _viz_flamegraph_merge_hashes!(
-          _flamegraph_raw_top_down_${uuid},
-          _flamegraph_source_${uuid}
+        from _viz_flamegraph_filter_frames!(
+          _flamegraph_source_${uuid},
+          ${showFromFrameBits}
         )
       `,
     ),
@@ -214,12 +213,12 @@ async function computeFlamegraphTree(
   disposable.use(
     await createPerfettoTable(
       engine,
-      `_flamegraph_raw_bottom_up_${uuid}`,
+      `_flamegraph_accumulated_${uuid}`,
       `
         select *
         from _viz_flamegraph_accumulate!(
-          _flamegraph_top_down_${uuid},
-          ${allStackBits}
+          _flamegraph_filtered_${uuid},
+          ${showStackBits}
         )
       `,
     ),
@@ -227,12 +226,37 @@ async function computeFlamegraphTree(
   disposable.use(
     await createPerfettoTable(
       engine,
-      `_flamegraph_windowed_${uuid}`,
+      `_flamegraph_hash_${uuid}`,
+      `
+        select *
+        from _viz_flamegraph_hash!(
+          _flamegraph_source_${uuid},
+          _flamegraph_filtered_${uuid},
+          _flamegraph_accumulated_${uuid},
+          ${showStackBits}
+        )
+      `,
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_merged_${uuid}`,
+      `
+        select * from _viz_flamegraph_merge_hashes!(
+          _flamegraph_hash_${uuid}
+        )
+      `,
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_layout_${uuid}`,
       `
         select *
         from _viz_flamegraph_local_layout!(
-          _flamegraph_raw_bottom_up_${uuid},
-          _flamegraph_top_down_${uuid}
+          _flamegraph_merged_${uuid}
         );
       `,
     ),
@@ -240,9 +264,8 @@ async function computeFlamegraphTree(
   const res = await engine.query(`
     select *
     from _viz_flamegraph_global_layout!(
-      _flamegraph_windowed_${uuid},
-      _flamegraph_raw_bottom_up_${uuid},
-      _flamegraph_top_down_${uuid}
+      _flamegraph_merged_${uuid},
+      _flamegraph_layout_${uuid}
     )
   `);
   const it = res.iter({
@@ -281,5 +304,5 @@ export const USE_NEW_FLAMEGRAPH_IMPL = featureFlags.register({
   id: 'useNewFlamegraphImpl',
   name: 'Use new flamegraph implementation',
   description: 'Use new flamgraph implementation in details panels.',
-  defaultValue: false,
+  defaultValue: true,
 });
