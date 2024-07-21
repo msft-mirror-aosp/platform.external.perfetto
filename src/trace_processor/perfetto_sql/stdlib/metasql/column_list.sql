@@ -13,21 +13,18 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-CREATE PERFETTO TABLE _ref_type_ids AS
-SELECT id AS type_id
-FROM heap_graph_class
-WHERE kind IN (
-  'KIND_FINALIZER_REFERENCE',
-  'KIND_PHANTOM_REFERENCE',
-  'KIND_SOFT_REFERENCE',
-  'KIND_WEAK_REFERENCE'
-)
-ORDER BY type_id;
+CREATE PERFETTO MACRO _col_list_id(a ColumnName, b ColumnName)
+RETURNS SqlFragment AS $a;
 
-CREATE PERFETTO TABLE _excluded_refs AS
-SELECT ref.id
-FROM heap_graph_reference ref
-CROSS JOIN heap_graph_object robj USING (reference_set_id)
-CROSS JOIN _ref_type_ids USING (type_id)
-WHERE ref.field_name = 'java.lang.ref.Reference.referent'
-ORDER BY ref.id;
+-- Given a list of column names, removes the parentheses allowing the usage
+-- of these in a select statement, window function etc.
+CREATE PERFETTO MACRO _metasql_unparenthesize_column_list(
+  columns ColumnNameList
+)
+RETURNS SqlFragment
+AS __intrinsic_token_zip_join!(
+  $columns,
+  $columns,
+  _col_list_id,
+  __intrinsic_token_comma!()
+);
