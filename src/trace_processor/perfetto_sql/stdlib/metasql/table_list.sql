@@ -13,22 +13,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-CREATE PERFETTO MACRO _col_list_id(a ColumnName)
-RETURNS _SqlFragment AS $a;
-
--- Given a list of column names, applies an arbitrary macro to each column
+-- Given a list of table names, applies an arbitrary macro to each table
 -- and joins the result with a comma.
-CREATE PERFETTO MACRO _metasql_map_join_column_list(
-  columns _ColumnNameList,
+CREATE PERFETTO MACRO _metasql_map_join_table_list(
+  tables _TableNameList,
   map_macro _Macro
 )
 RETURNS _SqlFragment
-AS __intrinsic_token_map_join!($columns, $map_macro, __intrinsic_token_comma!());
-
--- Given a list of column names, removes the parentheses allowing the usage
--- of these in a select statement, window function etc.
-CREATE PERFETTO MACRO _metasql_unparenthesize_column_list(
-  columns _ColumnNameList
-)
-RETURNS _SqlFragment
-AS _metasql_map_join_column_list!($columns, _col_list_id);
+AS __intrinsic_token_map_join!($tables, $map_macro, __intrinsic_token_comma!());
