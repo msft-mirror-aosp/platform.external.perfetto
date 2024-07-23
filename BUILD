@@ -1535,6 +1535,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/sched_event_state.h",
         "src/trace_processor/importers/common/sched_event_tracker.cc",
         "src/trace_processor/importers/common/sched_event_tracker.h",
+        "src/trace_processor/importers/common/scoped_active_trace_file.cc",
+        "src/trace_processor/importers/common/scoped_active_trace_file.h",
         "src/trace_processor/importers/common/slice_tracker.cc",
         "src/trace_processor/importers/common/slice_tracker.h",
         "src/trace_processor/importers/common/slice_translation_table.cc",
@@ -1545,6 +1547,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/system_info_tracker.h",
         "src/trace_processor/importers/common/thread_state_tracker.cc",
         "src/trace_processor/importers/common/thread_state_tracker.h",
+        "src/trace_processor/importers/common/trace_file_tracker.cc",
+        "src/trace_processor/importers/common/trace_file_tracker.h",
         "src/trace_processor/importers/common/trace_parser.cc",
         "src/trace_processor/importers/common/track_tracker.cc",
         "src/trace_processor/importers/common/track_tracker.h",
@@ -2543,6 +2547,14 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/cpu:cpu
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_cpu_cpu",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/cpu/cluster_type.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/android/frames:frames
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
@@ -2571,6 +2583,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_class_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/dominator_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/excluded_refs.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/heap_graph_class_aggregation.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/helpers.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/raw_dominator_tree.sql",
     ],
@@ -2770,6 +2783,15 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_linux",
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/metasql:metasql
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_metasql_metasql",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/metasql/column_list.sql",
+        "src/trace_processor/perfetto_sql/stdlib/metasql/table_list.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/pkvm:pkvm
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
@@ -2856,7 +2878,6 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_viz_viz",
     srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/viz/core_type.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/flamegraph.sql",
     ],
 )
@@ -2883,6 +2904,7 @@ perfetto_cc_amalgamated_sql(
     deps = [
         ":src_trace_processor_perfetto_sql_stdlib_android_android",
         ":src_trace_processor_perfetto_sql_stdlib_android_auto_auto",
+        ":src_trace_processor_perfetto_sql_stdlib_android_cpu_cpu",
         ":src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
         ":src_trace_processor_perfetto_sql_stdlib_android_gpu_gpu",
         ":src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
@@ -2903,6 +2925,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_linux_linux",
         ":src_trace_processor_perfetto_sql_stdlib_linux_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_linux_perf_perf",
+        ":src_trace_processor_perfetto_sql_stdlib_metasql_metasql",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
         ":src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
         ":src_trace_processor_perfetto_sql_stdlib_sched_sched",

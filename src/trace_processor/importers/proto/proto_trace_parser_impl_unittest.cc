@@ -279,8 +279,8 @@ class ProtoTraceParserTest : public ::testing::Test {
     context_.clock_tracker.reset(clock_);
     context_.flow_tracker.reset(new FlowTracker(&context_));
     context_.proto_trace_parser.reset(new ProtoTraceParserImpl(&context_));
-    context_.sorter.reset(new TraceSorter(&context_,
-                                          TraceSorter::SortingMode::kFullSort));
+    context_.sorter.reset(
+        new TraceSorter(&context_, TraceSorter::SortingMode::kFullSort));
     context_.descriptor_pool_.reset(new DescriptorPool());
 
     RegisterDefaultModules(&context_);
@@ -296,8 +296,9 @@ class ProtoTraceParserTest : public ::testing::Test {
     std::vector<uint8_t> trace_bytes = trace_.SerializeAsArray();
     std::unique_ptr<uint8_t[]> raw_trace(new uint8_t[trace_bytes.size()]);
     memcpy(raw_trace.get(), trace_bytes.data(), trace_bytes.size());
-    context_.chunk_reader.reset(new ProtoTraceReader(&context_));
-    auto status = context_.chunk_reader->Parse(TraceBlobView(
+    context_.chunk_readers.push_back(
+        std::make_unique<ProtoTraceReader>(&context_));
+    auto status = context_.chunk_readers.back()->Parse(TraceBlobView(
         TraceBlob::TakeOwnership(std::move(raw_trace), trace_bytes.size())));
 
     ResetTraceBuffers();
@@ -619,7 +620,7 @@ TEST_F(ProtoTraceParserTest, LoadCpuFreq) {
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->cpu_counter_track_table().cpu()[0], 10u);
+  EXPECT_EQ(context_.storage->cpu_counter_track_table().ucpu()[0].value, 10u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadCpuFreqKHz) {
@@ -642,10 +643,10 @@ TEST_F(ProtoTraceParserTest, LoadCpuFreqKHz) {
 
   auto row = context_.storage->cpu_counter_track_table().FindById(TrackId(0));
   EXPECT_EQ(context_.storage->GetString(row->name()), "cpufreq");
-  EXPECT_EQ(row->cpu(), 0u);
+  EXPECT_EQ(row->ucpu().value, 0u);
 
   row = context_.storage->cpu_counter_track_table().FindById(TrackId(1));
-  EXPECT_EQ(row->cpu(), 1u);
+  EXPECT_EQ(row->ucpu().value, 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadMemInfo) {
