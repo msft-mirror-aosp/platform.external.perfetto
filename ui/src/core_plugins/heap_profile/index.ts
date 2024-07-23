@@ -288,6 +288,9 @@ function flamegraphAttrsForHeapProfile(
               id,
               parent_id as parentId,
               name,
+              mapping_name,
+              source_file,
+              cast(line_number AS text) as line_number,
               self_size,
               self_count,
               self_alloc_size,
@@ -306,6 +309,11 @@ function flamegraphAttrsForHeapProfile(
         `,
         metrics,
         'include perfetto module android.memory.heap_profile.callstacks',
+        [{name: 'mapping_name', displayName: 'Mapping'}],
+        [
+          {name: 'source_file', displayName: 'Source File'},
+          {name: 'line_number', displayName: 'Line Number'},
+        ],
       ),
     ],
   };
@@ -316,7 +324,13 @@ function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
     ? metricsFromTableOrSubquery(
         `
           (
-            select id, parent_id as parentId, name, self_size, self_count
+            select
+              id,
+              parent_id as parentId,
+              name,
+              root_type,
+              self_size,
+              self_count
             from _heap_graph_dominator_class_tree
             where graph_sample_ts = ${ts} and upid = ${upid}
           )
@@ -334,6 +348,7 @@ function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
           },
         ],
         'include perfetto module android.memory.heap_graph.dominator_class_tree;',
+        [{name: 'root_type', displayName: 'Root Type'}],
       )
     : [];
   return {
@@ -342,7 +357,13 @@ function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
       ...metricsFromTableOrSubquery(
         `
           (
-            select id, parent_id as parentId, name, self_size, self_count
+            select
+              id,
+              parent_id as parentId,
+              name,
+              root_type,
+              self_size,
+              self_count
             from _heap_graph_class_tree
             where graph_sample_ts = ${ts} and upid = ${upid}
           )
@@ -360,6 +381,7 @@ function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
           },
         ],
         'include perfetto module android.memory.heap_graph.class_tree;',
+        [{name: 'root_type', displayName: 'Root Type'}],
       ),
       ...dominator,
     ],
