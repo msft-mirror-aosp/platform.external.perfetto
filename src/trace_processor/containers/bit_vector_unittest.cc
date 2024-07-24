@@ -18,17 +18,20 @@
 
 #include <bitset>
 #include <cstdint>
-#include <limits>
 #include <random>
 #include <utility>
 #include <vector>
 
 #include "perfetto/protozero/scattered_heap_buffer.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 #include "test/gtest_and_gmock.h"
+
+#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor {
 namespace {
+using testing::ElementsAre;
+using testing::IsEmpty;
+using testing::UnorderedElementsAre;
 
 TEST(BitVectorUnittest, CreateAllTrue) {
   BitVector bv(2049, true);
@@ -407,6 +410,23 @@ TEST(BitVectorUnittest, SelectBitsEnd) {
   ASSERT_EQ(expected.CountSetBits(), bv.CountSetBits());
 }
 
+TEST(BitVectorUnittest, SelectBitsOob) {
+  BitVector bv = BitVector::RangeForTesting(
+      0, 512, [](uint32_t idx) { return idx % 7 == 0; });
+  BitVector mask = BitVector(512, true);
+  bv.SelectBits(mask);
+
+  BitVector expected = BitVector::RangeForTesting(
+      0, 512, [](uint32_t idx) { return idx % 7 == 0; });
+
+  ASSERT_EQ(bv.size(), 512u);
+  for (uint32_t i = 0; i < expected.size(); ++i) {
+    ASSERT_EQ(expected.IsSet(i), bv.IsSet(i)) << "Index " << i;
+    ASSERT_EQ(expected.CountSetBits(i), bv.CountSetBits(i)) << "Index " << i;
+  }
+  ASSERT_EQ(expected.CountSetBits(), bv.CountSetBits());
+}
+
 TEST(BitVectorUnittest, IntersectRange) {
   BitVector bv =
       BitVector::RangeForTesting(1, 20, [](uint32_t t) { return t % 2 == 0; });
@@ -613,14 +633,14 @@ TEST(BitVectorUnittest, BuilderStressTest) {
   ASSERT_TRUE(bv.IsSet(8 * 1024));
 }
 
-TEST(BitVectorUnittest, FromIndexVectorEmpty) {
+TEST(BitVectorUnittest, FromSortedIndexVectorEmpty) {
   std::vector<int64_t> indices{};
   BitVector bv = BitVector::FromSortedIndexVector(indices);
 
   ASSERT_EQ(bv.size(), 0u);
 }
 
-TEST(BitVectorUnittest, FromIndexVector) {
+TEST(BitVectorUnittest, FromSortedIndexVector) {
   std::vector<int64_t> indices{0, 100, 200, 2000};
   BitVector bv = BitVector::FromSortedIndexVector(indices);
 
@@ -632,9 +652,41 @@ TEST(BitVectorUnittest, FromIndexVector) {
   ASSERT_TRUE(bv.IsSet(2000));
 }
 
-TEST(BitVectorUnittest, FromIndexVectorStressTestLargeValues) {
+TEST(BitVectorUnittest, FromSortedIndexVectorStressTestLargeValues) {
   std::vector<int64_t> indices{0, 1 << 2, 1 << 10, 1 << 20, 1 << 30};
   BitVector bv = BitVector::FromSortedIndexVector(indices);
+
+  ASSERT_EQ(bv.size(), (1 << 30) + 1u);
+  ASSERT_EQ(bv.CountSetBits(), 5u);
+  ASSERT_TRUE(bv.IsSet(0));
+  ASSERT_TRUE(bv.IsSet(1 << 2));
+  ASSERT_TRUE(bv.IsSet(1 << 10));
+  ASSERT_TRUE(bv.IsSet(1 << 20));
+  ASSERT_TRUE(bv.IsSet(1 << 30));
+}
+
+TEST(BitVectorUnittest, FromUnsortedIndexVectorEmpty) {
+  std::vector<uint32_t> indices{};
+  BitVector bv = BitVector::FromUnsortedIndexVector(indices);
+
+  ASSERT_EQ(bv.size(), 0u);
+}
+
+TEST(BitVectorUnittest, FromUnsortedIndexVector) {
+  std::vector<uint32_t> indices{0, 2000, 200, 100};
+  BitVector bv = BitVector::FromUnsortedIndexVector(indices);
+
+  ASSERT_EQ(bv.size(), 2001u);
+  ASSERT_EQ(bv.CountSetBits(), 4u);
+  ASSERT_TRUE(bv.IsSet(0));
+  ASSERT_TRUE(bv.IsSet(100));
+  ASSERT_TRUE(bv.IsSet(200));
+  ASSERT_TRUE(bv.IsSet(2000));
+}
+
+TEST(BitVectorUnittest, FromUnsortedIndexVectorStressTestLargeValues) {
+  std::vector<uint32_t> indices{0, 1 << 30, 1 << 10, 1 << 2, 1 << 20};
+  BitVector bv = BitVector::FromUnsortedIndexVector(indices);
 
   ASSERT_EQ(bv.size(), (1 << 30) + 1u);
   ASSERT_EQ(bv.CountSetBits(), 5u);
@@ -652,6 +704,8 @@ TEST(BitVectorUnittest, Not) {
 
   EXPECT_FALSE(bv.IsSet(2));
   EXPECT_EQ(bv.CountSetBits(), 9u);
+  EXPECT_THAT(bv.GetSetBitIndices(),
+              UnorderedElementsAre(0u, 1u, 3u, 4u, 5u, 6u, 7u, 8u, 9u));
 }
 
 TEST(BitVectorUnittest, NotBig) {
@@ -716,7 +770,19 @@ TEST(BitVectorUnittest, QueryStressTest) {
 
 TEST(BitVectorUnittest, GetSetBitIndices) {
   BitVector bv = {true, false, true, false, true, true, false, false};
-  ASSERT_THAT(bv.GetSetBitIndices(), testing::ElementsAre(0u, 2u, 4u, 5u));
+  ASSERT_THAT(bv.GetSetBitIndices(), ElementsAre(0u, 2u, 4u, 5u));
+}
+
+TEST(BitVectorUnittest, GetSetBitIndicesIntersectRange) {
+  BitVector bv(130u, true);
+  BitVector out = bv.IntersectRange(10, 12);
+  ASSERT_THAT(out.GetSetBitIndices(), ElementsAre(10, 11));
+}
+
+TEST(BitVectorUnittest, UpdateSetBitsGetSetBitIndices) {
+  BitVector bv(130u, true);
+  bv.UpdateSetBits(BitVector(60u));
+  ASSERT_THAT(bv.GetSetBitIndices(), IsEmpty());
 }
 
 TEST(BitVectorUnittest, SerializeSimple) {

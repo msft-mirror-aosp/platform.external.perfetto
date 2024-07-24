@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_PROCESSOR_PERFETTO_SQL_ENGINE_PERFETTO_SQL_ENGINE_H_
 #define SRC_TRACE_PROCESSOR_PERFETTO_SQL_ENGINE_PERFETTO_SQL_ENGINE_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -38,7 +39,9 @@
 #include "src/trace_processor/perfetto_sql/engine/runtime_table_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/sql_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/static_table_function.h"
-#include "src/trace_processor/sqlite/query_cache.h"
+#include "src/trace_processor/sqlite/bindings/sqlite_result.h"
+#include "src/trace_processor/sqlite/bindings/sqlite_window_function.h"
+#include "src/trace_processor/sqlite/db_sqlite_table.h"
 #include "src/trace_processor/sqlite/sql_source.h"
 #include "src/trace_processor/sqlite/sqlite_engine.h"
 #include "src/trace_processor/sqlite/sqlite_utils.h"
@@ -63,7 +66,6 @@ class PerfettoSqlEngine {
   };
 
   explicit PerfettoSqlEngine(StringPool* pool);
-  ~PerfettoSqlEngine();
 
   // Executes all the statements in |sql| and returns a |ExecutionResult|
   // object. The metadata will reference all the statements executed and the
@@ -82,18 +84,27 @@ class PerfettoSqlEngine {
   // no valid SQL to run.
   base::StatusOr<ExecutionResult> ExecuteUntilLastStatement(SqlSource sql);
 
+  // Prepares a single SQLite statement in |sql| and returns a
+  // |PreparedStatement| object.
+  //
+  // Returns an error if the preparation of the statement failed or if there was
+  // no valid SQL to run.
+  base::StatusOr<SqliteEngine::PreparedStatement> PrepareSqliteStatement(
+      SqlSource sql);
+
   // Registers a trace processor C++ function to be runnable from SQL.
   //
   // The format of the function is given by the |SqlFunction|.
   //
-  // |name|:        name of the function in SQL
-  // |argc|:        number of arguments for this function. This can be -1 if
-  //                the number of arguments is variable.
-  // |ctx|:         context object for the function (see SqlFunction::Run);
-  //                this object *must* outlive the function so should likely be
-  //                either static or scoped to the lifetime of TraceProcessor.
-  // |determistic|: whether this function has deterministic output given the
-  //                same set of arguments.
+  // |name|:          name of the function in SQL.
+  // |argc|:          number of arguments for this function. This can be -1 if
+  //                  the number of arguments is variable.
+  // |ctx|:           context object for the function (see SqlFunction::Run);
+  //                  this object *must* outlive the function so should likely
+  //                  be either static or scoped to the lifetime of
+  //                  TraceProcessor.
+  // |deterministic|: whether this function has deterministic output given the
+  //                  same set of arguments.
   template <typename Function = SqlFunction>
   base::Status RegisterStaticFunction(const char* name,
                                       int argc,
@@ -113,6 +124,55 @@ class PerfettoSqlEngine {
       std::unique_ptr<typename Function::Context> ctx,
       bool deterministic = true);
 
+  // Registers a trace processor C++ function to be runnable from SQL.
+  //
+  // The format of the function is given by the |SqliteFunction|.
+  //
+  // |ctx|:           context object for the function; this object *must*
+  //                  outlive the function so should likely be either static or
+  //                  scoped to the lifetime of TraceProcessor.
+  // |deterministic|: whether this function has deterministic output given the
+  //                  same set of arguments.
+  template <typename Function>
+  base::Status RegisterSqliteFunction(typename Function::UserDataContext* ctx,
+                                      bool deterministic = true);
+  template <typename Function>
+  base::Status RegisterSqliteFunction(
+      std::unique_ptr<typename Function::UserDataContext> ctx,
+      bool deterministic = true);
+
+  // Registers a trace processor C++ aggregate function to be runnable from SQL.
+  //
+  // The format of the function is given by the |SqliteAggregateFunction|.
+  //
+  // |ctx|:           context object for the function; this object *must*
+  //                  outlive the function so should likely be either static or
+  //                  scoped to the lifetime of TraceProcessor.
+  // |deterministic|: whether this function has deterministic output given the
+  //                  same set of arguments.
+  template <typename Function>
+  base::Status RegisterSqliteAggregateFunction(
+      typename Function::UserDataContext* ctx,
+      bool deterministic = true);
+
+  // Registers a trace processor C++ window function to be runnable from SQL.
+  //
+  // The format of the function is given by the |SqliteWindowFunction|.
+  //
+  // |name|:          name of the function in SQL.
+  // |argc|:          number of arguments for this function. This can be -1 if
+  //                  the number of arguments is variable.
+  // |ctx|:           context object for the function; this object *must*
+  //                  outlive the function so should likely be either static or
+  //                  scoped to the lifetime of TraceProcessor.
+  // |deterministic|: whether this function has deterministic output given the
+  //                  same set of arguments.
+  template <typename Function = SqliteWindowFunction>
+  base::Status RegisterSqliteWindowFunction(const char* name,
+                                            int argc,
+                                            typename Function::Context* ctx,
+                                            bool deterministic = true);
+
   // Registers a function with the prototype |prototype| which returns a value
   // of |return_type| and is implemented by executing the SQL statement |sql|.
   base::Status RegisterRuntimeFunction(bool replace,
@@ -125,19 +185,12 @@ class PerfettoSqlEngine {
 
   // Registers a trace processor C++ table with SQLite with an SQL name of
   // |name|.
-  void RegisterStaticTable(const Table&,
+  void RegisterStaticTable(Table*,
                            const std::string& name,
                            Table::Schema schema);
 
   // Registers a trace processor C++ table function with SQLite.
   void RegisterStaticTableFunction(std::unique_ptr<StaticTableFunction> fn);
-
-  // Returns the state for the given table function.
-  RuntimeTableFunction::State* GetRuntimeTableFunctionState(
-      const std::string&) const;
-
-  // Should be called when a table function is destroyed.
-  void OnRuntimeTableFunctionDestroyed(const std::string&);
 
   SqliteEngine* sqlite_engine() { return engine_.get(); }
 
@@ -171,8 +224,17 @@ class PerfettoSqlEngine {
 
     // The missing objects from the above query are static functions, runtime
     // functions and macros. Add those in now.
-    return query_count + static_function_count_ + runtime_function_count_ +
-           macros_.size();
+    return query_count + static_function_count_ +
+           static_window_function_count_ + static_aggregate_function_count_ +
+           runtime_function_count_ + macros_.size();
+  }
+
+  // Find table (Static or Runtime) registered with engine with provided name.
+  const Table* GetTableOrNull(std::string_view name) const {
+    if (auto maybe_runtime = GetRuntimeTableOrNull(name); maybe_runtime) {
+      return maybe_runtime;
+    }
+    return GetStaticTableOrNull(name);
   }
 
   // Find RuntimeTable registered with engine with provided name.
@@ -180,6 +242,21 @@ class PerfettoSqlEngine {
 
   // Find static table registered with engine with provided name.
   const Table* GetStaticTableOrNull(std::string_view) const;
+
+  // Find table (Static or Runtime) registered with engine with provided name.
+  Table* GetMutableTableOrNull(std::string_view name) {
+    if (auto maybe_runtime = GetMutableRuntimeTableOrNull(name);
+        maybe_runtime) {
+      return maybe_runtime;
+    }
+    return GetMutableStaticTableOrNull(name);
+  }
+
+  // Find RuntimeTable registered with engine with provided name.
+  RuntimeTable* GetMutableRuntimeTableOrNull(std::string_view);
+
+  // Find static table registered with engine with provided name.
+  Table* GetMutableStaticTableOrNull(std::string_view);
 
  private:
   base::Status ExecuteCreateFunction(const PerfettoSqlParser::CreateFunction&);
@@ -195,6 +272,10 @@ class PerfettoSqlEngine {
 
   base::Status ExecuteCreateMacro(const PerfettoSqlParser::CreateMacro&);
 
+  base::Status ExecuteCreateIndex(const PerfettoSqlParser::CreateIndex&);
+
+  base::Status ExecuteDropIndex(const PerfettoSqlParser::DropIndex&);
+
   template <typename Function>
   base::Status RegisterFunctionWithSqlite(
       const char* name,
@@ -203,17 +284,21 @@ class PerfettoSqlEngine {
       bool deterministic = true);
 
   // Get the column names from a statement.
-  // |operator_name| is used in the error message if the statement is invalid.
-  static base::StatusOr<std::vector<std::string>>
-  GetColumnNamesFromSelectStatement(const SqliteEngine::PreparedStatement& stmt,
-                                    const char* tag);
+  // |tag| is used in the error message if the statement is invalid.
+  base::StatusOr<std::vector<std::string>> GetColumnNamesFromSelectStatement(
+      const SqliteEngine::PreparedStatement& stmt,
+      const char* tag) const;
 
   // Validates that the column names in |column_names| match the |schema|.
-  // |operator_name| is used in the error message if the statement is invalid.
-  static base::Status ValidateColumnNames(
+  // Given that PerfettoSQL supports an arbitrary order of columns in the
+  // schema, this function also normalises the schema by reordering the schema
+  // columns to match the order of columns in the query. |tag| is used in the
+  // error message if the statement is invalid.
+  base::StatusOr<std::vector<sql_argument::ArgumentDefinition>>
+  ValidateAndGetEffectiveSchema(
       const std::vector<std::string>& column_names,
       const std::vector<sql_argument::ArgumentDefinition>& schema,
-      const char* operator_name);
+      const char* tag) const;
 
   // Given a module and a key, include the correct file(s) from the module.
   // The key can contain a wildcard to include all files in the module with the
@@ -228,16 +313,17 @@ class PerfettoSqlEngine {
       const std::string& key,
       const PerfettoSqlParser& parser);
 
-  std::unique_ptr<QueryCache> query_cache_;
   StringPool* pool_ = nullptr;
 
   uint64_t static_function_count_ = 0;
+  uint64_t static_aggregate_function_count_ = 0;
+  uint64_t static_window_function_count_ = 0;
   uint64_t runtime_function_count_ = 0;
 
-  base::FlatHashMap<std::string, std::unique_ptr<RuntimeTableFunction::State>>
-      runtime_table_fn_states_;
-  base::FlatHashMap<std::string, const Table*> static_tables_;
-  base::FlatHashMap<std::string, std::unique_ptr<RuntimeTable>> runtime_tables_;
+  RuntimeTableFunctionModule::Context* runtime_table_fn_context_ = nullptr;
+  DbSqliteModule::Context* runtime_table_context_ = nullptr;
+  DbSqliteModule::Context* static_table_context_ = nullptr;
+  DbSqliteModule::Context* static_table_fn_context_ = nullptr;
   base::FlatHashMap<std::string, sql_modules::RegisteredModule> modules_;
   base::FlatHashMap<std::string, PerfettoSqlPreprocessor::Macro> macros_;
   std::unique_ptr<SqliteEngine> engine_;
@@ -267,13 +353,13 @@ void WrapSqlFunction(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
   base::Status status =
       Function::Run(ud, static_cast<size_t>(argc), argv, value, destructors);
   if (!status.ok()) {
-    sqlite3_result_error(ctx, status.c_message(), -1);
+    sqlite::result::Error(ctx, status.c_message());
     return;
   }
 
   if (Function::kVoidReturn) {
     if (!value.is_null()) {
-      sqlite3_result_error(ctx, "void SQL function returned value", -1);
+      sqlite::result::Error(ctx, "void SQL function returned value");
       return;
     }
 
@@ -283,15 +369,15 @@ void WrapSqlFunction(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
     // if we don't actually read it - just set it to a pointer to an empty
     // string for this reason.
     static char kVoidValue[] = "";
-    sqlite3_result_pointer(ctx, kVoidValue, "VOID", nullptr);
+    sqlite::result::StaticPointer(ctx, kVoidValue, "VOID");
   } else {
-    sqlite_utils::ReportSqlValue(ctx, value, destructors.string_destructor,
-                                 destructors.bytes_destructor);
+    sqlite::utils::ReportSqlValue(ctx, value, destructors.string_destructor,
+                                  destructors.bytes_destructor);
   }
 
   status = Function::VerifyPostConditions(ud);
   if (!status.ok()) {
-    sqlite3_result_error(ctx, status.c_message(), -1);
+    sqlite::result::Error(ctx, status.c_message());
     return;
   }
 }
@@ -312,6 +398,51 @@ base::Status PerfettoSqlEngine::RegisterStaticFunction(
   return engine_->RegisterFunction(
       name, argc, perfetto_sql_internal::WrapSqlFunction<Function>, ctx,
       nullptr, deterministic);
+}
+
+template <typename Function>
+base::Status PerfettoSqlEngine::RegisterSqliteFunction(
+    typename Function::UserDataContext* ctx,
+    bool deterministic) {
+  static_function_count_++;
+  return engine_->RegisterFunction(Function::kName, Function::kArgCount,
+                                   Function::Step, ctx, nullptr, deterministic);
+}
+
+template <typename Function>
+base::Status PerfettoSqlEngine::RegisterSqliteFunction(
+    std::unique_ptr<typename Function::UserDataContext> ctx,
+    bool deterministic) {
+  static_function_count_++;
+  return engine_->RegisterFunction(
+      Function::kName, Function::kArgCount, Function::Step, ctx.release(),
+      [](void* ptr) {
+        std::unique_ptr<typename Function::UserDataContext>(
+            static_cast<typename Function::UserDataContext*>(ptr));
+      },
+      deterministic);
+}
+
+template <typename Function>
+base::Status PerfettoSqlEngine::RegisterSqliteAggregateFunction(
+    typename Function::UserDataContext* ctx,
+    bool deterministic) {
+  static_aggregate_function_count_++;
+  return engine_->RegisterAggregateFunction(
+      Function::kName, Function::kArgCount, Function::Step, Function::Final,
+      ctx, nullptr, deterministic);
+}
+
+template <typename Function>
+base::Status PerfettoSqlEngine::RegisterSqliteWindowFunction(
+    const char* name,
+    int argc,
+    typename Function::Context* ctx,
+    bool deterministic) {
+  static_window_function_count_++;
+  return engine_->RegisterWindowFunction(
+      name, argc, Function::Step, Function::Inverse, Function::Value,
+      Function::Final, ctx, nullptr, deterministic);
 }
 
 template <typename Function>

@@ -25,7 +25,7 @@ import {
 import {pluginManager, PluginManager} from '../common/plugins';
 import {raf} from '../core/raf_scheduler';
 import {MetricVisualisation} from '../public';
-import {EngineProxy} from '../trace_processor/engine';
+import {Engine} from '../trace_processor/engine';
 import {STR} from '../trace_processor/query_result';
 import {Select} from '../widgets/select';
 import {Spinner} from '../widgets/spinner';
@@ -34,10 +34,10 @@ import {VegaView} from '../widgets/vega_view';
 import {globals} from './globals';
 import {createPage} from './pages';
 
-type Format = 'json'|'prototext'|'proto';
+type Format = 'json' | 'prototext' | 'proto';
 const FORMATS: Format[] = ['json', 'prototext', 'proto'];
 
-function getEngine(): EngineProxy|undefined {
+function getEngine(): Engine | undefined {
   const engineId = globals.getCurrentEngine()?.id;
   if (engineId === undefined) {
     return undefined;
@@ -46,7 +46,7 @@ function getEngine(): EngineProxy|undefined {
   return engine;
 }
 
-async function getMetrics(engine: EngineProxy): Promise<string[]> {
+async function getMetrics(engine: Engine): Promise<string[]> {
   const metrics: string[] = [];
   const metricsResult = await engine.query('select name from trace_metrics');
   for (const it = metricsResult.iter({name: STR}); it.valid(); it.next()) {
@@ -56,7 +56,10 @@ async function getMetrics(engine: EngineProxy): Promise<string[]> {
 }
 
 async function getMetric(
-  engine: EngineProxy, metric: string, format: Format): Promise<string> {
+  engine: Engine,
+  metric: string,
+  format: Format,
+): Promise<string> {
   const result = await engine.computeMetric([metric], format);
   if (result instanceof Uint8Array) {
     return `Uint8Array<len=${result.length}>`;
@@ -66,7 +69,7 @@ async function getMetric(
 }
 
 class MetricsController {
-  engine: EngineProxy;
+  engine: Engine;
   plugins: PluginManager;
   private _metrics: string[];
   private _selected?: string;
@@ -75,7 +78,7 @@ class MetricsController {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _json: any;
 
-  constructor(plugins: PluginManager, engine: EngineProxy) {
+  constructor(plugins: PluginManager, engine: Engine) {
     this.plugins = plugins;
     this.engine = engine;
     this._metrics = [];
@@ -92,11 +95,12 @@ class MetricsController {
   }
 
   get visualisations(): MetricVisualisation[] {
-    return this.plugins.metricVisualisations().filter(
-      (v) => v.metric === this.selected);
+    return this.plugins
+      .metricVisualisations()
+      .filter((v) => v.metric === this.selected);
   }
 
-  set selected(metric: string|undefined) {
+  set selected(metric: string | undefined) {
     if (this._selected === metric) {
       return;
     }
@@ -104,7 +108,7 @@ class MetricsController {
     this.update();
   }
 
-  get selected(): string|undefined {
+  get selected(): string | undefined {
     return this._selected;
   }
 
@@ -189,7 +193,8 @@ class MetricPicker implements m.ClassComponent<MetricPickerAttrs> {
     const {controller} = attrs;
     return m(
       '.metrics-page-picker',
-      m(Select,
+      m(
+        Select,
         {
           value: controller.selected,
           oninput: (e: Event) => {
@@ -197,21 +202,23 @@ class MetricPicker implements m.ClassComponent<MetricPickerAttrs> {
             controller.selected = (e.target as HTMLSelectElement).value;
           },
         },
-        controller.metrics.map(
-          (metric) =>
-            m('option',
-              {
-                value: metric,
-                key: metric,
-              },
-              metric))),
+        controller.metrics.map((metric) =>
+          m(
+            'option',
+            {
+              value: metric,
+              key: metric,
+            },
+            metric,
+          ),
+        ),
+      ),
       m(
         Select,
         {
           oninput: (e: Event) => {
             if (!e.target) return;
-            controller.format =
-                    (e.target as HTMLSelectElement).value as Format;
+            controller.format = (e.target as HTMLSelectElement).value as Format;
           },
         },
         FORMATS.map((f) => {
@@ -227,11 +234,9 @@ class MetricPicker implements m.ClassComponent<MetricPickerAttrs> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface MetricVizViewAttrs {
   visualisation: MetricVisualisation;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: any;
+  data: unknown;
 }
 
 class MetricVizView implements m.ClassComponent<MetricVizViewAttrs> {
@@ -246,7 +251,7 @@ class MetricVizView implements m.ClassComponent<MetricVizViewAttrs> {
       }),
     );
   }
-};
+}
 
 class MetricPageContents implements m.ClassComponent {
   controller?: MetricsController;
@@ -270,14 +275,14 @@ class MetricPageContents implements m.ClassComponent {
       m(MetricPicker, {
         controller,
       }),
-      (controller.format === 'json') &&
-          controller.visualisations.map((visualisation) => {
-            let data = json;
-            for (const p of visualisation.path) {
-              data = data[p] ?? [];
-            }
-            return m(MetricVizView, {visualisation, data});
-          }),
+      controller.format === 'json' &&
+        controller.visualisations.map((visualisation) => {
+          let data = json;
+          for (const p of visualisation.path) {
+            data = data[p] ?? [];
+          }
+          return m(MetricVizView, {visualisation, data});
+        }),
       m(MetricResultView, {result: controller.result}),
     ];
   }

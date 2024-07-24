@@ -17,13 +17,17 @@
 #define SRC_TRACE_PROCESSOR_DB_COLUMN_TYPES_H_
 
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/row_map.h"
+#include "src/trace_processor/containers/string_pool.h"
 
 namespace perfetto::trace_processor {
 
@@ -92,7 +96,34 @@ struct Constraint {
 // Represents an order by operation on a column.
 struct Order {
   uint32_t col_idx;
-  bool desc;
+  bool desc = false;
+};
+
+// Structured data used to determine what Trace Processor will query using
+// CEngine.
+struct Query {
+  enum class OrderType {
+    // Order should only be used for sorting.
+    kSort = 0,
+    // Distinct, `orders` signify which columns are supposed to be distinct and
+    // used for sorting.
+    kDistinctAndSort = 1,
+    // Distinct and `orders` signify only columns are supposed to be distinct,
+    // don't need additional sorting.
+    kDistinct = 2
+  };
+  OrderType order_type = OrderType::kSort;
+  // Query constraints.
+  std::vector<Constraint> constraints;
+  // Query order bys. Check distinct to know whether they should be used for
+  // sorting.
+  std::vector<Order> orders;
+
+  // LIMIT value.
+  std::optional<uint32_t> limit;
+
+  // OFFSET value. Can be "!= 0" only if `limit` has value.
+  uint32_t offset = 0;
 };
 
 // The enum type of the column.
@@ -113,19 +144,30 @@ enum class ColumnType {
   kDummy,
 };
 
-// Index vector related data required to Filter using IndexSearch.
-struct Indices {
-  enum class State {
-    // We can't guarantee that data is in monotonic order.
-    kNonmonotonic,
-    // Data is in monotonic order.
-    // TODO(b/307482437): Use this to optimise filtering if storage is sorted.
-    kMonotonic
-  };
+// Contains an index to an element in the chain and an opaque payload class
+// which can be set to whatever the user of the chain requires.
+struct Token {
+  // An index pointing to an element in this chain. Indicates the element
+  // at this index should be filtered.
+  uint32_t index;
 
-  const uint32_t* data = nullptr;
-  uint32_t size = 0;
-  State state = Indices::State::kNonmonotonic;
+  // An opaque value which can be set to some value meaningful to the
+  // caller. While the exact meaning of |payload| should not be depended
+  // upon, implementations are free to make assumptions that |payload| will
+  // be strictly monotonic.
+  uint32_t payload;
+
+  struct PayloadComparator {
+    bool operator()(const Token& a, const Token& b) {
+      return a.payload < b.payload;
+    }
+  };
+};
+
+// Indicates the direction of the sort on a single chain.
+enum class SortDirection {
+  kAscending,
+  kDescending,
 };
 
 }  // namespace perfetto::trace_processor

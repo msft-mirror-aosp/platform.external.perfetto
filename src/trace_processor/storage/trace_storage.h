@@ -43,6 +43,7 @@
 #include "src/trace_processor/tables/android_tables_py.h"
 #include "src/trace_processor/tables/counter_tables_py.h"
 #include "src/trace_processor/tables/flow_tables_py.h"
+#include "src/trace_processor/tables/jit_tables_py.h"
 #include "src/trace_processor/tables/memory_tables_py.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
 #include "src/trace_processor/tables/profiler_tables_py.h"
@@ -381,6 +382,13 @@ class TraceStorage {
     return &energy_counter_track_table_;
   }
 
+  const tables::LinuxDeviceTrackTable& linux_device_track_table() const {
+    return linux_device_track_table_;
+  }
+  tables::LinuxDeviceTrackTable* mutable_linux_device_track_table() {
+    return &linux_device_track_table_;
+  }
+
   const tables::UidCounterTrackTable& uid_counter_track_table() const {
     return uid_counter_track_table_;
   }
@@ -506,6 +514,29 @@ class TraceStorage {
     return &android_dumpstate_table_;
   }
 
+  const tables::AndroidKeyEventsTable& android_key_events_table() const {
+    return android_key_events_table_;
+  }
+  tables::AndroidKeyEventsTable* mutable_android_key_events_table() {
+    return &android_key_events_table_;
+  }
+
+  const tables::AndroidMotionEventsTable& android_motion_events_table() const {
+    return android_motion_events_table_;
+  }
+  tables::AndroidMotionEventsTable* mutable_android_motion_events_table() {
+    return &android_motion_events_table_;
+  }
+
+  const tables::AndroidInputEventDispatchTable&
+  android_input_event_dispatch_table() const {
+    return android_input_event_dispatch_table_;
+  }
+  tables::AndroidInputEventDispatchTable*
+  mutable_android_input_event_dispatch_table() {
+    return &android_input_event_dispatch_table_;
+  }
+
   const StatsMap& stats() const { return stats_; }
 
   const tables::MetadataTable& metadata_table() const {
@@ -532,6 +563,9 @@ class TraceStorage {
   tables::FtraceEventTable* mutable_ftrace_event_table() {
     return &ftrace_event_table_;
   }
+
+  const tables::MachineTable& machine_table() const { return machine_table_; }
+  tables::MachineTable* mutable_machine_table() { return &machine_table_; }
 
   const tables::CpuTable& cpu_table() const { return cpu_table_; }
   tables::CpuTable* mutable_cpu_table() { return &cpu_table_; }
@@ -592,6 +626,13 @@ class TraceStorage {
     return &profiler_smaps_table_;
   }
 
+  const tables::TraceFileTable& trace_file_table() const {
+    return trace_file_table_;
+  }
+  tables::TraceFileTable* mutable_trace_file_table() {
+    return &trace_file_table_;
+  }
+
   const tables::StackSampleTable& stack_sample_table() const {
     return stack_sample_table_;
   }
@@ -605,6 +646,13 @@ class TraceStorage {
   }
   tables::CpuProfileStackSampleTable* mutable_cpu_profile_stack_sample_table() {
     return &cpu_profile_stack_sample_table_;
+  }
+
+  const tables::PerfSessionTable& perf_session_table() const {
+    return perf_session_table_;
+  }
+  tables::PerfSessionTable* mutable_perf_session_table() {
+    return &perf_session_table_;
   }
 
   const tables::PerfSampleTable& perf_sample_table() const {
@@ -729,6 +777,14 @@ class TraceStorage {
     return &actual_frame_timeline_slice_table_;
   }
 
+  const tables::AndroidNetworkPacketsTable& android_network_packets_table()
+      const {
+    return android_network_packets_table_;
+  }
+  tables::AndroidNetworkPacketsTable* mutable_android_network_packets_table() {
+    return &android_network_packets_table_;
+  }
+
   const tables::V8IsolateTable& v8_isolate_table() const {
     return v8_isolate_table_;
   }
@@ -752,6 +808,61 @@ class TraceStorage {
   }
   tables::V8JsFunctionTable* mutable_v8_js_function_table() {
     return &v8_js_function_table_;
+  }
+  const tables::V8JsCodeTable& v8_js_code_table() const {
+    return v8_js_code_table_;
+  }
+  tables::V8JsCodeTable* mutable_v8_js_code_table() {
+    return &v8_js_code_table_;
+  }
+  const tables::V8InternalCodeTable& v8_internal_code_table() const {
+    return v8_internal_code_table_;
+  }
+  tables::V8InternalCodeTable* mutable_v8_internal_code_table() {
+    return &v8_internal_code_table_;
+  }
+  const tables::V8WasmCodeTable& v8_wasm_code_table() const {
+    return v8_wasm_code_table_;
+  }
+  tables::V8WasmCodeTable* mutable_v8_wasm_code_table() {
+    return &v8_wasm_code_table_;
+  }
+  const tables::V8RegexpCodeTable& v8_regexp_code_table() const {
+    return v8_regexp_code_table_;
+  }
+  tables::V8RegexpCodeTable* mutable_v8_regexp_code_table() {
+    return &v8_regexp_code_table_;
+  }
+
+  const tables::JitCodeTable& jit_code_table() const { return jit_code_table_; }
+  tables::JitCodeTable* mutable_jit_code_table() { return &jit_code_table_; }
+
+  const tables::JitFrameTable& jit_frame_table() const {
+    return jit_frame_table_;
+  }
+  tables::JitFrameTable* mutable_jit_frame_table() { return &jit_frame_table_; }
+
+  const tables::InputMethodClientsTable& inputmethod_clients_table() const {
+    return inputmethod_clients_table_;
+  }
+  tables::InputMethodClientsTable* mutable_inputmethod_clients_table() {
+    return &inputmethod_clients_table_;
+  }
+
+  const tables::InputMethodManagerServiceTable&
+  inputmethod_manager_service_table() const {
+    return inputmethod_manager_service_table_;
+  }
+  tables::InputMethodManagerServiceTable*
+  mutable_inputmethod_manager_service_table() {
+    return &inputmethod_manager_service_table_;
+  }
+
+  const tables::InputMethodServiceTable& inputmethod_service_table() const {
+    return inputmethod_service_table_;
+  }
+  tables::InputMethodServiceTable* mutable_inputmethod_service_table() {
+    return &inputmethod_service_table_;
   }
 
   const tables::SurfaceFlingerLayersSnapshotTable&
@@ -777,6 +888,20 @@ class TraceStorage {
   tables::SurfaceFlingerTransactionsTable*
   mutable_surfaceflinger_transactions_table() {
     return &surfaceflinger_transactions_table_;
+  }
+
+  const tables::ViewCaptureTable& viewcapture_table() const {
+    return viewcapture_table_;
+  }
+  tables::ViewCaptureTable* mutable_viewcapture_table() {
+    return &viewcapture_table_;
+  }
+
+  const tables::WindowManagerTable& windowmanager_table() const {
+    return windowmanager_table_;
+  }
+  tables::WindowManagerTable* mutable_windowmanager_table() {
+    return &windowmanager_table_;
   }
 
   const tables::WindowManagerShellTransitionsTable&
@@ -842,8 +967,9 @@ class TraceStorage {
                           const char* key,
                           std::optional<Variadic>* result) const {
     const auto& args = arg_table();
-    RowMap filtered = args.QueryToRowMap(
-        {args.arg_set_id().eq(arg_set_id), args.key().eq(key)}, {});
+    Query q;
+    q.constraints = {args.arg_set_id().eq(arg_set_id), args.key().eq(key)};
+    RowMap filtered = args.QueryToRowMap(q);
     if (filtered.empty()) {
       *result = std::nullopt;
       return util::OkStatus();
@@ -943,6 +1069,8 @@ class TraceStorage {
       &string_pool_, &uid_track_table_};
   tables::ProcessTrackTable process_track_table_{&string_pool_, &track_table_};
   tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
+  tables::LinuxDeviceTrackTable linux_device_track_table_{&string_pool_,
+                                                          &track_table_};
 
   // Track tables for counter events.
   tables::CounterTrackTable counter_track_table_{&string_pool_, &track_table_};
@@ -1004,6 +1132,8 @@ class TraceStorage {
   tables::RawTable raw_table_{&string_pool_};
   tables::FtraceEventTable ftrace_event_table_{&string_pool_, &raw_table_};
 
+  tables::MachineTable machine_table_{&string_pool_};
+
   tables::CpuTable cpu_table_{&string_pool_};
 
   tables::CpuFreqTable cpu_freq_table_{&string_pool_};
@@ -1011,6 +1141,11 @@ class TraceStorage {
   tables::AndroidLogTable android_log_table_{&string_pool_};
 
   tables::AndroidDumpstateTable android_dumpstate_table_{&string_pool_};
+
+  tables::AndroidKeyEventsTable android_key_events_table_{&string_pool_};
+  tables::AndroidMotionEventsTable android_motion_events_table_{&string_pool_};
+  tables::AndroidInputEventDispatchTable
+      android_input_event_dispatch_table_{&string_pool_};
 
   tables::StackProfileMappingTable stack_profile_mapping_table_{&string_pool_};
   tables::StackProfileFrameTable stack_profile_frame_table_{&string_pool_};
@@ -1021,11 +1156,14 @@ class TraceStorage {
       &string_pool_};
   tables::CpuProfileStackSampleTable cpu_profile_stack_sample_table_{
       &string_pool_, &stack_sample_table_};
+  tables::PerfSessionTable perf_session_table_{&string_pool_};
   tables::PerfSampleTable perf_sample_table_{&string_pool_};
   tables::PackageListTable package_list_table_{&string_pool_};
   tables::AndroidGameInterventionListTable
       android_game_intervention_list_table_{&string_pool_};
   tables::ProfilerSmapsTable profiler_smaps_table_{&string_pool_};
+
+  tables::TraceFileTable trace_file_table_{&string_pool_};
 
   // Symbol tables (mappings from frames to symbol names)
   tables::SymbolTable symbol_table_{&string_pool_};
@@ -1052,18 +1190,36 @@ class TraceStorage {
   tables::ActualFrameTimelineSliceTable actual_frame_timeline_slice_table_{
       &string_pool_, &slice_table_};
 
+  // AndroidNetworkPackets tables
+  tables::AndroidNetworkPacketsTable android_network_packets_table_{
+      &string_pool_, &slice_table_};
+
   // V8 tables
   tables::V8IsolateTable v8_isolate_table_{&string_pool_};
   tables::V8JsScriptTable v8_js_script_table_{&string_pool_};
   tables::V8WasmScriptTable v8_wasm_script_table_{&string_pool_};
   tables::V8JsFunctionTable v8_js_function_table_{&string_pool_};
+  tables::V8JsCodeTable v8_js_code_table_{&string_pool_};
+  tables::V8InternalCodeTable v8_internal_code_table_{&string_pool_};
+  tables::V8WasmCodeTable v8_wasm_code_table_{&string_pool_};
+  tables::V8RegexpCodeTable v8_regexp_code_table_{&string_pool_};
+
+  // Jit tables
+  tables::JitCodeTable jit_code_table_{&string_pool_};
+  tables::JitFrameTable jit_frame_table_{&string_pool_};
 
   // Winscope tables
+  tables::InputMethodClientsTable inputmethod_clients_table_{&string_pool_};
+  tables::InputMethodManagerServiceTable inputmethod_manager_service_table_{
+      &string_pool_};
+  tables::InputMethodServiceTable inputmethod_service_table_{&string_pool_};
   tables::SurfaceFlingerLayersSnapshotTable
       surfaceflinger_layers_snapshot_table_{&string_pool_};
   tables::SurfaceFlingerLayerTable surfaceflinger_layer_table_{&string_pool_};
   tables::SurfaceFlingerTransactionsTable surfaceflinger_transactions_table_{
       &string_pool_};
+  tables::ViewCaptureTable viewcapture_table_{&string_pool_};
+  tables::WindowManagerTable windowmanager_table_{&string_pool_};
   tables::WindowManagerShellTransitionsTable
       window_manager_shell_transitions_table_{&string_pool_};
   tables::WindowManagerShellTransitionHandlersTable
@@ -1110,6 +1266,12 @@ struct std::hash<::perfetto::trace_processor::FrameId>
     : std::hash<::perfetto::trace_processor::BaseId> {};
 template <>
 struct std::hash<::perfetto::trace_processor::tables::HeapGraphObjectTable::Id>
+    : std::hash<::perfetto::trace_processor::BaseId> {};
+template <>
+struct std::hash<::perfetto::trace_processor::tables::V8IsolateTable::Id>
+    : std::hash<::perfetto::trace_processor::BaseId> {};
+template <>
+struct std::hash<::perfetto::trace_processor::tables::JitCodeTable::Id>
     : std::hash<::perfetto::trace_processor::BaseId> {};
 
 template <>

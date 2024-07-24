@@ -43,6 +43,9 @@
 namespace perfetto::trace_processor::column {
 namespace {
 
+using Indices = DataLayerChain::Indices;
+using OrderedIndices = DataLayerChain::OrderedIndices;
+
 using NumericValue = std::variant<uint32_t, int32_t, int64_t, double>;
 
 // Using the fact that binary operators in std are operators() of classes, we
@@ -130,58 +133,6 @@ uint32_t UpperBoundIntrinsic(const void* vector_ptr,
             std::upper_bound(typed_start + search_range.start,
                              typed_start + search_range.end, val_data);
         return static_cast<uint32_t>(std::distance(typed_start, upper));
-      },
-      val);
-}
-
-template <typename T>
-uint32_t TypedLowerBoundExtrinsic(T val, const T* data, Indices indices) {
-  const auto* lower = std::lower_bound(
-      indices.data, indices.data + indices.size, val,
-      [data](uint32_t index, T value) { return data[index] < value; });
-  return static_cast<uint32_t>(std::distance(indices.data, lower));
-}
-
-uint32_t LowerBoundExtrinsic(const void* vector_ptr,
-                             NumericValue val,
-                             Indices indices) {
-  if (const auto* u32 = std::get_if<uint32_t>(&val)) {
-    const auto* start =
-        static_cast<const std::vector<uint32_t>*>(vector_ptr)->data();
-    return TypedLowerBoundExtrinsic(*u32, start, indices);
-  }
-  if (const auto* i64 = std::get_if<int64_t>(&val)) {
-    const auto* start =
-        static_cast<const std::vector<int64_t>*>(vector_ptr)->data();
-    return TypedLowerBoundExtrinsic(*i64, start, indices);
-  }
-  if (const auto* i32 = std::get_if<int32_t>(&val)) {
-    const auto* start =
-        static_cast<const std::vector<int32_t>*>(vector_ptr)->data();
-    return TypedLowerBoundExtrinsic(*i32, start, indices);
-  }
-  if (const auto* db = std::get_if<double>(&val)) {
-    const auto* start =
-        static_cast<const std::vector<double>*>(vector_ptr)->data();
-    return TypedLowerBoundExtrinsic(*db, start, indices);
-  }
-  PERFETTO_FATAL("Type not handled");
-}
-
-uint32_t UpperBoundExtrinsic(const void* vector_ptr,
-                             NumericValue val,
-                             Indices indices) {
-  return std::visit(
-      [vector_ptr, indices](auto val_data) {
-        using T = decltype(val_data);
-        const T* typed_start =
-            static_cast<const std::vector<T>*>(vector_ptr)->data();
-        const auto* upper =
-            std::upper_bound(indices.data, indices.data + indices.size,
-                             val_data, [typed_start](T value, uint32_t index) {
-                               return value < typed_start[index];
-                             });
-        return static_cast<uint32_t>(std::distance(indices.data, upper));
       },
       val);
 }
@@ -306,12 +257,7 @@ SearchValidationResult NumericStorageBase::ChainImpl::ValidateSearchConstraints(
     if (op == FilterOp::kIsNotNull) {
       return SearchValidationResult::kAllData;
     }
-    if (op == FilterOp::kIsNull) {
-      return SearchValidationResult::kNoData;
-    }
-    PERFETTO_FATAL(
-        "Invalid path. NULL should only be compared with 'IS NULL' and 'IS NOT "
-        "NULL'");
+    return SearchValidationResult::kNoData;
   }
 
   // FilterOp checks. Switch so that we get a warning if new FilterOp is not
@@ -458,119 +404,45 @@ RangeOrBitVector NumericStorageBase::ChainImpl::SearchValidated(
   return RangeOrBitVector(LinearSearchInternal(op, val, search_range));
 }
 
-RangeOrBitVector NumericStorageBase::ChainImpl::IndexSearchValidated(
+void NumericStorageBase::ChainImpl::IndexSearchValidated(
     FilterOp op,
     SqlValue sql_val,
-    Indices indices) const {
-  PERFETTO_DCHECK(*std::max_element(indices.data, indices.data + indices.size) <
-                  size());
-
+    Indices& indices) const {
   PERFETTO_TP_TRACE(
       metatrace::Category::DB, "NumericStorage::ChainImpl::IndexSearch",
-      [indices, op](metatrace::Record* r) {
-        r->AddArg("Count", std::to_string(indices.size));
+      [&indices, op](metatrace::Record* r) {
+        r->AddArg("Count", std::to_string(indices.tokens.size()));
         r->AddArg("Op", std::to_string(static_cast<uint32_t>(op)));
       });
 
   // Mismatched types - value is double and column is int.
   if (sql_val.type == SqlValue::kDouble &&
       storage_type_ != ColumnType::kDouble) {
-    auto ret_opt =
-        utils::CanReturnEarly(IntColumnWithDouble(op, &sql_val), indices.size);
-    if (ret_opt) {
-      return RangeOrBitVector(*ret_opt);
+    if (utils::CanReturnEarly(IntColumnWithDouble(op, &sql_val), indices)) {
+      return;
     }
   }
 
   // Mismatched types - column is double and value is int.
   if (sql_val.type != SqlValue::kDouble &&
       storage_type_ == ColumnType::kDouble) {
-    auto ret_opt =
-        utils::CanReturnEarly(DoubleColumnWithInt(op, &sql_val), indices.size);
-    if (ret_opt) {
-      return RangeOrBitVector(*ret_opt);
+    if (utils::CanReturnEarly(DoubleColumnWithInt(op, &sql_val), indices)) {
+      return;
     }
   }
 
   NumericValue val = GetNumericTypeVariant(storage_type_, sql_val);
-  return RangeOrBitVector(
-      IndexSearchInternal(op, val, indices.data, indices.size));
-}
-
-Range NumericStorageBase::ChainImpl::OrderedIndexSearchValidated(
-    FilterOp op,
-    SqlValue sql_val,
-    Indices indices) const {
-  PERFETTO_DCHECK(*std::max_element(indices.data, indices.data + indices.size) <
-                  size());
-
-  PERFETTO_TP_TRACE(
-      metatrace::Category::DB, "NumericStorage::ChainImpl::OrderedIndexSearch",
-      [indices, op](metatrace::Record* r) {
-        r->AddArg("Count", std::to_string(indices.size));
-        r->AddArg("Op", std::to_string(static_cast<uint32_t>(op)));
-      });
-
-  // Mismatched types - value is double and column is int.
-  if (sql_val.type == SqlValue::kDouble &&
-      storage_type_ != ColumnType::kDouble) {
-    if (auto ret = utils::CanReturnEarly(IntColumnWithDouble(op, &sql_val),
-                                         indices.size);
-        ret) {
-      return *ret;
-    }
-  }
-
-  // Mismatched types - column is double and value is int.
-  if (sql_val.type != SqlValue::kDouble &&
-      storage_type_ == ColumnType::kDouble) {
-    if (auto ret = utils::CanReturnEarly(DoubleColumnWithInt(op, &sql_val),
-                                         indices.size);
-        ret) {
-      return *ret;
-    }
-  }
-
-  NumericValue val;
-  switch (storage_type_) {
-    case ColumnType::kDouble:
-      val = sql_val.AsDouble();
-      break;
-    case ColumnType::kInt64:
-      val = sql_val.AsLong();
-      break;
-    case ColumnType::kInt32:
-      val = static_cast<int32_t>(sql_val.AsLong());
-      break;
-    case ColumnType::kUint32:
-      val = static_cast<uint32_t>(sql_val.AsLong());
-      break;
-    case ColumnType::kString:
-    case ColumnType::kDummy:
-    case ColumnType::kId:
-      PERFETTO_FATAL("Invalid type");
-  }
-
-  switch (op) {
-    case FilterOp::kEq:
-      return {LowerBoundExtrinsic(vector_ptr_, val, indices),
-              UpperBoundExtrinsic(vector_ptr_, val, indices)};
-    case FilterOp::kLe:
-      return {0, UpperBoundExtrinsic(vector_ptr_, val, indices)};
-    case FilterOp::kLt:
-      return {0, LowerBoundExtrinsic(vector_ptr_, val, indices)};
-    case FilterOp::kGe:
-      return {LowerBoundExtrinsic(vector_ptr_, val, indices), indices.size};
-    case FilterOp::kGt:
-      return {UpperBoundExtrinsic(vector_ptr_, val, indices), indices.size};
-    case FilterOp::kNe:
-    case FilterOp::kIsNull:
-    case FilterOp::kIsNotNull:
-    case FilterOp::kGlob:
-    case FilterOp::kRegex:
-      PERFETTO_FATAL("Wrong filtering operation");
-  }
-  PERFETTO_FATAL("For GCC");
+  std::visit(
+      [this, &indices, op](auto val) {
+        using T = decltype(val);
+        auto* start = static_cast<const std::vector<T>*>(vector_ptr_)->data();
+        std::visit(
+            [start, &indices, val](auto comparator) {
+              utils::IndexSearchWithComparator(val, start, indices, comparator);
+            },
+            GetFilterOpVariant<T>(op));
+      },
+      val);
 }
 
 BitVector NumericStorageBase::ChainImpl::LinearSearchInternal(
@@ -601,27 +473,6 @@ BitVector NumericStorageBase::ChainImpl::LinearSearchInternal(
   } else {
     PERFETTO_DFATAL("Invalid");
   }
-  return std::move(builder).Build();
-}
-
-BitVector NumericStorageBase::ChainImpl::IndexSearchInternal(
-    FilterOp op,
-    NumericValue val,
-    const uint32_t* indices,
-    uint32_t indices_count) const {
-  BitVector::Builder builder(indices_count);
-  std::visit(
-      [this, indices, op, &builder](auto val) {
-        using T = decltype(val);
-        auto* start = static_cast<const std::vector<T>*>(vector_ptr_)->data();
-        std::visit(
-            [start, indices, val, &builder](auto comparator) {
-              utils::IndexSearchWithComparator(val, start, indices, comparator,
-                                               builder);
-            },
-            GetFilterOpVariant<T>(op));
-      },
-      val);
   return std::move(builder).Build();
 }
 

@@ -19,8 +19,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <utility>
+#include <vector>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
@@ -33,6 +36,32 @@
 #include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
+namespace {
+using Indices = DataLayerChain::Indices;
+
+std::optional<Token> RemoveAllNullsAndReturnTheFirstOne(
+    Indices& indices,
+    const BitVector& non_null) {
+  // Find first NULL.
+  auto first_null_it = std::find_if(
+      indices.tokens.begin(), indices.tokens.end(),
+      [&non_null](const Token& t) { return !non_null.IsSet(t.index); });
+
+  // Save first NULL.
+  std::optional<Token> null_tok;
+  if (first_null_it != indices.tokens.end()) {
+    null_tok = *first_null_it;
+  }
+
+  // Erase all NULLs.
+  indices.tokens.erase(std::remove_if(first_null_it, indices.tokens.end(),
+                                      [&non_null](const Token& idx) {
+                                        return !non_null.IsSet(idx.index);
+                                      }),
+                       indices.tokens.end());
+  return null_tok;
+}
+}  // namespace
 
 DenseNullOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                        const BitVector* non_null)
@@ -67,6 +96,9 @@ SearchValidationResult DenseNullOverlay::ChainImpl::ValidateSearchConstraints(
   if (op == FilterOp::kIsNull || op == FilterOp::kIsNotNull) {
     return SearchValidationResult::kOk;
   }
+  if (sql_val.is_null()) {
+    return SearchValidationResult::kNoData;
+  }
   return inner_->ValidateSearchConstraints(op, sql_val);
 }
 
@@ -81,10 +113,10 @@ RangeOrBitVector DenseNullOverlay::ChainImpl::SearchValidated(FilterOp op,
       case SearchValidationResult::kNoData: {
         // There is no need to search in underlying storage. It's enough to
         // intersect the |non_null_|.
-        BitVector res = non_null_->IntersectRange(in.start, in.end);
-        res.Not();
+        BitVector res = non_null_->Copy();
         res.Resize(in.end, false);
-        return RangeOrBitVector(std::move(res));
+        res.Not();
+        return RangeOrBitVector(res.IntersectRange(in.start, in.end));
       }
       case SearchValidationResult::kAllData:
         return RangeOrBitVector(in);
@@ -135,133 +167,127 @@ RangeOrBitVector DenseNullOverlay::ChainImpl::SearchValidated(FilterOp op,
   return RangeOrBitVector(std::move(res));
 }
 
-RangeOrBitVector DenseNullOverlay::ChainImpl::IndexSearchValidated(
-    FilterOp op,
-    SqlValue sql_val,
-    Indices indices) const {
+void DenseNullOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
+                                                       SqlValue sql_val,
+                                                       Indices& indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "DenseNullOverlay::ChainImpl::IndexSearch");
 
   if (op == FilterOp::kIsNull) {
-    switch (inner_->ValidateSearchConstraints(op, sql_val)) {
-      case SearchValidationResult::kNoData: {
-        BitVector::Builder null_indices(indices.size);
-        for (const uint32_t* it = indices.data;
-             it != indices.data + indices.size; it++) {
-          null_indices.Append(!non_null_->IsSet(*it));
-        }
-        // There is no need to search in underlying storage. We should just
-        // check if the index is set in |non_null_|.
-        return RangeOrBitVector(std::move(null_indices).Build());
-      }
-      case SearchValidationResult::kAllData:
-        return RangeOrBitVector(Range(0, indices.size));
-      case SearchValidationResult::kOk:
-        break;
-    }
-  } else if (op == FilterOp::kIsNotNull) {
-    switch (inner_->ValidateSearchConstraints(op, sql_val)) {
-      case SearchValidationResult::kNoData: {
-        BitVector::Builder non_null_indices(indices.size);
-        for (const uint32_t* it = indices.data;
-             it != indices.data + indices.size; it++) {
-          non_null_indices.Append(non_null_->IsSet(*it));
-        }
-        // There is no need to search in underlying storage. We should just
-        // check if the index is set in |non_null_|.
-        return RangeOrBitVector(std::move(non_null_indices).Build());
-      }
-      case SearchValidationResult::kAllData:
-        return RangeOrBitVector(Range(0, indices.size));
-      case SearchValidationResult::kOk:
-        break;
-    }
+    // Partition the vector into all the null indices followed by all the
+    // non-null indices.
+    auto non_null_it = std::stable_partition(
+        indices.tokens.begin(), indices.tokens.end(),
+        [this](const Token& t) { return !non_null_->IsSet(t.index); });
+
+    // IndexSearch |inner_| with a vector containing a copy of the non-null
+    // indices.
+    Indices non_null{{non_null_it, indices.tokens.end()}, indices.state};
+    inner_->IndexSearch(op, sql_val, non_null);
+
+    // Replace all the original non-null positions with the result from calling
+    // IndexSearch.
+    auto new_non_null_it =
+        indices.tokens.erase(non_null_it, indices.tokens.end());
+    indices.tokens.insert(new_non_null_it, non_null.tokens.begin(),
+                          non_null.tokens.end());
+
+    // Merge the two sorted index ranges together using the payload as the
+    // comparator. This is a required post-condition of IndexSearch.
+    std::inplace_merge(indices.tokens.begin(), new_non_null_it,
+                       indices.tokens.end(), Token::PayloadComparator());
+    return;
   }
 
-  RangeOrBitVector inner_res =
-      inner_->IndexSearchValidated(op, sql_val, indices);
-  if (inner_res.IsRange()) {
-    Range inner_range = std::move(inner_res).TakeIfRange();
-    BitVector::Builder builder(indices.size, inner_range.start);
-    for (uint32_t i = inner_range.start; i < inner_range.end; ++i) {
-      builder.Append(non_null_->IsSet(indices.data[i]));
-    }
-    return RangeOrBitVector(std::move(builder).Build());
-  }
-
-  BitVector::Builder builder(indices.size);
-  for (uint32_t i = 0; i < indices.size; ++i) {
-    builder.Append(non_null_->IsSet(indices.data[i]));
-  }
-  BitVector non_null = std::move(builder).Build();
-
-  BitVector res = std::move(inner_res).TakeIfBitVector();
-
-  if (op == FilterOp::kIsNull) {
-    BitVector null = std::move(non_null);
-    null.Not();
-    res.Or(null);
-  } else {
-    res.And(non_null);
-  }
-
-  PERFETTO_DCHECK(res.size() == indices.size);
-  return RangeOrBitVector(std::move(res));
-}
-
-Range DenseNullOverlay::ChainImpl::OrderedIndexSearchValidated(
-    FilterOp op,
-    SqlValue sql_val,
-    Indices indices) const {
-  // For NOT EQUAL the further analysis needs to be done by the caller.
-  PERFETTO_CHECK(op != FilterOp::kNe);
-
-  PERFETTO_TP_TRACE(metatrace::Category::DB,
-                    "DenseNullOverlay::ChainImpl::OrderedIndexSearch");
-
-  // We assume all NULLs are ordered to be in the front. We are looking for the
-  // first index that points to non NULL value.
-  const uint32_t* first_non_null =
-      std::partition_point(indices.data, indices.data + indices.size,
-                           [this](uint32_t i) { return !non_null_->IsSet(i); });
-
-  auto non_null_offset =
-      static_cast<uint32_t>(std::distance(indices.data, first_non_null));
-  auto non_null_size = static_cast<uint32_t>(
-      std::distance(first_non_null, indices.data + indices.size));
-
-  if (op == FilterOp::kIsNull) {
-    return {0, non_null_offset};
-  }
-
+  auto keep_only_non_null = [this, &indices]() {
+    indices.tokens.erase(
+        std::remove_if(
+            indices.tokens.begin(), indices.tokens.end(),
+            [this](const Token& idx) { return !non_null_->IsSet(idx.index); }),
+        indices.tokens.end());
+    return;
+  };
   if (op == FilterOp::kIsNotNull) {
     switch (inner_->ValidateSearchConstraints(op, sql_val)) {
       case SearchValidationResult::kNoData:
-        return {};
+        indices.tokens.clear();
+        return;
       case SearchValidationResult::kAllData:
-        return {non_null_offset, indices.size};
+        keep_only_non_null();
+        return;
       case SearchValidationResult::kOk:
         break;
     }
   }
-
-  Range inner_range = inner_->OrderedIndexSearchValidated(
-      op, sql_val,
-      Indices{first_non_null, non_null_size, Indices::State::kNonmonotonic});
-  return {inner_range.start + non_null_offset,
-          inner_range.end + non_null_offset};
+  keep_only_non_null();
+  inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void DenseNullOverlay::ChainImpl::StableSort(SortToken* start,
-                                             SortToken* end,
+void DenseNullOverlay::ChainImpl::StableSort(Token* start,
+                                             Token* end,
                                              SortDirection direction) const {
-  SortToken* it = std::stable_partition(
-      start, end,
-      [this](const SortToken& idx) { return !non_null_->IsSet(idx.index); });
+  Token* it = std::stable_partition(start, end, [this](const Token& idx) {
+    return !non_null_->IsSet(idx.index);
+  });
   inner_->StableSort(it, end, direction);
   if (direction == SortDirection::kDescending) {
     std::rotate(start, it, end);
   }
+}
+
+void DenseNullOverlay::ChainImpl::Distinct(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "DenseNullOverlay::ChainImpl::Distinct");
+  std::optional<Token> null_tok =
+      RemoveAllNullsAndReturnTheFirstOne(indices, *non_null_);
+
+  inner_->Distinct(indices);
+
+  // Add the only null as it is distinct value.
+  if (null_tok.has_value()) {
+    indices.tokens.push_back(*null_tok);
+  }
+}
+
+std::optional<Token> DenseNullOverlay::ChainImpl::MaxElement(
+    Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "DenseNullOverlay::ChainImpl::MaxElement");
+  std::optional<Token> null_tok =
+      RemoveAllNullsAndReturnTheFirstOne(indices, *non_null_);
+
+  std::optional<Token> max_val = inner_->MaxElement(indices);
+
+  return max_val ? max_val : null_tok;
+}
+
+std::optional<Token> DenseNullOverlay::ChainImpl::MinElement(
+    Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "DenseNullOverlay::ChainImpl::MinElement");
+  // Return the first NULL if found.
+  auto first_null_it = std::find_if(
+      indices.tokens.begin(), indices.tokens.end(),
+      [this](const Token& t) { return !non_null_->IsSet(t.index); });
+
+  return (first_null_it == indices.tokens.end()) ? inner_->MinElement(indices)
+                                                 : *first_null_it;
+}
+
+std::unique_ptr<DataLayer> DenseNullOverlay::ChainImpl::Flatten(
+    std::vector<uint32_t>& indices) const {
+  for (auto& i : indices) {
+    if (!non_null_->IsSet(i)) {
+      i = std::numeric_limits<uint32_t>::max();
+    }
+  }
+  return inner_->Flatten(indices);
+}
+
+SqlValue DenseNullOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
+    uint32_t index) const {
+  return non_null_->IsSet(index) ? inner_->Get_AvoidUsingBecauseSlow(index)
+                                 : SqlValue();
 }
 
 void DenseNullOverlay::ChainImpl::Serialize(StorageProto* storage) const {

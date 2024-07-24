@@ -32,25 +32,6 @@ from python.generators.sql_processing.utils import check_banned_create_view_as
 from python.generators.sql_processing.utils import check_banned_words
 from python.generators.sql_processing.utils import check_banned_include_all
 
-# Allowlist path are relative to the stdlib root.
-CREATE_TABLE_ALLOWLIST = {
-    '/prelude/trace_bounds.sql': ['trace_bounds'],
-    '/android/binder.sql': ['_oom_score'],
-    '/android/monitor_contention.sql': [
-        '_isolated', 'android_monitor_contention_chain',
-        'android_monitor_contention'
-    ],
-    '/chrome/tasks.sql': [
-        '_chrome_mojo_slices', '_chrome_java_views', '_chrome_scheduler_tasks',
-        '_chrome_tasks'
-    ],
-    '/sched/thread_executing_span.sql': [
-        '_wakeup', '_thread_executing_span_graph', '_critical_path',
-        '_wakeup_graph', '_thread_executing_span_graph'
-    ],
-    '/slices/flat_slices.sql': ['_slice_flattened']
-}
-
 
 def main():
   parser = argparse.ArgumentParser()
@@ -83,9 +64,6 @@ def main():
         if not pattern.match(rel_path):
           continue
 
-      if args.verbose:
-        print(f'Parsing {rel_path}:')
-
       with open(path, 'r') as f:
         sql = f.read()
 
@@ -98,10 +76,13 @@ def main():
       modules.append((path, sql, parsed))
 
       if args.verbose:
-        function_count = len(parsed.functions) + len(parsed.table_functions)
-        print(f'Parsed {function_count} functions'
-              f', {len(parsed.table_views)} tables/views'
-              f' ({len(parsed.errors)} errors).')
+        obj_count = len(parsed.functions) + len(parsed.table_functions) + len(
+            parsed.table_views) + len(parsed.macros)
+        print(
+            f"""Parsing '{rel_path}' ({obj_count} objects, {len(parsed.errors)} errors)
+- {len(parsed.functions)} functions + {len(parsed.table_functions)} table functions,
+- {len(parsed.table_views)} tables/views,
+- {len(parsed.macros)} macros.""")
 
   for path, sql, parsed in modules:
     lines = [l.strip() for l in sql.split('\n')]
@@ -124,7 +105,7 @@ def main():
     errors += check_banned_create_table_as(
         sql,
         path.split(ROOT_DIR)[1],
-        args.stdlib_sources.split(ROOT_DIR)[1], CREATE_TABLE_ALLOWLIST)
+        args.stdlib_sources.split(ROOT_DIR)[1])
     errors += check_banned_create_view_as(sql, path.split(ROOT_DIR)[1])
     errors += check_banned_include_all(sql, path.split(ROOT_DIR)[1])
 

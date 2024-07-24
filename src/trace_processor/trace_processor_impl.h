@@ -29,7 +29,9 @@
 
 #include "perfetto/base/status.h"
 #include "perfetto/trace_processor/basic_types.h"
+#include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor.h"
+#include "src/trace_processor/iterator_impl.h"
 #include "src/trace_processor/metrics/metrics.h"
 #include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/create_function.h"
@@ -100,7 +102,7 @@ class TraceProcessorImpl : public TraceProcessor,
   friend class IteratorImpl;
 
   template <typename Table>
-  void RegisterStaticTable(const Table& table) {
+  void RegisterStaticTable(Table* table) {
     engine_->RegisterStaticTable(table, Table::Name(),
                                  Table::ComputeStaticSchema());
   }

@@ -51,7 +51,7 @@ constexpr char kRssStatThrottledTrigger[] =
 constexpr char kSuspendResumeMinimalTrigger[] =
     "hist:keys=start:size=128:onmatch(power.suspend_resume)"
     ".trace(suspend_resume_minimal, start) if action == 'syscore_resume'";
-}
+}  // namespace
 
 void KernelLogWrite(const char* s) {
   PERFETTO_DCHECK(*s && s[strlen(s) - 1] == '\n');
@@ -285,7 +285,8 @@ bool FtraceProcfs::MaybeSetUpEventTriggers(const std::string& group,
             CreateEventTrigger("kmem", "rss_stat", kRssStatThrottledTrigger);
     } else if (name == "suspend_resume_minimal") {
       ret = RemoveAllEventTriggers("power", "suspend_resume") &&
-            CreateEventTrigger("power", "suspend_resume", kSuspendResumeMinimalTrigger);
+            CreateEventTrigger("power", "suspend_resume",
+                               kSuspendResumeMinimalTrigger);
     }
   }
 
@@ -305,7 +306,8 @@ bool FtraceProcfs::MaybeTearDownEventTriggers(const std::string& group,
     if (name == "rss_stat_throttled") {
       ret = RemoveAllEventTriggers("kmem", "rss_stat");
     } else if (name == "suspend_resume_minimal") {
-      ret = RemoveEventTrigger("power", "suspend_resume", kSuspendResumeMinimalTrigger);
+      ret = RemoveEventTrigger("power", "suspend_resume",
+                               kSuspendResumeMinimalTrigger);
     }
   }
 
@@ -397,7 +399,7 @@ void FtraceProcfs::ClearTrace() {
   // We cannot use PERFETTO_CHECK as we might get a permission denied error
   // on Android. The permissions to these files are configured in
   // platform/framework/native/cmds/atrace/atrace.rc.
-  for (size_t cpu = 0; cpu < NumberOfCpus(); cpu++) {
+  for (size_t cpu = 0, num_cpus = NumberOfCpus(); cpu < num_cpus; cpu++) {
     ClearPerCpuTrace(cpu);
   }
 }

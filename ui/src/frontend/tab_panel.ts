@@ -16,6 +16,7 @@ import m from 'mithril';
 
 import {Gate} from '../base/mithril_utils';
 import {Actions} from '../common/actions';
+import {getLegacySelection} from '../common/state';
 import {EmptyState} from '../widgets/empty_state';
 
 import {
@@ -60,8 +61,10 @@ export class TabPanel implements m.ClassComponent {
       }
     });
 
-    if (!this.hasBeenDragged &&
-        (tabs.length > 0 || globals.state.currentSelection)) {
+    if (
+      !this.hasBeenDragged &&
+      (tabs.length > 0 || globals.state.selection.kind !== 'empty')
+    ) {
       this.detailsHeight = getDefaultDetailsHeight();
     }
 
@@ -72,23 +75,24 @@ export class TabPanel implements m.ClassComponent {
       content: this.renderCSTabContentWithFading(),
     });
 
-    const tabDropdownEntries =
-        globals.tabManager.tabs.filter((tab) => tab.isEphemeral === false)
-          .map(({content, uri}): TabDropdownEntry => {
-            // Check if the tab is already open
-            const isOpen = globals.state.tabs.openTabs.find((openTabUri) => {
-              return openTabUri === uri;
-            });
-            const clickAction = isOpen ?
-              Actions.hideTab({uri}) :
-              Actions.showTab({uri});
-            return {
-              key: uri,
-              title: content.getTitle(),
-              onClick: () => globals.dispatch(clickAction),
-              checked: isOpen !== undefined,
-            };
-          });
+    const tabDropdownEntries = globals.tabManager.tabs
+      .filter((tab) => tab.isEphemeral === false)
+      .map(({content, uri}): TabDropdownEntry => {
+        // Check if the tab is already open
+        const isOpen =
+          globals.state.tabs.openTabs.find((openTabUri) => {
+            return openTabUri === uri;
+          }) !== undefined;
+        const clickAction = isOpen
+          ? Actions.hideTab({uri})
+          : Actions.showTab({uri});
+        return {
+          key: uri,
+          title: content.getTitle(),
+          onClick: () => globals.dispatch(clickAction),
+          checked: isOpen !== undefined,
+        };
+      });
 
     return [
       m(DragHandle, {
@@ -109,7 +113,7 @@ export class TabPanel implements m.ClassComponent {
           style: {height: `${this.detailsHeight}px`},
         },
         tabs.map(({key, content}) => {
-          const active = (key === globals.state.tabs.currentTab);
+          const active = key === globals.state.tabs.currentTab;
           return m(Gate, {open: active}, content);
         }),
       ),
@@ -125,38 +129,77 @@ export class TabPanel implements m.ClassComponent {
     }
   }
 
-  private renderCSTabContent(): {isLoading: boolean, content: m.Children} {
-    const cs = globals.state.currentSelection;
-    if (!cs) {
+  private renderCSTabContent(): {isLoading: boolean; content: m.Children} {
+    const currentSelection = globals.state.selection;
+    const legacySelection = getLegacySelection(globals.state);
+    if (currentSelection.kind === 'empty') {
       return {
         isLoading: false,
-        content: m(EmptyState, {
-          className: 'pf-noselection',
-          title: 'Nothing selected',
-        }, 'Selection details will appear here'),
+        content: m(
+          EmptyState,
+          {
+            className: 'pf-noselection',
+            title: 'Nothing selected',
+          },
+          'Selection details will appear here',
+        ),
       };
     }
 
+    // Show single selection panels if they are registered
+    if (currentSelection.kind === 'single') {
+      const trackKey = currentSelection.trackKey;
+      const uri = globals.state.tracks[trackKey]?.uri;
+
+      if (uri) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(uri);
+        const panel = trackDesc?.detailsPanel;
+        if (panel) {
+          return {
+            content: panel.render(currentSelection.eventId),
+            isLoading: panel.isLoading?.() ?? false,
+          };
+        }
+      }
+    }
+
     // Get the first "truthy" details panel
-    const panel = globals.tabManager.detailsPanels
-      .map((dp) => {
-        return {
-          content: dp.render(cs),
-          isLoading: dp.isLoading?.() ?? false,
-        };
-      })
-      .find(({content}) => content);
+    let detailsPanels = globals.tabManager.detailsPanels.map((dp) => {
+      return {
+        content: dp.render(currentSelection),
+        isLoading: dp.isLoading?.() ?? false,
+      };
+    });
+
+    if (legacySelection !== null) {
+      const legacyDetailsPanels = globals.tabManager.legacyDetailsPanels.map(
+        (dp) => {
+          return {
+            content: dp.render(legacySelection),
+            isLoading: dp.isLoading?.() ?? false,
+          };
+        },
+      );
+
+      detailsPanels = detailsPanels.concat(legacyDetailsPanels);
+    }
+
+    const panel = detailsPanels.find(({content}) => content);
 
     if (panel) {
       return panel;
     } else {
       return {
         isLoading: false,
-        content: m(EmptyState, {
-          className: 'pf-noselection',
-          title: 'No details available',
-          icon: 'warning',
-        }, `Selection kind: '${cs.kind}'`),
+        content: m(
+          EmptyState,
+          {
+            className: 'pf-noselection',
+            title: 'No details available',
+            icon: 'warning',
+          },
+          `Selection kind: '${currentSelection.kind}'`,
+        ),
       };
     }
   }

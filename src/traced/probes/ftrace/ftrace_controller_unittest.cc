@@ -102,9 +102,10 @@ std::unique_ptr<Table> FakeTable(FtraceProcfs* ftrace) {
 }
 
 std::unique_ptr<FtraceConfigMuxer> FakeMuxer(FtraceProcfs* ftrace,
+                                             AtraceWrapper* atrace_wrapper,
                                              ProtoTranslationTable* table) {
   return std::unique_ptr<FtraceConfigMuxer>(new FtraceConfigMuxer(
-      ftrace, table, SyscallTable(Architecture::kUnknown), {}));
+      ftrace, atrace_wrapper, table, SyscallTable(Architecture::kUnknown), {}));
 }
 
 class MockFtraceProcfs : public FtraceProcfs {
@@ -201,6 +202,13 @@ class MockFtraceProcfs : public FtraceProcfs {
   std::string current_tracer_ = "nop";
 };
 
+class MockAtraceWrapper : public AtraceWrapper {
+ public:
+  MOCK_METHOD(bool, RunAtrace, (const std::vector<std::string>&, std::string*));
+  MOCK_METHOD(bool, SupportsUserspaceOnly, ());
+  MOCK_METHOD(bool, SupportsPreferSdk, ());
+};
+
 }  // namespace
 
 class TestFtraceController : public FtraceController,
@@ -208,11 +216,13 @@ class TestFtraceController : public FtraceController,
  public:
   TestFtraceController(std::unique_ptr<MockFtraceProcfs> ftrace_procfs,
                        std::unique_ptr<Table> table,
+                       std::unique_ptr<AtraceWrapper> atrace_wrapper,
                        std::unique_ptr<FtraceConfigMuxer> muxer,
                        std::unique_ptr<MockTaskRunner> runner,
                        MockFtraceProcfs* raw_procfs)
       : FtraceController(std::move(ftrace_procfs),
                          std::move(table),
+                         std::move(atrace_wrapper),
                          std::move(muxer),
                          runner.get(),
                          /*observer=*/this),
@@ -256,7 +266,7 @@ class TestFtraceController : public FtraceController,
     PERFETTO_CHECK(ftrace_procfs);
 
     auto table = FakeTable(ftrace_procfs.get());
-    auto muxer = FakeMuxer(ftrace_procfs.get(), table.get());
+    auto muxer = FakeMuxer(ftrace_procfs.get(), atrace_wrapper(), table.get());
     return std::unique_ptr<FtraceController::FtraceInstanceState>(
         new FtraceController::FtraceInstanceState(
             std::move(ftrace_procfs), std::move(table), std::move(muxer)));
@@ -289,14 +299,17 @@ std::unique_ptr<TestFtraceController> CreateTestController(
         new MockFtraceProcfs("/root/", cpu_count));
   }
 
+  auto atrace_wrapper = std::make_unique<NiceMock<MockAtraceWrapper>>();
+
   auto table = FakeTable(ftrace_procfs.get());
 
-  auto muxer = FakeMuxer(ftrace_procfs.get(), table.get());
+  auto muxer =
+      FakeMuxer(ftrace_procfs.get(), atrace_wrapper.get(), table.get());
 
   MockFtraceProcfs* raw_procfs = ftrace_procfs.get();
   return std::unique_ptr<TestFtraceController>(new TestFtraceController(
-      std::move(ftrace_procfs), std::move(table), std::move(muxer),
-      std::move(runner), raw_procfs));
+      std::move(ftrace_procfs), std::move(table), std::move(atrace_wrapper),
+      std::move(muxer), std::move(runner), raw_procfs));
 }
 
 }  // namespace
@@ -485,27 +498,6 @@ TEST(FtraceControllerTest, BufferSize) {
         *controller->procfs(),
         WriteToFile("/root/buffer_size_kb", testing::AnyOf("2048", "8192")));
     FtraceConfig config = CreateFtraceConfig({"group/foo"});
-    auto data_source = controller->AddFakeDataSource(config);
-    ASSERT_TRUE(controller->StartDataSource(data_source.get()));
-  }
-
-  {
-    // Way too big buffer size -> max size.
-    EXPECT_CALL(*controller->procfs(),
-                WriteToFile("/root/buffer_size_kb", "65536"));
-    FtraceConfig config = CreateFtraceConfig({"group/foo"});
-    config.set_buffer_size_kb(10 * 1024 * 1024);
-    auto data_source = controller->AddFakeDataSource(config);
-    ASSERT_TRUE(controller->StartDataSource(data_source.get()));
-  }
-
-  {
-    // The limit is 64mb, 65mb is too much.
-    EXPECT_CALL(*controller->procfs(),
-                WriteToFile("/root/buffer_size_kb", "65536"));
-    FtraceConfig config = CreateFtraceConfig({"group/foo"});
-    ON_CALL(*controller->procfs(), NumberOfCpus()).WillByDefault(Return(2));
-    config.set_buffer_size_kb(65 * 1024);
     auto data_source = controller->AddFakeDataSource(config);
     ASSERT_TRUE(controller->StartDataSource(data_source.get()));
   }

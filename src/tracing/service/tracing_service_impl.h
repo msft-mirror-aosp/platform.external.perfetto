@@ -21,7 +21,6 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <random>
 #include <set>
@@ -33,6 +32,7 @@
 #include "perfetto/base/time.h"
 #include "perfetto/ext/base/circular_queue.h"
 #include "perfetto/ext/base/periodic_task.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/uuid.h"
 #include "perfetto/ext/base/weak_ptr.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
@@ -212,7 +212,7 @@ class TracingServiceImpl : public TracingService {
     ~ConsumerEndpointImpl() override;
 
     void NotifyOnTracingDisabled(const std::string& error);
-    void NotifyCloneSnapshotTrigger();
+    void NotifyCloneSnapshotTrigger(const std::string& trigger_name);
 
     // TracingService::ConsumerEndpoint implementation.
     void EnableTracing(const TraceConfig&, base::ScopedFile) override;
@@ -332,8 +332,8 @@ class TracingServiceImpl : public TracingService {
   void ApplyChunkPatches(ProducerID,
                          const std::vector<CommitDataRequest::ChunkToPatch>&);
   void NotifyFlushDoneForProducer(ProducerID, FlushRequestID);
-  void NotifyDataSourceStarted(ProducerID, const DataSourceInstanceID);
-  void NotifyDataSourceStopped(ProducerID, const DataSourceInstanceID);
+  void NotifyDataSourceStarted(ProducerID, DataSourceInstanceID);
+  void NotifyDataSourceStopped(ProducerID, DataSourceInstanceID);
   void ActivateTriggers(ProducerID, const std::vector<std::string>& triggers);
 
   // Called by ConsumerEndpointImpl.
@@ -352,10 +352,10 @@ class TracingServiceImpl : public TracingService {
              ConsumerEndpoint::FlushCallback,
              FlushFlags);
   void FlushAndDisableTracing(TracingSessionID);
-  void FlushAndCloneSession(ConsumerEndpointImpl*,
-                            TracingSessionID,
-                            bool skip_filter,
-                            bool for_bugreport);
+  base::Status FlushAndCloneSession(ConsumerEndpointImpl*,
+                                    TracingSessionID,
+                                    bool skip_filter,
+                                    bool for_bugreport);
 
   // Starts reading the internal tracing buffers from the tracing session `tsid`
   // and sends them to `*consumer` (which must be != nullptr).
@@ -574,6 +574,10 @@ class TracingServiceImpl : public TracingService {
           });
     }
 
+    // Checks whether |clone_uid| is allowed to clone the current tracing
+    // session.
+    bool IsCloneAllowed(uid_t clone_uid) const;
+
     const TracingSessionID id;
 
     // The consumer that started the session.
@@ -741,6 +745,8 @@ class TracingServiceImpl : public TracingService {
   TracingServiceImpl(const TracingServiceImpl&) = delete;
   TracingServiceImpl& operator=(const TracingServiceImpl&) = delete;
 
+  bool IsInitiatorPrivileged(const TracingSession&);
+
   DataSourceInstance* SetupDataSource(const TraceConfig::DataSource&,
                                       const TraceConfig::ProducerConfig&,
                                       const RegisteredDataSource&,
@@ -804,14 +810,14 @@ class TracingServiceImpl : public TracingService {
   void FlushDataSourceInstances(
       TracingSession*,
       uint32_t timeout_ms,
-      std::map<ProducerID, std::vector<DataSourceInstanceID>>,
+      const std::map<ProducerID, std::vector<DataSourceInstanceID>>&,
       ConsumerEndpoint::FlushCallback,
       FlushFlags);
   std::map<ProducerID, std::vector<DataSourceInstanceID>>
   GetFlushableDataSourceInstancesForBuffers(TracingSession*,
-                                            std::set<BufferID>);
+                                            const std::set<BufferID>&);
   bool DoCloneBuffers(TracingSession*,
-                      std::set<BufferID>,
+                      const std::set<BufferID>&,
                       std::vector<std::unique_ptr<TraceBuffer>>*);
   base::Status FinishCloneSession(ConsumerEndpointImpl*,
                                   TracingSessionID,
@@ -821,7 +827,7 @@ class TracingServiceImpl : public TracingService {
                                   base::Uuid*);
   void OnFlushDoneForClone(TracingSessionID src_tsid,
                            PendingCloneID clone_id,
-                           std::set<BufferID> buf_ids,
+                           const std::set<BufferID>& buf_ids,
                            bool final_flush_outcome);
 
   // Returns true if `*tracing_session` is waiting for a trigger that hasn't

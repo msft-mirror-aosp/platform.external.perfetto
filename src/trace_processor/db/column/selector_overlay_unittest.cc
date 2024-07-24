@@ -17,6 +17,7 @@
 #include "src/trace_processor/db/column/selector_overlay.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "data_layer.h"
@@ -33,6 +34,9 @@ namespace {
 
 using testing::ElementsAre;
 using testing::IsEmpty;
+
+using Indices = DataLayerChain::Indices;
+using OrderedIndices = DataLayerChain::OrderedIndices;
 
 TEST(SelectorOverlay, SingleSearch) {
   BitVector selector{0, 1, 1, 0, 0, 1, 1, 0};
@@ -94,41 +98,27 @@ TEST(SelectorOverlay, IndexSearch) {
   SelectorOverlay storage(&selector);
   auto chain = storage.MakeChain(std::move(fake));
 
-  std::vector<uint32_t> table_idx{1u, 0u, 3u};
-  RangeOrBitVector res = chain->IndexSearch(
-      FilterOp::kGe, SqlValue::Long(0u),
-      Indices{table_idx.data(), static_cast<uint32_t>(table_idx.size()),
-              Indices::State::kNonmonotonic});
-  ASSERT_THAT(utils::ToIndexVectorForTests(res), ElementsAre(1u));
+  auto indices = Indices::CreateWithIndexPayloadForTesting(
+      {1u, 0u, 3u}, Indices::State::kNonmonotonic);
+  chain->IndexSearch(FilterOp::kGe, SqlValue::Long(0u), indices);
+  ASSERT_THAT(utils::ExtractPayloadForTesting(indices), ElementsAre(1u));
 }
 
-TEST(SelectorOverlay, OrderedIndexSearchTrivial) {
+TEST(SelectorOverlay, OrderedIndexSearch) {
+  std::vector<uint32_t> numeric_data{1, 0, 0, 1, 1};
+  NumericStorage<uint32_t> numeric(&numeric_data, ColumnType::kUint32, false);
+
   BitVector selector{1, 0, 1, 0, 1};
-  auto fake = FakeStorageChain::SearchAll(5);
   SelectorOverlay storage(&selector);
-  auto chain = storage.MakeChain(std::move(fake));
+  auto chain = storage.MakeChain(numeric.MakeChain());
 
   std::vector<uint32_t> table_idx{1u, 0u, 2u};
   Range res = chain->OrderedIndexSearch(
-      FilterOp::kGe, SqlValue::Long(0u),
-      Indices{table_idx.data(), static_cast<uint32_t>(table_idx.size()),
-              Indices::State::kNonmonotonic});
-  ASSERT_EQ(res.start, 0u);
+      FilterOp::kGe, SqlValue::Long(1u),
+      OrderedIndices{table_idx.data(), static_cast<uint32_t>(table_idx.size()),
+                     Indices::State::kNonmonotonic});
+  ASSERT_EQ(res.start, 1u);
   ASSERT_EQ(res.end, 3u);
-}
-
-TEST(SelectorOverlay, OrderedIndexSearchNone) {
-  BitVector selector{1, 0, 1, 0, 1};
-  auto fake = FakeStorageChain::SearchNone(5);
-  SelectorOverlay storage(&selector);
-  auto chain = storage.MakeChain(std::move(fake));
-
-  std::vector<uint32_t> table_idx{1u, 0u, 2u};
-  Range res = chain->OrderedIndexSearch(
-      FilterOp::kGe, SqlValue::Long(0u),
-      Indices{table_idx.data(), static_cast<uint32_t>(table_idx.size()),
-              Indices::State::kNonmonotonic});
-  ASSERT_EQ(res.size(), 0u);
 }
 
 TEST(SelectorOverlay, StableSort) {
@@ -141,28 +131,34 @@ TEST(SelectorOverlay, StableSort) {
 
   auto make_tokens = []() {
     return std::vector{
-        column::DataLayerChain::SortToken{0, 0},
-        column::DataLayerChain::SortToken{1, 1},
-        column::DataLayerChain::SortToken{2, 2},
-        column::DataLayerChain::SortToken{3, 3},
-        column::DataLayerChain::SortToken{4, 4},
-        column::DataLayerChain::SortToken{5, 5},
+        Token{0, 0}, Token{1, 1}, Token{2, 2},
+        Token{3, 3}, Token{4, 4}, Token{5, 5},
     };
   };
   {
     auto tokens = make_tokens();
     chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
-                      column::DataLayerChain::SortDirection::kAscending);
+                      SortDirection::kAscending);
     ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
                 ElementsAre(1, 0, 2, 4, 3, 5));
   }
   {
     auto tokens = make_tokens();
     chain->StableSort(tokens.data(), tokens.data() + tokens.size(),
-                      column::DataLayerChain::SortDirection::kDescending);
+                      SortDirection::kDescending);
     ASSERT_THAT(utils::ExtractPayloadForTesting(tokens),
                 ElementsAre(3, 5, 4, 2, 0, 1));
   }
+}
+
+TEST(SelectorOverlay, Flatten) {
+  BitVector selector{0, 1, 1, 0, 0, 1, 1, 0};
+  SelectorOverlay storage(&selector);
+  auto chain = storage.MakeChain(FakeStorageChain::SearchAll(8));
+
+  std::vector<uint32_t> indices{1, 2, 3};
+  chain->Flatten(indices);
+  ASSERT_THAT(indices, ElementsAre(2, 5, 6));
 }
 
 }  // namespace

@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 import m from 'mithril';
 
-import {Disposable} from '../base/disposable';
 import {SimpleResizeObserver} from '../base/resize_observer';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
 import {QueryResponse, runQuery} from '../common/queries';
 import {raf} from '../core/raf_scheduler';
-import {EngineProxy} from '../trace_processor/engine';
+import {Engine} from '../trace_processor/engine';
 import {Callout} from '../widgets/callout';
 import {Editor} from '../widgets/editor';
 
@@ -49,8 +47,8 @@ function runManualQuery(query: string) {
   state.queryResult = undefined;
   const engine = getEngine();
   if (engine) {
-    runQuery(undoCommonChatAppReplacements(query), engine)
-      .then((resp: QueryResponse) => {
+    runQuery(undoCommonChatAppReplacements(query), engine).then(
+      (resp: QueryResponse) => {
         addQueryResultsTab(
           {
             query: query,
@@ -66,12 +64,13 @@ function runManualQuery(query: string) {
         }
         state.queryResult = resp;
         raf.scheduleFullRedraw();
-      });
+      },
+    );
   }
   raf.scheduleDelayedFullRedraw();
 }
 
-function getEngine(): EngineProxy|undefined {
+function getEngine(): Engine | undefined {
   const engineId = globals.getCurrentEngine()?.id;
   if (engineId === undefined) {
     return undefined;
@@ -92,7 +91,7 @@ class QueryInput implements m.ClassComponent {
 
   onremove(): void {
     if (this.resize) {
-      this.resize.dispose();
+      this.resize[Symbol.dispose]();
       this.resize = undefined;
     }
   }
@@ -113,7 +112,6 @@ class QueryInput implements m.ClassComponent {
       onUpdate: (text: string) => {
         state.enteredText = text;
       },
-
     });
   }
 }
@@ -124,16 +122,13 @@ export const QueryPage = createPage({
       '.query-page',
       m(Callout, 'Enter query and press Cmd/Ctrl + Enter'),
       m(QueryInput),
-      state.executedQuery === undefined ? null : m(QueryTable, {
-        query: state.executedQuery,
-        resp: state.queryResult,
-        onClose: () => {
-          state.executedQuery = undefined;
-          state.queryResult = undefined;
-          raf.scheduleFullRedraw();
-        },
-        fillParent: false,
-      }),
+      state.executedQuery === undefined
+        ? null
+        : m(QueryTable, {
+            query: state.executedQuery,
+            resp: state.queryResult,
+            fillParent: false,
+          }),
       m(QueryHistoryComponent, {
         runQuery: runManualQuery,
         setQuery: (q: string) => {
@@ -141,6 +136,7 @@ export const QueryPage = createPage({
           state.generation++;
           raf.scheduleFullRedraw();
         },
-      }));
+      }),
+    );
   },
 });

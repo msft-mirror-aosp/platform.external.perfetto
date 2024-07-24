@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/file_utils.h"
@@ -28,7 +27,21 @@
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/trace_processor/trace_blob.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
+#include "src/trace_processor/util/status_macros.h"
+#include "src/trace_redaction/broadphase_packet_filter.h"
+#include "src/trace_redaction/collect_frame_cookies.h"
+#include "src/trace_redaction/collect_system_info.h"
+#include "src/trace_redaction/collect_timeline_events.h"
+#include "src/trace_redaction/find_package_uid.h"
+#include "src/trace_redaction/merge_threads.h"
+#include "src/trace_redaction/populate_allow_lists.h"
+#include "src/trace_redaction/prune_package_list.h"
+#include "src/trace_redaction/redact_ftrace_events.h"
+#include "src/trace_redaction/redact_process_events.h"
+#include "src/trace_redaction/redact_process_trees.h"
+#include "src/trace_redaction/scrub_process_stats.h"
 #include "src/trace_redaction/trace_redaction_framework.h"
+#include "src/trace_redaction/verify_integrity.h"
 
 #include "protos/perfetto/trace/trace.pbzero.h"
 
@@ -48,39 +61,27 @@ base::Status TraceRedactor::Redact(std::string_view source_filename,
   base::ScopedMmap mapped =
       base::ReadMmapWholeFile(source_filename_str.c_str());
   if (!mapped.IsValid()) {
-    return base::ErrStatus("Failed to map pages for trace (%s)",
+    return base::ErrStatus("TraceRedactor: failed to map pages for trace (%s)",
                            source_filename_str.c_str());
   }
 
   trace_processor::TraceBlobView whole_view(
       trace_processor::TraceBlob::FromMmap(std::move(mapped)));
 
-  if (auto status = Collect(context, whole_view); !status.ok()) {
-    return status;
+  RETURN_IF_ERROR(Collect(context, whole_view));
+
+  for (const auto& builder : builders_) {
+    RETURN_IF_ERROR(builder->Build(context));
   }
 
-  if (auto status = Build(context); !status.ok()) {
-    return status;
-  }
-
-  if (auto status = Transform(*context, whole_view, std::string(dest_filename));
-      !status.ok()) {
-    return status;
-  }
-
-  return base::OkStatus();
+  return Transform(*context, whole_view, std::string(dest_filename));
 }
 
 base::Status TraceRedactor::Collect(
     Context* context,
     const trace_processor::TraceBlobView& view) const {
-  // Mask, marking which collectors should be ran. When a collector no longer
-  // needs to run, the value will be null.
-  std::vector<const CollectPrimitive*> collectors;
-  collectors.reserve(collectors_.size());
-
   for (const auto& collector : collectors_) {
-    collectors.push_back(collector.get());
+    RETURN_IF_ERROR(collector->Begin(context));
   }
 
   const Trace::Decoder trace_decoder(view.data(), view.length());
@@ -88,38 +89,13 @@ base::Status TraceRedactor::Collect(
   for (auto packet_it = trace_decoder.packet(); packet_it; ++packet_it) {
     const TracePacket::Decoder packet(packet_it->as_bytes());
 
-    for (auto cit = collectors.begin(); cit != collectors.end();) {
-      auto status = (*cit)->Collect(packet, context);
-
-      if (!status.ok()) {
-        return status.status();
-      }
-
-      // If this collector has returned `kStop`, it means that it (and it alone)
-      // no longer needs to run. The driver (TraceRedactor) should not invoke it
-      // on any future packets.
-      if (status.value() == CollectPrimitive::ContinueCollection::kRetire) {
-        cit = collectors.erase(cit);
-      } else {
-        ++cit;
-      }
-    }
-
-    // If all the collectors have found what they were looking for, then there
-    // is no reason to continue through the trace.
-    if (collectors.empty()) {
-      break;
+    for (auto& collector : collectors_) {
+      RETURN_IF_ERROR(collector->Collect(packet, context));
     }
   }
 
-  return base::OkStatus();
-}
-
-base::Status TraceRedactor::Build(Context* context) const {
-  for (const auto& builder : builders_) {
-    if (auto status = builder->Build(context); !status.ok()) {
-      return status;
-    }
+  for (const auto& collector : collectors_) {
+    RETURN_IF_ERROR(collector->End(context));
   }
 
   return base::OkStatus();
@@ -149,10 +125,7 @@ base::Status TraceRedactor::Transform(
         break;
       }
 
-      if (auto status = transformer->Transform(context, &packet);
-          !status.ok()) {
-        return status;
-      }
+      RETURN_IF_ERROR(transformer->Transform(context, &packet));
     }
 
     // The packet has been removed from the trace. Don't write an empty packet
@@ -161,23 +134,141 @@ base::Status TraceRedactor::Transform(
       continue;
     }
 
-    protozero::HeapBuffered<> serializer;
-    auto* packet_message =
-        serializer->BeginNestedMessage<TracePacket>(Trace::kPacketFieldNumber);
-    packet_message->AppendRawProtoBytes(packet.data(), packet.size());
-    packet_message->Finalize();
-    serializer->Finalize();
+    protozero::HeapBuffered<protos::pbzero::Trace> serializer;
+    serializer->add_packet()->AppendRawProtoBytes(packet.data(), packet.size());
+    packet.assign(serializer.SerializeAsString());
 
-    auto encoded_packet = serializer.SerializeAsString();
-
-    if (const auto exported_data = base::WriteAll(
-            dest_fd.get(), encoded_packet.data(), encoded_packet.size());
+    if (const auto exported_data =
+            base::WriteAll(dest_fd.get(), packet.data(), packet.size());
         exported_data <= 0) {
-      return base::ErrStatus("Failed to write redacted trace to disk");
+      return base::ErrStatus(
+          "TraceRedactor: failed to write redacted trace to disk");
     }
   }
 
   return base::OkStatus();
+}
+
+std::unique_ptr<TraceRedactor> TraceRedactor::CreateInstance(
+    const Config& config) {
+  auto redactor = std::make_unique<TraceRedactor>();
+
+  // VerifyIntegrity breaks the CollectPrimitive pattern. Instead of writing to
+  // the context, its job is to read trace packets and return errors if any
+  // packet does not look "correct". This primitive is added first in an effort
+  // to detect and react to bad input before other collectors run.
+  if (config.verify) {
+    redactor->emplace_collect<VerifyIntegrity>();
+  }
+
+  // Add all collectors.
+  redactor->emplace_collect<FindPackageUid>();
+  redactor->emplace_collect<CollectTimelineEvents>();
+  redactor->emplace_collect<CollectFrameCookies>();
+  redactor->emplace_collect<CollectSystemInfo>();
+
+  // Add all builders.
+  redactor->emplace_build<ReduceFrameCookies>();
+  redactor->emplace_build<BuildSyntheticThreads>();
+
+  {
+    // In order for BroadphasePacketFilter to work, something needs to populate
+    // the masks (i.e. PopulateAllowlists).
+    redactor->emplace_build<PopulateAllowlists>();
+    redactor->emplace_transform<BroadphasePacketFilter>();
+  }
+
+  {
+    auto* primitive = redactor->emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_ftrace_filter<FilterRss>();
+    primitive->emplace_post_filter_modifier<DoNothing>();
+  }
+
+  {
+    auto* primitive = redactor->emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_ftrace_filter<FilterFtraceUsingSuspendResume>();
+    primitive->emplace_post_filter_modifier<DoNothing>();
+  }
+
+  {
+    // Remove all frame timeline events that don't belong to the target package.
+    redactor->emplace_transform<FilterFrameEvents>();
+  }
+
+  redactor->emplace_transform<PrunePackageList>();
+
+  // Process stats includes per-process information, such as:
+  //
+  //   processes {
+  //   pid: 1
+  //   vm_size_kb: 11716992
+  //   vm_rss_kb: 5396
+  //   rss_anon_kb: 2896
+  //   rss_file_kb: 1728
+  //   rss_shmem_kb: 772
+  //   vm_swap_kb: 4236
+  //   vm_locked_kb: 0
+  //   vm_hwm_kb: 6720
+  //   oom_score_adj: -1000
+  // }
+  //
+  // Use the ConnectedToPackage primitive to ensure only the target package has
+  // stats in the trace.
+  {
+    auto* primitive = redactor->emplace_transform<ScrubProcessStats>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
+
+  // Redacts all switch and waking events. This should use the same modifier and
+  // filter as the process events (see below).
+  {
+    auto* primitive = redactor->emplace_transform<RedactSchedEvents>();
+    primitive->emplace_modifier<ClearComms>();
+    primitive->emplace_waking_filter<ConnectedToPackage>();
+  }
+
+  // Redacts all new task, rename task, process free events. This should use the
+  // same modifier and filter as the schedule events (see above).
+  {
+    auto* primitive = redactor->emplace_transform<RedactProcessEvents>();
+    primitive->emplace_modifier<ClearComms>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
+
+  // Merge Threads (part 1): Remove all waking events that connected to the
+  // target package. Change the pids not connected to the target package.
+  {
+    auto* primitive = redactor->emplace_transform<RedactSchedEvents>();
+    primitive->emplace_modifier<MergeThreadsPids>();
+    primitive->emplace_waking_filter<ConnectedToPackage>();
+  }
+
+  // Merge Threads (part 2): Drop all process events not belonging to the
+  // target package. No modification is needed.
+  {
+    auto* primitive = redactor->emplace_transform<RedactProcessEvents>();
+    primitive->emplace_modifier<DoNothing>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
+
+  // Merge Threads (part 3): Replace ftrace event's pid (not the task's pid)
+  // for all pids not connected to the target package.
+  {
+    auto* primitive = redactor->emplace_transform<RedactFtraceEvents>();
+    primitive->emplace_post_filter_modifier<MergeThreadsPids>();
+    primitive->emplace_ftrace_filter<AllowAll>();
+  }
+
+  // Configure the primitive to remove processes and threads that don't belong
+  // to the target package and adds a process and threads for the synth thread
+  // group and threads.
+  {
+    auto* primitive = redactor->emplace_transform<RedactProcessTrees>();
+    primitive->emplace_modifier<ProcessTreeCreateSynthThreads>();
+    primitive->emplace_filter<ConnectedToPackage>();
+  }
+
+  return redactor;
 }
 
 }  // namespace perfetto::trace_redaction

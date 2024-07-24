@@ -21,8 +21,9 @@
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <memory>
+#include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 #include "perfetto/base/logging.h"
@@ -41,40 +42,12 @@ namespace perfetto::trace_processor::column {
 namespace {
 
 template <typename Comparator>
-RangeOrBitVector IndexSearchWithComparator(uint32_t val,
-                                           const uint32_t* indices,
-                                           uint32_t indices_size,
-                                           Comparator comparator) {
-  // Slow path: we compare <64 elements and append to get us to a word
-  // boundary.
-  const uint32_t* ptr = indices;
-  BitVector::Builder builder(indices_size);
-  uint32_t front_elements = builder.BitsUntilWordBoundaryOrFull();
-  for (uint32_t i = 0; i < front_elements; ++i) {
-    builder.Append(comparator(ptr[i], val));
-  }
-  ptr += front_elements;
-
-  // Fast path: we compare as many groups of 64 elements as we can.
-  // This should be very easy for the compiler to auto-vectorize.
-  uint32_t fast_path_elements = builder.BitsInCompleteWordsUntilFull();
-  for (uint32_t i = 0; i < fast_path_elements; i += BitVector::kBitsInWord) {
-    uint64_t word = 0;
-    // This part should be optimised by SIMD and is expected to be fast.
-    for (uint32_t k = 0; k < BitVector::kBitsInWord; ++k) {
-      bool comp_result = comparator(ptr[i + k], val);
-      word |= static_cast<uint64_t>(comp_result) << k;
-    }
-    builder.AppendWord(word);
-  }
-  ptr += fast_path_elements;
-
-  // Slow path: we compare <64 elements and append to fill the Builder.
-  uint32_t back_elements = builder.BitsUntilFull();
-  for (uint32_t i = 0; i < back_elements; ++i) {
-    builder.Append(comparator(ptr[i], val));
-  }
-  return RangeOrBitVector(std::move(builder).Build());
+void IndexSearchWithComparator(uint32_t val, DataLayerChain::Indices& indices) {
+  indices.tokens.erase(
+      std::remove_if(
+          indices.tokens.begin(), indices.tokens.end(),
+          [val](const Token& idx) { return !Comparator()(idx.index, val); }),
+      indices.tokens.end());
 }
 
 }  // namespace
@@ -87,12 +60,6 @@ SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
     if (op == FilterOp::kIsNotNull) {
       return SearchValidationResult::kAllData;
     }
-    if (op == FilterOp::kIsNull) {
-      return SearchValidationResult::kNoData;
-    }
-    PERFETTO_DFATAL(
-        "Invalid filter operation. NULL should only be compared with 'IS NULL' "
-        "and 'IS NOT NULL'");
     return SearchValidationResult::kNoData;
   }
 
@@ -226,14 +193,13 @@ RangeOrBitVector IdStorage::ChainImpl::SearchValidated(
   return RangeOrBitVector(BinarySearchIntrinsic(op, val, search_range));
 }
 
-RangeOrBitVector IdStorage::ChainImpl::IndexSearchValidated(
-    FilterOp op,
-    SqlValue sql_val,
-    Indices indices) const {
+void IdStorage::ChainImpl::IndexSearchValidated(FilterOp op,
+                                                SqlValue sql_val,
+                                                Indices& indices) const {
   PERFETTO_TP_TRACE(
       metatrace::Category::DB, "IdStorage::ChainImpl::IndexSearch",
-      [indices, op](metatrace::Record* r) {
-        r->AddArg("Count", std::to_string(indices.size));
+      [&indices, op](metatrace::Record* r) {
+        r->AddArg("Count", std::to_string(indices.tokens.size()));
         r->AddArg("Op", std::to_string(static_cast<uint32_t>(op)));
       });
 
@@ -241,35 +207,30 @@ RangeOrBitVector IdStorage::ChainImpl::IndexSearchValidated(
   // requires special logic.
   if (sql_val.type == SqlValue::kDouble) {
     switch (utils::CompareIntColumnWithDouble(op, &sql_val)) {
+      case SearchValidationResult::kAllData:
+        return;
+      case SearchValidationResult::kNoData:
+        indices.tokens.clear();
+        return;
       case SearchValidationResult::kOk:
         break;
-      case SearchValidationResult::kAllData:
-        return RangeOrBitVector(Range(0, indices.size));
-      case SearchValidationResult::kNoData:
-        return RangeOrBitVector(Range());
     }
   }
 
   auto val = static_cast<uint32_t>(sql_val.AsLong());
   switch (op) {
     case FilterOp::kEq:
-      return IndexSearchWithComparator(val, indices.data, indices.size,
-                                       std::equal_to<>());
+      return IndexSearchWithComparator<std::equal_to<>>(val, indices);
     case FilterOp::kNe:
-      return IndexSearchWithComparator(val, indices.data, indices.size,
-                                       std::not_equal_to<>());
+      return IndexSearchWithComparator<std::not_equal_to<>>(val, indices);
     case FilterOp::kLe:
-      return IndexSearchWithComparator(val, indices.data, indices.size,
-                                       std::less_equal<>());
+      return IndexSearchWithComparator<std::less_equal<>>(val, indices);
     case FilterOp::kLt:
-      return IndexSearchWithComparator(val, indices.data, indices.size,
-                                       std::less<>());
+      return IndexSearchWithComparator<std::less<>>(val, indices);
     case FilterOp::kGt:
-      return IndexSearchWithComparator(val, indices.data, indices.size,
-                                       std::greater<>());
+      return IndexSearchWithComparator<std::greater<>>(val, indices);
     case FilterOp::kGe:
-      return IndexSearchWithComparator(val, indices.data, indices.size,
-                                       std::greater_equal<>());
+      return IndexSearchWithComparator<std::greater_equal<>>(val, indices);
     case FilterOp::kIsNotNull:
     case FilterOp::kIsNull:
     case FilterOp::kGlob:
@@ -277,47 +238,6 @@ RangeOrBitVector IdStorage::ChainImpl::IndexSearchValidated(
       PERFETTO_FATAL("Invalid filter operation");
   }
   PERFETTO_FATAL("FilterOp not matched");
-}
-
-Range IdStorage::ChainImpl::OrderedIndexSearchValidated(FilterOp op,
-                                                        SqlValue sql_val,
-                                                        Indices indices) const {
-  PERFETTO_DCHECK(op != FilterOp::kNe);
-
-  PERFETTO_TP_TRACE(
-      metatrace::Category::DB, "IdStorage::ChainImpl::OrderedIndexSearch",
-      [indices, op](metatrace::Record* r) {
-        r->AddArg("Count", std::to_string(indices.size));
-        r->AddArg("Op", std::to_string(static_cast<uint32_t>(op)));
-      });
-
-  // It's a valid filter operation if |sql_val| is a double, although it
-  // requires special logic.
-  if (sql_val.type == SqlValue::kDouble) {
-    switch (utils::CompareIntColumnWithDouble(op, &sql_val)) {
-      case SearchValidationResult::kOk:
-        break;
-      case SearchValidationResult::kAllData:
-        return {0, indices.size};
-      case SearchValidationResult::kNoData:
-        return {};
-    }
-  }
-  auto val = static_cast<uint32_t>(sql_val.AsLong());
-
-  // Indices are monotonic non contiguous values if OrderedIndexSearch was
-  // called.
-  // Look for the first and last index and find the result of looking for this
-  // range in IdStorage.
-  Range indices_range(indices.data[0], indices.data[indices.size - 1] + 1);
-  Range bin_search_ret = BinarySearchIntrinsic(op, val, indices_range);
-
-  const auto* start_ptr = std::lower_bound(
-      indices.data, indices.data + indices.size, bin_search_ret.start);
-  const auto* end_ptr = std::lower_bound(start_ptr, indices.data + indices.size,
-                                         bin_search_ret.end);
-  return {static_cast<uint32_t>(std::distance(indices.data, start_ptr)),
-          static_cast<uint32_t>(std::distance(indices.data, end_ptr))};
 }
 
 Range IdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
@@ -344,22 +264,60 @@ Range IdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   PERFETTO_FATAL("FilterOp not matched");
 }
 
-void IdStorage::ChainImpl::StableSort(SortToken* start,
-                                      SortToken* end,
+void IdStorage::ChainImpl::StableSort(Token* start,
+                                      Token* end,
                                       SortDirection direction) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "IdStorage::ChainImpl::StableSort");
   switch (direction) {
     case SortDirection::kAscending:
-      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+      std::stable_sort(start, end, [](const Token& a, const Token& b) {
         return a.index < b.index;
       });
       return;
     case SortDirection::kDescending:
-      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+      std::stable_sort(start, end, [](const Token& a, const Token& b) {
         return a.index > b.index;
       });
       return;
   }
   PERFETTO_FATAL("For GCC");
+}
+
+void IdStorage::ChainImpl::Distinct(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB, "IdStorage::ChainImpl::Distinct");
+  std::unordered_set<uint32_t> s;
+  indices.tokens.erase(
+      std::remove_if(
+          indices.tokens.begin(), indices.tokens.end(),
+          [&s](const Token& idx) { return !s.insert(idx.index).second; }),
+      indices.tokens.end());
+}
+
+std::optional<Token> IdStorage::ChainImpl::MaxElement(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "IdStorage::ChainImpl::MaxElement");
+  auto tok = std::max_element(
+      indices.tokens.begin(), indices.tokens.end(),
+      [](const Token& a, const Token& b) { return a.index < b.index; });
+  return (tok == indices.tokens.end()) ? std::nullopt
+                                       : std::make_optional(*tok);
+}
+
+std::optional<Token> IdStorage::ChainImpl::MinElement(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "IdStorage::ChainImpl::MinElement");
+  auto tok = std::min_element(
+      indices.tokens.begin(), indices.tokens.end(),
+      [](const Token& a, const Token& b) { return a.index > b.index; });
+  if (tok == indices.tokens.end()) {
+    return std::nullopt;
+  }
+  return *tok;
+}
+
+SqlValue IdStorage::ChainImpl::Get_AvoidUsingBecauseSlow(uint32_t index) const {
+  return SqlValue::Long(index);
 }
 
 void IdStorage::ChainImpl::Serialize(StorageProto* storage) const {

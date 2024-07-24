@@ -27,14 +27,13 @@ enum class PerfettoStatsdAtom {
   // Checkpoints inside perfetto_cmd before tracing is finished.
   kTraceBegin = 1,
   kBackgroundTraceBegin = 2,
+  kCloneTraceBegin = 55,
+  kCloneTriggerTraceBegin = 56,
   kOnConnect = 3,
 
   // Guardrails inside perfetto_cmd before tracing is finished.
   kOnTimeout = 16,
   kCmdUserBuildTracingNotAllowed = 43,
-  kCmdFailedToInitGuardrailState = 44,
-  kCmdInvalidGuardrailState = 45,
-  kCmdHitUploadLimit = 46,
 
   // Checkpoints inside traced.
   kTracedEnableTracing = 37,
@@ -73,6 +72,7 @@ enum class PerfettoStatsdAtom {
   kTracedEnableTracingOobTargetBuffer = 48,
   kTracedEnableTracingInvalidTriggerMode = 52,
   kTracedEnableTracingInvalidBrFilename = 54,
+  kTracedEnableTracingFailedSessionSemaphoreCheck = 57,
 
   // Checkpoints inside perfetto_cmd after tracing has finished.
   kOnTracingDisabled = 4,
@@ -107,6 +107,10 @@ enum class PerfettoStatsdAtom {
   // Contained status of Dropbox uploads. Removed as Perfetto no
   // longer supports uploading traces using Dropbox.
   // reserved 5, 6, 7;
+
+  // Contained status of guardrail state initialization and upload limit in
+  // perfetto_cmd. Removed as perfetto no longer manages stateful guardrails
+  // reserved 44, 45, 46;
 };
 
 // This must match the values of the PerfettoTrigger::TriggerType enum in:

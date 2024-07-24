@@ -1825,19 +1825,22 @@ TEST_P(PerfettoApiTest, TrackEventConcurrentSessions) {
 
 TEST_P(PerfettoApiTest, TrackEventProcessAndThreadDescriptors) {
   // Thread and process descriptors can be set before tracing is enabled.
-  perfetto::TrackEvent::SetProcessDescriptor(
-      [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-        desc->set_name("hello.exe");
-        desc->set_chrome_process()->set_process_priority(1);
-      });
+  {
+    auto track = perfetto::ProcessTrack::Current();
+    auto desc = track.Serialize();
+    desc.set_name("hello.exe");
+    desc.mutable_chrome_process()->set_process_priority(1);
+    perfetto::TrackEvent::SetTrackDescriptor(track, std::move(desc));
+  }
 
   // Erased tracks shouldn't show up anywhere.
-  perfetto::Track erased(1234u);
-  perfetto::TrackEvent::SetTrackDescriptor(
-      erased, [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-        desc->set_name("ErasedTrack");
-      });
-  perfetto::TrackEvent::EraseTrackDescriptor(erased);
+  {
+    perfetto::Track erased(1234u);
+    auto desc = erased.Serialize();
+    desc.set_name("ErasedTrack");
+    perfetto::TrackEvent::SetTrackDescriptor(erased, std::move(desc));
+    perfetto::TrackEvent::EraseTrackDescriptor(erased);
+  }
 
   // Setup the trace config.
   perfetto::TraceConfig cfg;
@@ -1852,29 +1855,33 @@ TEST_P(PerfettoApiTest, TrackEventProcessAndThreadDescriptors) {
   TRACE_EVENT_INSTANT("test", "MainThreadEvent");
 
   std::thread thread([&] {
-    perfetto::TrackEvent::SetThreadDescriptor(
-        [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-          desc->set_name("TestThread");
-        });
+    auto track = perfetto::ThreadTrack::Current();
+    auto desc = track.Serialize();
+    desc.set_name("TestThread");
+    perfetto::TrackEvent::SetTrackDescriptor(track, std::move(desc));
     TRACE_EVENT_INSTANT("test", "ThreadEvent");
   });
   thread.join();
 
   // Update the process descriptor while tracing is enabled. It should be
   // immediately reflected in the trace.
-  perfetto::TrackEvent::SetProcessDescriptor(
-      [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-        desc->set_name("goodbye.exe");
-      });
-  perfetto::TrackEvent::Flush();
+  {
+    auto track = perfetto::ProcessTrack::Current();
+    auto desc = track.Serialize();
+    desc.set_name("goodbye.exe");
+    perfetto::TrackEvent::SetTrackDescriptor(track, std::move(desc));
+    perfetto::TrackEvent::Flush();
+  }
 
   tracing_session->get()->StopBlocking();
 
   // After tracing ends, setting the descriptor has no immediate effect.
-  perfetto::TrackEvent::SetProcessDescriptor(
-      [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-        desc->set_name("noop.exe");
-      });
+  {
+    auto track = perfetto::ProcessTrack::Current();
+    auto desc = track.Serialize();
+    desc.set_name("noop.exe");
+    perfetto::TrackEvent::SetTrackDescriptor(track, std::move(desc));
+  }
 
   std::vector<char> raw_trace = tracing_session->get()->ReadTraceBlocking();
   perfetto::protos::gen::Trace trace;
@@ -1972,11 +1979,13 @@ TEST_P(PerfettoApiTest, TrackEventCustomTrack) {
 
   // Declare a custom track and give it a name.
   uint64_t async_id = 123;
-  perfetto::TrackEvent::SetTrackDescriptor(
-      perfetto::Track(async_id),
-      [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-        desc->set_name("MyCustomTrack");
-      });
+
+  {
+    auto track = perfetto::Track(async_id);
+    auto desc = track.Serialize();
+    desc.set_name("MyCustomTrack");
+    perfetto::TrackEvent::SetTrackDescriptor(track, std::move(desc));
+  }
 
   // Start events on one thread and end them on another.
   TRACE_EVENT_BEGIN("bar", "AsyncEvent", perfetto::Track(async_id), "debug_arg",
@@ -2476,7 +2485,7 @@ TEST_P(PerfettoApiTest, TrackEventThreadTime) {
         EXPECT_FALSE(found_counter_track_descriptor);
         found_counter_track_descriptor = true;
         thread_time_counter_uuid = packet.track_descriptor().uuid();
-        EXPECT_EQ("thread_time", packet.track_descriptor().name());
+        EXPECT_EQ("thread_time", packet.track_descriptor().static_name());
         auto counter = packet.track_descriptor().counter();
         EXPECT_EQ(
             perfetto::protos::gen::
@@ -4928,17 +4937,31 @@ TEST_P(PerfettoApiTest, LegacyTraceEventsAndClockSnapshots) {
 
   auto trace = StopSessionAndReturnParsedTrace(tracing_session);
 
-  // Check that clock snapshots are monotonic and don't contain timestamps from
-  // trace events with explicit timestamps.
-  std::unordered_map<uint64_t, uint64_t> last_clock_ts;
+  // Check that clock snapshots are monotonic (per sequence) and don't contain
+  // timestamps from trace events with explicit timestamps.
+  struct ClockPerSequence {
+    uint64_t seq_id = 0;
+    uint64_t clock_id = 0;
+    bool operator<(const struct ClockPerSequence& other) const {
+      return std::tie(seq_id, clock_id) <
+             std::tie(other.seq_id, other.clock_id);
+    }
+  };
+  std::map<ClockPerSequence, uint64_t> last_clock_ts;
   for (const auto& packet : trace.packet()) {
     if (packet.has_clock_snapshot()) {
       for (auto& clock : packet.clock_snapshot().clocks()) {
         if (!clock.is_incremental()) {
           uint64_t ts = clock.timestamp();
-          uint64_t id = clock.clock_id();
-          EXPECT_LE(last_clock_ts[id], ts);
-          last_clock_ts[id] = ts;
+          ClockPerSequence c;
+          c.seq_id = packet.trusted_packet_sequence_id();
+          c.clock_id = clock.clock_id();
+
+          uint64_t& last = last_clock_ts[c];
+
+          EXPECT_LE(last, ts)
+              << "This sequence:" << c.seq_id << " clock_id:" << c.clock_id;
+          last = ts;
         }
       }
 
@@ -5317,10 +5340,9 @@ void EmitConsoleEvents() {
   TRACE_EVENT_END("foo");
   uint64_t async_id = 4004;
   auto track = perfetto::Track(async_id, perfetto::ThreadTrack::Current());
-  perfetto::TrackEvent::SetTrackDescriptor(
-      track, [](perfetto::protos::pbzero::TrackDescriptor* desc) {
-        desc->set_name("AsyncTrack");
-      });
+  auto desc = track.Serialize();
+  desc.set_name("AsyncTrack");
+  perfetto::TrackEvent::SetTrackDescriptor(track, std::move(desc));
   TRACE_EVENT_BEGIN("test", "AsyncEvent", track);
 
   std::thread thread([&] {
@@ -5773,8 +5795,10 @@ TEST_P(PerfettoApiTest, CountersDeltaEncoding) {
       auto& desc = packet.track_descriptor();
       if (!desc.has_counter())
         continue;
-      counter_names[desc.uuid()] = desc.name();
-      EXPECT_EQ((desc.name() != "Framerate3"), desc.counter().is_incremental());
+      counter_names[desc.uuid()] =
+          desc.has_name() ? desc.name() : desc.static_name();
+      EXPECT_EQ((desc.static_name() != "Framerate3"),
+                desc.counter().is_incremental());
     }
     if (packet.has_track_event()) {
       auto event = packet.track_event();
@@ -5847,7 +5871,8 @@ TEST_P(PerfettoApiTest, Counters) {
       continue;
     }
     auto desc = packet.track_descriptor();
-    counter_names[desc.uuid()] = desc.name();
+    counter_names[desc.uuid()] =
+        desc.has_name() ? desc.name() : desc.static_name();
     if (desc.name() == "Framerate") {
       EXPECT_EQ("fps", desc.counter().unit_name());
     } else if (desc.name() == "Goats teleported") {

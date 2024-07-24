@@ -164,6 +164,28 @@ Script `ui/run-unittests` also supports `--watch` parameter, which would
 restart the testing when the underlying source files are changed. This can be
 used in conjunction with `--no-build`, and on its own as well.
 
+### Formatting & Linting
+
+We use `eslint` to lint TypeScript and JavaScript, and `prettier` to format
+TypeScript, JavaScript, and SCSS.
+
+To auto-format all source files, run ui/format-sources, which takes care of
+running both prettier and eslint on the changed files:
+
+```bash
+# By default it formats only files that changed from the upstream Git branch
+# (typicaly origin/main).
+# Pass --all for formatting all files under ui/src
+ui/format-sources
+```
+
+For VSCode users, we recommend using the eslint & prettier extensions to handle
+this entirely from within the IDE. See the
+[Useful Extensions](#useful-extensions) section on how to set this up.
+
+Presubmit checks require no formatting or linting issues, so fix all issues
+using the commands above before submitting a patch.
+
 ## Build files
 
 The source of truth of our build file is in the BUILD.gn files, which are based
@@ -486,6 +508,7 @@ If you are using VS Code we suggest the following extensions:
 - [GNFormat](https://marketplace.visualstudio.com/items?itemName=persidskiy.vscode-gnformat)
 - [ESlint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
 - [markdownlint](https://marketplace.visualstudio.com/items?itemName=DavidAnson.vscode-markdownlint)
+- [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
 
 #### Useful settings
 
@@ -507,10 +530,14 @@ In `.vscode/settings.json`:
   "eslint.workingDirectories": [
     "./ui",
   ],
-  "eslint.format.enable": true,
+  "prettier.configPath": "ui/.prettierrc.yml",
+  "typescript.preferences.importModuleSpecifier": "relative",
   "[typescript]": {
-    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
-  }
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[scss]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
 }
 ```
 

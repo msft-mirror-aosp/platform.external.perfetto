@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {exists} from '../../base/utils';
 import {
   createStore,
   Plugin,
-  PluginContext,
   PluginContextTrace,
   PluginDescriptor,
   Store,
@@ -31,16 +31,16 @@ class ExampleState implements Plugin {
   private store: Store<State> = createStore({counter: 0});
 
   private migrate(initialState: unknown): State {
-    if (initialState && typeof initialState === 'object' &&
-        'counter' in initialState && typeof initialState.counter === 'number') {
+    if (
+      exists(initialState) &&
+      typeof initialState === 'object' &&
+      'counter' in initialState &&
+      typeof initialState.counter === 'number'
+    ) {
       return {counter: initialState.counter};
     } else {
       return {counter: 0};
     }
-  }
-
-  onActivate(_: PluginContext): void {
-    //
   }
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -52,7 +52,9 @@ class ExampleState implements Plugin {
       callback: () => {
         const counter = this.store.state.counter;
         ctx.tabs.openQuery(
-          `SELECT ${counter} as counter;`, `Show counter ${counter}`);
+          `SELECT ${counter} as counter;`,
+          `Show counter ${counter}`,
+        );
         this.store.edit((draft) => {
           ++draft.counter;
         });
@@ -61,7 +63,7 @@ class ExampleState implements Plugin {
   }
 
   async onTraceUnload(_: PluginContextTrace): Promise<void> {
-    this.store.dispose();
+    this.store[Symbol.dispose]();
   }
 }
 

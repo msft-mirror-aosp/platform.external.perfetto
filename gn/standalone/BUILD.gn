@@ -83,6 +83,7 @@ config("extra_warnings") {
       "-Wno-gnu-zero-variadic-macro-arguments",
       "-Wno-padded",
       "-Wno-poison-system-directories",
+      "-Wno-pre-c11-compat",
       "-Wno-reserved-id-macro",
       "-Wno-reserved-identifier",
       "-Wno-shadow-uncaptured-local",
@@ -94,7 +95,7 @@ config("extra_warnings") {
       # codebase cleanup.
       "-Wno-switch-default",
     ]
-  } else if (!is_clang && !is_win) {
+  } else if (is_gcc) {
     # Use return std::move(...) for compatibility with old GCC compilers.
     cflags_cc = [ "-Wno-redundant-move" ]
 
@@ -280,10 +281,7 @@ config("default") {
       "-msse2",
       "-mfpmath=sse",
     ]
-    ldflags += [
-      "-m32",
-      "-lgcc",
-    ]
+    ldflags += [ "-m32" ]
   } else if (current_cpu == "arm64") {
     cflags += [ "-fno-omit-frame-pointer" ]
   } else if (current_cpu == "x64") {

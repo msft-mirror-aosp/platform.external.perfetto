@@ -19,10 +19,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
@@ -35,7 +35,7 @@ namespace perfetto::trace_processor::column {
 class ArrangementOverlay final : public DataLayer {
  public:
   ArrangementOverlay(const std::vector<uint32_t>* arrangement,
-                     Indices::State arrangement_state);
+                     DataLayerChain::Indices::State arrangement_state);
   ~ArrangementOverlay() override;
 
   std::unique_ptr<DataLayerChain> MakeChain(
@@ -59,20 +59,19 @@ class ArrangementOverlay final : public DataLayer {
 
     RangeOrBitVector SearchValidated(FilterOp, SqlValue, Range) const override;
 
-    RangeOrBitVector IndexSearchValidated(FilterOp,
-                                          SqlValue,
-                                          Indices) const override;
+    void IndexSearchValidated(FilterOp, SqlValue, Indices&) const override;
 
-    Range OrderedIndexSearchValidated(FilterOp,
-                                      SqlValue,
-                                      Indices) const override {
-      PERFETTO_FATAL(
-          "OrderedIndexSearch can't be called on ArrangementOverlay");
-    }
+    void StableSort(Token* start, Token* end, SortDirection) const override;
 
-    void StableSort(SortToken* start,
-                    SortToken* end,
-                    SortDirection) const override;
+    void Distinct(Indices&) const override;
+
+    std::optional<Token> MaxElement(Indices&) const override;
+
+    std::optional<Token> MinElement(Indices&) const override;
+
+    std::unique_ptr<DataLayer> Flatten(std::vector<uint32_t>&) const override;
+
+    SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const override;
 
     void Serialize(StorageProto*) const override;
 
@@ -91,7 +90,7 @@ class ArrangementOverlay final : public DataLayer {
 
   std::unique_ptr<DataLayerChain> inner_;
   const std::vector<uint32_t>* arrangement_;
-  const Indices::State arrangement_state_;
+  const DataLayerChain::Indices::State arrangement_state_;
 };
 
 }  // namespace perfetto::trace_processor::column

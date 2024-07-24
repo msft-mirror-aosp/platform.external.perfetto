@@ -14,18 +14,20 @@
 
 import m from 'mithril';
 
-import {CallsiteInfo} from '../common/state';
-
 import {globals} from './globals';
+import {CallsiteInfo} from '../common/legacy_flamegraph_util';
 
 interface CpuProfileDetailsPanelAttrs {}
 
-export class CpuProfileDetailsPanel implements
-    m.ClassComponent<CpuProfileDetailsPanelAttrs> {
+export class CpuProfileDetailsPanel
+  implements m.ClassComponent<CpuProfileDetailsPanelAttrs>
+{
   view() {
     const sampleDetails = globals.cpuProfileDetails;
-    const header =
-        m('.details-panel-heading', m('h2', `CPU Profile Sample Details`));
+    const header = m(
+      '.details-panel-heading',
+      m('h2', `CPU Profile Sample Details`),
+    );
     if (sampleDetails.id === undefined) {
       return m('.details-panel', header);
     }
@@ -33,7 +35,8 @@ export class CpuProfileDetailsPanel implements
     return m(
       '.details-panel',
       header,
-      m('table', this.getStackText(sampleDetails.stack)));
+      m('table', this.getStackText(sampleDetails.stack)),
+    );
   }
 
   getStackText(stack?: CallsiteInfo[]): m.Vnode[] {

@@ -14,17 +14,16 @@
 
 import m from 'mithril';
 
-import {findRef, getScrollbarWidth, toHTMLElement} from '../base/dom_utils';
+import {findRef, toHTMLElement} from '../base/dom_utils';
 import {clamp} from '../base/math_utils';
 import {Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {TrackCacheEntry} from '../common/track_cache';
-import {TABS_V2_FLAG, featureFlags} from '../core/feature_flags';
+import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {TrackTags} from '../public';
 
 import {TRACK_SHELL_WIDTH} from './css_constants';
-import {DetailsPanel} from './details_panel';
 import {globals} from './globals';
 import {NotesPanel} from './notes_panel';
 import {OverviewTimelinePanel} from './overview_timeline_panel';
@@ -40,6 +39,7 @@ import {DISMISSED_PANNING_HINT_KEY} from './topbar';
 import {TrackGroupPanel} from './track_group_panel';
 import {TrackPanel} from './track_panel';
 import {assertExists} from '../base/logging';
+import {PxSpan, TimeScale} from './time_scale';
 
 const OVERVIEW_PANEL_FLAG = featureFlags.register({
   id: 'overviewVisible',
@@ -50,17 +50,19 @@ const OVERVIEW_PANEL_FLAG = featureFlags.register({
 
 // Checks if the mousePos is within 3px of the start or end of the
 // current selected time range.
-function onTimeRangeBoundary(mousePos: number): 'START'|'END'|null {
-  const selection = globals.state.currentSelection;
-  if (selection !== null && selection.kind === 'AREA') {
+function onTimeRangeBoundary(
+  timescale: TimeScale,
+  mousePos: number,
+): 'START' | 'END' | null {
+  const selection = globals.state.selection;
+  if (selection.kind === 'area') {
     // If frontend selectedArea exists then we are in the process of editing the
     // time range and need to use that value instead.
-    const area = globals.timeline.selectedArea ?
-      globals.timeline.selectedArea :
-      globals.state.areas[selection.areaId];
-    const {visibleTimeScale} = globals.timeline;
-    const start = visibleTimeScale.timeToPx(area.start);
-    const end = visibleTimeScale.timeToPx(area.end);
+    const area = globals.timeline.selectedArea
+      ? globals.timeline.selectedArea
+      : selection;
+    const start = timescale.timeToPx(area.start);
+    const end = timescale.timeToPx(area.end);
     const startDrag = mousePos - TRACK_SHELL_WIDTH;
     const startDistance = Math.abs(start - startDrag);
     const endDistance = Math.abs(end - startDrag);
@@ -78,50 +80,36 @@ function onTimeRangeBoundary(mousePos: number): 'START'|'END'|null {
  * panels, and everything else that's part of the main trace viewer page.
  */
 class TraceViewer implements m.ClassComponent {
-  private onResize: () => void = () => {};
   private zoomContent?: PanAndZoomHandler;
   // Used to prevent global deselection if a pan/drag select occurred.
   private keepCurrentSelection = false;
 
-  private overviewTimelinePanel = new OverviewTimelinePanel('overview');
-  private timeAxisPanel = new TimeAxisPanel('timeaxis');
-  private timeSelectionPanel = new TimeSelectionPanel('timeselection');
-  private notesPanel = new NotesPanel('notes');
-  private tickmarkPanel = new TickmarkPanel('searchTickmarks');
+  private overviewTimelinePanel = new OverviewTimelinePanel();
+  private timeAxisPanel = new TimeAxisPanel();
+  private timeSelectionPanel = new TimeSelectionPanel();
+  private notesPanel = new NotesPanel();
+  private tickmarkPanel = new TickmarkPanel();
+  private timelineWidthPx?: number;
 
   private readonly PAN_ZOOM_CONTENT_REF = 'pan-and-zoom-content';
 
   oncreate(vnode: m.CVnodeDOM) {
-    const timeline = globals.timeline;
-    const updateDimensions = () => {
-      const rect = vnode.dom.getBoundingClientRect();
-      timeline.updateLocalLimits(
-        0, rect.width - TRACK_SHELL_WIDTH - getScrollbarWidth());
-    };
-
-    updateDimensions();
-
-    // TODO: Do resize handling better.
-    this.onResize = () => {
-      updateDimensions();
-      raf.scheduleFullRedraw();
-    };
-
-    // Once ResizeObservers are out, we can stop accessing the window here.
-    window.addEventListener('resize', this.onResize);
-
     const panZoomElRaw = findRef(vnode.dom, this.PAN_ZOOM_CONTENT_REF);
     const panZoomEl = toHTMLElement(assertExists(panZoomElRaw));
 
     this.zoomContent = new PanAndZoomHandler({
       element: panZoomEl,
       onPanned: (pannedPx: number) => {
-        const {
-          visibleTimeScale,
-        } = globals.timeline;
+        const timeline = globals.timeline;
+
+        if (this.timelineWidthPx === undefined) return;
 
         this.keepCurrentSelection = true;
-        const tDelta = visibleTimeScale.pxDeltaToDuration(pannedPx);
+        const timescale = new TimeScale(
+          timeline.visibleWindow,
+          new PxSpan(0, this.timelineWidthPx),
+        );
+        const tDelta = timescale.pxToDuration(pannedPx);
         timeline.panVisibleWindow(tDelta);
 
         // If the user has panned they no longer need the hint.
@@ -129,6 +117,7 @@ class TraceViewer implements m.ClassComponent {
         raf.scheduleRedraw();
       },
       onZoomed: (zoomedPositionPx: number, zoomRatio: number) => {
+        const timeline = globals.timeline;
         // TODO(hjd): Avoid hardcoding TRACK_SHELL_WIDTH.
         // TODO(hjd): Improve support for zooming in overview timeline.
         const zoomPx = zoomedPositionPx - TRACK_SHELL_WIDTH;
@@ -138,7 +127,12 @@ class TraceViewer implements m.ClassComponent {
         raf.scheduleRedraw();
       },
       editSelection: (currentPx: number) => {
-        return onTimeRangeBoundary(currentPx) !== null;
+        if (this.timelineWidthPx === undefined) return false;
+        const timescale = new TimeScale(
+          globals.timeline.visibleWindow,
+          new PxSpan(0, this.timelineWidthPx),
+        );
+        return onTimeRangeBoundary(timescale, currentPx) !== null;
       },
       onSelection: (
         dragStartX: number,
@@ -146,48 +140,60 @@ class TraceViewer implements m.ClassComponent {
         prevX: number,
         currentX: number,
         currentY: number,
-        editing: boolean) => {
-        const traceTime = globals.state.traceTime;
-        const {visibleTimeScale} = timeline;
+        editing: boolean,
+      ) => {
+        const traceTime = globals.traceContext;
+        const timeline = globals.timeline;
+
+        if (this.timelineWidthPx === undefined) return;
+
+        // TODO(stevegolton): Don't get the windowSpan from globals, get it from
+        // here!
+        const {visibleWindow} = timeline;
+        const timespan = visibleWindow.toTimeSpan();
         this.keepCurrentSelection = true;
+
+        const timescale = new TimeScale(
+          timeline.visibleWindow,
+          new PxSpan(0, this.timelineWidthPx),
+        );
+
         if (editing) {
-          const selection = globals.state.currentSelection;
-          if (selection !== null && selection.kind === 'AREA') {
-            const area = globals.timeline.selectedArea ?
-              globals.timeline.selectedArea :
-              globals.state.areas[selection.areaId];
-            let newTime =
-                visibleTimeScale.pxToHpTime(currentX - TRACK_SHELL_WIDTH)
-                  .toTime();
+          const selection = globals.state.selection;
+          if (selection.kind === 'area') {
+            const area = globals.timeline.selectedArea
+              ? globals.timeline.selectedArea
+              : selection;
+            let newTime = timescale
+              .pxToHpTime(currentX - TRACK_SHELL_WIDTH)
+              .toTime();
             // Have to check again for when one boundary crosses over the other.
-            const curBoundary = onTimeRangeBoundary(prevX);
+            const curBoundary = onTimeRangeBoundary(timescale, prevX);
             if (curBoundary == null) return;
             const keepTime = curBoundary === 'START' ? area.end : area.start;
             // Don't drag selection outside of current screen.
             if (newTime < keepTime) {
-              newTime =
-                  Time.max(newTime, visibleTimeScale.timeSpan.start.toTime());
+              newTime = Time.max(newTime, timespan.start);
             } else {
-              newTime =
-                  Time.min(newTime, visibleTimeScale.timeSpan.end.toTime());
+              newTime = Time.min(newTime, timespan.end);
             }
             // When editing the time range we always use the saved tracks,
             // since these will not change.
             timeline.selectArea(
               Time.max(Time.min(keepTime, newTime), traceTime.start),
               Time.min(Time.max(keepTime, newTime), traceTime.end),
-              globals.state.areas[selection.areaId].tracks);
+              selection.tracks,
+            );
           }
         } else {
           let startPx = Math.min(dragStartX, currentX) - TRACK_SHELL_WIDTH;
           let endPx = Math.max(dragStartX, currentX) - TRACK_SHELL_WIDTH;
           if (startPx < 0 && endPx < 0) return;
-          const {pxSpan} = visibleTimeScale;
-          startPx = clamp(startPx, pxSpan.start, pxSpan.end);
-          endPx = clamp(endPx, pxSpan.start, pxSpan.end);
+          startPx = clamp(startPx, 0, this.timelineWidthPx);
+          endPx = clamp(endPx, 0, this.timelineWidthPx);
           timeline.selectArea(
-            visibleTimeScale.pxToHpTime(startPx).toTime('floor'),
-            visibleTimeScale.pxToHpTime(endPx).toTime('ceil'),
+            timescale.pxToHpTime(startPx).toTime('floor'),
+            timescale.pxToHpTime(endPx).toTime('ceil'),
           );
           timeline.areaY.start = dragStartY;
           timeline.areaY.end = currentY;
@@ -202,13 +208,12 @@ class TraceViewer implements m.ClassComponent {
         // If we are editing we need to pass the current id through to ensure
         // the marked area with that id is also updated.
         if (edit) {
-          const selection = globals.state.currentSelection;
-          if (selection !== null && selection.kind === 'AREA' && area) {
-            globals.dispatch(
-              Actions.editArea({area, areaId: selection.areaId}));
+          const selection = globals.state.selection;
+          if (selection.kind === 'area' && area) {
+            globals.dispatch(Actions.selectArea({...area}));
           }
         } else if (area) {
-          globals.makeSelection(Actions.selectArea({area}));
+          globals.makeSelection(Actions.selectArea({...area}));
         }
         // Now the selection has ended we stored the final selected area in the
         // global state and can remove the in progress selection from the
@@ -221,47 +226,59 @@ class TraceViewer implements m.ClassComponent {
   }
 
   onremove() {
-    window.removeEventListener('resize', this.onResize);
-    if (this.zoomContent) this.zoomContent.dispose();
+    if (this.zoomContent) this.zoomContent[Symbol.dispose]();
   }
 
   view() {
-    const scrollingPanels: PanelOrGroup[] =
-        globals.state.scrollingTracks.map((key) => {
-          const trackBundle = this.resolveTrack(key);
-          return new TrackPanel({
-            trackKey: key,
-            title: trackBundle.title,
-            tags: trackBundle.tags,
-            trackFSM: trackBundle.trackFSM,
-          });
+    const scrollingPanels: PanelOrGroup[] = globals.state.scrollingTracks.map(
+      (key) => {
+        const trackBundle = this.resolveTrack(key);
+        return new TrackPanel({
+          trackKey: key,
+          title: trackBundle.title,
+          tags: trackBundle.tags,
+          trackFSM: trackBundle.trackFSM,
+          closeable: trackBundle.closeable,
+          chips: trackBundle.chips,
+          pluginId: trackBundle.pluginId,
         });
+      },
+    );
 
     for (const group of Object.values(globals.state.trackGroups)) {
-      const key = group.tracks[0];
-      const trackBundle = this.resolveTrack(key);
-      const headerPanel = new TrackGroupPanel({
-        trackGroupId: group.id,
-        key: `trackgroup-${group.id}`,
-        trackFSM: trackBundle.trackFSM,
-        labels: trackBundle.labels,
-        tags: trackBundle.tags,
-        collapsed: group.collapsed,
-        title: group.name,
-      });
+      const summaryTrackKey = group.summaryTrack;
+      let headerPanel;
+      if (summaryTrackKey) {
+        const trackBundle = this.resolveTrack(summaryTrackKey);
+        headerPanel = new TrackGroupPanel({
+          groupKey: group.key,
+          trackFSM: trackBundle.trackFSM,
+          subtitle: trackBundle.subtitle,
+          tags: trackBundle.tags,
+          chips: trackBundle.chips,
+          collapsed: group.collapsed,
+          title: group.name,
+        });
+      } else {
+        headerPanel = new TrackGroupPanel({
+          groupKey: group.key,
+          collapsed: group.collapsed,
+          title: group.name,
+        });
+      }
 
       const childTracks: Panel[] = [];
-      // The first track is the summary track, and is displayed as part of the
-      // group panel, we don't want to display it twice so we start from 1.
       if (!group.collapsed) {
-        for (let i = 1; i < group.tracks.length; ++i) {
-          const key = group.tracks[i];
+        for (const key of group.tracks) {
           const trackBundle = this.resolveTrack(key);
           const panel = new TrackPanel({
             trackKey: key,
             title: trackBundle.title,
             tags: trackBundle.tags,
             trackFSM: trackBundle.trackFSM,
+            closeable: trackBundle.closeable,
+            chips: trackBundle.chips,
+            pluginId: trackBundle.pluginId,
           });
           childTracks.push(panel);
         }
@@ -270,9 +287,8 @@ class TraceViewer implements m.ClassComponent {
       scrollingPanels.push({
         kind: 'group',
         collapsed: group.collapsed,
-        childTracks,
+        childPanels: childTracks,
         header: headerPanel,
-        trackGroupId: group.id,
       });
     }
 
@@ -283,7 +299,8 @@ class TraceViewer implements m.ClassComponent {
 
     const result = m(
       '.page.viewer-page',
-      m('.pan-and-zoom-content',
+      m(
+        '.pan-and-zoom-content',
         {
           ref: this.PAN_ZOOM_CONTENT_REF,
           onclick: () => {
@@ -292,24 +309,25 @@ class TraceViewer implements m.ClassComponent {
               this.keepCurrentSelection = false;
               return;
             }
-            globals.makeSelection(Actions.deselect({}));
+            globals.clearSelection();
           },
         },
-        m(PanelContainer, {
-          className: 'header-panel-container',
-          doesScroll: false,
-          panels: [
-            ...overviewPanel,
-            this.timeAxisPanel,
-            this.timeSelectionPanel,
-            this.notesPanel,
-            this.tickmarkPanel,
-          ],
-          kind: 'OVERVIEW',
-        }),
+        m(
+          '.pf-timeline-header',
+          m(PanelContainer, {
+            className: 'header-panel-container',
+            panels: [
+              ...overviewPanel,
+              this.timeAxisPanel,
+              this.timeSelectionPanel,
+              this.notesPanel,
+              this.tickmarkPanel,
+            ],
+          }),
+          m('.scrollbar-spacer-vertical'),
+        ),
         m(PanelContainer, {
           className: 'pinned-panel-container',
-          doesScroll: true,
           panels: globals.state.pinnedTracks.map((key) => {
             const trackBundle = this.resolveTrack(key);
             return new TrackPanel({
@@ -318,18 +336,23 @@ class TraceViewer implements m.ClassComponent {
               tags: trackBundle.tags,
               trackFSM: trackBundle.trackFSM,
               revealOnCreate: true,
+              closeable: trackBundle.closeable,
+              chips: trackBundle.chips,
+              pluginId: trackBundle.pluginId,
             });
           }),
-          kind: 'TRACKS',
         }),
         m(PanelContainer, {
           className: 'scrolling-panel-container',
-          doesScroll: true,
           panels: scrollingPanels,
-          kind: 'TRACKS',
+          onPanelStackResize: (width) => {
+            const timelineWidth = width - TRACK_SHELL_WIDTH;
+            this.timelineWidthPx = timelineWidth;
+          },
         }),
       ),
-      this.renderTabPanel());
+      this.renderTabPanel(),
+    );
 
     globals.trackManager.flushOldTracks();
     return result;
@@ -338,37 +361,39 @@ class TraceViewer implements m.ClassComponent {
   // Resolve a track and its metadata through the track cache
   private resolveTrack(key: string): TrackBundle {
     const trackState = globals.state.tracks[key];
-    const {uri, params, name, labels} = trackState;
+    const {uri, name, closeable} = trackState;
     const trackDesc = globals.trackManager.resolveTrackInfo(uri);
     const trackCacheEntry =
-        trackDesc && globals.trackManager.resolveTrack(key, trackDesc, params);
+      trackDesc && globals.trackManager.resolveTrack(key, trackDesc);
     const trackFSM = trackCacheEntry;
     const tags = trackCacheEntry?.desc.tags;
-    const trackIds = trackCacheEntry?.desc.trackIds;
+    const subtitle = trackCacheEntry?.desc.subtitle;
+    const chips = trackCacheEntry?.desc.chips;
+    const plugin = trackCacheEntry?.desc.pluginId;
     return {
       title: name,
+      subtitle,
+      closeable: closeable ?? false,
       tags,
       trackFSM,
-      labels,
-      trackIds,
+      chips,
+      pluginId: plugin,
     };
   }
 
   private renderTabPanel() {
-    if (TABS_V2_FLAG.get()) {
-      return m(TabPanel);
-    } else {
-      return m(DetailsPanel);
-    }
+    return m(TabPanel);
   }
 }
 
 interface TrackBundle {
-  title: string;
-  trackFSM?: TrackCacheEntry;
-  tags?: TrackTags;
-  labels?: string[];
-  trackIds?: number[];
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly closeable: boolean;
+  readonly trackFSM?: TrackCacheEntry;
+  readonly tags?: TrackTags;
+  readonly chips?: ReadonlyArray<string>;
+  readonly pluginId?: string;
 }
 
 export const ViewerPage = createPage({

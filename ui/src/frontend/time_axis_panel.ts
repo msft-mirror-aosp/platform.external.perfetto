@@ -14,88 +14,96 @@
 
 import m from 'mithril';
 
-import {
-  Time,
-  time,
-  toISODateOnly,
-} from '../base/time';
-import {TimestampFormat, timestampFormat} from '../common/timestamp_format';
+import {Time, time, toISODateOnly} from '../base/time';
+import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {
   getMaxMajorTicks,
   MIN_PX_PER_STEP,
-  TickGenerator,
+  generateTicks,
   TickType,
-  timeScaleForVisibleWindow,
 } from './gridline_helper';
-import {PanelSize} from './panel';
+import {Size} from '../base/geom';
 import {Panel} from './panel_container';
+import {PxSpan, TimeScale} from './time_scale';
+import {canvasClip} from '../common/canvas_utils';
 
 export class TimeAxisPanel implements Panel {
   readonly kind = 'panel';
   readonly selectable = false;
-  readonly trackKey = undefined;
-
-  constructor(readonly key: string) {}
 
   render(): m.Children {
     return m('.time-axis-panel');
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
     ctx.fillStyle = '#999';
     ctx.textAlign = 'left';
     ctx.font = '11px Roboto Condensed';
 
+    this.renderOffsetTimestamp(ctx);
+
+    const trackSize = {...size, width: size.width - TRACK_SHELL_WIDTH};
+    ctx.save();
+    ctx.translate(TRACK_SHELL_WIDTH, 0);
+    canvasClip(ctx, 0, 0, trackSize.width, trackSize.height);
+    this.renderPanel(ctx, trackSize);
+    ctx.restore();
+
+    ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
+  }
+
+  private renderOffsetTimestamp(ctx: CanvasRenderingContext2D): void {
     const offset = globals.timestampOffset();
     switch (timestampFormat()) {
-    case TimestampFormat.Raw:
-    case TimestampFormat.RawLocale:
-      break;
-    case TimestampFormat.Seconds:
-    case TimestampFormat.Timecode:
-      const width = renderTimestamp(ctx, offset, 6, 10, MIN_PX_PER_STEP);
-      ctx.fillText('+', 6 + width + 2, 10, 6);
-      break;
-    case TimestampFormat.UTC:
-      const offsetDate =
-            Time.toDate(globals.utcOffset, globals.realtimeOffset);
-      const dateStr = toISODateOnly(offsetDate);
-      ctx.fillText(`UTC ${dateStr}`, 6, 10);
-      break;
-    case TimestampFormat.TraceTz:
-      const offsetTzDate =
-            Time.toDate(globals.traceTzOffset, globals.realtimeOffset);
-      const dateTzStr = toISODateOnly(offsetTzDate);
-      ctx.fillText(dateTzStr, 6, 10);
-      break;
+      case TimestampFormat.Raw:
+      case TimestampFormat.RawLocale:
+        break;
+      case TimestampFormat.Seconds:
+      case TimestampFormat.Timecode:
+        const width = renderTimestamp(ctx, offset, 6, 10, MIN_PX_PER_STEP);
+        ctx.fillText('+', 6 + width + 2, 10, 6);
+        break;
+      case TimestampFormat.UTC:
+        const offsetDate = Time.toDate(
+          globals.traceContext.utcOffset,
+          globals.traceContext.realtimeOffset,
+        );
+        const dateStr = toISODateOnly(offsetDate);
+        ctx.fillText(`UTC ${dateStr}`, 6, 10);
+        break;
+      case TimestampFormat.TraceTz:
+        const offsetTzDate = Time.toDate(
+          globals.traceContext.traceTzOffset,
+          globals.traceContext.realtimeOffset,
+        );
+        const dateTzStr = toISODateOnly(offsetTzDate);
+        ctx.fillText(dateTzStr, 6, 10);
+        break;
     }
+  }
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(TRACK_SHELL_WIDTH, 0, size.width - TRACK_SHELL_WIDTH, size.height);
-    ctx.clip();
+  private renderPanel(ctx: CanvasRenderingContext2D, size: Size): void {
+    const visibleWindow = globals.timeline.visibleWindow;
+    const timescale = new TimeScale(visibleWindow, new PxSpan(0, size.width));
+    const timespan = visibleWindow.toTimeSpan();
+    const offset = globals.timestampOffset();
 
     // Draw time axis.
-    const span = globals.timeline.visibleTimeSpan;
-    if (size.width > TRACK_SHELL_WIDTH && span.duration > 0n) {
-      const maxMajorTicks = getMaxMajorTicks(size.width - TRACK_SHELL_WIDTH);
-      const map = timeScaleForVisibleWindow(TRACK_SHELL_WIDTH, size.width);
-
-      const tickGen = new TickGenerator(span, maxMajorTicks, offset);
+    if (size.width > 0 && timespan.duration > 0n) {
+      const maxMajorTicks = getMaxMajorTicks(size.width);
+      const tickGen = generateTicks(timespan, maxMajorTicks, offset);
       for (const {type, time} of tickGen) {
         if (type === TickType.MAJOR) {
-          const position = Math.floor(map.timeToPx(time));
+          const position = Math.floor(timescale.timeToPx(time));
           ctx.fillRect(position, 0, 1, size.height);
           const domainTime = globals.toDomainTime(time);
           renderTimestamp(ctx, domainTime, position + 5, 10, MIN_PX_PER_STEP);
         }
       }
     }
-    ctx.restore();
-    ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
   }
 }
 
@@ -108,19 +116,19 @@ function renderTimestamp(
 ) {
   const fmt = timestampFormat();
   switch (fmt) {
-  case TimestampFormat.UTC:
-  case TimestampFormat.TraceTz:
-  case TimestampFormat.Timecode:
-    return renderTimecode(ctx, time, x, y, minWidth);
-  case TimestampFormat.Raw:
-    return renderRawTimestamp(ctx, time.toString(), x, y, minWidth);
-  case TimestampFormat.RawLocale:
-    return renderRawTimestamp(ctx, time.toLocaleString(), x, y, minWidth);
-  case TimestampFormat.Seconds:
-    return renderRawTimestamp(ctx, Time.formatSeconds(time), x, y, minWidth);
-  default:
-    const z: never = fmt;
-    throw new Error(`Invalid timestamp ${z}`);
+    case TimestampFormat.UTC:
+    case TimestampFormat.TraceTz:
+    case TimestampFormat.Timecode:
+      return renderTimecode(ctx, time, x, y, minWidth);
+    case TimestampFormat.Raw:
+      return renderRawTimestamp(ctx, time.toString(), x, y, minWidth);
+    case TimestampFormat.RawLocale:
+      return renderRawTimestamp(ctx, time.toLocaleString(), x, y, minWidth);
+    case TimestampFormat.Seconds:
+      return renderRawTimestamp(ctx, Time.formatSeconds(time), x, y, minWidth);
+    default:
+      const z: never = fmt;
+      throw new Error(`Invalid timestamp ${z}`);
   }
 }
 

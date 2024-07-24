@@ -28,11 +28,13 @@ namespace perfetto::trace_redaction {
 // Returns `base::ErrStatus()` if `Context.package_uid` was not set.
 class PrunePackageList final : public TransformPrimitive {
  public:
-  PrunePackageList();
-  ~PrunePackageList() override;
-
   base::Status Transform(const Context& context,
                          std::string* packet) const override;
+
+ private:
+  void OnPackageList(const Context& context,
+                     protozero::ConstBytes bytes,
+                     protos::pbzero::PackagesList* message) const;
 };
 
 }  // namespace perfetto::trace_redaction

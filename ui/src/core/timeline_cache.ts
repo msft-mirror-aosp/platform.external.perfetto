@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {BigintMath} from '../base/bigint_math';
-import {assertTrue} from '../base/logging';
 import {duration, time, Time} from '../base/time';
 
 export const BUCKETS_PER_PIXEL = 2;
@@ -61,13 +60,22 @@ export class CacheKey {
   readonly windowSizePx: number;
 
   static create(startNs: time, endNs: time, windowSizePx: number): CacheKey {
-    const bucketNs = (endNs - startNs) /
-        BigInt(Math.round(windowSizePx * BUCKETS_PER_PIXEL));
-    return new CacheKey(startNs, endNs, bucketNs, windowSizePx);
+    const bucketNs =
+      (endNs - startNs) / BigInt(Math.round(windowSizePx * BUCKETS_PER_PIXEL));
+    return new CacheKey(
+      startNs,
+      endNs,
+      BigintMath.max(1n, bucketNs),
+      windowSizePx,
+    );
   }
 
   private constructor(
-    startNs: time, endNs: time, bucketNs: duration, windowSizePx: number) {
+    startNs: time,
+    endNs: time,
+    bucketNs: duration,
+    windowSizePx: number,
+  ) {
     this.start = startNs;
     this.end = endNs;
     this.bucketSize = bucketNs;
@@ -117,63 +125,5 @@ export class CacheKey {
     const bucket = this.bucketSize;
     const size = this.windowSizePx;
     return `CacheKey<${start}, ${end}, ${bucket}, ${size}>`;
-  }
-}
-
-
-interface CacheItem<T> {
-  t: T;
-  lastAccessId: number;
-}
-
-
-// LRU cache for the timeline.
-// T is all the data needed for a displaying the track in a given
-// CacheKey area - generally an array of slices.
-export class TimelineCache<T> {
-  private cacheSize: number;
-  private cache: Map<string, CacheItem<T>>;
-  private lastAccessId: number;
-
-  constructor(cacheSize: number) {
-    assertTrue(cacheSize >= 2);
-    this.cacheSize = cacheSize;
-    this.cache = new Map();
-    this.lastAccessId = 0;
-  }
-
-  insert(cacheKey: CacheKey, t: T): void {
-    assertTrue(cacheKey.isNormalized());
-    const key = cacheKey.toString();
-    this.cache.set(key, {
-      t,
-      lastAccessId: this.lastAccessId++,
-    });
-    this.updateLru();
-  }
-
-  lookup(cacheKey: CacheKey): undefined|T {
-    assertTrue(cacheKey.isNormalized());
-    const key = cacheKey.toString();
-    const item = this.cache.get(key);
-    if (item) {
-      item.lastAccessId = this.lastAccessId++;
-      this.updateLru();
-    }
-    return item === undefined ? undefined : item.t;
-  }
-
-  private updateLru(): void {
-    while (this.cache.size > this.cacheSize) {
-      let oldestKey = '';
-      let oldestAccessId = Number.MAX_SAFE_INTEGER;
-      for (const [k, v] of this.cache.entries()) {
-        if (v.lastAccessId < oldestAccessId) {
-          oldestAccessId = v.lastAccessId;
-          oldestKey = k;
-        }
-      }
-      this.cache.delete(oldestKey);
-    }
   }
 }

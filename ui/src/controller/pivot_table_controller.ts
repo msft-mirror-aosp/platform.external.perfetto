@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
+import {arrayEquals} from '../base/array_utils';
 import {Actions} from '../common/actions';
 import {
+  Area,
   AreaSelection,
+  PivotTableAreaState,
   PivotTableQuery,
   PivotTableQueryMetadata,
   PivotTableResult,
@@ -30,7 +33,7 @@ import {
 } from '../frontend/pivot_table_query_generator';
 import {Aggregation, PivotTree} from '../frontend/pivot_table_types';
 import {Engine} from '../trace_processor/engine';
-import {ColumnType, STR} from '../trace_processor/query_result';
+import {ColumnType} from '../trace_processor/query_result';
 
 import {Controller} from './controller';
 
@@ -99,11 +102,13 @@ export class PivotTableTreeBuilder {
   updateAggregates(tree: PivotTree, row: ColumnType[]) {
     const countIndex = this.queryMetadata.countIndex;
     const treeCount =
-        countIndex >= 0 ? expectNumber(tree.aggregates[countIndex]) : 0;
-    const rowCount = countIndex >= 0 ?
-      expectNumber(
-        row[aggregationIndex(this.pivotColumnsCount, countIndex)]) :
-      0;
+      countIndex >= 0 ? expectNumber(tree.aggregates[countIndex]) : 0;
+    const rowCount =
+      countIndex >= 0
+        ? expectNumber(
+            row[aggregationIndex(this.pivotColumnsCount, countIndex)],
+          )
+        : 0;
 
     for (let i = 0; i < this.aggregateColumns.length; i++) {
       const agg = this.aggregateColumns[i];
@@ -112,22 +117,22 @@ export class PivotTableTreeBuilder {
       const childAgg = row[aggregationIndex(this.pivotColumnsCount, i)];
       if (typeof currAgg === 'number' && typeof childAgg === 'number') {
         switch (agg.aggregationFunction) {
-        case 'SUM':
-        case 'COUNT':
-          tree.aggregates[i] = currAgg + childAgg;
-          break;
-        case 'MAX':
-          tree.aggregates[i] = Math.max(currAgg, childAgg);
-          break;
-        case 'MIN':
-          tree.aggregates[i] = Math.min(currAgg, childAgg);
-          break;
-        case 'AVG': {
-          const currSum = currAgg * treeCount;
-          const addSum = childAgg * rowCount;
-          tree.aggregates[i] = (currSum + addSum) / (treeCount + rowCount);
-          break;
-        }
+          case 'SUM':
+          case 'COUNT':
+            tree.aggregates[i] = currAgg + childAgg;
+            break;
+          case 'MAX':
+            tree.aggregates[i] = Math.max(currAgg, childAgg);
+            break;
+          case 'MIN':
+            tree.aggregates[i] = Math.min(currAgg, childAgg);
+            break;
+          case 'AVG': {
+            const currSum = currAgg * treeCount;
+            const addSum = childAgg * rowCount;
+            tree.aggregates[i] = (currSum + addSum) / (treeCount + rowCount);
+            break;
+          }
         }
       }
     }
@@ -150,8 +155,11 @@ export class PivotTableTreeBuilder {
     for (let j = 0; j < this.aggregateColumns.length; j++) {
       aggregates.push(row[aggregationIndex(this.pivotColumnsCount, j)]);
     }
-    aggregates.push(row[aggregationIndex(
-      this.pivotColumnsCount, this.aggregateColumns.length)]);
+    aggregates.push(
+      row[
+        aggregationIndex(this.pivotColumnsCount, this.aggregateColumns.length)
+      ],
+    );
 
     return {
       isCollapsed: false,
@@ -162,8 +170,9 @@ export class PivotTableTreeBuilder {
   }
 }
 
-function createEmptyQueryResult(metadata: PivotTableQueryMetadata):
-    PivotTableResult {
+function createEmptyQueryResult(
+  metadata: PivotTableQueryMetadata,
+): PivotTableResult {
   return {
     tree: {
       aggregates: [],
@@ -180,9 +189,8 @@ function createEmptyQueryResult(metadata: PivotTableQueryMetadata):
 export class PivotTableController extends Controller<{}> {
   static detailsCount = 0;
   engine: Engine;
-  lastQueryAreaId = '';
+  lastQueryArea?: PivotTableAreaState;
   lastQueryAreaTracks = new Set<string>();
-  requestedArgumentNames = false;
 
   constructor(args: {engine: Engine}) {
     super({});
@@ -209,10 +217,12 @@ export class PivotTableController extends Controller<{}> {
       return false;
     }
 
-    const newTracks = new Set(globals.state.areas[selection.areaId].tracks);
-    if (this.lastQueryAreaId !== state.selectionArea.areaId ||
-        !this.sameTracks(newTracks)) {
-      this.lastQueryAreaId = state.selectionArea.areaId;
+    const newTracks = new Set(selection.tracks);
+    if (
+      this.lastQueryArea !== state.selectionArea ||
+      !this.sameTracks(newTracks)
+    ) {
+      this.lastQueryArea = state.selectionArea;
       this.lastQueryAreaTracks = newTracks;
       return true;
     }
@@ -243,8 +253,11 @@ export class PivotTableController extends Controller<{}> {
     if (!it.valid()) {
       // Iterator is invalid after creation; means that there are no rows
       // satisfying filtering criteria. Return an empty tree.
-      globals.dispatch(Actions.setPivotStateQueryResult(
-        {queryResult: createEmptyQueryResult(query.metadata)}));
+      globals.dispatch(
+        Actions.setPivotStateQueryResult({
+          queryResult: createEmptyQueryResult(query.metadata),
+        }),
+      );
       return;
     }
 
@@ -253,54 +266,48 @@ export class PivotTableController extends Controller<{}> {
       treeBuilder.ingestRow(nextRow());
     }
 
-    globals.dispatch(Actions.setPivotStateQueryResult(
-      {queryResult: {tree: treeBuilder.build(), metadata: query.metadata}}));
-    globals.dispatch(Actions.setCurrentTab({tab: 'pivot_table'}));
+    globals.dispatch(
+      Actions.setPivotStateQueryResult({
+        queryResult: {tree: treeBuilder.build(), metadata: query.metadata},
+      }),
+    );
   }
-
-  async requestArgumentNames() {
-    this.requestedArgumentNames = true;
-    const result = await this.engine.query(`
-      select distinct flat_key from args
-    `);
-    const it = result.iter({flat_key: STR});
-
-    const argumentNames = [];
-    while (it.valid()) {
-      argumentNames.push(it.flat_key);
-      it.next();
-    }
-
-    globals.dispatch(Actions.setPivotTableArgumentNames({argumentNames}));
-  }
-
 
   run() {
     if (!PIVOT_TABLE_REDUX_FLAG.get()) {
       return;
     }
 
-    if (!this.requestedArgumentNames) {
-      this.requestArgumentNames();
-    }
-
     const pivotTableState = globals.state.nonSerializableState.pivotTable;
-    const selection = globals.state.currentSelection;
+    const selection = globals.state.selection;
 
-    if (pivotTableState.queryRequested ||
-        (selection !== null && selection.kind === 'AREA' &&
-         this.shouldRerun(pivotTableState, selection))) {
+    if (
+      pivotTableState.queryRequested ||
+      (selection.kind === 'area' &&
+        this.shouldRerun(pivotTableState, selection))
+    ) {
       globals.dispatch(
-        Actions.setPivotTableQueryRequested({queryRequested: false}));
+        Actions.setPivotTableQueryRequested({queryRequested: false}),
+      );
       // Need to re-run the existing query, clear the current result.
       globals.dispatch(Actions.setPivotStateQueryResult({queryResult: null}));
       this.processQuery(generateQueryFromState(pivotTableState));
     }
 
-    if (selection !== null && selection.kind === 'AREA' &&
-        (pivotTableState.selectionArea === undefined ||
-         pivotTableState.selectionArea.areaId !== selection.areaId)) {
-      globals.dispatch(Actions.togglePivotTable({areaId: selection.areaId}));
+    if (
+      selection.kind === 'area' &&
+      (pivotTableState.selectionArea === undefined ||
+        !areasEqual(pivotTableState.selectionArea, selection))
+    ) {
+      globals.dispatch(Actions.togglePivotTable({area: selection}));
     }
   }
+}
+
+// Returns true if two areas and exactly equivalent, false otherwise
+function areasEqual(a: Area, b: Area): boolean {
+  if (a.start !== b.start) return false;
+  if (a.end !== b.end) return false;
+  if (!arrayEquals(a.tracks, b.tracks)) return false;
+  return true;
 }

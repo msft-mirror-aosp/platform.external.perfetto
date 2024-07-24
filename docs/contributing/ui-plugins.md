@@ -36,21 +36,29 @@ Notes on naming:
 - Commands should have ids with the pattern `example.com#DoSomething`
 - Command's ids should be prefixed with the id of the plugin which
   provides them.
-- Commands names should have the form "Verb something something".
-  Good: "Pin janky frame timeline tracks"
-  Bad: "Tracks are Displayed if Janky"
+- Command names should have the form "Verb something something", and should be
+  in normal sentence case. I.e. don't capitalize the first letter of each word.
+  - Good: "Pin janky frame timeline tracks"
+  - Bad: "Tracks are Displayed if Janky"
 
 ### Start the dev server
 ```sh
 ./ui/run-dev-server
 ```
-Now navigate to [](http://localhost:10000/settings)
+Now navigate to [localhost:10000](http://localhost:10000/)
+
+### Enable your plugin
+- Navigate to the plugins page: [localhost:10000/#!/plugins](http://localhost:10000/#!/plugins).
+- Ctrl-F for your plugin name and enable it.
+
+Later you can request for your plugin to be enabled by default.
+Follow the [default plugins](#default-plugins) section for this.
 
 ### Upload your plugin for review
 - Update `ui/src/plugins/<your-plugin-name>/OWNERS` to include your email.
 - Follow the [Contributing](./getting-started#contributing)
   instructions to upload your CL to the codereview tool.
-- Once uploaded add `hjd@google.com` as a reviewer for your CL.
+- Once uploaded add `stevegolton@google.com` as a reviewer for your CL.
 
 ## Plugin extension points
 Plugins can extend a handful of specific places in the UI. The sections
@@ -461,7 +469,7 @@ mechanism.
 
 Persistent plugin state works using a `Store<T>` where `T` is some JSON
 serializable object.
-`Store` is implemented [here](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/frontend/store.ts).
+`Store` is implemented [here](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/base/store.ts).
 `Store` allows for reading and writing `T`.
 Reading:
 ```typescript
@@ -575,9 +583,10 @@ Examples:
 ## Guide to the plugin API
 The plugin interfaces are defined in [ui/src/public/index.ts](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/public/index.ts).
 
-
 ## Default plugins
-TBD
+Some plugins are enabled by default.
+These plugins are held to a higher quality than non-default plugins since changes to those plugins effect all users of the UI.
+The list of default plugins is specified at [ui/src/core/default_plugins.ts](https://cs.android.com/android/platform/superproject/main/+/main:external/perfetto/ui/src/common/default_plugins.ts).
 
 ## Misc notes
 - Plugins must be licensed under

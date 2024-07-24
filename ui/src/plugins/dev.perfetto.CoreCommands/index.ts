@@ -19,7 +19,6 @@ import {
   PluginContext,
   PluginContextTrace,
   PluginDescriptor,
-  addDebugSliceTrack,
 } from '../../public';
 
 const SQL_STATS = `
@@ -88,7 +87,7 @@ group by
 order by total_self_size desc
 limit 100;`;
 
-const coreCommands: Plugin = {
+class CoreCommandsPlugin implements Plugin {
   onActivate(ctx: PluginContext) {
     ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#ToggleLeftSidebar',
@@ -102,12 +101,12 @@ const coreCommands: Plugin = {
       },
       defaultHotkey: '!Mod+B',
     });
-  },
+  }
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#RunQueryAllProcesses',
-      name: 'Run query: all processes',
+      name: 'Run query: All processes',
       callback: () => {
         ctx.tabs.openQuery(ALL_PROCESSES_QUERY, 'All Processes');
       },
@@ -126,7 +125,9 @@ const coreCommands: Plugin = {
       name: 'Run query: cycles by p-state by CPU',
       callback: () => {
         ctx.tabs.openQuery(
-          CYCLES_PER_P_STATE_PER_CPU, 'Cycles by p-state by CPU');
+          CYCLES_PER_P_STATE_PER_CPU,
+          'Cycles by p-state by CPU',
+        );
       },
     });
 
@@ -135,7 +136,9 @@ const coreCommands: Plugin = {
       name: 'Run query: CPU Time by CPU by process',
       callback: () => {
         ctx.tabs.openQuery(
-          CPU_TIME_BY_CPU_BY_PROCESS, 'CPU Time by CPU by process');
+          CPU_TIME_BY_CPU_BY_PROCESS,
+          'CPU time by CPU by process',
+        );
       },
     });
 
@@ -144,7 +147,9 @@ const coreCommands: Plugin = {
       name: 'Run query: heap graph bytes per type',
       callback: () => {
         ctx.tabs.openQuery(
-          HEAP_GRAPH_BYTES_PER_TYPE, 'Heap graph bytes per type');
+          HEAP_GRAPH_BYTES_PER_TYPE,
+          'Heap graph bytes per type',
+        );
       },
     });
 
@@ -157,18 +162,8 @@ const coreCommands: Plugin = {
     });
 
     ctx.registerCommand({
-      id: 'dev.perfetto.CoreCommands#PinFtraceTracks',
-      name: 'Pin ftrace tracks',
-      callback: () => {
-        ctx.timeline.pinTracksByPredicate((tags) => {
-          return !!tags.name?.startsWith('Ftrace Events Cpu ');
-        });
-      },
-    });
-
-    ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#UnpinAllTracks',
-      name: 'Unpin all tracks',
+      name: 'Unpin all pinned tracks',
       callback: () => {
         ctx.timeline.unpinTracksByPredicate((_) => {
           return true;
@@ -178,7 +173,7 @@ const coreCommands: Plugin = {
 
     ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#ExpandAllGroups',
-      name: 'Expand all groups',
+      name: 'Expand all track groups',
       callback: () => {
         ctx.timeline.expandGroupsByPredicate((_) => {
           return true;
@@ -188,7 +183,7 @@ const coreCommands: Plugin = {
 
     ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#CollapseAllGroups',
-      name: 'Collapse all groups',
+      name: 'Collapse all track groups',
       callback: () => {
         ctx.timeline.collapseGroupsByPredicate((_) => {
           return true;
@@ -198,7 +193,7 @@ const coreCommands: Plugin = {
 
     ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#PanToTimestamp',
-      name: 'Pan To Timestamp',
+      name: 'Pan to timestamp',
       callback: (tsRaw: unknown) => {
         if (exists(tsRaw)) {
           if (typeof tsRaw !== 'bigint') {
@@ -216,37 +211,16 @@ const coreCommands: Plugin = {
     });
 
     ctx.registerCommand({
-      id: 'test',
-      name: 'Make Test Debug Track',
-      callback: () => {
-        addDebugSliceTrack(
-          ctx.engine,
-          {
-            sqlSource: `
-              SELECT *
-              FROM slice
-              WHERE name like 'a%'
-              LIMIT 10000
-            `,
-          },
-          'Track Name',
-          {ts: 'ts', dur: 'dur', name: 'name'},
-          [],
-        );
-      },
-    });
-
-    ctx.registerCommand({
       id: 'dev.perfetto.CoreCommands#ShowCurrentSelectionTab',
-      name: 'Show Current Selection Tab',
+      name: 'Show current selection tab',
       callback: () => {
         ctx.tabs.showTab('current_selection');
       },
     });
-  },
-};
+  }
+}
 
-function promptForTimestamp(message: string): time|undefined {
+function promptForTimestamp(message: string): time | undefined {
   const tsStr = window.prompt(message);
   if (tsStr !== null) {
     try {
@@ -260,5 +234,5 @@ function promptForTimestamp(message: string): time|undefined {
 
 export const plugin: PluginDescriptor = {
   pluginId: 'dev.perfetto.CoreCommands',
-  plugin: coreCommands,
+  plugin: CoreCommandsPlugin,
 };

@@ -16,10 +16,11 @@ import m from 'mithril';
 
 import {classNames} from '../base/classnames';
 import {raf} from '../core/raf_scheduler';
-import {VERSION} from '../gen/perfetto_version';
 
 import {globals} from './globals';
 import {taskTracker} from './task_tracker';
+import {Popup, PopupPosition} from '../widgets/popup';
+import {assertFalse} from '../base/logging';
 
 export const DISMISSED_PANNING_HINT_KEY = 'dismissedPanningHint';
 
@@ -32,24 +33,9 @@ class Progress implements m.ClassComponent {
   private isLoading(): boolean {
     const engine = globals.getCurrentEngine();
     return (
-      (engine && !engine.ready) || globals.numQueuedQueries > 0 ||
-        taskTracker.hasPendingTasks());
-  }
-}
-
-class NewVersionNotification implements m.ClassComponent {
-  view() {
-    return m(
-      '.new-version-toast',
-      `Updated to ${VERSION} and ready for offline use!`,
-      m('button.notification-btn.preferred',
-        {
-          onclick: () => {
-            globals.newVersionAvailable = false;
-            raf.scheduleFullRedraw();
-          },
-        },
-        'Dismiss'),
+      (engine && !engine.ready) ||
+      globals.numQueuedQueries > 0 ||
+      taskTracker.hasPendingTasks()
     );
   }
 }
@@ -60,16 +46,22 @@ class HelpPanningNotification implements m.ClassComponent {
     // Do not show the help notification in embedded mode because local storage
     // does not persist for iFrames. The host is responsible for communicating
     // to users that they can press '?' for help.
-    if (globals.embeddedMode || dismissed === 'true' ||
-        !globals.showPanningHint) {
+    if (
+      globals.embeddedMode ||
+      dismissed === 'true' ||
+      !globals.showPanningHint
+    ) {
       return;
     }
     return m(
       '.helpful-hint',
-      m('.hint-text',
+      m(
+        '.hint-text',
         'Are you trying to pan? Use the WASD keys or hold shift to click ' +
-              'and drag. Press \'?\' for more help.'),
-      m('button.hint-dismiss-button',
+          "and drag. Press '?' for more help.",
+      ),
+      m(
+        'button.hint-dismiss-button',
         {
           onclick: () => {
             globals.showPanningHint = false;
@@ -77,7 +69,8 @@ class HelpPanningNotification implements m.ClassComponent {
             raf.scheduleFullRedraw();
           },
         },
-        'Dismiss'),
+        'Dismiss',
+      ),
     );
   }
 }
@@ -87,20 +80,40 @@ class TraceErrorIcon implements m.ClassComponent {
     if (globals.embeddedMode) return;
 
     const mode = globals.state.omniboxState.mode;
-
     const errors = globals.traceErrors;
-    if (!Boolean(errors) && !globals.metricError || mode === 'COMMAND') return;
-    const message = Boolean(errors) ?
-      `${errors} import or data loss errors detected.` :
-      `Metric error detected.`;
+    if ((!Boolean(errors) && !globals.metricError) || mode === 'COMMAND') {
+      return;
+    }
+    const message = Boolean(errors)
+      ? `${errors} import or data loss errors detected.`
+      : `Metric error detected.`;
     return m(
-      'a.error',
-      {href: '#!/info'},
-      m('i.material-icons',
+      '.error-box',
+      m(
+        Popup,
         {
-          title: message + ` Click for more info.`,
+          trigger: m('.popup-trigger'),
+          isOpen: globals.showTraceErrorPopup,
+          position: PopupPosition.Left,
+          onChange: (shouldOpen: boolean) => {
+            assertFalse(shouldOpen);
+            globals.showTraceErrorPopup = false;
+          },
         },
-        'announcement'));
+        m('.error-popup', 'Data-loss/import error. Click for more info.'),
+      ),
+      m(
+        'a.error',
+        {href: '#!/info'},
+        m(
+          'i.material-icons',
+          {
+            title: message + ` Click for more info.`,
+          },
+          'announcement',
+        ),
+      ),
+    );
   }
 }
 
@@ -114,9 +127,10 @@ export class Topbar implements m.ClassComponent<TopbarAttrs> {
     return m(
       '.topbar',
       {class: globals.state.sidebarVisible ? '' : 'hide-sidebar'},
-      globals.newVersionAvailable ? m(NewVersionNotification) : omnibox,
+      omnibox,
       m(Progress),
       m(HelpPanningNotification),
-      m(TraceErrorIcon));
+      m(TraceErrorIcon),
+    );
   }
 }

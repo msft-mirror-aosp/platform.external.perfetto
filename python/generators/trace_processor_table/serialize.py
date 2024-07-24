@@ -591,7 +591,7 @@ class TableSerializer(object):
       if (overlays()[i].row_map().IsIndexVector()) {{
         overlay_layers[i].reset(new column::ArrangementOverlay(
             overlays()[i].row_map().GetIfIndexVector(),
-            Indices::State::kNonmonotonic));
+            column::DataLayerChain::Indices::State::kNonmonotonic));
       }} else if (overlays()[i].row_map().IsBitVector()) {{
         overlay_layers[i].reset(new column::SelectorOverlay(
             overlays()[i].row_map().GetIfBitVector()));
@@ -674,15 +674,13 @@ class {self.table_name} : public macros_internal::MacroTable {{
 
   Iterator IterateRows() {{ return Iterator(this, Table::IterateRows()); }}
 
-  ConstIterator FilterToIterator(
-      const std::vector<Constraint>& cs) const {{
+  ConstIterator FilterToIterator(const Query& q) const {{
     return ConstIterator(
-      this, ApplyAndIterateRows(QueryToRowMap(cs, {{}})));
+      this, ApplyAndIterateRows(QueryToRowMap(q)));
   }}
 
-  Iterator FilterToIterator(
-      const std::vector<Constraint>& cs) {{
-    return Iterator(this, ApplyAndIterateRows(QueryToRowMap(cs, {{}})));
+  Iterator FilterToIterator(const Query& q) {{
+    return Iterator(this, ApplyAndIterateRows(QueryToRowMap(q)));
   }}
 
   void ShrinkToFit() {{
@@ -730,7 +728,10 @@ class {self.table_name} : public macros_internal::MacroTable {{
 def serialize_header(ifdef_guard: str, tables: List[ParsedTable],
                      include_paths: List[str]) -> str:
   """Serializes a table header file containing the given set of tables."""
-  include_paths_str = '\n'.join([f'#include "{i}"' for i in include_paths])
+  # Replace the backslash with forward slash when building on Windows.
+  # Caused b/327985369 without the replace.
+  include_paths_str = '\n'.join([f'#include "{i}"' for i in include_paths
+                                ]).replace("\\", "/")
   tables_str = '\n\n'.join([TableSerializer(t).serialize() for t in tables])
   return f'''
 #ifndef {ifdef_guard}

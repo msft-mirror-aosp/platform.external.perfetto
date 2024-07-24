@@ -16,15 +16,15 @@
 
 #include "src/tracing/service/tracing_service_impl.h"
 
-#include <errno.h>
 #include <limits.h>
-#include <stdint.h>
 #include <string.h>
 
 #include <cinttypes>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <regex>
+#include <string>
 #include <unordered_set>
 #include "perfetto/base/time.h"
 #include "perfetto/ext/tracing/core/client_identity.h"
@@ -59,7 +59,8 @@
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/metatrace.h"
 #include "perfetto/ext/base/string_utils.h"
-#include "perfetto/ext/base/temp_file.h"
+#include "perfetto/ext/base/string_view.h"
+#include "perfetto/ext/base/sys_types.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/base/uuid.h"
 #include "perfetto/ext/base/version.h"
@@ -156,8 +157,8 @@ ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
 // Format (by bit range):
 // [   31 ][         30 ][             29:20 ][            19:10 ][        9:0]
 // [unused][has flush id][num chunks to patch][num chunks to move][producer id]
-static int32_t EncodeCommitDataRequest(ProducerID producer_id,
-                                       const CommitDataRequest& req_untrusted) {
+int32_t EncodeCommitDataRequest(ProducerID producer_id,
+                                const CommitDataRequest& req_untrusted) {
   uint32_t cmov = static_cast<uint32_t>(req_untrusted.chunks_to_move_size());
   uint32_t cpatch = static_cast<uint32_t>(req_untrusted.chunks_to_patch_size());
   uint32_t has_flush_id = req_untrusted.flush_request_id() != 0;
@@ -495,8 +496,6 @@ void TracingServiceImpl::DisconnectConsumer(ConsumerEndpointImpl* consumer) {
   PERFETTO_DLOG("Consumer %p disconnected", reinterpret_cast<void*>(consumer));
   PERFETTO_DCHECK(consumers_.count(consumer));
 
-  // TODO(primiano) : Check that this is safe (what happens if there are
-  // ReadBuffers() calls posted in the meantime? They need to become noop).
   if (consumer->tracing_session_id_)
     FreeBuffers(consumer->tracing_session_id_);  // Will also DisableTracing().
   consumers_.erase(consumer);
@@ -778,6 +777,57 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
     }
   }
 
+  if (!cfg.session_semaphores().empty()) {
+    struct SemaphoreSessionsState {
+      uint64_t smallest_max_other_session_count =
+          std::numeric_limits<uint64_t>::max();
+      uint64_t session_count = 0;
+    };
+    // For each semaphore, compute the number of active sessions and the
+    // MIN(limit).
+    std::unordered_map<std::string, SemaphoreSessionsState>
+        sem_to_sessions_state;
+    for (const auto& id_and_session : tracing_sessions_) {
+      const auto& session = id_and_session.second;
+      if (session.state == TracingSession::CLONED_READ_ONLY ||
+          session.state == TracingSession::DISABLED) {
+        // Don't consider cloned or disabled sessions in checks.
+        continue;
+      }
+      for (const auto& sem : session.config.session_semaphores()) {
+        auto& sessions_state = sem_to_sessions_state[sem.name()];
+        sessions_state.smallest_max_other_session_count =
+            std::min(sessions_state.smallest_max_other_session_count,
+                     sem.max_other_session_count());
+        sessions_state.session_count++;
+      }
+    }
+
+    // Check if any of the semaphores declared by the config clashes with any of
+    // the currently active semaphores.
+    for (const auto& semaphore : cfg.session_semaphores()) {
+      auto it = sem_to_sessions_state.find(semaphore.name());
+      if (it == sem_to_sessions_state.end()) {
+        continue;
+      }
+      uint64_t max_other_session_count =
+          std::min(semaphore.max_other_session_count(),
+                   it->second.smallest_max_other_session_count);
+      if (it->second.session_count > max_other_session_count) {
+        MaybeLogUploadEvent(
+            cfg, uuid,
+            PerfettoStatsdAtom::
+                kTracedEnableTracingFailedSessionSemaphoreCheck);
+        return PERFETTO_SVC_ERR(
+            "Semaphore \"%s\" exceeds maximum allowed other session count "
+            "(%" PRIu64 " > min(%" PRIu64 ", %" PRIu64 "))",
+            semaphore.name().c_str(), it->second.session_count,
+            semaphore.max_other_session_count(),
+            it->second.smallest_max_other_session_count);
+      }
+    }
+  }
+
   if (cfg.enable_extra_guardrails()) {
     // unique_session_name can be empty
     const std::string& name = cfg.unique_session_name();
@@ -1015,7 +1065,7 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
     auto range = data_sources_.equal_range(cfg_data_source.config().name());
     for (auto it = range.first; it != range.second; it++) {
       TraceConfig::ProducerConfig producer_config;
-      for (auto& config : cfg.producers()) {
+      for (const auto& config : cfg.producers()) {
         if (GetProducer(it->second.producer_id)->name_ ==
             config.producer_name()) {
           producer_config = config;
@@ -1184,7 +1234,7 @@ void TracingServiceImpl::ChangeTraceConfig(ConsumerEndpointImpl* consumer,
       // If it wasn't previously setup, set it up now.
       // (The per-producer config is optional).
       TraceConfig::ProducerConfig producer_config;
-      for (auto& config : tracing_session->config.producers()) {
+      for (const auto& config : tracing_session->config.producers()) {
         if (producer->name_ == config.producer_name()) {
           producer_config = config;
           break;
@@ -1689,13 +1739,14 @@ void TracingServiceImpl::ActivateTriggers(
               tracing_session.config, tracing_session.trace_uuid,
               PerfettoStatsdAtom::kTracedTriggerCloneSnapshot, iter->name());
           task_runner_->PostDelayedTask(
-              [weak_this, tsid] {
+              [weak_this, tsid, trigger_name = iter->name()] {
                 if (!weak_this)
                   return;
                 auto* tsess = weak_this->GetTracingSession(tsid);
                 if (!tsess || !tsess->consumer_maybe_null)
                   return;
-                tsess->consumer_maybe_null->NotifyCloneSnapshotTrigger();
+                tsess->consumer_maybe_null->NotifyCloneSnapshotTrigger(
+                    trigger_name);
               },
               iter->stop_delay_ms());
           break;
@@ -1796,13 +1847,13 @@ void TracingServiceImpl::Flush(TracingSessionID tsid,
     data_source_instances[producer_id].push_back(ds_inst.instance_id);
   }
   FlushDataSourceInstances(tracing_session, timeout_ms, data_source_instances,
-                           callback, flush_flags);
+                           std::move(callback), flush_flags);
 }
 
 void TracingServiceImpl::FlushDataSourceInstances(
     TracingSession* tracing_session,
     uint32_t timeout_ms,
-    std::map<ProducerID, std::vector<DataSourceInstanceID>>
+    const std::map<ProducerID, std::vector<DataSourceInstanceID>>&
         data_source_instances,
     ConsumerEndpoint::FlushCallback callback,
     FlushFlags flush_flags) {
@@ -1880,7 +1931,7 @@ void TracingServiceImpl::NotifyFlushDoneForProducer(
         it++;
       }
     }  // for (pending_flushes)
-  }    // for (tracing_session)
+  }  // for (tracing_session)
 }
 
 void TracingServiceImpl::OnFlushTimeout(TracingSessionID tsid,
@@ -2427,7 +2478,7 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
       did_hit_threshold = packets_bytes >= threshold;
       packets.emplace_back(std::move(packet));
     }  // for(packets...)
-  }    // for(buffers...)
+  }  // for(buffers...)
 
   *has_more = did_hit_threshold;
 
@@ -2642,9 +2693,22 @@ void TracingServiceImpl::FreeBuffers(TracingSessionID tsid) {
   bool is_long_trace =
       (tracing_session->config.write_into_file() &&
        tracing_session->config.file_write_period_ms() < kMillisPerDay);
+  auto pending_clones = std::move(tracing_session->pending_clones);
   tracing_sessions_.erase(tsid);
   tracing_session = nullptr;
   UpdateMemoryGuardrail();
+
+  for (const auto& id_to_clone_op : pending_clones) {
+    const PendingClone& clone_op = id_to_clone_op.second;
+    if (clone_op.weak_consumer) {
+      task_runner_->PostTask([weak_consumer = clone_op.weak_consumer] {
+        if (weak_consumer) {
+          weak_consumer->consumer_->OnSessionCloned(
+              {false, "Original session ended", {}});
+        }
+      });
+    }
+  }
 
   PERFETTO_LOG("Tracing session %" PRIu64 " ended, total sessions:%zu", tsid,
                tracing_sessions_.size());
@@ -2706,7 +2770,7 @@ void TracingServiceImpl::RegisterDataSource(ProducerID producer_id,
     }
 
     TraceConfig::ProducerConfig producer_config;
-    for (auto& config : tracing_session.config.producers()) {
+    for (const auto& config : tracing_session.config.producers()) {
       if (producer->name_ == config.producer_name()) {
         producer_config = config;
         break;
@@ -2824,6 +2888,37 @@ void TracingServiceImpl::UnregisterDataSource(ProducerID producer_id,
       name.c_str(), producer_id);
 }
 
+bool TracingServiceImpl::IsInitiatorPrivileged(
+    const TracingSession& tracing_session) {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  if (tracing_session.consumer_uid == 1066 /* AID_STATSD */ &&
+      tracing_session.config.statsd_metadata().triggering_config_uid() !=
+          2000 /* AID_SHELL */
+      && tracing_session.config.statsd_metadata().triggering_config_uid() !=
+             0 /* AID_ROOT */) {
+    // StatsD can be triggered either by shell, root or an app that has DUMP and
+    // USAGE_STATS permission. When triggered by shell or root, we do not want
+    // to consider the trace a trusted system trace, as it was initiated by the
+    // user. Otherwise, it has to come from an app with DUMP and
+    // PACKAGE_USAGE_STATS, which has to be preinstalled and trusted by the
+    // system.
+    // Check for shell / root: https://bit.ly/3b7oZNi
+    // Check for DUMP or PACKAGE_USAGE_STATS: https://bit.ly/3ep0NrR
+    return true;
+  }
+  if (tracing_session.consumer_uid == 1000 /* AID_SYSTEM */) {
+    // AID_SYSTEM is considered a privileged initiator so that system_server can
+    // profile apps that are not profileable by shell. Other AID_SYSTEM
+    // processes are not allowed by SELinux to connect to the consumer socket or
+    // to exec perfetto.
+    return true;
+  }
+#else
+  base::ignore_result(tracing_session);
+#endif
+  return false;
+}
+
 TracingServiceImpl::DataSourceInstance* TracingServiceImpl::SetupDataSource(
     const TraceConfig::DataSource& cfg_data_source,
     const TraceConfig::ProducerConfig& producer_config,
@@ -2900,19 +2995,7 @@ TracingServiceImpl::DataSourceInstance* TracingServiceImpl::SetupDataSource(
   ds_config.set_stop_timeout_ms(tracing_session->data_source_stop_timeout_ms());
   ds_config.set_enable_extra_guardrails(
       tracing_session->config.enable_extra_guardrails());
-  if (tracing_session->consumer_uid == 1066 /* AID_STATSD */ &&
-      tracing_session->config.statsd_metadata().triggering_config_uid() !=
-          2000 /* AID_SHELL */
-      && tracing_session->config.statsd_metadata().triggering_config_uid() !=
-             0 /* AID_ROOT */) {
-    // StatsD can be triggered either by shell, root or an app that has DUMP and
-    // USAGE_STATS permission. When triggered by shell or root, we do not want
-    // to consider the trace a trusted system trace, as it was initiated by the
-    // user. Otherwise, it has to come from an app with DUMP and
-    // PACKAGE_USAGE_STATS, which has to be preinstalled and trusted by the
-    // system.
-    // Check for shell / root: https://bit.ly/3b7oZNi
-    // Check for DUMP or PACKAGE_USAGE_STATS: https://bit.ly/3ep0NrR
+  if (IsInitiatorPrivileged(*tracing_session)) {
     ds_config.set_session_initiator(
         DataSourceConfig::SESSION_INITIATOR_TRUSTED_SYSTEM);
   } else {
@@ -3196,9 +3279,9 @@ void TracingServiceImpl::UpdateMemoryGuardrail() {
   // Sum up all the cloned traced buffers.
   for (const auto& id_to_ts : tracing_sessions_) {
     const TracingSession& ts = id_to_ts.second;
-    for (const auto& id_to_pending_clone : ts.pending_clones) {
-      const PendingClone& pending_clone = id_to_pending_clone.second;
-      for (const std::unique_ptr<TraceBuffer>& buf : pending_clone.buffers) {
+    for (const auto& id_to_clone_op : ts.pending_clones) {
+      const PendingClone& clone_op = id_to_clone_op.second;
+      for (const std::unique_ptr<TraceBuffer>& buf : clone_op.buffers) {
         if (buf) {
           total_buffer_bytes += buf->size();
         }
@@ -3471,8 +3554,8 @@ TraceStats TracingServiceImpl::GetTraceStats(TracingSession* tracing_session) {
           wri_stats->add_chunk_payload_histogram_sum(hist.GetBucketSum(i));
         }
       }  // for each sequence (writer).
-    }    // for each buffer.
-  }      // if (!disable_chunk_usage_histograms)
+    }  // for each buffer.
+  }  // if (!disable_chunk_usage_histograms)
 
   return trace_stats;
 }
@@ -3519,6 +3602,8 @@ void TracingServiceImpl::EmitSystemInfo(std::vector<TracePacket>* packets) {
     utsname_info->set_machine(uname_info.machine);
     utsname_info->set_release(uname_info.release);
   }
+  info->set_page_size(static_cast<uint32_t>(sysconf(_SC_PAGESIZE)));
+  info->set_num_cpus(static_cast<uint32_t>(sysconf(_SC_NPROCESSORS_CONF)));
 #endif  // !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   std::string fingerprint_value = base::GetAndroidProp("ro.build.fingerprint");
@@ -3535,8 +3620,21 @@ void TracingServiceImpl::EmitSystemInfo(std::vector<TracePacket>* packets) {
   } else {
     PERFETTO_ELOG("Unable to read ro.build.version.sdk");
   }
-  info->set_hz(sysconf(_SC_CLK_TCK));
-  info->set_page_size(static_cast<uint32_t>(sysconf(_SC_PAGESIZE)));
+
+  std::string soc_model_value = base::GetAndroidProp("ro.soc.model");
+  if (!soc_model_value.empty()) {
+    info->set_android_soc_model(soc_model_value);
+  } else {
+    PERFETTO_ELOG("Unable to read ro.soc.model");
+  }
+
+  std::string hw_rev_value = base::GetAndroidProp("ro.boot.hardware.revision");
+  if (!hw_rev_value.empty()) {
+    info->set_android_hardware_revision(hw_rev_value);
+  } else {
+    PERFETTO_ELOG("Unable to read ro.boot.hardware.revision");
+  }
+
 #endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   packet->set_trusted_uid(static_cast<int32_t>(uid_));
   packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
@@ -3573,7 +3671,7 @@ void TracingServiceImpl::EmitLifecycleEvents(
               return a.first < b.first;
             });
 
-  for (const auto& pair : timestamped_packets)
+  for (auto& pair : timestamped_packets)
     SerializeAndAppendPacket(packets, std::move(pair.second));
 }
 
@@ -3608,14 +3706,14 @@ void TracingServiceImpl::MaybeEmitRemoteClockSync(
       auto* sync_exchange_msg = remote_clock_sync->add_synced_clocks();
 
       auto* client_snapshots = sync_exchange_msg->set_client_clocks();
-      for (auto& client_clock : sync_exchange.client_clocks) {
+      for (const auto& client_clock : sync_exchange.client_clocks) {
         auto* clock = client_snapshots->add_clocks();
         clock->set_clock_id(client_clock.clock_id);
         clock->set_timestamp(client_clock.timestamp);
       }
 
       auto* host_snapshots = sync_exchange_msg->set_host_clocks();
-      for (auto& host_clock : sync_exchange.host_clocks) {
+      for (const auto& host_clock : sync_exchange.host_clocks) {
         auto* clock = host_snapshots->add_clocks();
         clock->set_clock_id(host_clock.clock_id);
         clock->set_timestamp(host_clock.timestamp);
@@ -3688,10 +3786,11 @@ size_t TracingServiceImpl::PurgeExpiredAndCountTriggerInWindow(
   return trigger_count;
 }
 
-void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
-                                              TracingSessionID tsid,
-                                              bool skip_trace_filter,
-                                              bool for_bugreport) {
+base::Status TracingServiceImpl::FlushAndCloneSession(
+    ConsumerEndpointImpl* consumer,
+    TracingSessionID tsid,
+    bool skip_trace_filter,
+    bool for_bugreport) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   auto clone_target = FlushFlags::CloneTarget::kUnknown;
 
@@ -3704,9 +3803,8 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
     PERFETTO_LOG("Looking for sessions for bugreport");
     TracingSession* session = FindTracingSessionWithMaxBugreportScore();
     if (!session) {
-      consumer->consumer_->OnSessionCloned(
-          {false, "No tracing sessions eligible for bugreport found", {}});
-      return;
+      return base::ErrStatus(
+          "No tracing sessions eligible for bugreport found");
     }
     tsid = session->id;
     clone_target = FlushFlags::CloneTarget::kBugreport;
@@ -3718,9 +3816,14 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
 
   TracingSession* session = GetTracingSession(tsid);
   if (!session) {
-    consumer->consumer_->OnSessionCloned(
-        {false, "Tracing session not found", {}});
-    return;
+    return base::ErrStatus("Tracing session not found");
+  }
+
+  // Skip the UID check for sessions marked with a bugreport_score > 0.
+  // Those sessions, by design, can be stolen by any other consumer for the
+  // sake of creating snapshots for bugreports.
+  if (!session->IsCloneAllowed(consumer->uid_)) {
+    return PERFETTO_SVC_ERR("Not allowed to clone a session from another UID");
   }
 
   // If any of the buffers are marked as clear_before_clone, reset them before
@@ -3752,9 +3855,8 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
       // We cannot leave the original tracing session buffer-less as it would
       // cause crashes when data sources commit new data.
       buf = std::move(old_buf);
-      consumer->consumer_->OnSessionCloned(
-          {false, "Buffer allocation failed while attempting to clone", {}});
-      return;
+      return base::ErrStatus(
+          "Buffer allocation failed while attempting to clone");
     }
   }
 
@@ -3800,12 +3902,14 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
         FlushFlags(FlushFlags::Initiator::kTraced,
                    FlushFlags::Reason::kTraceClone, clone_target));
   }
+
+  return base::OkStatus();
 }
 
 std::map<ProducerID, std::vector<DataSourceInstanceID>>
 TracingServiceImpl::GetFlushableDataSourceInstancesForBuffers(
     TracingSession* session,
-    std::set<BufferID> bufs) {
+    const std::set<BufferID>& bufs) {
   std::map<ProducerID, std::vector<DataSourceInstanceID>> data_source_instances;
 
   for (const auto& [producer_id, ds_inst] : session->data_source_instances) {
@@ -3825,7 +3929,7 @@ TracingServiceImpl::GetFlushableDataSourceInstancesForBuffers(
 
 void TracingServiceImpl::OnFlushDoneForClone(TracingSessionID tsid,
                                              PendingCloneID clone_id,
-                                             std::set<BufferID> buf_ids,
+                                             const std::set<BufferID>& buf_ids,
                                              bool final_flush_outcome) {
   TracingSession* src = GetTracingSession(tsid);
   // The session might be gone by the time we try to clone it.
@@ -3881,7 +3985,7 @@ void TracingServiceImpl::OnFlushDoneForClone(TracingSessionID tsid,
 
 bool TracingServiceImpl::DoCloneBuffers(
     TracingSession* src,
-    std::set<BufferID> buf_ids,
+    const std::set<BufferID>& buf_ids,
     std::vector<std::unique_ptr<TraceBuffer>>* buf_snaps) {
   PERFETTO_DCHECK(src->num_buffers() == src->config.buffers().size());
   buf_snaps->resize(src->buffers_index.size());
@@ -3935,14 +4039,6 @@ base::Status TracingServiceImpl::FinishCloneSession(
   if (consumer->tracing_session_id_) {
     return PERFETTO_SVC_ERR(
         "The consumer is already attached to another tracing session");
-  }
-
-  // Skip the UID check for sessions marked with a bugreport_score > 0.
-  // Those sessions, by design, can be stolen by any other consumer for the
-  // sake of creating snapshots for bugreports.
-  if (src->config.bugreport_score() <= 0 &&
-      src->consumer_uid != consumer->uid_ && consumer->uid_ != 0) {
-    return PERFETTO_SVC_ERR("Not allowed to clone a session from another UID");
   }
 
   std::vector<BufferID> buf_ids =
@@ -4027,6 +4123,20 @@ base::Status TracingServiceImpl::FinishCloneSession(
                                             ? TraceStats::FINAL_FLUSH_SUCCEEDED
                                             : TraceStats::FINAL_FLUSH_FAILED;
   return base::OkStatus();
+}
+
+bool TracingServiceImpl::TracingSession::IsCloneAllowed(uid_t clone_uid) const {
+  if (clone_uid == 0)
+    return true;  // Root is always allowed to clone everything.
+  if (clone_uid == this->consumer_uid)
+    return true;  // Allow cloning if the uids match.
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  // On Android allow shell to clone sessions marked as exported for bugreport.
+  // Dumpstate (invoked by adb bugreport) invokes commands as shell.
+  if (clone_uid == AID_SHELL && this->config.bugreport_score() > 0)
+    return true;
+#endif
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -4233,13 +4343,15 @@ void TracingServiceImpl::ConsumerEndpointImpl::OnAllDataSourcesStarted() {
   observable_events->set_all_data_sources_started(true);
 }
 
-void TracingServiceImpl::ConsumerEndpointImpl::NotifyCloneSnapshotTrigger() {
+void TracingServiceImpl::ConsumerEndpointImpl::NotifyCloneSnapshotTrigger(
+    const std::string& trigger_name) {
   if (!(observable_events_mask_ & ObservableEvents::TYPE_CLONE_TRIGGER_HIT)) {
     return;
   }
   auto* observable_events = AddObservableEvents();
   auto* clone_trig = observable_events->mutable_clone_trigger_hit();
   clone_trig->set_tracing_session_id(static_cast<int64_t>(tracing_session_id_));
+  clone_trig->set_trigger_name(trigger_name);
 }
 
 ObservableEvents*
@@ -4273,7 +4385,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::QueryServiceState(
   int num_started = 0;
   for (const auto& kv : sessions)
     num_started += kv.second.state == TracingSession::State::STARTED ? 1 : 0;
-  svc_state.set_num_sessions_started(static_cast<int>(num_started));
+  svc_state.set_num_sessions_started(num_started);
 
   for (const auto& kv : service_->producers_) {
     if (args.sessions_only)
@@ -4299,8 +4411,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::QueryServiceState(
   svc_state.set_supports_tracing_sessions(true);
   for (const auto& kv : service_->tracing_sessions_) {
     const TracingSession& s = kv.second;
-    // List only tracing sessions for the calling UID (or everything for root).
-    if (uid_ != 0 && uid_ != s.consumer_uid)
+    if (!s.IsCloneAllowed(uid_))
       continue;
     auto* session = svc_state.add_tracing_sessions();
     session->set_id(s.id);
@@ -4370,8 +4481,12 @@ void TracingServiceImpl::ConsumerEndpointImpl::CloneSession(
     CloneSessionArgs args) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   // FlushAndCloneSession will call OnSessionCloned after the async flush.
-  service_->FlushAndCloneSession(this, tsid, args.skip_trace_filter,
-                                 args.for_bugreport);
+  base::Status result = service_->FlushAndCloneSession(
+      this, tsid, args.skip_trace_filter, args.for_bugreport);
+
+  if (!result.ok()) {
+    consumer_->OnSessionCloned({false, result.message(), {}});
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

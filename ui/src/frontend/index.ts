@@ -13,24 +13,25 @@
 // limitations under the License.
 
 // Keep this import first.
+import '../base/disposable_polyfill';
 import '../base/static_initializers';
 import '../gen/all_plugins';
+import '../gen/all_core_plugins';
 
 import {Draft} from 'immer';
 import m from 'mithril';
 
 import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
+import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
 import {flattenArgs, traceEvent} from '../common/metatracing';
 import {pluginManager} from '../common/plugins';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
-import {
-  isGetCategoriesResponse,
-} from '../controller/chrome_proxy_record_controller';
+import {isGetCategoriesResponse} from '../controller/chrome_proxy_record_controller';
 import {RECORDING_V2_FLAG, featureFlags} from '../core/feature_flags';
-import {initLiveReloadIfLocalhost} from '../core/live_reload';
+import {initLiveReload} from '../core/live_reload';
 import {raf} from '../core/raf_scheduler';
 import {initWasm} from '../trace_processor/wasm_engine_proxy';
 import {setScheduleFullRedraw} from '../widgets/raf';
@@ -52,7 +53,6 @@ import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
 import {Route, Router} from './router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
-import {Store} from './store';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
 import {ViewerPage} from './viewer_page';
@@ -63,62 +63,22 @@ import {showModal} from '../widgets/modal';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
-
 const CSP_WS_PERMISSIVE_PORT = featureFlags.register({
   id: 'cspAllowAnyWebsocketPort',
   name: 'Relax Content Security Policy for 127.0.0.1:*',
-  description: 'Allows simultaneous usage of several trace_processor_shell ' +
-               '-D --http-port 1234 by opening ' +
-               'https://ui.perfetto.dev/#!/?rpc_port=1234',
+  description:
+    'Allows simultaneous usage of several trace_processor_shell ' +
+    '-D --http-port 1234 by opening ' +
+    'https://ui.perfetto.dev/#!/?rpc_port=1234',
   defaultValue: false,
 });
 
-class FrontendApi {
-  constructor() {
-    globals.store.subscribe(this.handleStoreUpdate);
-  }
-
-  private handleStoreUpdate = (store: Store<State>, oldState: State) => {
-    const newState = store.state;
-
-    // If the visible time in the global state has been updated more
-    // recently than the visible time handled by the frontend @ 60fps,
-    // update it. This typically happens when restoring the state from a
-    // permalink.
-    globals.timeline.mergeState(newState.frontendLocalState);
-
-    // Only redraw if something other than the frontendLocalState changed.
-    let key: keyof State;
-    for (key in store.state) {
-      if (key !== 'frontendLocalState' && oldState[key] !== newState[key]) {
-        raf.scheduleFullRedraw();
-        break;
-      }
-    }
-
-    // Run in microtask to avoid avoid reentry
-    setTimeout(runControllers, 0);
-  };
-
-  dispatchMultiple(actions: DeferredAction[]) {
-    const edits = actions.map((action) => {
-      return traceEvent(`action.${action.type}`, () => {
-        return (draft: Draft<State>) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (StateActions as any)[action.type](draft, action.args);
-        };
-      }, {
-        args: flattenArgs(action.args),
-      });
-    });
-    globals.store.edit(edits);
-  }
-}
-
 function setExtensionAvailability(available: boolean) {
-  globals.dispatch(Actions.setExtensionAvailable({
-    available,
-  }));
+  globals.dispatch(
+    Actions.setExtensionAvailable({
+      available,
+    }),
+  );
 }
 
 function routeChange(route: Route) {
@@ -141,8 +101,8 @@ function setupContentSecurityPolicy() {
   // Note: self and sha-xxx must be quoted, urls data: and blob: must not.
 
   let rpcPolicy = [
-    'http://127.0.0.1:9001',  // For trace_processor_shell --httpd.
-    'ws://127.0.0.1:9001',    // Ditto, for the websocket RPC.
+    'http://127.0.0.1:9001', // For trace_processor_shell --httpd.
+    'ws://127.0.0.1:9001', // Ditto, for the websocket RPC.
   ];
   if (CSP_WS_PERMISSIVE_PORT.get()) {
     const route = Router.parseUrl(window.location.href);
@@ -172,9 +132,9 @@ function setupContentSecurityPolicy() {
     'object-src': ['none'],
     'connect-src': [
       `'self'`,
-      'ws://127.0.0.1:8037',    // For the adb websocket server.
+      'ws://127.0.0.1:8037', // For the adb websocket server.
       'https://*.google-analytics.com',
-      'https://*.googleapis.com',  // For Google Cloud Storage fetches.
+      'https://*.googleapis.com', // For Google Cloud Storage fetches.
       'blob:',
       'data:',
     ].concat(rpcPolicy),
@@ -186,10 +146,7 @@ function setupContentSecurityPolicy() {
       'https://www.googletagmanager.com',
       'https://*.googleapis.com',
     ],
-    'style-src': [
-      `'self'`,
-      `'unsafe-inline'`,
-    ],
+    'style-src': [`'self'`, `'unsafe-inline'`],
     'navigate-to': ['https://*.perfetto.dev', 'self'],
   };
   const meta = document.createElement('meta');
@@ -225,7 +182,7 @@ function main() {
   // and initialize GA after that (or after a timeout if something goes wrong).
   const script = document.createElement('script');
   script.src =
-      'https://storage.cloud.google.com/perfetto-ui-internal/is_internal_user.js';
+    'https://storage.cloud.google.com/perfetto-ui-internal/is_internal_user.js';
   script.async = true;
   script.onerror = () => globals.logging.initialize();
   script.onload = () => globals.logging.initialize();
@@ -246,50 +203,32 @@ function main() {
   initWasm(globals.root);
   initController(extensionLocalChannel.port1);
 
-  const dispatch = (action: DeferredAction) => {
-    frontendApi.dispatchMultiple([action]);
-  };
-
-  const router = new Router({
-    '/': HomePage,
-    '/viewer': ViewerPage,
-    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
-    '/query': QueryPage,
-    '/insights': InsightsPage,
-    '/flags': FlagsPage,
-    '/metrics': MetricsPage,
-    '/info': TraceInfoPage,
-    '/widgets': WidgetsPage,
-    '/viz': VizPage,
-    '/plugins': PluginsPage,
-  });
-  router.onRouteChanged = routeChange;
-
   // These need to be set before globals.initialize.
   const route = Router.parseUrl(window.location.href);
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  globals.initialize(dispatch, router);
+  globals.initialize(stateActionDispatcher);
 
   globals.serviceWorkerController.install();
 
-  const frontendApi = new FrontendApi();
+  globals.store.subscribe(scheduleRafAndRunControllersOnStateChange);
   globals.publishRedraw = () => raf.scheduleFullRedraw();
 
   // We proxy messages between the extension and the controller because the
   // controller's worker can't access chrome.runtime.
-  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-  const extensionPort = window.chrome && chrome.runtime ?
-    chrome.runtime.connect(EXTENSION_ID) :
-    undefined;
+  const extensionPort =
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+    window.chrome && chrome.runtime
+      ? chrome.runtime.connect(EXTENSION_ID)
+      : undefined;
 
   setExtensionAvailability(extensionPort !== undefined);
 
   if (extensionPort) {
     extensionPort.onDisconnect.addListener((_) => {
       setExtensionAvailability(false);
-      void chrome.runtime.lastError;  // Needed to not receive an error log.
+      void chrome.runtime.lastError; // Needed to not receive an error log.
     });
     // This forwards the messages from the extension to the controller.
     extensionPort.onMessage.addListener(
@@ -299,7 +238,8 @@ function main() {
           return;
         }
         extensionLocalChannel.port2.postMessage(message);
-      });
+      },
+    );
   }
 
   // This forwards the messages from the controller to the extension
@@ -311,9 +251,13 @@ function main() {
   registerDebugGlobals();
 
   // Prevent pinch zoom.
-  document.body.addEventListener('wheel', (e: MouseEvent) => {
-    if (e.ctrlKey) e.preventDefault();
-  }, {passive: false});
+  document.body.addEventListener(
+    'wheel',
+    (e: MouseEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    },
+    {passive: false},
+  );
 
   cssLoadPromise.then(() => onCssLoaded());
 
@@ -330,24 +274,47 @@ function onCssLoaded() {
   // And replace it with the root <main> element which will be used by mithril.
   document.body.innerHTML = '';
 
+  const router = new Router({
+    '/': HomePage,
+    '/viewer': ViewerPage,
+    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
+    '/query': QueryPage,
+    '/insights': InsightsPage,
+    '/flags': FlagsPage,
+    '/metrics': MetricsPage,
+    '/info': TraceInfoPage,
+    '/widgets': WidgetsPage,
+    '/viz': VizPage,
+    '/plugins': PluginsPage,
+  });
+  router.onRouteChanged = routeChange;
+
   raf.domRedraw = () => {
-    m.render(document.body, m(App, globals.router.resolve()));
+    m.render(document.body, m(App, router.resolve()));
   };
 
-  initLiveReloadIfLocalhost(globals.embeddedMode);
+  if (
+    (location.origin.startsWith('http://localhost:') ||
+      location.origin.startsWith('http://127.0.0.1:')) &&
+    !globals.embeddedMode &&
+    !globals.testing
+  ) {
+    initLiveReload();
+  }
 
   if (!RECORDING_V2_FLAG.get()) {
     updateAvailableAdbDevices();
     try {
-      navigator.usb.addEventListener(
-        'connect', () => updateAvailableAdbDevices());
-      navigator.usb.addEventListener(
-        'disconnect', () => updateAvailableAdbDevices());
+      navigator.usb.addEventListener('connect', () =>
+        updateAvailableAdbDevices(),
+      );
+      navigator.usb.addEventListener('disconnect', () =>
+        updateAvailableAdbDevices(),
+      );
     } catch (e) {
       console.error('WebUSB API not supported');
     }
   }
-
 
   // Will update the chip on the sidebar footer that notifies that the RPC is
   // connected. Has no effect on the controller (which will repeat this check
@@ -358,15 +325,17 @@ function onCssLoaded() {
   maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-    globals.dispatch(Actions.maybeSetPendingDeeplink({
-      ts: route.args.ts,
-      tid: route.args.tid,
-      dur: route.args.dur,
-      pid: route.args.pid,
-      query: route.args.query,
-      visStart: route.args.visStart,
-      visEnd: route.args.visEnd,
-    }));
+    globals.dispatch(
+      Actions.maybeSetPendingDeeplink({
+        ts: route.args.ts,
+        tid: route.args.tid,
+        dur: route.args.dur,
+        pid: route.args.pid,
+        query: route.args.query,
+        visStart: route.args.visStart,
+        visEnd: route.args.visEnd,
+      }),
+    );
 
     if (!globals.embeddedMode) {
       installFileDropHandler();
@@ -397,21 +366,57 @@ function maybeChangeRpcPortFromFragment() {
     if (!CSP_WS_PERMISSIVE_PORT.get()) {
       showModal({
         title: 'Using a different port requires a flag change',
-        content: m('div',
-          m('span',
+        content: m(
+          'div',
+          m(
+            'span',
             'For security reasons before connecting to a non-standard ' +
-            'TraceProcessor port you need to manually enable the flag to ' +
-            'relax the Content Security Policy and restart the UI.',
-          )),
-        buttons: [{
-          text: 'Take me to the flags page',
-          primary: true,
-          action: () => Router.navigate('#!/flags/cspAllowAnyWebsocketPort')}],
+              'TraceProcessor port you need to manually enable the flag to ' +
+              'relax the Content Security Policy and restart the UI.',
+          ),
+        ),
+        buttons: [
+          {
+            text: 'Take me to the flags page',
+            primary: true,
+            action: () => Router.navigate('#!/flags/cspAllowAnyWebsocketPort'),
+          },
+        ],
       });
     } else {
       HttpRpcEngine.rpcPort = route.args.rpc_port;
     }
   }
+}
+
+function stateActionDispatcher(actions: DeferredAction[]) {
+  const edits = actions.map((action) => {
+    return traceEvent(
+      `action.${action.type}`,
+      () => {
+        return (draft: Draft<State>) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (StateActions as any)[action.type](draft, action.args);
+        };
+      },
+      {
+        args: flattenArgs(action.args),
+      },
+    );
+  });
+  globals.store.edit(edits);
+}
+
+function scheduleRafAndRunControllersOnStateChange(
+  store: Store<State>,
+  oldState: State,
+) {
+  // Only redraw if something actually changed
+  if (oldState !== store.state) {
+    raf.scheduleFullRedraw();
+  }
+  // Run in a separate task to avoid avoid reentry.
+  setTimeout(runControllers, 0);
 }
 
 main();

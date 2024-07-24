@@ -12,14 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
 import {addDebugSliceTrack} from '../../public';
-import {runQuery} from '../../common/queries';
 
 const PERF_TRACE_COUNTERS_PRECONDITION = `
   SELECT
@@ -31,11 +25,9 @@ const PERF_TRACE_COUNTERS_PRECONDITION = `
 `;
 
 class AndroidPerfTraceCounters implements Plugin {
-  onActivate(_: PluginContext): void {}
-
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    const resp = await runQuery(PERF_TRACE_COUNTERS_PRECONDITION, ctx.engine);
-    if (resp.totalRowCount === 0) return;
+    const resp = await ctx.engine.query(PERF_TRACE_COUNTERS_PRECONDITION);
+    if (resp.numRows() === 0) return;
     ctx.registerCommand({
       id: 'dev.perfetto.AndroidPerfTraceCounters#ThreadRuntimeIPC',
       name: 'Add a track to show a thread runtime ipc',
@@ -91,9 +83,11 @@ class AndroidPerfTraceCounters implements Plugin {
         `;
 
         await addDebugSliceTrack(
-          ctx.engine,
+          ctx,
           {
-            sqlSource: sqlPrefix + `
+            sqlSource:
+              sqlPrefix +
+              `
               SELECT * FROM target_thread_ipc_slice WHERE ts IS NOT NULL`,
           },
           'Rutime IPC:' + tid,
@@ -101,7 +95,8 @@ class AndroidPerfTraceCounters implements Plugin {
           ['instruction', 'cycle', 'stall_backend_mem', 'l3_cache_miss'],
         );
         ctx.tabs.openQuery(
-          sqlPrefix + `
+          sqlPrefix +
+            `
             SELECT
               (sum(instruction) * 1.0 / sum(cycle)*1.0) AS avg_ipc,
               sum(dur)/1e6 as total_runtime_ms,

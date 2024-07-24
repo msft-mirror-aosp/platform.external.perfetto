@@ -16,46 +16,47 @@
 
 #include "src/perfetto_cmd/perfetto_cmd.h"
 
-#include "perfetto/base/build_config.h"
-#include "perfetto/base/proc_utils.h"
-#include "perfetto/ext/base/scoped_file.h"
-#include "perfetto/ext/base/string_splitter.h"
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 
-// For dup() (and _setmode() on windows).
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-#include <fcntl.h>
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
-
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
-#include <fstream>
+#include <cinttypes>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
-#include <sstream>
+#include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
+#include "perfetto/base/build_config.h"
 #include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
-#include "perfetto/base/time.h"
-#include "perfetto/ext/base/android_utils.h"
+#include "perfetto/base/proc_utils.h"         // IWYU pragma: keep
+#include "perfetto/ext/base/android_utils.h"  // IWYU pragma: keep
 #include "perfetto/ext/base/ctrl_c_handler.h"
 #include "perfetto/ext/base/file_utils.h"
-#include "perfetto/ext/base/getopt.h"
+#include "perfetto/ext/base/getopt.h"  // IWYU pragma: keep
 #include "perfetto/ext/base/no_destructor.h"
 #include "perfetto/ext/base/pipe.h"
+#include "perfetto/ext/base/scoped_file.h"
+#include "perfetto/ext/base/string_splitter.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/string_view.h"
-#include "perfetto/ext/base/temp_file.h"
+#include "perfetto/ext/base/thread_task_runner.h"
 #include "perfetto/ext/base/thread_utils.h"
 #include "perfetto/ext/base/utils.h"
 #include "perfetto/ext/base/uuid.h"
@@ -64,11 +65,14 @@
 #include "perfetto/ext/traced/traced.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
 #include "perfetto/ext/tracing/core/trace_packet.h"
-#include "perfetto/protozero/proto_utils.h"
-#include "perfetto/tracing/core/data_source_descriptor.h"
+#include "perfetto/ext/tracing/core/tracing_service.h"
+#include "perfetto/ext/tracing/ipc/consumer_ipc_client.h"
+#include "perfetto/tracing/core/flush_flags.h"
+#include "perfetto/tracing/core/forward_decls.h"
 #include "perfetto/tracing/core/trace_config.h"
-#include "perfetto/tracing/core/tracing_service_state.h"
 #include "perfetto/tracing/default_socket.h"
+#include "protos/perfetto/common/data_source_descriptor.gen.h"
+#include "src/android_stats/perfetto_atoms.h"
 #include "src/android_stats/statsd_logging_helper.h"
 #include "src/perfetto_cmd/bugreport_path.h"
 #include "src/perfetto_cmd/config.h"
@@ -81,6 +85,14 @@
 #include "protos/perfetto/common/tracing_service_state.gen.h"
 #include "protos/perfetto/common/track_event_descriptor.gen.h"
 
+// For dup() (and _setmode() on windows).
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace perfetto {
 namespace {
 
@@ -92,7 +104,7 @@ const uint32_t kCloneTimeoutMs = 30000;
 class LoggingErrorReporter : public ErrorReporter {
  public:
   LoggingErrorReporter(std::string file_name, const char* config)
-      : file_name_(file_name), config_(config) {}
+      : file_name_(std::move(file_name)), config_(config) {}
 
   void AddError(size_t row,
                 size_t column,
@@ -165,41 +177,11 @@ std::optional<PerfettoStatsdAtom> ConvertRateLimiterResponseToAtom(
   switch (resp) {
     case RateLimiter::kNotAllowedOnUserBuild:
       return PerfettoStatsdAtom::kCmdUserBuildTracingNotAllowed;
-    case RateLimiter::kFailedToInitState:
-      return PerfettoStatsdAtom::kCmdFailedToInitGuardrailState;
-    case RateLimiter::kInvalidState:
-      return PerfettoStatsdAtom::kCmdInvalidGuardrailState;
-    case RateLimiter::kHitUploadLimit:
-      return PerfettoStatsdAtom::kCmdHitUploadLimit;
     case RateLimiter::kOkToTrace:
       return std::nullopt;
   }
   PERFETTO_FATAL("For GCC");
 }
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-// Reports trace with `uuid` being finalized to the trace marker.
-//
-// This reimplements parts of android libcutils, because:
-// * libcutils is not exposed to the NDK and cannot be used from standalone
-//   perfetto
-// * libcutils atrace uses properties to enable tags, which are not required in
-//   this case.
-void ReportFinalizeTraceUuidToAtrace(const base::Uuid& uuid) {
-  base::ScopedFile file =
-      base::OpenFile("/sys/kernel/tracing/trace_marker", O_WRONLY);
-  if (!file) {
-    file = base::OpenFile("/sys/kernel/debug/tracing/trace_marker", O_WRONLY);
-    if (!file) {
-      return;
-    }
-  }
-  base::StackString<100> uuid_slice("N|%d|OtherTraces|finalize-uuid-%s",
-                                    base::GetProcessId(),
-                                    uuid.ToPrettyString().c_str());
-  PERFETTO_EINTR(write(file.get(), uuid_slice.c_str(), uuid_slice.len()));
-}
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 
 void ArgsAppend(std::string* str, const std::string& arg) {
   str->append(arg);
@@ -493,8 +475,9 @@ std::optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
     }
 
     if (option == OPT_RESET_GUARDRAILS) {
-      PERFETTO_CHECK(limiter_->ClearState());
-      PERFETTO_ILOG("Guardrail state cleared");
+      PERFETTO_ILOG(
+          "Guardrails no longer exist in perfetto_cmd; this option only exists "
+          "for backwards compatability.");
       return 0;
     }
 
@@ -994,15 +977,10 @@ int PerfettoCmd::ConnectToServiceAndRun() {
   RateLimiter::Args args{};
   args.is_user_build = IsUserBuild();
   args.is_uploading = save_to_incidentd_ || report_to_android_framework_;
-  args.current_time = base::GetWallTimeS();
-  args.ignore_guardrails = ignore_guardrails_;
   args.allow_user_build_tracing = trace_config_->allow_user_build_tracing();
-  args.unique_session_name = trace_config_->unique_session_name();
-  args.max_upload_bytes_override =
-      trace_config_->guardrail_overrides().max_upload_per_day_bytes();
 
-  if (!args.unique_session_name.empty())
-    base::MaybeSetThreadName("p-" + args.unique_session_name);
+  if (!trace_config_->unique_session_name().empty())
+    base::MaybeSetThreadName("p-" + trace_config_->unique_session_name());
 
   expected_duration_ms_ = trace_config_->duration_ms();
   if (!expected_duration_ms_) {
@@ -1024,7 +1002,14 @@ int PerfettoCmd::ConnectToServiceAndRun() {
     std::this_thread::sleep_for(std::chrono::milliseconds(dist(minstd)));
   }
 
-  if (trace_config_->trigger_config().trigger_timeout_ms() == 0) {
+  if (clone_tsid_) {
+    if (snapshot_trigger_name_.empty()) {
+      LogUploadEvent(PerfettoStatsdAtom::kCloneTraceBegin);
+    } else {
+      LogUploadEvent(PerfettoStatsdAtom::kCloneTriggerTraceBegin,
+                     snapshot_trigger_name_);
+    }
+  } else if (trace_config_->trigger_config().trigger_timeout_ms() == 0) {
     LogUploadEvent(PerfettoStatsdAtom::kTraceBegin);
   } else {
     LogUploadEvent(PerfettoStatsdAtom::kBackgroundTraceBegin);
@@ -1053,9 +1038,7 @@ int PerfettoCmd::ConnectToServiceAndRun() {
   SetupCtrlCSignalHandler();
   task_runner_.Run();
 
-  return limiter_->OnTraceDone(args, update_guardrail_state_, bytes_written_)
-             ? 0
-             : 1;
+  return tracing_succeeded_ ? 0 : 1;
 }
 
 void PerfettoCmd::OnConnect() {
@@ -1221,13 +1204,13 @@ void PerfettoCmd::ReadbackTraceDataAndQuit(const std::string& error) {
       remove(trace_out_path_.c_str());
     }
 
-    // Update guardrail state even if we failed. This is for two
-    // reasons:
-    // 1. Keeps compatibility with pre-stats code which used to
-    // ignore errors from the service and always update state.
-    // 2. We want to prevent failure storms and the guardrails help
-    // by preventing tracing too frequently with the same session.
-    update_guardrail_state_ = true;
+    // Even though there was a failure, we mark this as success for legacy
+    // reasons: when guardrails used to exist in perfetto_cmd, this codepath
+    // would still cause guardrails to be written and the exit code to be 0.
+    //
+    // We want to preserve that semantic and the easiest way to do that would
+    // be to set |tracing_succeeded_| to true.
+    tracing_succeeded_ = true;
     task_runner_.Quit();
     return;
   }
@@ -1281,13 +1264,7 @@ void PerfettoCmd::FinalizeTraceAndExit() {
     }
   }
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-  // When multiple traces are being recorded at the same time, this is used to
-  // correlate one trace with another.
-  ReportFinalizeTraceUuidToAtrace(base::Uuid(uuid_));
-#endif
-
-  update_guardrail_state_ = true;
+  tracing_succeeded_ = true;
   task_runner_.Quit();
 }
 
@@ -1545,11 +1522,15 @@ void PerfettoCmd::OnObservableEvents(
   }
   if (observable_events.has_clone_trigger_hit()) {
     int64_t tsid = observable_events.clone_trigger_hit().tracing_session_id();
-    OnCloneSnapshotTriggerReceived(static_cast<TracingSessionID>(tsid));
+    std::string trigger_name =
+        observable_events.clone_trigger_hit().trigger_name();
+    OnCloneSnapshotTriggerReceived(static_cast<TracingSessionID>(tsid),
+                                   std::move(trigger_name));
   }
 }
 
-void PerfettoCmd::OnCloneSnapshotTriggerReceived(TracingSessionID tsid) {
+void PerfettoCmd::OnCloneSnapshotTriggerReceived(TracingSessionID tsid,
+                                                 std::string trigger_name) {
   std::string cmdline;
   cmdline.reserve(128);
   ArgsAppend(&cmdline, "perfetto");
@@ -1567,13 +1548,15 @@ void PerfettoCmd::OnCloneSnapshotTriggerReceived(TracingSessionID tsid) {
   } else {
     PERFETTO_FATAL("Cannot use CLONE_SNAPSHOT with the current cmdline args");
   }
-  CloneSessionOnThread(tsid, cmdline, kSingleExtraThread, nullptr);
+  CloneSessionOnThread(tsid, cmdline, kSingleExtraThread,
+                       std::move(trigger_name), nullptr);
 }
 
 void PerfettoCmd::CloneSessionOnThread(
     TracingSessionID tsid,
     const std::string& cmdline,
     CloneThreadMode thread_mode,
+    std::string trigger_name,
     std::function<void()> on_clone_callback) {
   PERFETTO_DLOG("Creating snapshot for tracing session %" PRIu64, tsid);
 
@@ -1595,7 +1578,7 @@ void PerfettoCmd::CloneSessionOnThread(
   std::string trace_config_copy = trace_config_->SerializeAsString();
 
   snapshot_threads_.back().PostTask(
-      [tsid, cmdline, trace_config_copy, on_clone_callback] {
+      [tsid, cmdline, trace_config_copy, trigger_name, on_clone_callback] {
         int argc = 0;
         char* argv[32];
         // `splitter` needs to live on the stack for the whole scope as it owns
@@ -1607,6 +1590,7 @@ void PerfettoCmd::CloneSessionOnThread(
         }
         perfetto::PerfettoCmd cmd;
         cmd.snapshot_config_ = std::move(trace_config_copy);
+        cmd.snapshot_trigger_name_ = std::move(trigger_name);
         cmd.on_session_cloned_ = on_clone_callback;
         auto cmdline_res = cmd.ParseCmdlineAndMaybeDaemonize(argc, argv);
         PERFETTO_CHECK(!cmdline_res.has_value());  // No daemonization expected.
@@ -1698,7 +1682,7 @@ void PerfettoCmd::CloneAllBugreportTraces(
     ArgsAppend(&cmdline, "--clone-for-bugreport");
     ArgsAppend(&cmdline, "--out");
     ArgsAppend(&cmdline, out_path);
-    CloneSessionOnThread(it->tsid, cmdline, kNewThreadPerRequest, sync_fn);
+    CloneSessionOnThread(it->tsid, cmdline, kNewThreadPerRequest, "", sync_fn);
   }  // for(sessions)
 
   PERFETTO_DLOG("Issuing %zu CloneSession requests", num_sessions);
@@ -1730,6 +1714,15 @@ void PerfettoCmd::LogUploadEvent(PerfettoStatsdAtom atom) {
     return;
   base::Uuid uuid(uuid_);
   android_stats::MaybeLogUploadEvent(atom, uuid.lsb(), uuid.msb());
+}
+
+void PerfettoCmd::LogUploadEvent(PerfettoStatsdAtom atom,
+                                 const std::string& trigger_name) {
+  if (!statsd_logging_)
+    return;
+  base::Uuid uuid(uuid_);
+  android_stats::MaybeLogUploadEvent(atom, uuid.lsb(), uuid.msb(),
+                                     trigger_name);
 }
 
 void PerfettoCmd::LogTriggerEvents(

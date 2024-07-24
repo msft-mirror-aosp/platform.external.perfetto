@@ -19,7 +19,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
@@ -89,23 +92,44 @@ class DataLayer : public RefCounted {
 // functionality for querying the transformed data of the entire chain.
 class DataLayerChain {
  public:
-  // Indicates the direction of the sort on a single chain.
-  enum class SortDirection {
-    kAscending,
-    kDescending,
-  };
-  // Struct wrapping indices to elements of this chain. Passed to sorting
-  // functions.
-  struct SortToken {
-    // An index pointing to an element in this chain. Indicates the element
-    // at this index should be compared.
-    uint32_t index;
-
-    // An opaque value which can be set to some value meaningful to the
-    // caller. Implementations *should not* read at this value.
-    uint32_t payload;
-  };
   using StorageProto = protos::pbzero::SerializedColumn_Storage;
+
+  // Index vector related data required to Filter using IndexSearch.
+  struct Indices {
+    enum class State {
+      // We can't guarantee that data is in monotonic order.
+      kNonmonotonic,
+      // Data is in monotonic order.
+      kMonotonic,
+    };
+    static Indices Create(const std::vector<uint32_t>& raw, State state) {
+      std::vector<Token> tokens;
+      tokens.reserve(raw.size());
+      for (auto r : raw) {
+        tokens.push_back({r, r});
+      }
+      return Indices{std::move(tokens), state};
+    }
+    static Indices CreateWithIndexPayloadForTesting(
+        const std::vector<uint32_t>& raw,
+        State state) {
+      std::vector<Token> tokens;
+      tokens.reserve(raw.size());
+      for (uint32_t i = 0; i < raw.size(); ++i) {
+        tokens.push_back(Token{raw[i], i});
+      }
+      return Indices{std::move(tokens), state};
+    }
+    std::vector<Token> tokens;
+    State state = State::kNonmonotonic;
+  };
+
+  // Index vector related data required to Filter using IndexSearch.
+  struct OrderedIndices {
+    const uint32_t* data = nullptr;
+    uint32_t size = 0;
+    Indices::State state = Indices::State::kNonmonotonic;
+  };
 
   virtual ~DataLayerChain();
 
@@ -138,6 +162,7 @@ class DataLayerChain {
   PERFETTO_ALWAYS_INLINE RangeOrBitVector Search(FilterOp op,
                                                  SqlValue value,
                                                  Range range) const {
+    PERFETTO_DCHECK(range.end <= size());
     switch (ValidateSearchConstraints(op, value)) {
       case SearchValidationResult::kAllData:
         return RangeOrBitVector(range);
@@ -163,24 +188,27 @@ class DataLayerChain {
   // Notes for implementors:
   //  * Implementations should ensure that, if they return a BitVector, it is
   //    precisely of size |indices_count|.
-  PERFETTO_ALWAYS_INLINE RangeOrBitVector IndexSearch(FilterOp op,
-                                                      SqlValue value,
-                                                      Indices indices) const {
+  PERFETTO_ALWAYS_INLINE void IndexSearch(FilterOp op,
+                                          SqlValue value,
+                                          Indices& indices) const {
     switch (ValidateSearchConstraints(op, value)) {
       case SearchValidationResult::kAllData:
-        return RangeOrBitVector(Range(0, indices.size));
+        return;
       case SearchValidationResult::kNoData:
-        return RangeOrBitVector(Range());
+        indices.tokens.clear();
+        return;
       case SearchValidationResult::kOk:
-        return IndexSearchValidated(op, value, indices);
+        IndexSearchValidated(op, value, indices);
+        return;
     }
     PERFETTO_FATAL("For GCC");
   }
 
   // Searches for elements which match |op| and |value| at the positions given
-  // by indices data.
+  // by OrderedIndicesdata.
   //
-  // Returns a Range into Indices data of indices that pass the constraint.
+  // Returns a Range into OrderedIndicesdata of OrderedIndicesthat pass the
+  // constraint.
   //
   // Notes for callers:
   //  * Should not be called on:
@@ -190,9 +218,10 @@ class DataLayerChain {
   //      result.
   //  * Callers should note that the return value of this function corresponds
   //    to positions in |indices| *not* positions in the storage.
-  PERFETTO_ALWAYS_INLINE Range OrderedIndexSearch(FilterOp op,
-                                                  SqlValue value,
-                                                  Indices indices) const {
+  PERFETTO_ALWAYS_INLINE Range
+  OrderedIndexSearch(FilterOp op,
+                     SqlValue value,
+                     const OrderedIndices& indices) const {
     switch (ValidateSearchConstraints(op, value)) {
       case SearchValidationResult::kAllData:
         return {0, indices.size};
@@ -204,21 +233,39 @@ class DataLayerChain {
     PERFETTO_FATAL("For GCC");
   }
 
-  // Stable sorts an array of SortToken elements between |start| and |end|
+  // Stable sorts an array of Token elements between |start| and |end|
   // using a comparator defined by looking up the elements in this chain using
-  // the index given by SortToken::index. |direction| indicates the direction of
+  // the index given by Token::index. |direction| indicates the direction of
   // the sort (ascending or descending).
   //
   // In simple terms the expectation is for implementations do something like:
   // ```
-  // std::stable_sort(start, index, [](const SortToken& a, const SortToken& b) {
+  // std::stable_sort(start, index, [](const Token& a, const Token& b) {
   //  return Get(a.index) < Get(b.index);
   // });
   // ```
   // with |Get| being a function to lookup the element in this chain.
-  virtual void StableSort(SortToken* start,
-                          SortToken* end,
+  virtual void StableSort(Token* start,
+                          Token* end,
                           SortDirection direction) const = 0;
+
+  // Removes all indices pointing to values that are duplicates, as a result the
+  // indices will only point to distinct (not duplicated) values.
+  //
+  // Notes for implementors:
+  // * Each layer that might introduce duplicates is responsible for removing
+  // them.
+  virtual void Distinct(Indices&) const = 0;
+
+  // After calling this function Indices will have at most one element. If
+  // present it will point to the first index with the largest value in the
+  // chain.
+  virtual std::optional<Token> MaxElement(Indices&) const = 0;
+
+  // After calling this function Indices will have at most one element. If
+  // present it will point to the first index with the smallest value in the
+  // chain.
+  virtual std::optional<Token> MinElement(Indices&) const = 0;
 
   // Serializes storage data to proto format.
   virtual void Serialize(StorageProto*) const = 0;
@@ -254,15 +301,37 @@ class DataLayerChain {
 
   // Post-validated implementation of |IndexSearch|. See |IndexSearch|'s
   // documentation.
-  virtual RangeOrBitVector IndexSearchValidated(FilterOp,
-                                                SqlValue,
-                                                Indices) const = 0;
+  virtual void IndexSearchValidated(FilterOp, SqlValue, Indices&) const = 0;
 
   // Post-validated implementation of |OrderedIndexSearch|. See
   // |OrderedIndexSearch|'s documentation.
-  virtual Range OrderedIndexSearchValidated(FilterOp,
-                                            SqlValue,
-                                            Indices) const = 0;
+  Range OrderedIndexSearchValidated(FilterOp op,
+                                    SqlValue value,
+                                    const OrderedIndices& indices) const;
+
+  // Returns the pointer to storage DataLayer and modifies indices so that it
+  // maps the data in the column.
+  // If |indices[i] == std::numeric_limits<uint32_t>::max()| the index points to
+  // null value.
+  virtual std::unique_ptr<DataLayer> Flatten(
+      std::vector<uint32_t>& indices) const = 0;
+
+  // Returns the SqlValue representing the value at a given index.
+  //
+  // This function might be very tempting to use as it appears cheap on the
+  // surface but because of how DataLayerChains might be layered on top of each
+  // other, this might require *several* virtual function calls per index.
+  // If you're tempted to use this, please consider instead create a new
+  // "vectorized" function instead and only using this as a last resort.
+  //
+  // The correct "class" of algorithms to use this function are cases where you
+  // have a set of indices you want to lookup and based on the value returned
+  // you will only use a fraction of them. In this case, it might be worth
+  // paying the non-vectorized lookup to vastly reduce how many indices need
+  // to be translated.
+  //
+  // An example of such an algorithm is binary search on indices.
+  virtual SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const = 0;
 };
 
 }  // namespace perfetto::trace_processor::column

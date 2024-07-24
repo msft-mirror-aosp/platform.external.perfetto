@@ -18,12 +18,13 @@ import {Actions} from '../common/actions';
 import {tryGetTrace} from '../common/cache_manager';
 import {showModal} from '../widgets/modal';
 
+import {loadPermalink} from './permalink';
 import {loadAndroidBugToolInfo} from './android_bug_tool';
 import {globals} from './globals';
 import {Route, Router} from './router';
 import {taskTracker} from './task_tracker';
 
-function getCurrentTraceUrl(): undefined|string {
+function getCurrentTraceUrl(): undefined | string {
   const source = globals.getCurrentEngine()?.source;
   if (source && source.type === 'URL') {
     return source.url;
@@ -34,7 +35,7 @@ function getCurrentTraceUrl(): undefined|string {
 export function maybeOpenTraceFromRoute(route: Route) {
   if (route.args.s) {
     // /?s=xxxx for permalinks.
-    globals.dispatch(Actions.loadPermalink({hash: route.args.s}));
+    loadPermalink(route.args.s);
     return;
   }
 
@@ -67,7 +68,6 @@ export function maybeOpenTraceFromRoute(route: Route) {
     return;
   }
 }
-
 
 /*
  * openCachedTrace(uuid) is called: (1) on startup, from frontend/index.ts; (2)
@@ -132,7 +132,8 @@ async function maybeOpenCachedTrace(traceUuid: string) {
 
   const navigateToOldTraceUuid = () => {
     Router.navigate(
-      `#!/viewer?local_cache_key=${globals.state.traceUuid || ''}`);
+      `#!/viewer?local_cache_key=${globals.state.traceUuid ?? ''}`,
+    );
   };
 
   if (!maybeTrace) {
@@ -140,13 +141,17 @@ async function maybeOpenCachedTrace(traceUuid: string) {
       title: 'Could not find the trace in the cache storage',
       content: m(
         'div',
-        m('p',
+        m(
+          'p',
           'You are trying to load a cached trace by setting the ' +
-                '?local_cache_key argument in the URL.'),
-        m('p', 'Unfortunately the trace wasn\'t in the cache storage.'),
-        m('p',
-          'This can happen if a tab was discarded and wasn\'t opened ' +
-                'for too long, or if you just mis-pasted the URL.'),
+            '?local_cache_key argument in the URL.',
+        ),
+        m('p', "Unfortunately the trace wasn't in the cache storage."),
+        m(
+          'p',
+          "This can happen if a tab was discarded and wasn't opened " +
+            'for too long, or if you just mis-pasted the URL.',
+        ),
         m('pre', `Trace UUID: ${traceUuid}`),
       ),
     });
@@ -172,21 +177,27 @@ async function maybeOpenCachedTrace(traceUuid: string) {
     title: 'You are about to load a different trace and reset the UI state',
     content: m(
       'div',
-      m('p',
+      m(
+        'p',
         'You are seeing this because you either pasted a URL with ' +
-              'a different ?local_cache_key=xxx argument or because you hit ' +
-              'the history back/fwd button and reached a different trace.'),
-      m('p',
+          'a different ?local_cache_key=xxx argument or because you hit ' +
+          'the history back/fwd button and reached a different trace.',
+      ),
+      m(
+        'p',
         'If you continue another trace will be loaded and the UI ' +
-              'state will be cleared.'),
-      m('pre',
+          'state will be cleared.',
+      ),
+      m(
+        'pre',
         `Old trace: ${globals.state.traceUuid || '<no trace>'}\n` +
-              `New trace: ${traceUuid}`),
+          `New trace: ${traceUuid}`,
+      ),
     ),
     buttons: [
       {
         text: 'Continue',
-        id: 'trace_id_open',  // Used by tests.
+        id: 'trace_id_open', // Used by tests.
         primary: true,
         action: () => {
           hasOpenedNewTrace = true;
@@ -206,21 +217,24 @@ async function maybeOpenCachedTrace(traceUuid: string) {
 }
 
 function loadTraceFromUrl(url: string) {
-  const isLocalhostTraceUrl =
-      ['127.0.0.1', 'localhost'].includes((new URL(url)).hostname);
+  const isLocalhostTraceUrl = ['127.0.0.1', 'localhost'].includes(
+    new URL(url).hostname,
+  );
 
   if (isLocalhostTraceUrl) {
     // This handles the special case of tools/record_android_trace serving the
     // traces from a local webserver and killing it immediately after having
     // seen the HTTP GET request. In those cases store the trace as a file, so
     // when users click on share we don't fail the re-fetch().
-    const fileName = url.split('/').pop() || 'local_trace.pftrace';
+    const fileName = url.split('/').pop() ?? 'local_trace.pftrace';
     const request = fetch(url)
       .then((response) => response.blob())
       .then((blob) => {
-        globals.dispatch(Actions.openTraceFromFile({
-          file: new File([blob], fileName),
-        }));
+        globals.dispatch(
+          Actions.openTraceFromFile({
+            file: new File([blob], fileName),
+          }),
+        );
       })
       .catch((e) => alert(`Could not load local trace ${e}`));
     taskTracker.trackPromise(request, 'Downloading local trace');
@@ -231,15 +245,21 @@ function loadTraceFromUrl(url: string) {
 
 function openTraceFromAndroidBugTool() {
   // TODO(hjd): Unify updateStatus and TaskTracker
-  globals.dispatch(Actions.updateStatus(
-    {msg: 'Loading trace from ABT extension', timestamp: Date.now() / 1000}));
+  globals.dispatch(
+    Actions.updateStatus({
+      msg: 'Loading trace from ABT extension',
+      timestamp: Date.now() / 1000,
+    }),
+  );
   const loadInfo = loadAndroidBugToolInfo();
   taskTracker.trackPromise(loadInfo, 'Loading trace from ABT extension');
   loadInfo
     .then((info) => {
-      globals.dispatch(Actions.openTraceFromFile({
-        file: info.file,
-      }));
+      globals.dispatch(
+        Actions.openTraceFromFile({
+          file: info.file,
+        }),
+      );
     })
     .catch((e) => {
       console.error(e);

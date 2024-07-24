@@ -18,15 +18,14 @@
 
 #include <string>
 
+#include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
+#include "perfetto/protozero/scattered_heap_buffer.h"
+#include "src/trace_redaction/proto_util.h"
 
-#include "protos/perfetto/trace/android/packages_list.gen.h"
-#include "protos/perfetto/trace/trace_packet.gen.h"
+#include "protos/perfetto/trace/android/packages_list.pbzero.h"
 
 namespace perfetto::trace_redaction {
-
-PrunePackageList::PrunePackageList() = default;
-PrunePackageList::~PrunePackageList() = default;
 
 base::Status PrunePackageList::Transform(const Context& context,
                                          std::string* packet) const {
@@ -34,31 +33,60 @@ base::Status PrunePackageList::Transform(const Context& context,
     return base::ErrStatus("PrunePackageList: missing package uid.");
   }
 
-  if (protos::pbzero::TracePacket::Decoder trace_packet_decoder(*packet);
-      !trace_packet_decoder.has_packages_list()) {
+  protozero::ProtoDecoder decoder(*packet);
+
+  protos::pbzero::TracePacket::Decoder trace_packet_decoder(*packet);
+
+  auto package_list =
+      decoder.FindField(protos::pbzero::TracePacket::kPackagesListFieldNumber);
+
+  if (!package_list.valid()) {
     return base::OkStatus();
   }
 
-  auto normalized_uid = NormalizeUid(context.package_uid.value());
+  protozero::HeapBuffered<protos::pbzero::TracePacket> packet_message;
 
-  protos::gen::TracePacket mutable_packet;
-  mutable_packet.ParseFromString(*packet);
+  for (auto field = decoder.ReadField(); field.valid();
+       field = decoder.ReadField()) {
+    if (field.id() == protos::pbzero::TracePacket::kPackagesListFieldNumber) {
+      OnPackageList(context, field.as_bytes(),
+                    packet_message->set_packages_list());
+    } else {
+      proto_util::AppendField(field, packet_message.get());
+    }
+  }
 
-  auto* packages = mutable_packet.mutable_packages_list()->mutable_packages();
-
-  // Remove all entries that don't match the uid. After this, one or more
-  // packages will be left in the list (multiple packages can share a uid).
-  packages->erase(
-      std::remove_if(
-          packages->begin(), packages->end(),
-          [normalized_uid](const protos::gen::PackagesList::PackageInfo& info) {
-            return NormalizeUid(info.uid()) != normalized_uid;
-          }),
-      packages->end());
-
-  packet->assign(mutable_packet.SerializeAsString());
+  packet->assign(packet_message.SerializeAsString());
 
   return base::OkStatus();
+}
+
+void PrunePackageList::OnPackageList(
+    const Context& context,
+    protozero::ConstBytes bytes,
+    protos::pbzero::PackagesList* message) const {
+  PERFETTO_DCHECK(message);
+
+  protozero::ProtoDecoder decoder(bytes);
+
+  for (auto field = decoder.ReadField(); field.valid();
+       field = decoder.ReadField()) {
+    if (field.id() == protos::pbzero::PackagesList::kPackagesFieldNumber) {
+      // The package uid should already be normalized (see
+      // find_package_info.cc).
+      //
+      // If there are more than one package entry (see
+      // trace_redaction_framework.h for more details), we need to match all
+      // instances here because retained processes will reference them.
+      protos::pbzero::PackagesList::PackageInfo::Decoder info(field.as_bytes());
+
+      if (info.has_uid() && NormalizeUid(info.uid()) == context.package_uid) {
+        proto_util::AppendField(field, message);
+      }
+    } else {
+      proto_util::AppendField(field, message);
+    }
+  }
 }
 
 }  // namespace perfetto::trace_redaction

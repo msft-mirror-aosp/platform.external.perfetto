@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {EngineProxy} from '../../trace_processor/engine';
+import {Engine} from '../../trace_processor/engine';
 import {
   LONG_NULL,
   NUM,
@@ -20,14 +20,17 @@ import {
   STR,
   STR_NULL,
 } from '../../trace_processor/query_result';
-import {
-  ArgSetId,
-  ArgsId,
-  asArgId,
-} from '../sql_types';
+import {ArgSetId, ArgsId, asArgId} from '../sql_types';
 
-export type ArgValue = bigint|string|number|boolean|null;
-type ArgValueType = 'int'|'uint'|'pointer'|'string'|'bool'|'real'|'null';
+export type ArgValue = bigint | string | number | boolean | null;
+type ArgValueType =
+  | 'int'
+  | 'uint'
+  | 'pointer'
+  | 'string'
+  | 'bool'
+  | 'real'
+  | 'null';
 
 export interface Arg {
   id: ArgsId;
@@ -39,7 +42,9 @@ export interface Arg {
 }
 
 export async function getArgs(
-  engine: EngineProxy, argSetId: ArgSetId): Promise<Arg[]> {
+  engine: Engine,
+  argSetId: ArgSetId,
+): Promise<Arg[]> {
   const query = await engine.query(`
     SELECT
       id,
@@ -53,7 +58,7 @@ export async function getArgs(
       display_value as displayValue
     FROM args
     WHERE arg_set_id = ${argSetId}
-    ORDER BY key`);
+    ORDER BY id`);
   const it = query.iter({
     id: NUM,
     type: STR,
@@ -82,29 +87,33 @@ export async function getArgs(
   return result;
 }
 
-function parseValue(valueType: ArgValueType, value: {
-  intValue: bigint|null,
-  stringValue: string|null,
-  realValue: number|null
-}): ArgValue {
+function parseValue(
+  valueType: ArgValueType,
+  value: {
+    intValue: bigint | null;
+    stringValue: string | null;
+    realValue: number | null;
+  },
+): ArgValue {
   switch (valueType) {
-  case 'int':
-  case 'uint':
-    return value.intValue;
-  case 'pointer':
-    return value.intValue === null ? null :
-      `0x${value.intValue.toString(16)}`;
-  case 'string':
-    return value.stringValue;
-  case 'bool':
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-    return !!value.intValue;
-  case 'real':
-    return value.realValue;
-  case 'null':
-    return null;
-  default:
-    const x: number = valueType;
-    throw new Error(`Unable to process arg of type ${x}`);
+    case 'int':
+    case 'uint':
+      return value.intValue;
+    case 'pointer':
+      return value.intValue === null
+        ? null
+        : `0x${value.intValue.toString(16)}`;
+    case 'string':
+      return value.stringValue;
+    case 'bool':
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      return !!value.intValue;
+    case 'real':
+      return value.realValue;
+    case 'null':
+      return null;
+    default:
+      const x: number = valueType;
+      throw new Error(`Unable to process arg of type ${x}`);
   }
 }

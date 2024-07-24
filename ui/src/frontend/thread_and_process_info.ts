@@ -17,13 +17,13 @@ import m from 'mithril';
 import {copyToClipboard} from '../base/clipboard';
 import {Icons} from '../base/semantic_icons';
 import {exists} from '../base/utils';
-import {EngineProxy} from '../trace_processor/engine';
-import {NUM, NUM_NULL, STR, STR_NULL} from '../trace_processor/query_result';
+import {Engine} from '../trace_processor/engine';
+import {NUM, NUM_NULL, STR_NULL} from '../trace_processor/query_result';
+import {fromNumNull} from '../trace_processor/sql_utils';
 import {Anchor} from '../widgets/anchor';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 
 import {Upid, Utid} from './sql_types';
-import {fromNumNull} from './sql_utils';
 
 // Interface definitions for process and thread-related information
 // and functions to extract them from SQL.
@@ -43,49 +43,44 @@ export interface ProcessInfo {
 }
 
 export async function getProcessInfo(
-  engine: EngineProxy, upid: Upid): Promise<ProcessInfo> {
-  const it = (await engine.query(`
-              SELECT pid, name, uid FROM process WHERE upid = ${upid};
-            `)).iter({pid: NUM, name: STR_NULL, uid: NUM_NULL});
-  if (!it.valid()) {
-    return {upid};
-  }
-  const result: ProcessInfo = {
+  engine: Engine,
+  upid: Upid,
+): Promise<ProcessInfo> {
+  const res = await engine.query(`
+    include perfetto module android.process_metadata;
+    select
+      p.upid,
+      p.pid,
+      p.name,
+      p.uid,
+      m.package_name as packageName,
+      m.version_code as versionCode
+    from process p
+    left join android_process_metadata m using (upid)
+    where upid = ${upid};
+  `);
+  const row = res.firstRow({
+    upid: NUM,
+    pid: NUM,
+    name: STR_NULL,
+    uid: NUM_NULL,
+    packageName: STR_NULL,
+    versionCode: NUM_NULL,
+  });
+  return {
     upid,
-    pid: it.pid,
-    name: it.name || undefined,
+    pid: row.pid,
+    name: row.name ?? undefined,
+    uid: fromNumNull(row.uid),
+    packageName: row.packageName ?? undefined,
+    versionCode: fromNumNull(row.versionCode),
   };
-
-  if (it.pid === null) {
-    return result;
-  }
-  result.pid = it.pid || undefined;
-
-  if (it.uid === undefined) {
-    return result;
-  }
-
-  const packageResult = await engine.query(`
-                SELECT
-                  package_name as packageName,
-                  version_code as versionCode
-                FROM package_list WHERE uid = ${it.uid};
-              `);
-  // The package_list table is not populated in some traces so we need to
-  // check if the result has returned any rows.
-  if (packageResult.numRows() > 0) {
-    const packageDetails = packageResult.firstRow({
-      packageName: STR,
-      versionCode: NUM,
-    });
-    result.packageName = packageDetails.packageName;
-    result.versionCode = packageDetails.versionCode || undefined;
-  }
-  return result;
 }
 
-function getDisplayName(name: string|undefined, id: number|undefined): string|
-    undefined {
+function getDisplayName(
+  name: string | undefined,
+  id: number | undefined,
+): string | undefined {
   if (name === undefined) {
     return id === undefined ? undefined : `${id}`;
   }
@@ -99,24 +94,27 @@ export function renderProcessRef(info: ProcessInfo): m.Children {
     {
       trigger: m(Anchor, getProcessName(info)),
     },
-    exists(name) && m(MenuItem, {
-      icon: Icons.Copy,
-      label: 'Copy process name',
-      onclick: () => copyToClipboard(name),
-    }),
-    exists(info.pid) && m(MenuItem, {
-      icon: Icons.Copy,
-      label: 'Copy pid',
-      onclick: () => copyToClipboard(`${info.pid}`),
-    }),
+    exists(name) &&
+      m(MenuItem, {
+        icon: Icons.Copy,
+        label: 'Copy process name',
+        onclick: () => copyToClipboard(name),
+      }),
+    exists(info.pid) &&
+      m(MenuItem, {
+        icon: Icons.Copy,
+        label: 'Copy pid',
+        onclick: () => copyToClipboard(`${info.pid}`),
+      }),
     m(MenuItem, {
       icon: Icons.Copy,
       label: 'Copy upid',
       onclick: () => copyToClipboard(`${info.upid}`),
-    }));
+    }),
+  );
 }
 
-export function getProcessName(info?: ProcessInfo): string|undefined {
+export function getProcessName(info?: ProcessInfo): string | undefined {
   return getDisplayName(info?.name, info?.pid);
 }
 
@@ -128,32 +126,63 @@ export interface ThreadInfo {
 }
 
 export async function getThreadInfo(
-  engine: EngineProxy, utid: Utid): Promise<ThreadInfo> {
-  const it = (await engine.query(`
+  engine: Engine,
+  utid: Utid,
+): Promise<ThreadInfo> {
+  const it = (
+    await engine.query(`
         SELECT tid, name, upid
         FROM thread
         WHERE utid = ${utid};
-    `)).iter({tid: NUM, name: STR_NULL, upid: NUM_NULL});
+    `)
+  ).iter({tid: NUM, name: STR_NULL, upid: NUM_NULL});
   if (!it.valid()) {
     return {
       utid,
     };
   }
-  const upid = fromNumNull(it.upid) as (Upid | undefined);
+  const upid = fromNumNull(it.upid) as Upid | undefined;
   return {
     utid,
     tid: it.tid,
-    name: it.name || undefined,
+    name: it.name ?? undefined,
     process: upid ? await getProcessInfo(engine, upid) : undefined,
   };
 }
 
-export function getThreadName(info?: ThreadInfo): string|undefined {
+export function renderThreadRef(info: ThreadInfo): m.Children {
+  const name = info.name;
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getThreadName(info)),
+    },
+    exists(name) &&
+      m(MenuItem, {
+        icon: Icons.Copy,
+        label: 'Copy thread name',
+        onclick: () => copyToClipboard(name),
+      }),
+    exists(info.tid) &&
+      m(MenuItem, {
+        icon: Icons.Copy,
+        label: 'Copy tid',
+        onclick: () => copyToClipboard(`${info.tid}`),
+      }),
+    m(MenuItem, {
+      icon: Icons.Copy,
+      label: 'Copy utid',
+      onclick: () => copyToClipboard(`${info.utid}`),
+    }),
+  );
+}
+
+export function getThreadName(info?: ThreadInfo): string | undefined {
   return getDisplayName(info?.name, info?.tid);
 }
 
 // Return the full thread name, including the process name.
-export function getFullThreadName(info?: ThreadInfo): string|undefined {
+export function getFullThreadName(info?: ThreadInfo): string | undefined {
   if (info?.process === undefined) {
     return getThreadName(info);
   }

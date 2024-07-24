@@ -16,10 +16,10 @@ import {exists} from '../../base/utils';
 import {ColumnDef, ThreadStateExtra} from '../../common/aggregation_data';
 import {Area, Sorting} from '../../common/state';
 import {translateState} from '../../common/thread_state';
+import {THREAD_STATE_TRACK_KIND} from '../../core/track_kinds';
 import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
-import {THREAD_STATE_TRACK_KIND} from '../../tracks/thread_state';
 
 import {AggregationController} from './aggregation_controller';
 
@@ -33,8 +33,8 @@ export class ThreadAggregationController extends AggregationController {
       // Track will be undefined for track groups.
       if (track?.uri) {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.kind === THREAD_STATE_TRACK_KIND) {
-          exists(trackInfo.utid) && this.utids.push(trackInfo.utid);
+        if (trackInfo?.tags?.kind === THREAD_STATE_TRACK_KIND) {
+          exists(trackInfo.tags.utid) && this.utids.push(trackInfo.tags.utid);
         }
       }
     }
@@ -46,22 +46,23 @@ export class ThreadAggregationController extends AggregationController {
     if (this.utids === undefined || this.utids.length === 0) return false;
 
     const query = `
+      INCLUDE PERFETTO MODULE viz.summary.threads_w_processes;
+
       create view ${this.kind} as
       SELECT
-        process.name as process_name,
+        process_name,
         pid,
-        thread.name as thread_name,
+        thread_name,
         tid,
         state || ',' || IFNULL(io_wait, 'NULL') as concat_state,
         sum(dur) AS total_dur,
         sum(dur)/count(1) as avg_dur,
         count(1) as occurrences
-      FROM thread
-      JOIN thread_state USING(utid)
-      LEFT JOIN process USING(upid)
-      WHERE utid IN (${this.utids}) AND
-      thread_state.ts + thread_state.dur > ${area.start} AND
-      thread_state.ts < ${area.end}
+      FROM _state_w_thread_process_summary
+      WHERE
+        utid IN (${this.utids})
+        AND ts + dur > ${area.start}
+        AND ts < ${area.end}
       GROUP BY utid, concat_state
     `;
 
@@ -69,14 +70,13 @@ export class ThreadAggregationController extends AggregationController {
     return true;
   }
 
-  async getExtra(engine: Engine, area: Area): Promise<ThreadStateExtra|void> {
+  async getExtra(engine: Engine, area: Area): Promise<ThreadStateExtra | void> {
     this.setThreadStateUtids(area.tracks);
     if (this.utids === undefined || this.utids.length === 0) return;
 
     const query = `select state, io_wait as ioWait, sum(dur) as totalDur
       FROM thread JOIN thread_state USING(utid)
-      WHERE utid IN (${this.utids}) AND thread_state.ts + thread_state.dur > ${
-  area.start} AND
+      WHERE utid IN (${this.utids}) AND thread_state.ts + thread_state.dur > ${area.start} AND
       thread_state.ts < ${area.end}
       GROUP BY state, io_wait`;
     const result = await engine.query(query);

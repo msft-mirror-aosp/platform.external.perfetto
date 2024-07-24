@@ -12,30 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {Size, Vector} from '../base/geom';
 import {isString} from '../base/object_utils';
-import {globals} from '../frontend/globals';
-
-export function cropText(str: string, charWidth: number, rectWidth: number) {
-  let displayText = '';
-  const maxLength = Math.floor(rectWidth / charWidth) - 1;
-  if (str.length <= maxLength) {
-    displayText = str;
-  } else {
-    let limit = maxLength;
-    let maybeTripleDot = '';
-    if (maxLength > 1) {
-      limit = maxLength - 1;
-      maybeTripleDot = '\u2026';
-    }
-    // Javascript strings are UTF-16. |limit| could point in the middle of a
-    // 32-bit double-wchar codepoint (e.g., an emoji). Here we detect if the
-    // |limit|-th wchar is a leading surrogate and attach the trailing one.
-    const lastCharCode = str.charCodeAt(limit - 1);
-    limit += (lastCharCode >= 0xD800 && lastCharCode < 0xDC00) ? 1 : 0;
-    displayText = str.substring(0, limit) + maybeTripleDot;
-  }
-  return displayText;
-}
 
 export function drawDoubleHeadedArrow(
   ctx: CanvasRenderingContext2D,
@@ -44,7 +22,8 @@ export function drawDoubleHeadedArrow(
   length: number,
   showArrowHeads: boolean,
   width = 2,
-  color = 'black') {
+  color = 'black',
+) {
   ctx.beginPath();
   ctx.lineWidth = width;
   ctx.lineCap = 'round';
@@ -76,7 +55,8 @@ export function drawIncompleteSlice(
   y: number,
   width: number,
   height: number,
-  showGradient: boolean = true) {
+  showGradient: boolean = true,
+) {
   if (width <= 0 || height <= 0) {
     return;
   }
@@ -86,11 +66,11 @@ export function drawIncompleteSlice(
   ctx.lineTo(x + width, y);
   ctx.lineTo(x + width - 3, y + triangleSize * 0.5);
   ctx.lineTo(x + width, y + triangleSize);
-  ctx.lineTo(x + width - 3, y + (triangleSize * 1.5));
+  ctx.lineTo(x + width - 3, y + triangleSize * 1.5);
   ctx.lineTo(x + width, y + 2 * triangleSize);
-  ctx.lineTo(x + width - 3, y + (triangleSize * 2.5));
+  ctx.lineTo(x + width - 3, y + triangleSize * 2.5);
   ctx.lineTo(x + width, y + 3 * triangleSize);
-  ctx.lineTo(x + width - 3, y + (triangleSize * 3.5));
+  ctx.lineTo(x + width - 3, y + triangleSize * 3.5);
   ctx.lineTo(x + width, y + 4 * triangleSize);
   ctx.lineTo(x, y + height);
 
@@ -104,8 +84,8 @@ export function drawIncompleteSlice(
     }
   } else {
     throw new Error(
-      `drawIncompleteSlice() expects fillStyle to be a simple color not ${
-        fillStyle}`);
+      `drawIncompleteSlice() expects fillStyle to be a simple color not ${fillStyle}`,
+    );
   }
 
   ctx.fill();
@@ -114,17 +94,18 @@ export function drawIncompleteSlice(
 
 export function drawTrackHoverTooltip(
   ctx: CanvasRenderingContext2D,
-  pos: {x: number, y: number},
-  maxHeight: number,
+  pos: Vector,
+  trackSize: Size,
   text: string,
-  text2?: string) {
+  text2?: string,
+) {
   ctx.font = '10px Roboto Condensed';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
 
   // TODO(hjd): Avoid measuring text all the time (just use monospace?)
   const textMetrics = ctx.measureText(text);
-  const text2Metrics = ctx.measureText(text2 || '');
+  const text2Metrics = ctx.measureText(text2 ?? '');
 
   // Padding on each side of the box containing the tooltip:
   const paddingPx = 4;
@@ -151,15 +132,15 @@ export function drawTrackHoverTooltip(
   y -= 10;
 
   // Ensure the box is on screen:
-  const endPx = globals.timeline.visibleTimeScale.pxSpan.end;
+  const endPx = trackSize.width;
   if (x + width > endPx) {
     x -= x + width - endPx;
   }
   if (y < 0) {
     y = 0;
   }
-  if (y + height > maxHeight) {
-    y -= y + height - maxHeight;
+  if (y + height > trackSize.height) {
+    y -= y + height - trackSize.height;
   }
 
   // Draw everything:
@@ -168,10 +149,15 @@ export function drawTrackHoverTooltip(
 
   ctx.fillStyle = 'hsl(200, 50%, 40%)';
   ctx.fillText(
-    text, x + paddingPx, y + paddingPx + textMetrics.fontBoundingBoxAscent);
+    text,
+    x + paddingPx,
+    y + paddingPx + textMetrics.fontBoundingBoxAscent,
+  );
   if (text2 !== undefined) {
-    const yOffsetPx = textMetrics.fontBoundingBoxAscent +
-        textMetrics.fontBoundingBoxDescent + text2Metrics.fontBoundingBoxAscent;
+    const yOffsetPx =
+      textMetrics.fontBoundingBoxAscent +
+      textMetrics.fontBoundingBoxDescent +
+      text2Metrics.fontBoundingBoxAscent;
     ctx.fillText(text2, x + paddingPx, y + paddingPx + yOffsetPx);
   }
 }
@@ -181,7 +167,8 @@ export function canvasClip(
   x: number,
   y: number,
   w: number,
-  h: number): void {
+  h: number,
+): void {
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();

@@ -18,13 +18,17 @@ syntax = "proto2";
 
 package perfetto.protos;
 
-// Next id: 28
+// Next id: 29
 message FtraceConfig {
   // Ftrace events to record, example: "sched/sched_switch".
   repeated string ftrace_events = 1;
   // Android-specific event categories:
   repeated string atrace_categories = 2;
   repeated string atrace_apps = 3;
+  // Some processes can emit data through atrace or through the perfetto SDK via
+  // the "track_event" data source. For these categories, the SDK will be
+  // preferred, if possible, for this config.
+  repeated string atrace_categories_prefer_sdk = 28;
 
   // Size of each per-cpu kernel ftrace ring buffer.
   // Not guaranteed if there are multiple concurrent tracing sessions, as the
@@ -143,9 +147,12 @@ message FtraceConfig {
   // Introduced in: Android T.
   optional bool disable_generic_events = 16;
 
-  // The list of syscalls that should be recorded by sys_{enter,exit} ftrace
-  // events. When empty, all syscalls are recorded. If neither sys_{enter,exit}
-  // are enabled, this setting has no effect. Example: ["sys_read", "sys_open"].
+  // The subset of syscalls to record. To record all syscalls, leave this unset
+  // and add "ftrace_events: raw_syscalls/sys_{enter,exit}" to the config.
+  // * before perfetto v43, requires the config to also enable
+  //   raw_syscalls/sys_{enter,exit}.
+  // * perfetto v43+ does the right thing if you set only this field.
+  // Example: ["sys_read", "sys_open"].
   // Introduced in: Android U.
   repeated string syscall_events = 18;
 

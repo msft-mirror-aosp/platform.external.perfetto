@@ -18,8 +18,9 @@
 
 #include <memory>
 
-#include "src/trace_processor/importers/proto/packet_sequence_state.h"
+#include "src/trace_processor/importers/common/mapping_tracker.h"
 #include "src/trace_processor/importers/common/stack_profile_tracker.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "test/gtest_and_gmock.h"
 
@@ -58,8 +59,9 @@ class HeapProfileTrackerDupTest : public ::testing::Test {
  public:
   HeapProfileTrackerDupTest() {
     context.storage.reset(new TraceStorage());
+    context.mapping_tracker.reset(new MappingTracker(&context));
     context.stack_profile_tracker.reset(new StackProfileTracker(&context));
-    packet_sequence_state.reset(new PacketSequenceState(&context));
+    sequence_state = PacketSequenceStateGeneration::CreateFirst(&context);
 
     mapping_name = context.storage->InternString("[mapping]");
     fully_qualified_mapping_name = context.storage->InternString("/[mapping]");
@@ -69,8 +71,7 @@ class HeapProfileTrackerDupTest : public ::testing::Test {
 
  protected:
   ProfilePacketSequenceState& profile_packet_sequence_state() {
-    return *packet_sequence_state->current_generation()
-                ->GetOrCreate<ProfilePacketSequenceState>();
+    return *sequence_state->GetCustomState<ProfilePacketSequenceState>();
   }
   void InsertMapping(const Packet& packet) {
     profile_packet_sequence_state().AddString(packet.mapping_name_id,
@@ -115,7 +116,7 @@ class HeapProfileTrackerDupTest : public ::testing::Test {
   StringId build;
   StringId frame_name;
   TraceProcessorContext context;
-  std::unique_ptr<PacketSequenceState> packet_sequence_state;
+  RefPtr<PacketSequenceStateGeneration> sequence_state;
 };
 
 // Insert the same mapping from two different packets, with different strings
@@ -196,10 +197,11 @@ std::optional<CallsiteId> FindCallstack(const TraceStorage& storage,
 TEST(HeapProfileTrackerTest, SourceMappingPath) {
   TraceProcessorContext context;
   context.storage.reset(new TraceStorage());
+  context.mapping_tracker.reset(new MappingTracker(&context));
   context.stack_profile_tracker.reset(new StackProfileTracker(&context));
-  PacketSequenceState pss(&context);
+  auto state = PacketSequenceStateGeneration::CreateFirst(&context);
   ProfilePacketSequenceState& ppss =
-      *pss.current_generation()->GetOrCreate<ProfilePacketSequenceState>();
+      *state->GetCustomState<ProfilePacketSequenceState>();
 
   constexpr auto kBuildId = 1u;
   constexpr auto kMappingNameId1 = 2u;
@@ -229,11 +231,12 @@ TEST(HeapProfileTrackerTest, SourceMappingPath) {
 TEST(HeapProfileTrackerTest, Functional) {
   TraceProcessorContext context;
   context.storage.reset(new TraceStorage());
+  context.mapping_tracker.reset(new MappingTracker(&context));
   context.stack_profile_tracker.reset(new StackProfileTracker(&context));
 
-  PacketSequenceState pss(&context);
+  auto state = PacketSequenceStateGeneration::CreateFirst(&context);
   ProfilePacketSequenceState& ppss =
-      *pss.current_generation()->GetOrCreate<ProfilePacketSequenceState>();
+      *state->GetCustomState<ProfilePacketSequenceState>();
 
   uint32_t next_string_intern_id = 1;
 

@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {constraintsToQueryPrefix, constraintsToQuerySuffix} from './sql_utils';
+import {
+  constraintsToQueryPrefix,
+  constraintsToQuerySuffix,
+} from '../trace_processor/sql_utils';
 
 // Clean up repeated whitespaces to allow for easier testing.
 function normalize(s: string): string {
@@ -24,37 +27,51 @@ test('constraintsToQueryPrefix: empty', () => {
 });
 
 test('constraintsToQueryPrefix: one CTE', () => {
-  expect(normalize(constraintsToQueryPrefix({
-    commonTableExpressions: {'foo': 'select * from bar'},
-  }))).toEqual('WITH foo AS (select * from bar)');
+  expect(
+    normalize(
+      constraintsToQueryPrefix({
+        commonTableExpressions: {foo: 'select * from bar'},
+      }),
+    ),
+  ).toEqual('WITH foo AS (select * from bar)');
 });
 
 test('constraintsToQueryPrefix: one CTE', () => {
-  expect(normalize(constraintsToQueryPrefix({
-    commonTableExpressions: {
-      'foo1': 'select * from bar1',
-      'foo2': 'select * from bar2',
-    },
-  })))
-    .toEqual(
-      'WITH foo1 AS (select * from bar1), foo2 AS (select * from bar2)');
+  expect(
+    normalize(
+      constraintsToQueryPrefix({
+        commonTableExpressions: {
+          foo1: 'select * from bar1',
+          foo2: 'select * from bar2',
+        },
+      }),
+    ),
+  ).toEqual('WITH foo1 AS (select * from bar1), foo2 AS (select * from bar2)');
 });
 
 test('constraintsToQuerySuffix: where', () => {
-  expect(normalize(constraintsToQuerySuffix({
-    filters: ['ts > 1000', 'dur != 0'],
-  }))).toEqual('WHERE ts > 1000 and dur != 0');
+  expect(
+    normalize(
+      constraintsToQuerySuffix({
+        filters: ['ts > 1000', 'dur != 0'],
+      }),
+    ),
+  ).toEqual('WHERE ts > 1000 and dur != 0');
 });
 
 test('constraintsToQuerySuffix: order by', () => {
-  expect(normalize(constraintsToQuerySuffix({
-    orderBy: [
-      {fieldName: 'name'},
-      {fieldName: 'count', direction: 'DESC'},
-      undefined,
-      'value',
-    ],
-  }))).toEqual('ORDER BY name, count DESC, value');
+  expect(
+    normalize(
+      constraintsToQuerySuffix({
+        orderBy: [
+          {fieldName: 'name'},
+          {fieldName: 'count', direction: 'DESC'},
+          undefined,
+          'value',
+        ],
+      }),
+    ),
+  ).toEqual('ORDER BY name, count DESC, value');
 });
 
 test('constraintsToQuerySuffix: limit', () => {
@@ -62,24 +79,36 @@ test('constraintsToQuerySuffix: limit', () => {
 });
 
 test('constraintsToQuerySuffix: group by', () => {
-  expect(normalize(constraintsToQuerySuffix({
-    groupBy: ['foo', undefined, 'bar'],
-  }))).toEqual('GROUP BY foo, bar');
+  expect(
+    normalize(
+      constraintsToQuerySuffix({
+        groupBy: ['foo', undefined, 'bar'],
+      }),
+    ),
+  ).toEqual('GROUP BY foo, bar');
 });
 
 test('constraintsToQuerySuffix: all', () => {
-  expect(normalize(constraintsToQuerySuffix({
-    filters: ['id != 1'],
-    groupBy: ['track_id'],
-    orderBy: [{fieldName: 'ts'}],
-    limit: 1,
-  }))).toEqual('WHERE id != 1 GROUP BY track_id ORDER BY ts LIMIT 1');
+  expect(
+    normalize(
+      constraintsToQuerySuffix({
+        filters: ['id != 1'],
+        groupBy: ['track_id'],
+        orderBy: [{fieldName: 'ts'}],
+        limit: 1,
+      }),
+    ),
+  ).toEqual('WHERE id != 1 GROUP BY track_id ORDER BY ts LIMIT 1');
 });
 
 test('constraintsToQuerySuffix: all undefined', () => {
-  expect(normalize(constraintsToQuerySuffix({
-    filters: [undefined],
-    orderBy: [undefined, undefined],
-    groupBy: [undefined, undefined],
-  }))).toEqual('');
+  expect(
+    normalize(
+      constraintsToQuerySuffix({
+        filters: [undefined],
+        orderBy: [undefined, undefined],
+        groupBy: [undefined, undefined],
+      }),
+    ),
+  ).toEqual('');
 });

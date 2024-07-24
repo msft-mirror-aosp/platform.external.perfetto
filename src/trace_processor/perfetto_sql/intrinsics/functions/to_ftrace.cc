@@ -38,6 +38,7 @@
 #include "protos/perfetto/trace/ftrace/g2d.pbzero.h"
 #include "protos/perfetto/trace/ftrace/irq.pbzero.h"
 #include "protos/perfetto/trace/ftrace/mdss.pbzero.h"
+#include "protos/perfetto/trace/ftrace/panel.pbzero.h"
 #include "protos/perfetto/trace/ftrace/power.pbzero.h"
 #include "protos/perfetto/trace/ftrace/samsung.pbzero.h"
 #include "protos/perfetto/trace/ftrace/sched.pbzero.h"
@@ -156,7 +157,9 @@ ArgsSerializer::ArgsSerializer(
 
   // We assume that the row map is a contiguous range (which is always the case
   // because arg_set_ids are contiguous by definition).
-  row_map_ = args.QueryToRowMap({set_ids.eq(arg_set_id_)}, {});
+  Query q;
+  q.constraints = {set_ids.eq(arg_set_id_)};
+  row_map_ = args.QueryToRowMap(q);
   start_row_ = row_map_.empty() ? 0 : row_map_.Get(0);
 
   // If the vector already has entries, we've previously cached the mapping
@@ -459,6 +462,19 @@ void ArgsSerializer::SerializeArgs() {
     writer_->AppendString("|");
     WriteValueForField(TMW::kValueFieldNumber, DVW());
     return;
+  } else if (event_name_ == "panel_write_generic") {
+    using TMW = protos::pbzero::PanelWriteGenericFtraceEvent;
+    WriteValueForField(TMW::kTypeFieldNumber, [this](const Variadic& value) {
+      PERFETTO_DCHECK(value.type == Variadic::Type::kUint);
+      writer_->AppendChar(static_cast<char>(value.uint_value));
+    });
+    writer_->AppendString("|");
+    WriteValueForField(TMW::kPidFieldNumber, DVW());
+    writer_->AppendString("|");
+    WriteValueForField(TMW::kNameFieldNumber, DVW());
+    writer_->AppendString("|");
+    WriteValueForField(TMW::kValueFieldNumber, DVW());
+    return;
   } else if (event_name_ == "g2d_tracing_mark_write") {
     using TMW = protos::pbzero::G2dTracingMarkWriteFtraceEvent;
     WriteValueForField(TMW::kTypeFieldNumber, [this](const Variadic& value) {
@@ -614,9 +630,11 @@ SystraceSerializer::ScopedCString SystraceSerializer::SerializeToString(
 void SystraceSerializer::SerializePrefix(uint32_t raw_row,
                                          base::StringWriter* writer) {
   const auto& raw = storage_->raw_table();
+  const auto& cpu_table = storage_->cpu_table();
 
   int64_t ts = raw.ts()[raw_row];
-  uint32_t cpu = raw.cpu()[raw_row];
+  auto ucpu = raw.ucpu()[raw_row];
+  auto cpu = cpu_table.cpu()[ucpu.value];
 
   UniqueTid utid = raw.utid()[raw_row];
   uint32_t tid = storage_->thread_table().tid()[utid];
@@ -659,7 +677,7 @@ void SystraceSerializer::SerializePrefix(uint32_t raw_row,
     writer->AppendPaddedInt<' ', 5>(tgid);
   }
   writer->AppendLiteral(") [");
-  writer->AppendPaddedInt<'0', 3>(cpu);
+  writer->AppendPaddedInt<'0', 3>(cpu ? *cpu : 0);
   writer->AppendLiteral("] .... ");
 
   writer->AppendInt(ftrace_time.secs);

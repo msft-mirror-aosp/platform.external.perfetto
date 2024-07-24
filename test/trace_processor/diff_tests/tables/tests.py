@@ -15,7 +15,7 @@
 
 from python.generators.diff_tests.testing import Path, DataPath, Metric
 from python.generators.diff_tests.testing import Csv, Json, TextProto
-from python.generators.diff_tests.testing import DiffTestBlueprint
+from python.generators.diff_tests.testing import DiffTestBlueprint, TraceInjector
 from python.generators.diff_tests.testing import TestSuite
 
 
@@ -35,6 +35,8 @@ class Tables(TestSuite):
         "ts","dur","quantum_ts"
         0,9223372036854775807,0
         """))
+
+
 
   # Null printing
   def test_nulls(self):
@@ -295,8 +297,8 @@ class Tables(TestSuite):
         """,
         out=Csv("""
         "type","cpu"
-        "cpu_track",0
-        "cpu_track",1
+        "__intrinsic_cpu_track",0
+        "__intrinsic_cpu_track",1
         """))
 
   def test_thread_state_flattened_aggregated(self):
@@ -413,4 +415,61 @@ class Tables(TestSuite):
         out=Csv("""
           "TO_REALTIME(0)"
           420
+        """))
+
+  # Test cpu_track with machine_id ID.
+  def test_cpu_track_table_machine_id(self):
+    return DiffTestBlueprint(
+        trace=TextProto(r"""
+        packet {
+          ftrace_events {
+            cpu: 1
+            event {
+              timestamp: 100001000000
+              pid: 10
+              irq_handler_entry {
+                irq: 100
+                name : "resource1"
+              }
+            }
+            event {
+              timestamp: 100002000000
+              pid: 10
+              irq_handler_exit {
+                irq: 100
+                ret: 1
+              }
+            }
+          }
+          machine_id: 1001
+        }
+        packet {
+          ftrace_events {
+            cpu: 0
+            event {
+              timestamp: 100003000000
+              pid: 15
+              irq_handler_entry {
+                irq: 100
+                name : "resource1"
+              }
+            }
+          }
+          machine_id: 1001
+        }
+        """),
+        query="""
+        SELECT
+          ct.type,
+          ct.ucpu,
+          c.cpu,
+          ct.machine_id
+        FROM cpu_track AS ct
+        JOIN cpu AS c ON ct.ucpu = c.id
+        ORDER BY ct.type, c.cpu
+        """,
+        out=Csv("""
+        "type","ucpu","cpu","machine_id"
+        "__intrinsic_cpu_track",4096,0,1
+        "__intrinsic_cpu_track",4097,1,1
         """))

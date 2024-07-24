@@ -14,9 +14,11 @@
 
 import {Draft} from 'immer';
 
-import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
+import {SortDirection} from '../base/comparison_utils';
+import {assertExists, assertTrue} from '../base/logging';
 import {duration, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
+import {randomColor} from '../core/colorizer';
 import {
   GenericSliceDetailsTabConfig,
   GenericSliceDetailsTabConfigBase,
@@ -28,48 +30,37 @@ import {
   tableColumnEquals,
   toggleEnabled,
 } from '../frontend/pivot_table_types';
-import {PrimaryTrackSortKey} from '../public/index';
 
-import {randomColor} from './colorizer';
 import {
   computeIntervals,
   DropDirection,
   performReordering,
 } from './dragndrop_logic';
 import {createEmptyState} from './empty_state';
-import {defaultViewingOption} from './flamegraph_util';
 import {
   MetatraceTrackId,
-  traceEvent,
   traceEventBegin,
   traceEventEnd,
   TraceEventScope,
 } from './metatracing';
 import {
   AdbRecordingTarget,
-  Area,
-  CallsiteInfo,
   EngineMode,
-  FlamegraphStateViewingOption,
-  FtraceFilterPatch,
   LoadedConfig,
   NewEngineMode,
   OmniboxMode,
   OmniboxState,
-  Pagination,
   PendingDeeplinkState,
   PivotTableResult,
+  PrimaryTrackSortKey,
   ProfileType,
   RecordingTarget,
   SCROLLING_TRACK_GROUP,
-  SortDirection,
   State,
   Status,
   ThreadTrackSortKey,
-  TraceTime,
   TrackSortKey,
   UtidToTrackSortKey,
-  VisibleState,
 } from './state';
 
 type StateDraft = Draft<State>;
@@ -78,10 +69,9 @@ export interface AddTrackArgs {
   key?: string;
   uri: string;
   name: string;
-  labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  params?: unknown;
+  closeable?: boolean;
 }
 
 export interface PostedTrace {
@@ -92,11 +82,21 @@ export interface PostedTrace {
   uuid?: string;
   localOnly?: boolean;
   keepApiOpen?: boolean;
+
+  // Allows to pass extra arguments to plugins. This can be read by plugins
+  // onTraceLoad() and can be used to trigger plugin-specific-behaviours (e.g.
+  // allow dashboards like APC to pass extra data to materialize onto tracks).
+  // The format is the following:
+  // pluginArgs: {
+  //   'dev.perfetto.PluginFoo': { 'key1': 'value1', 'key2': 1234 }
+  //   'dev.perfetto.PluginBar': { 'key3': '...', 'key4': ... }
+  // }
+  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
 }
 
 export interface PostedScrollToRange {
-  timeStart: time;
-  timeEnd: time;
+  timeStart: number;
+  timeEnd: number;
   viewPercentage?: number;
 }
 
@@ -153,10 +153,9 @@ function removeTrack(state: StateDraft, trackKey: string) {
   state.pinnedTracks = state.pinnedTracks.filter((key) => key !== trackKey);
 }
 
-let statusTraceEvent: TraceEventScope|undefined;
+let statusTraceEvent: TraceEventScope | undefined;
 
 export const StateActions = {
-
   openTraceFromFile(state: StateDraft, args: {file: File}): void {
     clearTraceState(state);
     const id = generateNextId(state);
@@ -204,16 +203,15 @@ export const StateActions = {
   addTracks(state: StateDraft, args: {tracks: AddTrackArgs[]}) {
     args.tracks.forEach((track) => {
       const trackKey =
-          track.key === undefined ? generateNextId(state) : track.key;
+        track.key === undefined ? generateNextId(state) : track.key;
       const name = track.name;
       state.tracks[trackKey] = {
         key: trackKey,
         name,
         trackSortKey: track.trackSortKey,
         trackGroup: track.trackGroup,
-        labels: track.labels,
         uri: track.uri,
-        params: track.params,
+        closeable: track.closeable,
       };
       if (track.trackGroup === SCROLLING_TRACK_GROUP) {
         state.scrollingTracks.push(trackKey);
@@ -240,7 +238,9 @@ export const StateActions = {
   },
 
   setUtidToTrackSortKey(
-    state: StateDraft, args: {threadOrderingMetadata: UtidToTrackSortKey}) {
+    state: StateDraft,
+    args: {threadOrderingMetadata: UtidToTrackSortKey},
+  ) {
     state.utidToThreadSortKey = args.threadOrderingMetadata;
   },
 
@@ -253,14 +253,19 @@ export const StateActions = {
     // Define ID in action so a track group can be referred to without running
     // the reducer.
     args: {
-        name: string; id: string; summaryTrackKey: string; collapsed: boolean;
-        fixedOrdering?: boolean;
-      }): void {
-    state.trackGroups[args.id] = {
+      name: string;
+      key: string;
+      summaryTrackKey?: string;
+      collapsed: boolean;
+      fixedOrdering?: boolean;
+    },
+  ): void {
+    state.trackGroups[args.key] = {
       name: args.name,
-      id: args.id,
+      key: args.key,
       collapsed: args.collapsed,
-      tracks: [args.summaryTrackKey],
+      tracks: [],
+      summaryTrack: args.summaryTrackKey,
       fixedOrdering: args.fixedOrdering,
     };
   },
@@ -278,20 +283,17 @@ export const StateActions = {
       const threadTrackSortKey = track.trackSortKey as ThreadTrackSortKey;
       if (threadTrackSortKey.utid === undefined) {
         const sortKey = track.trackSortKey as PrimaryTrackSortKey;
-        return [
-          sortKey,
-          0,
-          0,
-          0,
-        ];
+        return [sortKey, 0, 0, 0];
       }
       const threadSortKey = state.utidToThreadSortKey[threadTrackSortKey.utid];
       return [
         /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-        threadSortKey ? threadSortKey.sortKey :
-          PrimaryTrackSortKey.ORDINARY_THREAD,
-        threadSortKey && threadSortKey.tid !== undefined ? threadSortKey.tid :
-          Number.MAX_VALUE,
+        threadSortKey
+          ? threadSortKey.sortKey
+          : PrimaryTrackSortKey.ORDINARY_THREAD,
+        threadSortKey && threadSortKey.tid !== undefined
+          ? threadSortKey.tid
+          : Number.MAX_VALUE,
         /* eslint-enable */
         threadTrackSortKey.utid,
         threadTrackSortKey.priority,
@@ -319,7 +321,9 @@ export const StateActions = {
   },
 
   updateAggregateSorting(
-    state: StateDraft, args: {id: string, column: string}) {
+    state: StateDraft,
+    args: {id: string; column: string},
+  ) {
     let prefs = state.aggregatePreferences[args.id];
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (!prefs) {
@@ -347,7 +351,8 @@ export const StateActions = {
 
   moveTrack(
     state: StateDraft,
-    args: {srcId: string; op: 'before' | 'after', dstId: string}): void {
+    args: {srcId: string; op: 'before' | 'after'; dstId: string},
+  ): void {
     const moveWithinTrackList = (trackList: string[]) => {
       const newList: string[] = [];
       for (let i = 0; i < trackList.length; i++) {
@@ -390,10 +395,8 @@ export const StateActions = {
     }
   },
 
-  toggleTrackGroupCollapsed(state: StateDraft, args: {trackGroupId: string}):
-      void {
-    const id = args.trackGroupId;
-    const trackGroup = assertExists(state.trackGroups[id]);
+  toggleTrackGroupCollapsed(state: StateDraft, args: {groupKey: string}): void {
+    const trackGroup = assertExists(state.trackGroups[args.groupKey]);
     trackGroup.collapsed = !trackGroup.collapsed;
   },
 
@@ -418,7 +421,8 @@ export const StateActions = {
   // of the state it interacts badly with permalinks.
   setEngineReady(
     state: StateDraft,
-    args: {engineId: string; ready: boolean, mode: EngineMode}): void {
+    args: {engineId: string; ready: boolean; mode: EngineMode},
+  ): void {
     const engine = state.engine;
     if (engine === undefined || engine.id !== args.engineId) {
       return;
@@ -432,46 +436,22 @@ export const StateActions = {
   },
 
   // Marks all engines matching the given |mode| as failed.
-  setEngineFailed(state: StateDraft, args: {mode: EngineMode; failure: string}):
-      void {
+  setEngineFailed(
+    state: StateDraft,
+    args: {mode: EngineMode; failure: string},
+  ): void {
     if (state.engine !== undefined && state.engine.mode === args.mode) {
       state.engine.failed = args.failure;
     }
-  },
-
-  createPermalink(state: StateDraft, args: {isRecordingConfig: boolean}): void {
-    state.permalink = {
-      requestId: generateNextId(state),
-      hash: undefined,
-      isRecordingConfig: args.isRecordingConfig,
-    };
-  },
-
-  setPermalink(state: StateDraft, args: {requestId: string; hash: string}):
-      void {
-    // Drop any links for old requests.
-    if (state.permalink.requestId !== args.requestId) return;
-    state.permalink = args;
-  },
-
-  loadPermalink(state: StateDraft, args: {hash: string}): void {
-    state.permalink = {requestId: generateNextId(state), hash: args.hash};
-  },
-
-  clearPermalink(state: StateDraft, _: {}): void {
-    state.permalink = {};
-  },
-
-  setTraceTime(state: StateDraft, args: TraceTime): void {
-    state.traceTime = args;
   },
 
   updateStatus(state: StateDraft, args: Status): void {
     if (statusTraceEvent) {
       traceEventEnd(statusTraceEvent);
     }
-    statusTraceEvent =
-        traceEventBegin(args.msg, {track: MetatraceTrackId.kOmniboxStatus});
+    statusTraceEvent = traceEventBegin(args.msg, {
+      track: MetatraceTrackId.kOmniboxStatus,
+    });
     state.status = args;
   },
 
@@ -495,329 +475,206 @@ export const StateActions = {
 
   setRecordConfig(
     state: StateDraft,
-    args: {config: RecordConfig, configType?: LoadedConfig}): void {
+    args: {config: RecordConfig; configType?: LoadedConfig},
+  ): void {
     state.recordConfig = args.config;
     state.lastLoadedConfig = args.configType || {type: 'NONE'};
   },
 
   selectNote(state: StateDraft, args: {id: string}): void {
-    if (args.id) {
-      state.currentSelection = {
-        kind: 'NOTE',
-        id: args.id,
-      };
-    }
+    state.selection = {
+      kind: 'note',
+      id: args.id,
+    };
   },
 
-  addAutomaticNote(
+  addNote(
     state: StateDraft,
-    args: {timestamp: time, color: string, text: string}): void {
-    const id = generateNextId(state);
+    args: {timestamp: time; color: string; id?: string; text?: string},
+  ): void {
+    const {timestamp, color, id = generateNextId(state), text = ''} = args;
     state.notes[id] = {
       noteType: 'DEFAULT',
       id,
-      timestamp: args.timestamp,
-      color: args.color,
-      text: args.text,
-    };
-  },
-
-  addNote(state: StateDraft, args: {timestamp: time, color: string}): void {
-    const id = generateNextId(state);
-    state.notes[id] = {
-      noteType: 'DEFAULT',
-      id,
-      timestamp: args.timestamp,
-      color: args.color,
-      text: '',
-    };
-    this.selectNote(state, {id});
-  },
-
-  markCurrentArea(
-    state: StateDraft, args: {color: string, persistent: boolean}):
-      void {
-    if (state.currentSelection === null ||
-            state.currentSelection.kind !== 'AREA') {
-      return;
-    }
-    const id = args.persistent ? generateNextId(state) : '0';
-    const color = args.persistent ? args.color : '#344596';
-    state.notes[id] = {
-      noteType: 'AREA',
-      id,
-      areaId: state.currentSelection.areaId,
+      timestamp,
       color,
-      text: '',
+      text,
     };
-    state.currentSelection.noteId = id;
   },
 
-  toggleMarkCurrentArea(state: StateDraft, args: {persistent: boolean}) {
-    const selection = state.currentSelection;
-    if (selection != null && selection.kind === 'AREA' &&
-        selection.noteId !== undefined) {
-      this.removeNote(state, {id: selection.noteId});
-    } else {
-      const color = randomColor();
-      this.markCurrentArea(state, {color, persistent: args.persistent});
-    }
-  },
+  addSpanNote(
+    state: StateDraft,
+    args: {start: time; end: time; id?: string; color?: string},
+  ): void {
+    const {
+      id = generateNextId(state),
+      color = randomColor(),
+      end,
+      start,
+    } = args;
 
-  markArea(state: StateDraft, args: {area: Area, persistent: boolean}): void {
-    const {start, end, tracks} = args.area;
-    assertTrue(start <= end);
-    const areaId = generateNextId(state);
-    state.areas[areaId] = {id: areaId, start, end, tracks};
-    const noteId = args.persistent ? generateNextId(state) : '0';
-    const color = args.persistent ? randomColor() : '#344596';
-    state.notes[noteId] = {
-      noteType: 'AREA',
-      id: noteId,
-      areaId,
+    state.notes[id] = {
+      noteType: 'SPAN',
+      start,
+      end,
       color,
+      id,
       text: '',
     };
   },
 
-  changeNoteColor(state: StateDraft, args: {id: string, newColor: string}):
-      void {
+  changeNoteColor(
+    state: StateDraft,
+    args: {id: string; newColor: string},
+  ): void {
     const note = state.notes[args.id];
     if (note === undefined) return;
     note.color = args.newColor;
   },
 
-  changeNoteText(state: StateDraft, args: {id: string, newText: string}): void {
+  changeNoteText(state: StateDraft, args: {id: string; newText: string}): void {
     const note = state.notes[args.id];
     if (note === undefined) return;
     note.text = args.newText;
   },
 
   removeNote(state: StateDraft, args: {id: string}): void {
-    if (state.notes[args.id] === undefined) return;
     delete state.notes[args.id];
-    // For regular notes, we clear the current selection but for an area note
-    // we only want to clear the note/marking and leave the area selected.
-    if (state.currentSelection === null) return;
-    if (state.currentSelection.kind === 'NOTE' &&
-        state.currentSelection.id === args.id) {
-      state.currentSelection = null;
-    } else if (
-      state.currentSelection.kind === 'AREA' &&
-        state.currentSelection.noteId === args.id) {
-      state.currentSelection.noteId = undefined;
+
+    // Clear the selection if this note was selected
+    if (state.selection.kind === 'note' && state.selection.id === args.id) {
+      state.selection = {kind: 'empty'};
     }
-  },
-
-  selectSlice(
-    state: StateDraft,
-    args: {id: number, trackKey: string, scroll?: boolean}): void {
-    state.currentSelection = {
-      kind: 'SLICE',
-      id: args.id,
-      trackKey: args.trackKey,
-    };
-    state.pendingScrollId = args.scroll ? args.id : undefined;
-  },
-
-  selectCounter(
-    state: StateDraft,
-    args: {leftTs: time, rightTs: time, id: number, trackKey: string}): void {
-    state.currentSelection = {
-      kind: 'COUNTER',
-      leftTs: args.leftTs,
-      rightTs: args.rightTs,
-      id: args.id,
-      trackKey: args.trackKey,
-    };
   },
 
   selectHeapProfile(
     state: StateDraft,
-    args: {id: number, upid: number, ts: time, type: ProfileType}): void {
-    state.currentSelection = {
-      kind: 'HEAP_PROFILE',
-      id: args.id,
-      upid: args.upid,
-      ts: args.ts,
-      type: args.type,
+    args: {id: number; upid: number; ts: time; type: ProfileType},
+  ): void {
+    state.selection = {
+      kind: 'legacy',
+      legacySelection: {
+        kind: 'HEAP_PROFILE',
+        id: args.id,
+        upid: args.upid,
+        ts: args.ts,
+        type: args.type,
+      },
     };
-    this.openFlamegraph(state, {
-      type: args.type,
-      start: state.traceTime.start as
-          time,  // TODO(stevegolton): Avoid type assertion here.
-      end: args.ts,
-      upids: [args.upid],
-      viewingOption: defaultViewingOption(args.type),
-    });
   },
 
-  selectPerfSamples(state: StateDraft, args: {
-    id: number,
-    upid: number,
-    leftTs: time,
-    rightTs: time,
-    type: ProfileType
-  }): void {
-    state.currentSelection = {
-      kind: 'PERF_SAMPLES',
-      id: args.id,
-      upid: args.upid,
-      leftTs: args.leftTs,
-      rightTs: args.rightTs,
-      type: args.type,
-    };
-    this.openFlamegraph(state, {
-      type: args.type,
-      start: args.leftTs,
-      end: args.rightTs,
-      upids: [args.upid],
-      viewingOption: defaultViewingOption(args.type),
-    });
-  },
-
-  openFlamegraph(state: StateDraft, args: {
-    upids: number[],
-    start: time,
-    end: time,
-    type: ProfileType,
-    viewingOption: FlamegraphStateViewingOption
-  }): void {
-    state.currentFlamegraphState = {
-      kind: 'FLAMEGRAPH_STATE',
-      upids: args.upids,
-      start: args.start,
-      end: args.end,
-      type: args.type,
-      viewingOption: args.viewingOption,
-      focusRegex: '',
+  selectPerfSamples(
+    state: StateDraft,
+    args: {
+      id: number;
+      utid?: number;
+      upid?: number;
+      leftTs: time;
+      rightTs: time;
+      type: ProfileType;
+    },
+  ): void {
+    state.selection = {
+      kind: 'legacy',
+      legacySelection: {
+        kind: 'PERF_SAMPLES',
+        id: args.id,
+        utid: args.utid,
+        upid: args.upid,
+        leftTs: args.leftTs,
+        rightTs: args.rightTs,
+        type: args.type,
+      },
     };
   },
 
   selectCpuProfileSample(
-    state: StateDraft, args: {id: number, utid: number, ts: time}): void {
-    state.currentSelection = {
-      kind: 'CPU_PROFILE_SAMPLE',
-      id: args.id,
-      utid: args.utid,
-      ts: args.ts,
+    state: StateDraft,
+    args: {id: number; utid: number; ts: time},
+  ): void {
+    state.selection = {
+      kind: 'legacy',
+      legacySelection: {
+        kind: 'CPU_PROFILE_SAMPLE',
+        id: args.id,
+        utid: args.utid,
+        ts: args.ts,
+      },
     };
   },
 
-  expandFlamegraphState(
-    state: StateDraft, args: {expandedCallsite?: CallsiteInfo}): void {
-    if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.expandedCallsite = args.expandedCallsite;
-  },
-
-  changeViewFlamegraphState(
-    state: StateDraft, args: {viewingOption: FlamegraphStateViewingOption}):
-      void {
-    if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.viewingOption = args.viewingOption;
-  },
-
-  changeFocusFlamegraphState(state: StateDraft, args: {focusRegex: string}):
-      void {
-    if (state.currentFlamegraphState === null) return;
-    state.currentFlamegraphState.focusRegex = args.focusRegex;
-  },
-
-  selectChromeSlice(
+  selectSlice(
     state: StateDraft,
-    args: {id: number, trackKey: string, table?: string, scroll?: boolean}):
-      void {
-    state.currentSelection = {
-      kind: 'CHROME_SLICE',
-      id: args.id,
-      trackKey: args.trackKey,
-      table: args.table,
+    args: {id: number; trackKey: string; table?: string; scroll?: boolean},
+  ): void {
+    state.selection = {
+      kind: 'legacy',
+      legacySelection: {
+        kind: 'SLICE',
+        id: args.id,
+        trackKey: args.trackKey,
+        table: args.table,
+      },
     };
     state.pendingScrollId = args.scroll ? args.id : undefined;
   },
 
-  selectGenericSlice(state: StateDraft, args: {
-    id: number,
-    sqlTableName: string,
-    start: time,
-    duration: duration,
-    trackKey: string,
-    detailsPanelConfig:
-        {kind: string, config: GenericSliceDetailsTabConfigBase},
-  }): void {
+  selectGenericSlice(
+    state: StateDraft,
+    args: {
+      id: number;
+      sqlTableName: string;
+      start: time;
+      duration: duration;
+      trackKey: string;
+      detailsPanelConfig: {
+        kind: string;
+        config: GenericSliceDetailsTabConfigBase;
+      };
+    },
+  ): void {
     const detailsPanelConfig: GenericSliceDetailsTabConfig = {
       id: args.id,
       ...args.detailsPanelConfig.config,
     };
 
-    state.currentSelection = {
-      kind: 'GENERIC_SLICE',
-      id: args.id,
-      sqlTableName: args.sqlTableName,
-      start: args.start,
-      duration: args.duration,
-      trackKey: args.trackKey,
-      detailsPanelConfig:
-          {kind: args.detailsPanelConfig.kind, config: detailsPanelConfig},
+    state.selection = {
+      kind: 'legacy',
+      legacySelection: {
+        kind: 'GENERIC_SLICE',
+        id: args.id,
+        sqlTableName: args.sqlTableName,
+        start: args.start,
+        duration: args.duration,
+        trackKey: args.trackKey,
+        detailsPanelConfig: {
+          kind: args.detailsPanelConfig.kind,
+          config: detailsPanelConfig,
+        },
+      },
     };
+  },
+
+  setPendingScrollId(state: StateDraft, args: {pendingScrollId: number}): void {
+    state.pendingScrollId = args.pendingScrollId;
   },
 
   clearPendingScrollId(state: StateDraft, _: {}): void {
     state.pendingScrollId = undefined;
   },
 
-  selectThreadState(state: StateDraft, args: {id: number, trackKey: string}):
-      void {
-    state.currentSelection = {
-      kind: 'THREAD_STATE',
-      id: args.id,
-      trackKey: args.trackKey,
-    };
-  },
-
-  selectLog(
+  selectThreadState(
     state: StateDraft,
-    args: {id: number, trackKey: string, scroll?: boolean}): void {
-    state.currentSelection = {
-      kind: 'LOG',
-      id: args.id,
-      trackKey: args.trackKey,
+    args: {id: number; trackKey: string},
+  ): void {
+    state.selection = {
+      kind: 'legacy',
+      legacySelection: {
+        kind: 'THREAD_STATE',
+        id: args.id,
+        trackKey: args.trackKey,
+      },
     };
-    state.pendingScrollId = args.scroll ? args.id : undefined;
-  },
-
-  deselect(state: StateDraft, _: {}): void {
-    state.currentSelection = null;
-  },
-
-  updateLogsPagination(state: StateDraft, args: Pagination): void {
-    state.logsPagination = args;
-  },
-
-  updateFtracePagination(state: StateDraft, args: Pagination): void {
-    state.ftracePagination = args;
-  },
-
-  updateFtraceFilter(state: StateDraft, patch: FtraceFilterPatch) {
-    const {excludedNames: diffs} = patch;
-    const excludedNames = state.ftraceFilter.excludedNames;
-    for (const [addRemove, name] of diffs) {
-      switch (addRemove) {
-      case 'add':
-        if (!excludedNames.some((excluded: string) => excluded === name)) {
-          excludedNames.push(name);
-        }
-        break;
-      case 'remove':
-        state.ftraceFilter.excludedNames =
-              state.ftraceFilter.excludedNames.filter(
-                (excluded: string) => excluded !== name);
-        break;
-      default:
-        assertUnreachable(addRemove);
-        break;
-      }
-    }
   },
 
   startRecording(state: StateDraft, _: {}): void {
@@ -848,7 +705,9 @@ export const StateActions = {
   },
 
   setAvailableAdbDevices(
-    state: StateDraft, args: {devices: AdbRecordingTarget[]}): void {
+    state: StateDraft,
+    args: {devices: AdbRecordingTarget[]},
+  ): void {
     state.availableAdbDevices = args.devices;
   },
 
@@ -860,51 +719,48 @@ export const StateActions = {
     state.omniboxState.mode = args.mode;
   },
 
-  selectArea(state: StateDraft, args: {area: Area}): void {
-    const {start, end, tracks} = args.area;
+  selectArea(
+    state: StateDraft,
+    args: {start: time; end: time; tracks: string[]},
+  ): void {
+    const {start, end, tracks} = args;
     assertTrue(start <= end);
-    const areaId = generateNextId(state);
-    state.areas[areaId] = {id: areaId, start, end, tracks};
-    state.currentSelection = {kind: 'AREA', areaId};
-  },
-
-  editArea(state: StateDraft, args: {area: Area, areaId: string}): void {
-    const {start, end, tracks} = args.area;
-    assertTrue(start <= end);
-    state.areas[args.areaId] = {id: args.areaId, start, end, tracks};
-  },
-
-  reSelectArea(state: StateDraft, args: {areaId: string, noteId: string}):
-      void {
-    state.currentSelection = {
-      kind: 'AREA',
-      areaId: args.areaId,
-      noteId: args.noteId,
+    state.selection = {
+      kind: 'area',
+      start,
+      end,
+      tracks,
     };
   },
 
   toggleTrackSelection(
-    state: StateDraft, args: {id: string, isTrackGroup: boolean}) {
-    const selection = state.currentSelection;
-    if (selection === null || selection.kind !== 'AREA') return;
-    const areaId = selection.areaId;
-    const index = state.areas[areaId].tracks.indexOf(args.id);
+    state: StateDraft,
+    args: {key: string; isTrackGroup: boolean},
+  ) {
+    const selection = state.selection;
+    if (selection.kind !== 'area') {
+      return;
+    }
+
+    const index = selection.tracks.indexOf(args.key);
     if (index > -1) {
-      state.areas[areaId].tracks.splice(index, 1);
-      if (args.isTrackGroup) {  // Also remove all child tracks.
-        for (const childTrack of state.trackGroups[args.id].tracks) {
-          const childIndex = state.areas[areaId].tracks.indexOf(childTrack);
+      selection.tracks.splice(index, 1);
+      if (args.isTrackGroup) {
+        // Also remove all child tracks.
+        for (const childTrack of state.trackGroups[args.key].tracks) {
+          const childIndex = selection.tracks.indexOf(childTrack);
           if (childIndex > -1) {
-            state.areas[areaId].tracks.splice(childIndex, 1);
+            selection.tracks.splice(childIndex, 1);
           }
         }
       }
     } else {
-      state.areas[areaId].tracks.push(args.id);
-      if (args.isTrackGroup) {  // Also add all child tracks.
-        for (const childTrack of state.trackGroups[args.id].tracks) {
-          if (!state.areas[areaId].tracks.includes(childTrack)) {
-            state.areas[areaId].tracks.push(childTrack);
+      selection.tracks.push(args.key);
+      if (args.isTrackGroup) {
+        // Also add all child tracks.
+        for (const childTrack of state.trackGroups[args.key].tracks) {
+          if (!selection.tracks.includes(childTrack)) {
+            selection.tracks.push(childTrack);
           }
         }
       }
@@ -913,11 +769,7 @@ export const StateActions = {
     // selection to be updated and this leads to bugs for people who do:
     // if (oldSelection !== state.selection) etc.
     // To solve this re-create the selection object here:
-    state.currentSelection = Object.assign({}, state.currentSelection);
-  },
-
-  setVisibleTraceTime(state: StateDraft, args: VisibleState): void {
-    state.frontendLocalState.visibleState = {...args};
+    state.selection = Object.assign({}, state.selection);
   },
 
   setChromeCategories(state: StateDraft, args: {categories: string[]}): void {
@@ -942,7 +794,7 @@ export const StateActions = {
     state.sidebarVisible = args.visible;
   },
 
-  setHoveredUtidAndPid(state: StateDraft, args: {utid: number, pid: number}) {
+  setHoveredUtidAndPid(state: StateDraft, args: {utid: number; pid: number}) {
     state.hoveredPid = args.pid;
     state.hoveredUtid = args.utid;
   },
@@ -971,18 +823,6 @@ export const StateActions = {
     state.hoveredNoteTimestamp = args.ts;
   },
 
-  // Tab V1 specific
-  setCurrentTab(state: StateDraft, args: {tab: string|undefined}) {
-    traceEvent('setCurrentTab', () => {
-      state.currentTab = args.tab;
-    }, {
-      args: {
-        tab: args.tab ?? '<undefined>',
-      },
-    });
-  },
-
-  // Specific to tabs V2.
   // Add a tab with a given URI to the tab bar and show it.
   // If the tab is already present in the tab bar, just show it.
   showTab(state: StateDraft, args: {uri: string}) {
@@ -996,7 +836,6 @@ export const StateActions = {
     state.tabs.currentTab = args.uri;
   },
 
-  // Specific to tabs V2.
   // Hide a tab in the tab bar pick a new tab to show.
   // Note: Attempting to hide the "current_selection" tab doesn't work. This tab
   // is special and cannot be removed.
@@ -1031,24 +870,24 @@ export const StateActions = {
 
   clearAllPinnedTracks(state: StateDraft, _: {}) {
     const pinnedTracks = state.pinnedTracks.slice();
-    for (let index = pinnedTracks.length-1; index >= 0; index--) {
+    for (let index = pinnedTracks.length - 1; index >= 0; index--) {
       const trackKey = pinnedTracks[index];
       this.toggleTrackPinned(state, {trackKey});
     }
   },
 
-  togglePivotTable(state: StateDraft, args: {areaId: string|null}) {
-    state.nonSerializableState.pivotTable.selectionArea = args.areaId === null ?
-      undefined :
-      {areaId: args.areaId, tracks: state.areas[args.areaId].tracks};
-    if (args.areaId !==
-        state.nonSerializableState.pivotTable.selectionArea?.areaId) {
-      state.nonSerializableState.pivotTable.queryResult = null;
-    }
+  togglePivotTable(
+    state: StateDraft,
+    args: {area?: {start: time; end: time; tracks: string[]}},
+  ) {
+    state.nonSerializableState.pivotTable.selectionArea = args.area;
+    state.nonSerializableState.pivotTable.queryResult = null;
   },
 
   setPivotStateQueryResult(
-    state: StateDraft, args: {queryResult: PivotTableResult|null}) {
+    state: StateDraft,
+    args: {queryResult: PivotTableResult | null},
+  ) {
     state.nonSerializableState.pivotTable.queryResult = args.queryResult;
   },
 
@@ -1061,97 +900,93 @@ export const StateActions = {
   },
 
   addPivotTableAggregation(
-    state: StateDraft, args: {aggregation: Aggregation, after: number}) {
+    state: StateDraft,
+    args: {aggregation: Aggregation; after: number},
+  ) {
     state.nonSerializableState.pivotTable.selectedAggregations.splice(
-      args.after, 0, args.aggregation);
+      args.after,
+      0,
+      args.aggregation,
+    );
   },
 
   removePivotTableAggregation(state: StateDraft, args: {index: number}) {
     state.nonSerializableState.pivotTable.selectedAggregations.splice(
-      args.index, 1);
+      args.index,
+      1,
+    );
   },
 
   setPivotTableQueryRequested(
-    state: StateDraft, args: {queryRequested: boolean}) {
+    state: StateDraft,
+    args: {queryRequested: boolean},
+  ) {
     state.nonSerializableState.pivotTable.queryRequested = args.queryRequested;
   },
 
   setPivotTablePivotSelected(
-    state: StateDraft, args: {column: TableColumn, selected: boolean}) {
+    state: StateDraft,
+    args: {column: TableColumn; selected: boolean},
+  ) {
     toggleEnabled(
       tableColumnEquals,
       state.nonSerializableState.pivotTable.selectedPivots,
       args.column,
-      args.selected);
+      args.selected,
+    );
   },
 
   setPivotTableAggregationFunction(
-    state: StateDraft, args: {index: number, function: AggregationFunction}) {
-    state.nonSerializableState.pivotTable.selectedAggregations[args.index]
-      .aggregationFunction = args.function;
+    state: StateDraft,
+    args: {index: number; function: AggregationFunction},
+  ) {
+    state.nonSerializableState.pivotTable.selectedAggregations[
+      args.index
+    ].aggregationFunction = args.function;
   },
 
   setPivotTableSortColumn(
     state: StateDraft,
-    args: {aggregationIndex: number, order: SortDirection}) {
+    args: {aggregationIndex: number; order: SortDirection},
+  ) {
     state.nonSerializableState.pivotTable.selectedAggregations =
-        state.nonSerializableState.pivotTable.selectedAggregations.map(
-          (agg, index) => ({
-            column: agg.column,
-            aggregationFunction: agg.aggregationFunction,
-            sortDirection: (index === args.aggregationIndex) ? args.order :
-              undefined,
-          }));
-  },
-
-  setPivotTableArgumentNames(
-    state: StateDraft, args: {argumentNames: string[]}) {
-    state.nonSerializableState.pivotTable.argumentNames = args.argumentNames;
+      state.nonSerializableState.pivotTable.selectedAggregations.map(
+        (agg, index) => ({
+          column: agg.column,
+          aggregationFunction: agg.aggregationFunction,
+          sortDirection:
+            index === args.aggregationIndex ? args.order : undefined,
+        }),
+      );
   },
 
   changePivotTablePivotOrder(
     state: StateDraft,
-    args: {from: number, to: number, direction: DropDirection}) {
+    args: {from: number; to: number; direction: DropDirection},
+  ) {
     const pivots = state.nonSerializableState.pivotTable.selectedPivots;
     state.nonSerializableState.pivotTable.selectedPivots = performReordering(
       computeIntervals(pivots.length, args.from, args.to, args.direction),
-      pivots);
+      pivots,
+    );
   },
 
   changePivotTableAggregationOrder(
     state: StateDraft,
-    args: {from: number, to: number, direction: DropDirection}) {
+    args: {from: number; to: number; direction: DropDirection},
+  ) {
     const aggregations =
-        state.nonSerializableState.pivotTable.selectedAggregations;
+      state.nonSerializableState.pivotTable.selectedAggregations;
     state.nonSerializableState.pivotTable.selectedAggregations =
-        performReordering(
-          computeIntervals(
-            aggregations.length, args.from, args.to, args.direction),
-          aggregations);
-  },
-
-  setMinimumLogLevel(state: StateDraft, args: {minimumLevel: number}) {
-    state.logFilteringCriteria.minimumLevel = args.minimumLevel;
-  },
-
-  addLogTag(state: StateDraft, args: {tag: string}) {
-    if (!state.logFilteringCriteria.tags.includes(args.tag)) {
-      state.logFilteringCriteria.tags.push(args.tag);
-    }
-  },
-
-  removeLogTag(state: StateDraft, args: {tag: string}) {
-    state.logFilteringCriteria.tags =
-        state.logFilteringCriteria.tags.filter((t) => t !== args.tag);
-  },
-
-  updateLogFilterText(state: StateDraft, args: {textEntry: string}) {
-    state.logFilteringCriteria.textEntry = args.textEntry;
-  },
-
-  toggleCollapseByTextEntry(state: StateDraft, _: {}) {
-    state.logFilteringCriteria.hideNonMatching =
-        !state.logFilteringCriteria.hideNonMatching;
+      performReordering(
+        computeIntervals(
+          aggregations.length,
+          args.from,
+          args.to,
+          args.direction,
+        ),
+        aggregations,
+      );
   },
 };
 
@@ -1174,9 +1009,10 @@ export interface DeferredAction<Args = {}> {
 // DeferredActions<T> has an attribute:
 // (args: Args) => DeferredAction<Args>
 type ActionFunction<Args> = (state: StateDraft, args: Args) => void;
-type DeferredActionFunc<T> = T extends ActionFunction<infer Args>?
-    (args: Args) => DeferredAction<Args>:
-    never;
+type DeferredActionFunc<T> =
+  T extends ActionFunction<infer Args>
+    ? (args: Args) => DeferredAction<Args>
+    : never;
 type DeferredActions<C> = {
   [P in keyof C]: DeferredActionFunc<C[P]>;
 };
@@ -1187,15 +1023,15 @@ type DeferredActions<C> = {
 // It's a Proxy such that any attribute access returns a function:
 // (args) => {return {type: ATTRIBUTE_NAME, args};}
 export const Actions =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  new Proxy<DeferredActions<typeof StateActions>>({} as any, {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    new Proxy<DeferredActions<typeof StateActions>>({} as any, {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      get(_: any, prop: string, _2: any) {
-        return (args: {}): DeferredAction<{}> => {
-          return {
-            type: prop,
-            args,
-          };
+    get(_: any, prop: string, _2: any) {
+      return (args: {}): DeferredAction<{}> => {
+        return {
+          type: prop,
+          args,
         };
-      },
-    });
+      };
+    },
+  });

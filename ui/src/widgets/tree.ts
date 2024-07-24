@@ -36,13 +36,9 @@ interface TreeAttrs {
 
 export class Tree implements m.ClassComponent<TreeAttrs> {
   view({attrs, children}: m.Vnode<TreeAttrs>): m.Children {
-    const {
-      className = '',
-    } = attrs;
+    const {className = ''} = attrs;
 
-    const classes = classNames(
-      className,
-    );
+    const classes = classNames(className);
 
     return m('.pf-tree', {class: classes}, children);
   }
@@ -81,38 +77,36 @@ export class TreeNode implements m.ClassComponent<TreeNodeAttrs> {
   }
 
   view(vnode: m.CVnode<TreeNodeAttrs>): m.Children {
-    const {children, attrs, attrs: {left, onCollapseChanged = () => {}}} =
-        vnode;
-    return m(
-      '.pf-tree-node',
-      {
-        class: classNames(this.getClassNameForNode(vnode)),
-      },
-      m('span.pf-tree-gutter', {
-        onclick: () => {
-          this.collapsed = !this.isCollapsed(vnode);
-          onCollapseChanged(this.collapsed, attrs);
-          scheduleFullRedraw();
-        },
-      }),
+    const {
+      children,
+      attrs,
+      attrs: {left, onCollapseChanged = () => {}},
+    } = vnode;
+    return [
       m(
-        '.pf-tree-content',
-        m('.pf-tree-left', left),
+        '.pf-tree-node',
+        {
+          class: classNames(this.getClassNameForNode(vnode)),
+        },
+        m(
+          '.pf-tree-left',
+          m('span.pf-tree-gutter', {
+            onclick: () => {
+              this.collapsed = !this.isCollapsed(vnode);
+              onCollapseChanged(this.collapsed, attrs);
+              scheduleFullRedraw();
+            },
+          }),
+          left,
+        ),
         this.renderRight(vnode),
       ),
-      hasChildren(vnode) &&
-            [
-              m('span.pf-tree-indent-gutter'),
-              m('.pf-tree-children', children),
-            ],
-    );
+      hasChildren(vnode) && m('.pf-tree-children', children),
+    ];
   }
 
   private getClassNameForNode(vnode: m.CVnode<TreeNodeAttrs>) {
-    const {
-      loading = false,
-      showCaret = false,
-    } = vnode.attrs;
+    const {loading = false, showCaret = false} = vnode.attrs;
     if (loading) {
       return 'pf-loading';
     } else if (hasChildren(vnode) || showCaret) {
@@ -127,7 +121,9 @@ export class TreeNode implements m.ClassComponent<TreeNodeAttrs> {
   }
 
   private renderRight(vnode: m.CVnode<TreeNodeAttrs>) {
-    const {attrs: {right, summary}} = vnode;
+    const {
+      attrs: {right, summary},
+    } = vnode;
     if (hasChildren(vnode) && this.isCollapsed(vnode)) {
       return m('.pf-tree-right', summary ?? right);
     } else {
@@ -137,9 +133,7 @@ export class TreeNode implements m.ClassComponent<TreeNodeAttrs> {
 
   private isCollapsed({attrs}: m.Vnode<TreeNodeAttrs>): boolean {
     // If collapsed is omitted, use our local collapsed state instead.
-    const {
-      collapsed = this.collapsed,
-    } = attrs;
+    const {collapsed = this.collapsed} = attrs;
 
     return collapsed;
   }
@@ -151,10 +145,12 @@ export function dictToTreeNodes(dict: {[key: string]: m.Child}): m.Child[] {
     if (dict[key] == undefined) {
       continue;
     }
-    children.push(m(TreeNode, {
-      left: key,
-      right: dict[key],
-    }));
+    children.push(
+      m(TreeNode, {
+        left: key,
+        right: dict[key],
+      }),
+    );
   }
   return children;
 }
@@ -236,6 +232,7 @@ export class LazyTreeNode implements m.ClassComponent<LazyTreeNodeAttrs> {
           scheduleFullRedraw();
         },
       },
-      this.renderChildren && this.renderChildren());
+      this.renderChildren && this.renderChildren(),
+    );
   }
 }

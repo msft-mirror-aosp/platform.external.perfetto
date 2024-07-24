@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Disposable} from '../base/disposable';
 import {FuzzyFinder, FuzzySegment} from '../base/fuzzy';
+import {Registry} from '../base/registry';
 import {Command} from '../public';
-import {Registry} from './registry';
 
 export interface CommandWithMatchInfo extends Command {
   segments: FuzzySegment[];
