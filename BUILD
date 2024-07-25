@@ -1384,6 +1384,7 @@ perfetto_cc_library(
         ":include_perfetto_public_protozero",
         "src/trace_processor/containers/bit_vector.h",
         "src/trace_processor/containers/implicit_segment_forest.h",
+        "src/trace_processor/containers/interval_intersector.h",
         "src/trace_processor/containers/interval_tree.h",
         "src/trace_processor/containers/null_term_string_view.h",
         "src/trace_processor/containers/row_map.h",
@@ -1535,8 +1536,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/sched_event_state.h",
         "src/trace_processor/importers/common/sched_event_tracker.cc",
         "src/trace_processor/importers/common/sched_event_tracker.h",
-        "src/trace_processor/importers/common/scoped_active_trace_file.cc",
-        "src/trace_processor/importers/common/scoped_active_trace_file.h",
         "src/trace_processor/importers/common/slice_tracker.cc",
         "src/trace_processor/importers/common/slice_tracker.h",
         "src/trace_processor/importers/common/slice_translation_table.cc",
@@ -1547,8 +1546,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/system_info_tracker.h",
         "src/trace_processor/importers/common/thread_state_tracker.cc",
         "src/trace_processor/importers/common/thread_state_tracker.h",
-        "src/trace_processor/importers/common/trace_file_tracker.cc",
-        "src/trace_processor/importers/common/trace_file_tracker.h",
         "src/trace_processor/importers/common/trace_parser.cc",
         "src/trace_processor/importers/common/track_tracker.cc",
         "src/trace_processor/importers/common/track_tracker.h",
@@ -2197,6 +2194,8 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup.sql",
+        "src/trace_processor/metrics/sql/android/wattson_estimate.sql",
+        "src/trace_processor/metrics/sql/android/wattson_rail_relations.sql",
     ],
 )
 
@@ -2880,6 +2879,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_viz_viz",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/viz/flamegraph.sql",
+        "src/trace_processor/perfetto_sql/stdlib/viz/slices.sql",
     ],
 )
 
@@ -4803,7 +4803,7 @@ perfetto_proto_library(
         "protos/perfetto/metrics/android/thread_time_in_state_metric.proto",
         "protos/perfetto/metrics/android/trace_quality.proto",
         "protos/perfetto/metrics/android/unsymbolized_frames.proto",
-        "protos/perfetto/metrics/android/wattson_app_startup.proto",
+        "protos/perfetto/metrics/android/wattson_in_time_period.proto",
     ],
     visibility = [
         PERFETTO_CONFIG.proto_library_visibility,
