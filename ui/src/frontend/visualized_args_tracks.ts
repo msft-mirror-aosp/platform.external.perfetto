@@ -16,7 +16,9 @@ import {assertExists} from '../base/logging';
 import {uuidv4} from '../base/uuid';
 import {Actions, AddTrackArgs} from '../common/actions';
 import {InThreadTrackSortKey} from '../common/state';
-import {Engine, NUM, TrackDescriptor} from '../public';
+import {TrackDescriptor} from '../public/tracks';
+import {Engine} from '../trace_processor/engine';
+import {NUM} from '../trace_processor/query_result';
 import {globals} from './globals';
 import {VisualisedArgsTrack} from './visualized_args_track';
 
@@ -88,9 +90,8 @@ export async function addVisualisedArgTracks(ctx: Context, argName: string) {
     const uri = `${VISUALISED_ARGS_SLICE_TRACK_URI_PREFIX}#${uuidv4()}`;
     ctx.registerTrack({
       uri,
-      tags: {
-        metric: true, // TODO(stevegolton): Is this track really a metric?
-      },
+      title: argName,
+      chips: ['metric'],
       trackFactory: (trackCtx) => {
         return new VisualisedArgsTrack({
           engine: ctx.engine,

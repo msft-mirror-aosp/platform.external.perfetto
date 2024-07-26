@@ -43,7 +43,8 @@
 #include "perfetto/trace_processor/iterator.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor.h"
-#include "src/trace_processor/importers/android_bugreport/android_bugreport_parser.h"
+#include "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.h"
+#include "src/trace_processor/importers/android_bugreport/android_log_reader.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
@@ -76,6 +77,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/graph_scan.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/graph_traversal.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/import.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/interval_intersect.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/math.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.h"
@@ -101,7 +103,6 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_flat_slice.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_sched_upid.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_slice_layout.h"
-#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/interval_intersect.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.h"
 #include "src/trace_processor/perfetto_sql/prelude/tables_views.h"
 #include "src/trace_processor/perfetto_sql/stdlib/stdlib.h"
@@ -318,6 +319,8 @@ const char* TraceTypeToString(TraceType trace_type) {
       return "zip";
     case kPerfDataTraceType:
       return "perf_data";
+    case kAndroidLogcatTraceType:
+      return "android_logcat";
   }
   PERFETTO_FATAL("For GCC");
 }
@@ -347,6 +350,11 @@ void InitializePreludeTablesViews(sqlite3* db) {
 
 TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
     : TraceProcessorStorageImpl(cfg), config_(cfg) {
+  context_.reader_registry->RegisterTraceReader<AndroidLogReader>(
+      kAndroidLogcatTraceType);
+  context_.android_log_event_parser =
+      std::make_unique<AndroidLogEventParserImpl>(&context_);
+
   context_.reader_registry->RegisterTraceReader<FuchsiaTraceTokenizer>(
       kFuchsiaTraceType);
   context_.fuchsia_record_parser =
@@ -450,12 +458,13 @@ void TraceProcessorImpl::Flush() {
                    context_.storage->GetTraceTimestampBoundsNs());
 }
 
-void TraceProcessorImpl::NotifyEndOfFile() {
+base::Status TraceProcessorImpl::NotifyEndOfFile() {
   if (notify_eof_called_) {
-    PERFETTO_ELOG(
+    const char kMessage[] =
         "NotifyEndOfFile should only be called once. Try calling Flush instead "
-        "if trying to commit the contents of the trace to tables.");
-    return;
+        "if trying to commit the contents of the trace to tables.";
+    PERFETTO_ELOG(kMessage);
+    return base::ErrStatus(kMessage);
   }
   notify_eof_called_ = true;
 
@@ -465,7 +474,7 @@ void TraceProcessorImpl::NotifyEndOfFile() {
   // Last opportunity to flush all pending data.
   Flush();
 
-  TraceProcessorStorageImpl::NotifyEndOfFile();
+  RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
   context_.storage->ShrinkToFitTables();
 
   // Rebuild the bounds table once everything has been completed: we do this
@@ -477,6 +486,7 @@ void TraceProcessorImpl::NotifyEndOfFile() {
                    context_.storage->GetTraceTimestampBoundsNs());
 
   TraceProcessorStorageImpl::DestroyContext();
+  return base::OkStatus();
 }
 
 size_t TraceProcessorImpl::RestoreInitialTables() {
@@ -766,6 +776,10 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
     if (!status.ok())
       PERFETTO_FATAL("%s", status.c_message());
   }
+  {
+    base::Status status = perfetto_sql::RegisterIntervalIntersectFunctions(
+        *engine_, context_.storage->mutable_string_pool());
+  }
 
   TraceStorage* storage = context_.storage.get();
 
@@ -925,6 +939,8 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   RegisterStaticTable(storage->mutable_viewcapture_table());
 
+  RegisterStaticTable(storage->mutable_windowmanager_table());
+
   RegisterStaticTable(
       storage->mutable_window_manager_shell_transitions_table());
   RegisterStaticTable(
@@ -980,8 +996,6 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       std::make_unique<ExperimentalAnnotatedStack>(&context_));
   engine_->RegisterStaticTableFunction(
       std::make_unique<ExperimentalFlatSlice>(&context_));
-  engine_->RegisterStaticTableFunction(std::make_unique<IntervalIntersect>(
-      context_.storage->mutable_string_pool()));
   engine_->RegisterStaticTableFunction(std::make_unique<DfsWeightBounded>(
       context_.storage->mutable_string_pool()));
 

@@ -15,16 +15,14 @@
 import m from 'mithril';
 
 import {Hotkey} from '../base/hotkeys';
-import {Span, duration, time} from '../base/time';
+import {TimeSpan, duration, time} from '../base/time';
 import {Migrate, Store} from '../base/store';
 import {ColorScheme} from '../core/colorizer';
-import {LegacySelection, PrimaryTrackSortKey, Selection} from '../common/state';
-import {Size} from '../base/geom';
+import {PrimaryTrackSortKey} from '../common/state';
 import {Engine} from '../trace_processor/engine';
-import {UntypedEventSet} from '../core/event_set';
-import {TraceContext} from '../frontend/globals';
 import {PromptOption} from '../frontend/omnibox_manager';
-import {Optional} from '../base/utils';
+import {LegacyDetailsPanel, TrackDescriptor} from './tracks';
+import {TraceContext} from '../frontend/trace_context';
 
 export {Engine} from '../trace_processor/engine';
 export {
@@ -42,6 +40,16 @@ export {PrimaryTrackSortKey} from '../common/state';
 
 export {addDebugSliceTrack} from '../frontend/debug_tracks/debug_tracks';
 export * from '../core/track_kinds';
+export {
+  TrackDescriptor,
+  Track,
+  TrackContext,
+  TrackTags,
+  SliceRect,
+  DetailsPanel,
+  LegacyDetailsPanel,
+  TrackSelectionDetailsPanel,
+} from './tracks';
 
 export interface Slice {
   // These properties are updated only once per query result when the Slice
@@ -151,107 +159,6 @@ export interface PluginContext {
   };
 }
 
-export interface TrackContext {
-  // This track's key, used for making selections et al.
-  trackKey: string;
-}
-
-export interface SliceRect {
-  left: number;
-  width: number;
-  top: number;
-  height: number;
-  visible: boolean;
-}
-
-export interface Track {
-  /**
-   * Optional: Called once before onUpdate is first called.
-   *
-   * If this function returns a Promise, this promise is awaited before onUpdate
-   * or onDestroy is called. Any calls made to these functions in the meantime
-   * will be queued up and the hook will be called later once onCreate returns.
-   *
-   * Exactly when this hook is called is left purposely undefined. The only
-   * guarantee is that it will be called once before onUpdate is first called.
-   *
-   * @param ctx Our track context object.
-   */
-  onCreate?(ctx: TrackContext): Promise<void> | void;
-
-  /**
-   * Optional: Called every render cycle while the track is visible, just before
-   * render().
-   * If this function returns a Promise, this promise is awaited before another
-   * onUpdate is called or onDestroy is called.
-   */
-  onUpdate?(): Promise<void> | void;
-
-  /**
-   * Optional: Called when the track is no longer visible. Should be used to
-   * clean up resources.
-   * This function can return nothing or a promise. The promise is currently
-   * ignored.
-   */
-  onDestroy?(): Promise<void> | void;
-
-  render(ctx: CanvasRenderingContext2D, size: Size): void;
-  onFullRedraw?(): void;
-  getSliceRect?(tStart: time, tEnd: time, depth: number): SliceRect | undefined;
-  getHeight(): number;
-  getTrackShellButtons?(): m.Children;
-  onMouseMove?(position: {x: number; y: number}): void;
-  onMouseClick?(position: {x: number; y: number}): boolean;
-  onMouseOut?(): void;
-
-  /**
-   * Optional: Get the event set that represents this track's data.
-   */
-  getEventSet?(): UntypedEventSet;
-}
-
-// A definition of a track, including a renderer implementation and metadata.
-export interface TrackDescriptor {
-  // A unique identifier for this track.
-  uri: string;
-
-  // A factory function returning a new track instance.
-  trackFactory: (ctx: TrackContext) => Track;
-
-  // The track "kind", used by various subsystems e.g. aggregation controllers.
-  // This is where "XXX_TRACK_KIND" values should be placed.
-  // TODO(stevegolton): This will be deprecated once we handle group selections
-  // in a more generic way - i.e. EventSet.
-  kind?: string;
-
-  // Optional: list of track IDs represented by this trace.
-  // This list is used for participation in track indexing by track ID.
-  // This index is used by various subsystems to find links between tracks based
-  // on the track IDs used by trace processor.
-  trackIds?: number[];
-
-  // Optional: The CPU number associated with this track.
-  cpu?: number;
-
-  // Optional: The UTID associated with this track.
-  utid?: number;
-
-  // Optional: The UPID associated with this track.
-  upid?: number;
-
-  // Optional: A list of tags used for sorting, grouping and "chips".
-  tags?: TrackTags;
-
-  // Placeholder - presently unused.
-  displayName?: string;
-
-  // Optional: method to look up the start and duration of an event on this track
-  getEventBounds?: (id: number) => Promise<Optional<{ts: time; dur: duration}>>;
-
-  // Optional: A details panel to use when this track is selected.
-  detailsPanel?: TrackSelectionDetailsPanel;
-}
-
 export interface SliceTrackColNames {
   ts: string;
   name: string;
@@ -300,21 +207,6 @@ export interface TabDescriptor {
   onShow?(): void;
 }
 
-export interface LegacyDetailsPanel {
-  render(selection: LegacySelection): m.Children;
-  isLoading?(): boolean;
-}
-
-export interface DetailsPanel {
-  render(selection: Selection): m.Children;
-  isLoading?(): boolean;
-}
-
-export interface TrackSelectionDetailsPanel {
-  render(id: number): m.Children;
-  isLoading?(): boolean;
-}
-
 // Similar to PluginContext but with additional methods to operate on the
 // currently loaded trace. Passed to trace-relevant hooks on a plugin instead of
 // PluginContext.
@@ -361,7 +253,7 @@ export interface PluginContextTrace extends PluginContext {
     setViewportTime(start: time, end: time): void;
 
     // A span representing the current viewport location
-    readonly viewport: Span<time, duration>;
+    readonly viewport: TimeSpan;
   };
 
   // Control over the bottom details pane.
@@ -408,7 +300,7 @@ export interface PluginContextTrace extends PluginContext {
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;
 
-  trace: TraceContext;
+  readonly trace: TraceContext;
 
   // When the trace is opened via postMessage deep-linking, returns the sub-set
   // of postMessageData.pluginArgs[pluginId] for the current plugin. If not
@@ -447,27 +339,27 @@ export interface PluginClass {
 // Describes a reference to a registered track.
 export interface TrackRef {
   // URI of the registered track.
-  uri: string;
+  readonly uri: string;
 
   // A human readable name for this track - displayed in the track shell.
-  displayName: string;
+  readonly title: string;
 
   // Optional: Used to define default sort order for new traces.
   // Note: This will be deprecated soon in favour of tags & sort rules.
-  sortKey?: PrimaryTrackSortKey;
+  readonly sortKey?: PrimaryTrackSortKey;
 
   // Optional: Add tracks to a group with this name.
-  groupName?: string;
+  readonly groupName?: string;
 
   // Optional: Track key
-  key?: string;
+  readonly key?: string;
 
   // Optional: Whether the track is pinned
-  isPinned?: boolean;
+  readonly isPinned?: boolean;
 }
 
 // A predicate for selecting a subset of tracks.
-export type TrackPredicate = (info: TrackTags) => boolean;
+export type TrackPredicate = (info: TrackDescriptor) => boolean;
 
 // Describes a reference to a group of tracks.
 export interface GroupRef {
@@ -480,30 +372,6 @@ export interface GroupRef {
 
 // A predicate for selecting a subset of groups.
 export type GroupPredicate = (info: GroupRef) => boolean;
-
-interface WellKnownTrackTags {
-  // A human readable name for this specific track.
-  name: string;
-
-  // Controls whether to show the "metric" chip.
-  metric: boolean;
-
-  // Controls whether to show the "debuggable" chip.
-  debuggable: boolean;
-
-  // Groupname of the track
-  groupName: string;
-}
-
-// An set of key/value pairs describing a given track. These are used for
-// selecting tracks to pin/unpin, diplsaying "chips" in the track shell, and
-// (in future) the sorting and grouping of tracks.
-// We define a handful of well known fields, and the rest are arbitrary key-
-// value pairs.
-export type TrackTags = Partial<WellKnownTrackTags> & {
-  // There may be arbitrary other key/value pairs.
-  [key: string]: string | number | boolean | undefined;
-};
 
 // Plugins can be class refs or concrete plugin implementations.
 export type PluginFactory = PluginClass | Plugin;

@@ -61,7 +61,6 @@ import {
   ThreadTrackSortKey,
   TrackSortKey,
   UtidToTrackSortKey,
-  VisibleState,
 } from './state';
 
 type StateDraft = Draft<State>;
@@ -70,7 +69,6 @@ export interface AddTrackArgs {
   key?: string;
   uri: string;
   name: string;
-  labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
   closeable?: boolean;
@@ -212,7 +210,6 @@ export const StateActions = {
         name,
         trackSortKey: track.trackSortKey,
         trackGroup: track.trackGroup,
-        labels: track.labels,
         uri: track.uri,
         closeable: track.closeable,
       };
@@ -570,7 +567,8 @@ export const StateActions = {
     state: StateDraft,
     args: {
       id: number;
-      upid: number;
+      utid?: number;
+      upid?: number;
       leftTs: time;
       rightTs: time;
       type: ProfileType;
@@ -581,6 +579,7 @@ export const StateActions = {
       legacySelection: {
         kind: 'PERF_SAMPLES',
         id: args.id,
+        utid: args.utid,
         upid: args.upid,
         leftTs: args.leftTs,
         rightTs: args.rightTs,
@@ -771,10 +770,6 @@ export const StateActions = {
     // if (oldSelection !== state.selection) etc.
     // To solve this re-create the selection object here:
     state.selection = Object.assign({}, state.selection);
-  },
-
-  setVisibleTraceTime(state: StateDraft, args: VisibleState): void {
-    state.frontendLocalState.visibleState = {...args};
   },
 
   setChromeCategories(state: StateDraft, args: {categories: string[]}): void {
@@ -1014,9 +1009,10 @@ export interface DeferredAction<Args = {}> {
 // DeferredActions<T> has an attribute:
 // (args: Args) => DeferredAction<Args>
 type ActionFunction<Args> = (state: StateDraft, args: Args) => void;
-type DeferredActionFunc<T> = T extends ActionFunction<infer Args>
-  ? (args: Args) => DeferredAction<Args>
-  : never;
+type DeferredActionFunc<T> =
+  T extends ActionFunction<infer Args>
+    ? (args: Args) => DeferredAction<Args>
+    : never;
 type DeferredActions<C> = {
   [P in keyof C]: DeferredActionFunc<C[P]>;
 };

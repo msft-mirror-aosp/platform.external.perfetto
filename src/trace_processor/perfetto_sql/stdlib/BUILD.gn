@@ -20,6 +20,7 @@ assert(enable_perfetto_trace_processor_sqlite)
 perfetto_amalgamated_sql_header("stdlib") {
   deps = [
     "android",
+    "callstacks",
     "chrome:chrome_sql",
     "common",
     "counters",
@@ -28,6 +29,7 @@ perfetto_amalgamated_sql_header("stdlib") {
     "graphs",
     "intervals",
     "linux",
+    "metasql",
     "pkvm",
     "prelude",
     "sched",
