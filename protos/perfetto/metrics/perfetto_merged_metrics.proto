@@ -1543,10 +1543,11 @@ message AndroidJankCujMetric {
 // Begin of protos/perfetto/metrics/android/java_heap_class_stats.proto
 
 message JavaHeapClassStats {
-  // Next id: 12
+  // Next id: 13
   message TypeCount {
+    reserved 11;
     optional string type_name = 1;
-    optional bool is_libcore_or_primitive_heap_root = 11;
+    optional bool is_libcore_or_array = 12;
 
     optional int64 obj_count = 2;
     optional int64 size_bytes = 3;
@@ -2839,11 +2840,12 @@ message UnsymbolizedFrames {
 
 // End of protos/perfetto/metrics/android/unsymbolized_frames.proto
 
-// Begin of protos/perfetto/metrics/android/wattson_app_startup.proto
+// Begin of protos/perfetto/metrics/android/wattson_in_time_period.proto
 
 message AndroidWattsonTimePeriodMetric {
   optional int32 metric_version = 1;
-  repeated AndroidWattsonEstimateInfo period_info = 2;
+  optional string period_type = 2;
+  repeated AndroidWattsonEstimateInfo period_info = 3;
 }
 
 message AndroidWattsonEstimateInfo {
@@ -2858,7 +2860,7 @@ message AndroidWattsonRailEstimate {
   repeated AndroidWattsonRailEstimate rail = 3;
 }
 
-// End of protos/perfetto/metrics/android/wattson_app_startup.proto
+// End of protos/perfetto/metrics/android/wattson_in_time_period.proto
 
 // Begin of protos/perfetto/metrics/metrics.proto
 
@@ -2907,7 +2909,7 @@ message TraceAnalysisStats {
 
 // Root message for all Perfetto-based metrics.
 //
-// Next id: 70
+// Next id: 71
 message TraceMetrics {
   reserved 4, 10, 13, 14, 16, 19;
 
@@ -3104,6 +3106,9 @@ message TraceMetrics {
 
   // Android Wattson app startup metrics.
   optional AndroidWattsonTimePeriodMetric wattson_app_startup = 69;
+
+  // Android Wattson estimate for markers metrics.
+  optional AndroidWattsonTimePeriodMetric wattson_estimate = 70;
 
   // Android
   // Demo extensions.
