@@ -458,12 +458,13 @@ void TraceProcessorImpl::Flush() {
                    context_.storage->GetTraceTimestampBoundsNs());
 }
 
-void TraceProcessorImpl::NotifyEndOfFile() {
+base::Status TraceProcessorImpl::NotifyEndOfFile() {
   if (notify_eof_called_) {
-    PERFETTO_ELOG(
+    const char kMessage[] =
         "NotifyEndOfFile should only be called once. Try calling Flush instead "
-        "if trying to commit the contents of the trace to tables.");
-    return;
+        "if trying to commit the contents of the trace to tables.";
+    PERFETTO_ELOG(kMessage);
+    return base::ErrStatus(kMessage);
   }
   notify_eof_called_ = true;
 
@@ -473,7 +474,7 @@ void TraceProcessorImpl::NotifyEndOfFile() {
   // Last opportunity to flush all pending data.
   Flush();
 
-  TraceProcessorStorageImpl::NotifyEndOfFile();
+  RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
   context_.storage->ShrinkToFitTables();
 
   // Rebuild the bounds table once everything has been completed: we do this
@@ -485,6 +486,7 @@ void TraceProcessorImpl::NotifyEndOfFile() {
                    context_.storage->GetTraceTimestampBoundsNs());
 
   TraceProcessorStorageImpl::DestroyContext();
+  return base::OkStatus();
 }
 
 size_t TraceProcessorImpl::RestoreInitialTables() {
@@ -679,7 +681,8 @@ void TraceProcessorImpl::EnableMetatrace(MetatraceConfig config) {
 }
 
 void TraceProcessorImpl::InitPerfettoSqlEngine() {
-  engine_.reset(new PerfettoSqlEngine(context_.storage->mutable_string_pool()));
+  engine_.reset(new PerfettoSqlEngine(context_.storage->mutable_string_pool(),
+                                      config_.enable_extra_checks));
   sqlite3* db = engine_->sqlite_engine()->db();
   sqlite3_str_split_init(db);
 
