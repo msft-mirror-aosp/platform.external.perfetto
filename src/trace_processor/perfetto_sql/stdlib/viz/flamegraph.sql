@@ -13,15 +13,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-include perfetto module graphs.scan;
+INCLUDE PERFETTO MODULE graphs.scan;
+INCLUDE PERFETTO MODULE metasql.column_list;
 
+CREATE PERFETTO MACRO _viz_flamegraph_hash_coalesce(col ColumnName)
+RETURNS _SqlFragment AS IFNULL($col, 0);
+
+-- For each frame in |tab|, returns a row containing the result of running
+-- all the filtering operations over that frame's name.
 CREATE PERFETTO MACRO _viz_flamegraph_prepare_filter(
   tab TableOrSubquery,
   show_stack Expr,
   hide_stack Expr,
   show_from_frame Expr,
   hide_frame Expr,
-  impossible_stack_bits Expr
+  pivot Expr,
+  impossible_stack_bits Expr,
+  grouping _ColumnNameList
 )
 RETURNS TableOrSubquery
 AS (
@@ -29,11 +37,20 @@ AS (
     *,
     IIF($hide_stack, $impossible_stack_bits, $show_stack) AS stackBits,
     $show_from_frame As showFromFrameBits,
-    $hide_frame = 0 AS showFrame
+    $hide_frame = 0 AS showFrame,
+    $pivot AS isPivot,
+    HASH(
+      name,
+      _metasql_map_join_column_list!($grouping, _viz_flamegraph_hash_coalesce)
+    ) AS groupingHash
   FROM $tab
   ORDER BY id
 );
 
+-- Walks the forest from root to leaf and performs the following operations:
+--  1) removes frames which were filtered out
+--  2) make any pivot nodes become the roots
+--  3) computes whether the stack as a whole should be retained or not
 CREATE PERFETTO MACRO _viz_flamegraph_filter_frames(
   source TableOrSubquery,
   show_from_frame_bits Expr
@@ -54,6 +71,7 @@ AS (
         NULL
       ) AS filteredId,
       NULL AS filteredParentId,
+      NULL AS filteredUnpivotedParentId,
       IIF(
         showFrame,
         showFromFrameBits,
@@ -70,12 +88,13 @@ AS (
   SELECT
     g.filteredId AS id,
     g.filteredParentId AS parentId,
+    g.filteredUnpivotedParentId AS unpivotedParentId,
     g.stackBits,
     SUM(t.value) AS value
   FROM _graph_scan!(
     edges,
     inits,
-    (filteredId, filteredParentId, showFromFrameBits, stackBits),
+    (filteredId, filteredParentId, filteredUnpivotedParentId, showFromFrameBits, stackBits),
     (
       SELECT
         t.id,
@@ -86,9 +105,14 @@ AS (
         ) AS filteredId,
         IIF(
           x.showFrame AND (t.showFromFrameBits | x.showFromFrameBits) = $show_from_frame_bits,
-          t.filteredId,
+          IIF(x.isPivot, NULL, t.filteredId),
           t.filteredParentId
         ) AS filteredParentId,
+        IIF(
+          x.showFrame AND (t.showFromFrameBits | x.showFromFrameBits) = $show_from_frame_bits,
+          t.filteredId,
+          t.filteredParentId
+        ) AS filteredUnpivotedParentId,
         IIF(
           x.showFrame,
           (t.showFromFrameBits | x.showFromFrameBits),
@@ -109,6 +133,10 @@ AS (
   ORDER BY filteredId
 );
 
+-- Walks the forest from leaves to root and does the following:
+--   1) removes nodes whose stacks are filtered out
+--   2) computes the cumulative value for each node (i.e. the sum of the self
+--      value of the node and all descendants).
 CREATE PERFETTO MACRO _viz_flamegraph_accumulate(
   filtered TableOrSubquery,
   showStackBits Expr
@@ -149,39 +177,112 @@ AS (
   ORDER BY id
 );
 
-CREATE PERFETTO MACRO _viz_flamegraph_hash(
+CREATE PERFETTO MACRO _viz_flamegraph_s_prefix(col ColumnName)
+RETURNS _SqlFragment AS s.$col;
+
+-- Propogates the cumulative value of the pivot nodes to the roots
+-- and computes the "fingerprint" of the path.
+CREATE PERFETTO MACRO _viz_flamegraph_upwards_hash(
   source TableOrSubquery,
   filtered TableOrSubquery,
   accumulated TableOrSubquery,
-  show_from_frame_bits Expr
+  grouping _ColumnNameList,
+  grouped _ColumnNameList
 )
 RETURNS TableOrSubquery
 AS (
+  WITH edges AS (
+    SELECT id AS source_node_id, unpivotedParentId AS dest_node_id
+    FROM $filtered
+    WHERE unpivotedParentId IS NOT NULL
+  ),
+  inits AS (
+    SELECT
+      f.id,
+      HASH(-1, s.groupingHash) AS hash,
+      NULL AS parentHash,
+      -1 AS depth,
+      a.cumulativeValue
+    FROM $filtered f
+    JOIN $source s USING (id)
+    JOIN $accumulated a USING (id)
+    WHERE s.isPivot AND a.cumulativeValue > 0
+  )
   SELECT
     g.id,
     g.hash,
     g.parentHash,
     g.depth,
     s.name,
+    _metasql_map_join_column_list!($grouping, _viz_flamegraph_s_prefix),
+    _metasql_map_join_column_list!($grouped, _viz_flamegraph_s_prefix),
     f.value,
-    a.cumulativeValue
+    g.cumulativeValue
   FROM _graph_scan!(
+    edges,
+    inits,
+    (hash, parentHash, depth, cumulativeValue),
     (
+      SELECT
+        t.id,
+        HASH(t.hash, x.groupingHash) AS hash,
+        t.hash AS parentHash,
+        t.depth - 1 AS depth,
+        t.cumulativeValue
+      FROM $table t
+      JOIN $source x USING (id)
+    )
+  ) g
+  JOIN $source s USING (id)
+  JOIN $filtered f USING (id)
+);
+
+-- Computes the "fingerprint" of the path by walking from the laves
+-- to the root.
+CREATE PERFETTO MACRO _viz_flamegraph_downwards_hash(
+  source TableOrSubquery,
+  filtered TableOrSubquery,
+  accumulated TableOrSubquery,
+  grouping _ColumnNameList,
+  grouped _ColumnNameList,
+  showDownward Expr
+)
+RETURNS TableOrSubquery
+AS (
+  WITH
+    edges AS (
       SELECT parentId AS source_node_id, id AS dest_node_id
       FROM $filtered
       WHERE parentId IS NOT NULL
     ),
-    (
-      SELECT f.id, HASH(s.name) AS hash, NULL AS parentHash, 0 AS depth
+    inits AS (
+      SELECT
+        f.id,
+        HASH(1, s.groupingHash) AS hash,
+        NULL AS parentHash,
+        1 AS depth
       FROM $filtered f
       JOIN $source s USING (id)
-      WHERE f.parentId IS NULL
-    ),
+      WHERE f.parentId IS NULL AND $showDownward
+    )
+  SELECT
+    g.id,
+    g.hash,
+    g.parentHash,
+    g.depth,
+    s.name,
+    _metasql_map_join_column_list!($grouping, _viz_flamegraph_s_prefix),
+    _metasql_map_join_column_list!($grouped, _viz_flamegraph_s_prefix),
+    f.value,
+    a.cumulativeValue
+  FROM _graph_scan!(
+    edges,
+    inits,
     (hash, parentHash, depth),
     (
       SELECT
         t.id,
-        HASH(t.hash, x.name) AS hash,
+        HASH(t.hash, x.groupingHash) AS hash,
         t.hash AS parentHash,
         t.depth + 1 AS depth
       FROM $table t
@@ -194,8 +295,18 @@ AS (
   ORDER BY hash
 );
 
+CREATE PERFETTO MACRO _viz_flamegraph_merge_grouped(
+  col ColumnName
+)
+RETURNS _SqlFragment
+AS IIF(COUNT() = 1, $col, NULL) AS $col;
+
+-- Converts a table of hashes and paretn hashes into ids and parent
+-- ids, grouping all hashes together.
 CREATE PERFETTO MACRO _viz_flamegraph_merge_hashes(
-  hashed TableOrSubquery
+  hashed TableOrSubquery,
+  grouping _ColumnNameList,
+  grouped _ColumnNameList
 )
 RETURNS TableOrSubquery
 AS (
@@ -209,12 +320,19 @@ AS (
     ) AS parentId,
     depth,
     name,
+    -- The grouping columns should be passed through as-is because the
+    -- hash took them into account: we would not merged any nodes where
+    -- the grouping columns were different.
+    _metasql_unparenthesize_column_list!($grouping),
+    _metasql_map_join_column_list!($grouped, _viz_flamegraph_merge_grouped),
     SUM(value) AS value,
     SUM(cumulativeValue) AS cumulativeValue
   FROM $hashed c
   GROUP BY hash
 );
 
+-- Performs a "layout" of nodes in the flamegraph relative to their
+-- siblings.
 CREATE PERFETTO MACRO _viz_flamegraph_local_layout(
   merged TableOrSubquery
 )
@@ -228,7 +346,7 @@ AS (
     FROM $merged
     WHERE cumulativeValue > 0
     WINDOW win AS (
-      PARTITION BY parentId
+      PARTITION BY parentId, depth
       ORDER BY cumulativeValue DESC
       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
     )
@@ -238,9 +356,13 @@ AS (
   ORDER BY id
 );
 
+-- Walks the graph from root to leaf, propogating the layout of
+-- parents to their children.
 CREATE PERFETTO MACRO _viz_flamegraph_global_layout(
   merged TableOrSubquery,
-  layout TableOrSubquery
+  layout TableOrSubquery,
+  grouping _ColumnNameList,
+  grouped _ColumnNameList
 )
 RETURNS TableOrSubquery
 AS (
@@ -250,33 +372,36 @@ AS (
     WHERE parentId IS NOT NULL
   ),
   inits AS (
-    SELECT h.id, l.xStart, l.xEnd
+    SELECT h.id, 1 AS rootDistance, l.xStart, l.xEnd
     FROM $merged h
     JOIN $layout l USING (id)
     WHERE h.parentId IS NULL
   )
   SELECT
-    h.id,
-    IFNULL(h.parentId, -1) AS parentId,
-    IIF(h.name = '', 'unknown', h.name) AS name,
-    h.value AS selfValue,
-    h.cumulativeValue,
-    h.depth,
+    s.id,
+    IFNULL(s.parentId, -1) AS parentId,
+    IIF(s.name = '', 'unknown', s.name) AS name,
+    _metasql_map_join_column_list!($grouping, _viz_flamegraph_s_prefix),
+    _metasql_map_join_column_list!($grouped, _viz_flamegraph_s_prefix),
+    s.value AS selfValue,
+    s.cumulativeValue,
+    s.depth,
     g.xStart,
     g.xEnd
   FROM _graph_scan!(
     edges,
     inits,
-    (xStart, xEnd),
+    (rootDistance, xStart, xEnd),
     (
       SELECT
         t.id,
+        t.rootDistance + 1 as rootDistance,
         t.xStart + w.xStart AS xStart,
         t.xStart + w.xEnd AS xEnd
       FROM $table t
       JOIN $layout w USING (id)
     )
   ) g
-  JOIN $merged h USING (id)
-  ORDER BY depth, xStart
+  JOIN $merged s USING (id)
+  ORDER BY rootDistance, xStart
 );
