@@ -16,7 +16,7 @@ import m from 'mithril';
 
 import {AsyncDisposableStack} from '../base/disposable_stack';
 import {Engine} from '../trace_processor/engine';
-import {NUM, STR} from '../trace_processor/query_result';
+import {NUM, STR, STR_NULL} from '../trace_processor/query_result';
 import {createPerfettoTable} from '../trace_processor/sql_utils';
 import {
   Flamegraph,
@@ -29,7 +29,15 @@ import {Monitor} from '../base/monitor';
 import {featureFlags} from './feature_flags';
 import {uuidv4Sql} from '../base/uuid';
 
-interface QueryFlamegraphMetric {
+export interface QueryFlamegraphColumn {
+  // The name of the column in SQL.
+  readonly name: string;
+
+  // The human readable name describing the contents of the column.
+  readonly displayName: string;
+}
+
+export interface QueryFlamegraphMetric {
   // The human readable name of the metric: will be shown to the user to change
   // between metrics.
   readonly name: string;
@@ -43,8 +51,28 @@ interface QueryFlamegraphMetric {
   readonly dependencySql?: string;
 
   // A single SQL statement which returns the columns `id`, `parentId`, `name`
-  // and `selfValue`
+  // `selfValue`, all columns specified by `unaggregatableProperties` and
+  // `aggregatableProperties`.
   readonly statement: string;
+
+  // Additional contextual columns containing data which should not be merged
+  // between sibling nodes, even if they have the same name.
+  //
+  // Examples include the mapping that a name comes from, the heap graph root
+  // type etc.
+  //
+  // Note: the name is always unaggregatable and should not be specified here.
+  readonly unaggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>;
+
+  // Additional contextual columns containing data which will be displayed to
+  // the user if there is no merging. If there is merging, currently the value
+  // will not be shown.
+  //
+  // Examples include the source file and line number.
+  //
+  // TODO(lalitm): reconsider the decision to show nothing, instead maybe show
+  // the top 5 options etc.
+  readonly aggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>;
 }
 
 // Given a table and columns on those table (corresponding to metrics),
@@ -52,11 +80,14 @@ interface QueryFlamegraphMetric {
 // in QueryFlamegraph's attrs.
 //
 // `tableOrSubquery` should have the columns `id`, `parentId`, `name` and all
-// columns specified by `tableMetrics[].name`.
+// columns specified by `tableMetrics[].name`, `unaggregatableProperties` and
+// `aggregatableProperties`.
 export function metricsFromTableOrSubquery(
   tableOrSubquery: string,
   tableMetrics: ReadonlyArray<{name: string; unit: string; columnName: string}>,
   dependencySql?: string,
+  unaggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>,
+  aggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>,
 ): QueryFlamegraphMetric[] {
   const metrics = [];
   for (const {name, unit, columnName} of tableMetrics) {
@@ -65,9 +96,11 @@ export function metricsFromTableOrSubquery(
       unit,
       dependencySql,
       statement: `
-        select id, parentId, name, ${columnName} as value
+        select *, ${columnName} as value
         from ${tableOrSubquery}
       `,
+      unaggregatableProperties,
+      aggregatableProperties,
     });
   }
   return metrics;
@@ -88,6 +121,7 @@ export class QueryFlamegraph implements m.ClassComponent<QueryFlamegraphAttrs> {
     hideStack: [],
     showFromFrame: [],
     hideFrame: [],
+    pivot: undefined,
   };
   private attrs: QueryFlamegraphAttrs;
   private selMonitor = new Monitor([() => this.attrs.metrics]);
@@ -123,33 +157,40 @@ export class QueryFlamegraph implements m.ClassComponent<QueryFlamegraphAttrs> {
   }
 
   private async fetchData(attrs: QueryFlamegraphAttrs) {
-    const {statement, dependencySql} = assertExists(
+    const metric = assertExists(
       attrs.metrics.find((metric) => metric.name === this.selectedMetricName),
     );
     const engine = attrs.engine;
     const filters = this.filters;
     this.queryLimiter.schedule(async () => {
-      this.data = await computeFlamegraphTree(
-        engine,
-        dependencySql,
-        statement,
-        filters,
-      );
+      this.data = await computeFlamegraphTree(engine, metric, filters);
     });
   }
 }
 
 async function computeFlamegraphTree(
   engine: Engine,
-  dependencySql: string | undefined,
-  sql: string,
-  {showStack, hideStack, showFromFrame, hideFrame}: FlamegraphFilters,
-) {
+  {
+    dependencySql,
+    statement,
+    unaggregatableProperties,
+    aggregatableProperties,
+  }: QueryFlamegraphMetric,
+  {showStack, hideStack, showFromFrame, hideFrame, pivot}: FlamegraphFilters,
+): Promise<FlamegraphQueryData> {
+  // Pivot also essentially acts as a "show stack" filter so treat it like one.
+  const showStackAndPivot = [...showStack];
+  if (pivot !== undefined) {
+    showStackAndPivot.push(pivot);
+  }
+
   const showStackFilter =
-    showStack.length === 0
+    showStackAndPivot.length === 0
       ? '0'
-      : showStack.map((x, i) => `((name like '%${x}%') << ${i})`).join(' | ');
-  const showStackBits = (1 << showStack.length) - 1;
+      : showStackAndPivot
+          .map((x, i) => `((name like '%${x}%') << ${i})`)
+          .join(' | ');
+  const showStackBits = (1 << showStackAndPivot.length) - 1;
 
   const hideStackFilter =
     hideStack.length === 0
@@ -169,6 +210,17 @@ async function computeFlamegraphTree(
       ? 'false'
       : hideFrame.map((x) => `name like '%${x}%'`).join(' OR ');
 
+  const pivotFilter = pivot === undefined ? '0' : `name like '%${pivot}%'`;
+
+  const unagg = unaggregatableProperties ?? [];
+  const unaggCols = unagg.map((x) => x.name);
+
+  const agg = aggregatableProperties ?? [];
+  const aggCols = agg.map((x) => x.name);
+
+  const groupingColumns = `(${(unaggCols.length === 0 ? ['groupingColumn'] : unaggCols).join()})`;
+  const groupedColumns = `(${(aggCols.length === 0 ? ['groupedColumn'] : aggCols).join()})`;
+
   if (dependencySql !== undefined) {
     await engine.query(dependencySql);
   }
@@ -176,6 +228,8 @@ async function computeFlamegraphTree(
 
   const uuid = uuidv4Sql();
   await using disposable = new AsyncDisposableStack();
+  // TODO(lalitm): this doesn't need to be called unless we have
+  // a non-empty set of filters.
   disposable.use(
     await createPerfettoTable(
       engine,
@@ -183,23 +237,36 @@ async function computeFlamegraphTree(
       `
         select *
         from _viz_flamegraph_prepare_filter!(
-          (${sql}),
+          (
+            select
+              id,
+              parentId,
+              name,
+              value,
+              ${(unaggCols.length === 0 ? [`'' as groupingColumn`] : unaggCols).join()},
+              ${(aggCols.length === 0 ? [`'' as groupedColumn`] : aggCols).join()}
+            FROM (${statement})
+          ),
           (${showStackFilter}),
           (${hideStackFilter}),
           (${showFromFrameFilter}),
           (${hideFrameFilter}),
-          ${1 << showStack.length}
+          (${pivotFilter}),
+          ${1 << showStackAndPivot.length},
+          ${groupingColumns}
         )
       `,
     ),
   );
+  // TODO(lalitm): this doesn't need to be called unless we have
+  // a non-empty set of filters.
   disposable.use(
     await createPerfettoTable(
       engine,
-      `_flamegraph_raw_top_down_${uuid}`,
+      `_flamegraph_filtered_${uuid}`,
       `
         select *
-        from _viz_flamegraph_filter_and_hash!(
+        from _viz_flamegraph_filter_frames!(
           _flamegraph_source_${uuid},
           ${showFromFrameBits}
         )
@@ -209,23 +276,11 @@ async function computeFlamegraphTree(
   disposable.use(
     await createPerfettoTable(
       engine,
-      `_flamegraph_top_down_${uuid}`,
-      `
-        select * from _viz_flamegraph_merge_hashes!(
-          _flamegraph_raw_top_down_${uuid},
-          _flamegraph_source_${uuid}
-        )
-      `,
-    ),
-  );
-  disposable.use(
-    await createPerfettoTable(
-      engine,
-      `_flamegraph_raw_bottom_up_${uuid}`,
+      `_flamegraph_accumulated_${uuid}`,
       `
         select *
         from _viz_flamegraph_accumulate!(
-          _flamegraph_top_down_${uuid},
+          _flamegraph_filtered_${uuid},
           ${showStackBits}
         )
       `,
@@ -234,12 +289,51 @@ async function computeFlamegraphTree(
   disposable.use(
     await createPerfettoTable(
       engine,
-      `_flamegraph_windowed_${uuid}`,
+      `_flamegraph_hash_${uuid}`,
+      `
+        select *
+        from _viz_flamegraph_downwards_hash!(
+          _flamegraph_source_${uuid},
+          _flamegraph_filtered_${uuid},
+          _flamegraph_accumulated_${uuid},
+          ${groupingColumns},
+          ${groupedColumns}
+        )
+        union all
+        select *
+        from _viz_flamegraph_upwards_hash!(
+          _flamegraph_source_${uuid},
+          _flamegraph_filtered_${uuid},
+          _flamegraph_accumulated_${uuid},
+          ${groupingColumns},
+          ${groupedColumns}
+        )
+        order by hash
+      `,
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_merged_${uuid}`,
+      `
+        select *
+        from _viz_flamegraph_merge_hashes!(
+          _flamegraph_hash_${uuid},
+          ${groupingColumns},
+          ${groupedColumns}
+        )
+      `,
+    ),
+  );
+  disposable.use(
+    await createPerfettoTable(
+      engine,
+      `_flamegraph_layout_${uuid}`,
       `
         select *
         from _viz_flamegraph_local_layout!(
-          _flamegraph_raw_bottom_up_${uuid},
-          _flamegraph_top_down_${uuid}
+          _flamegraph_merged_${uuid}
         );
       `,
     ),
@@ -247,11 +341,13 @@ async function computeFlamegraphTree(
   const res = await engine.query(`
     select *
     from _viz_flamegraph_global_layout!(
-      _flamegraph_windowed_${uuid},
-      _flamegraph_raw_bottom_up_${uuid},
-      _flamegraph_top_down_${uuid}
+      _flamegraph_merged_${uuid},
+      _flamegraph_layout_${uuid},
+      ${groupingColumns},
+      ${groupedColumns}
     )
   `);
+
   const it = res.iter({
     id: NUM,
     parentId: NUM,
@@ -261,11 +357,21 @@ async function computeFlamegraphTree(
     cumulativeValue: NUM,
     xStart: NUM,
     xEnd: NUM,
+    ...Object.fromEntries(unaggCols.map((m) => [m, STR_NULL])),
+    ...Object.fromEntries(aggCols.map((m) => [m, STR_NULL])),
   });
   let allRootsCumulativeValue = 0;
+  let minDepth = 0;
   let maxDepth = 0;
   const nodes = [];
   for (; it.valid(); it.next()) {
+    const properties = new Map<string, string>();
+    for (const a of [...agg, ...unagg]) {
+      const r = it.get(a.name);
+      if (r !== null) {
+        properties.set(a.displayName, r as string);
+      }
+    }
     nodes.push({
       id: it.id,
       parentId: it.parentId,
@@ -275,13 +381,15 @@ async function computeFlamegraphTree(
       cumulativeValue: it.cumulativeValue,
       xStart: it.xStart,
       xEnd: it.xEnd,
+      properties,
     });
-    if (it.parentId === -1) {
+    if (it.depth === 1) {
       allRootsCumulativeValue += it.cumulativeValue;
     }
+    minDepth = Math.min(minDepth, it.depth);
     maxDepth = Math.max(maxDepth, it.depth);
   }
-  return {nodes, allRootsCumulativeValue, maxDepth};
+  return {nodes, allRootsCumulativeValue, minDepth, maxDepth};
 }
 
 export const USE_NEW_FLAMEGRAPH_IMPL = featureFlags.register({

@@ -43,24 +43,6 @@
 namespace perfetto::trace_processor {
 namespace {
 
-// Proto traces should always parsed first as they might contains clock sync
-// data needed to correctly parse other traces.
-// The rest of the types are sorted by position in the enum but this is not
-// something users should rely on.
-// TODO(carlscab): Proto traces with just ModuleSymbols packets should be an
-// exception. We actually need those are the very end (once whe have all the
-// Frames). Alternatively we could build a map address -> symbol during
-// tokenization and use this during parsing to resolve symbols.
-bool CompareTraceType(TraceType lhs, TraceType rhs) {
-  if (rhs == TraceType::kProtoTraceType) {
-    return false;
-  }
-  if (lhs == TraceType::kProtoTraceType) {
-    return true;
-  }
-  return lhs < rhs;
-}
-
 bool HasSymbols(const TraceBlobView& blob) {
   bool has_symbols = false;
   ProtoTraceTokenizer().Tokenize(blob.copy(), [&](TraceBlobView raw) {
@@ -79,18 +61,26 @@ ZipTraceReader::~ZipTraceReader() = default;
 
 bool ZipTraceReader::Entry::operator<(const Entry& rhs) const {
   // Traces with symbols should be the last ones to be read.
+  // TODO(carlscab): Proto traces with just ModuleSymbols packets should be an
+  // exception. We actually need those are the very end (once whe have all the
+  // Frames). Alternatively we could build a map address -> symbol during
+  // tokenization and use this during parsing to resolve symbols.
   if (has_symbols) {
     return false;
   }
   if (rhs.has_symbols) {
     return true;
   }
-  if (CompareTraceType(trace_type, rhs.trace_type)) {
-    return true;
-  }
-  if (CompareTraceType(rhs.trace_type, trace_type)) {
+
+  // Proto traces should always parsed first as they might contains clock sync
+  // data needed to correctly parse other traces.
+  if (rhs.trace_type == TraceType::kProtoTraceType) {
     return false;
   }
+  if (trace_type == TraceType::kProtoTraceType) {
+    return true;
+  }
+
   return std::tie(name, index) < std::tie(rhs.name, rhs.index);
 }
 
@@ -98,14 +88,7 @@ base::Status ZipTraceReader::Parse(TraceBlobView blob) {
   return zip_reader_.Parse(std::move(blob));
 }
 
-void ZipTraceReader::NotifyEndOfFile() {
-  base::Status status = NotifyEndOfFileImpl();
-  if (!status.ok()) {
-    PERFETTO_ELOG("ZipTraceReader failed: %s", status.c_message());
-  }
-}
-
-base::Status ZipTraceReader::NotifyEndOfFileImpl() {
+base::Status ZipTraceReader::NotifyEndOfFile() {
   std::vector<util::ZipFile> files = zip_reader_.TakeFiles();
 
   // Android bug reports are ZIP files and its files do not get handled
@@ -114,17 +97,15 @@ base::Status ZipTraceReader::NotifyEndOfFileImpl() {
     return AndroidBugreportReader::Parse(context_, std::move(files));
   }
 
-  base::StatusOr<std::vector<Entry>> entries = ExtractEntries(std::move(files));
-  if (!entries.ok()) {
-    return entries.status();
-  }
-  std::sort(entries->begin(), entries->end());
+  ASSIGN_OR_RETURN(std::vector<Entry> entries,
+                   ExtractEntries(std::move(files)));
+  std::sort(entries.begin(), entries.end());
 
-  for (Entry& e : *entries) {
+  for (Entry& e : entries) {
     parsers_.push_back(std::make_unique<ForwardingTraceParser>(context_));
     auto& parser = *parsers_.back();
     RETURN_IF_ERROR(parser.Parse(std::move(e.uncompressed_data)));
-    parser.NotifyEndOfFile();
+    RETURN_IF_ERROR(parser.NotifyEndOfFile());
   }
   return base::OkStatus();
 }
