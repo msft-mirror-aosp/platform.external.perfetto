@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -275,23 +276,21 @@ Range SetIdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   return {};
 }
 
-void SetIdStorage::ChainImpl::StableSort(SortToken* start,
-                                         SortToken* end,
+void SetIdStorage::ChainImpl::StableSort(Token* start,
+                                         Token* end,
                                          SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SetIdStorage::ChainImpl::StableSort");
   switch (direction) {
     case SortDirection::kAscending:
-      std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return (*values_)[a.index] < (*values_)[b.index];
-                       });
+      std::stable_sort(start, end, [this](const Token& a, const Token& b) {
+        return (*values_)[a.index] < (*values_)[b.index];
+      });
       break;
     case SortDirection::kDescending:
-      std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return (*values_)[a.index] > (*values_)[b.index];
-                       });
+      std::stable_sort(start, end, [this](const Token& a, const Token& b) {
+        return (*values_)[a.index] > (*values_)[b.index];
+      });
       break;
   }
 }
@@ -339,6 +338,11 @@ std::optional<Token> SetIdStorage::ChainImpl::MinElement(
   }
 
   return *tok;
+}
+
+std::unique_ptr<DataLayer> SetIdStorage::ChainImpl::Flatten(
+    std::vector<uint32_t>&) const {
+  return std::unique_ptr<DataLayer>(new SetIdStorage(values_));
 }
 
 SqlValue SetIdStorage::ChainImpl::Get_AvoidUsingBecauseSlow(

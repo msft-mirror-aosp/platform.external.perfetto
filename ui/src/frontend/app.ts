@@ -15,7 +15,7 @@
 import m from 'mithril';
 
 import {copyToClipboard} from '../base/clipboard';
-import {DisposableStack} from '../base/disposable';
+
 import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
 import {assertExists, assertUnreachable} from '../base/logging';
@@ -45,8 +45,6 @@ import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
 import {AggregationsTabs} from './aggregation_tab';
-import {addSqlTableTab} from './sql_table/tab';
-import {SqlTables} from './sql_table/well_known_tables';
 import {
   findCurrentSelection,
   focusOtherFlow,
@@ -57,6 +55,9 @@ import {OmniboxMode, PromptOption} from './omnibox_manager';
 import {Utid} from './sql_types';
 import {getThreadInfo} from './thread_and_process_info';
 import {THREAD_STATE_TRACK_KIND} from '../core/track_kinds';
+import {DisposableStack} from '../base/disposable_stack';
+import {addSqlTableTab} from './sql_table_tab';
+import {SqlTables} from './well_known_sql_tables';
 
 function renderPermalink(): m.Children {
   const hash = globals.permalinkHash;
@@ -142,10 +143,10 @@ export class App implements m.ClassComponent {
         const trackInfo = globals.state.tracks[firstThreadStateTrack];
         const trackDesc = globals.trackManager.resolveTrackInfo(trackInfo.uri);
         if (
-          trackDesc?.kind === THREAD_STATE_TRACK_KIND &&
-          trackDesc?.utid !== undefined
+          trackDesc?.tags?.kind === THREAD_STATE_TRACK_KIND &&
+          trackDesc?.tags?.utid !== undefined
         ) {
-          return trackDesc?.utid;
+          return trackDesc.tags.utid;
         }
       }
     }

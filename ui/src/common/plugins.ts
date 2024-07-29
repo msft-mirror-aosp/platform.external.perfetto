@@ -14,10 +14,9 @@
 
 import {v4 as uuidv4} from 'uuid';
 
-import {Disposable, DisposableStack} from '../base/disposable';
 import {Registry} from '../base/registry';
-import {Span, duration, time} from '../base/time';
-import {TraceContext, globals} from '../frontend/globals';
+import {TimeSpan, time} from '../base/time';
+import {globals} from '../frontend/globals';
 import {
   Command,
   LegacyDetailsPanel,
@@ -43,9 +42,10 @@ import {Flag, featureFlags} from '../core/feature_flags';
 import {assertExists} from '../base/logging';
 import {raf} from '../core/raf_scheduler';
 import {defaultPlugins} from '../core/default_plugins';
-import {HighPrecisionTimeSpan} from './high_precision_time';
 import {PromptOption} from '../frontend/omnibox_manager';
 import {horizontalScrollToTs} from '../frontend/scroll_helper';
+import {DisposableStack} from '../base/disposable_stack';
+import {TraceContext} from '../frontend/trace_context';
 
 // Every plugin gets its own PluginContext. This is how we keep track
 // what each plugin is doing and how we can blame issues on particular
@@ -90,7 +90,7 @@ export class PluginContextImpl implements PluginContext, Disposable {
 
   constructor(readonly pluginId: string) {}
 
-  dispose(): void {
+  [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
   }
@@ -126,7 +126,10 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     // Silently ignore if context is dead.
     if (!this.alive) return;
 
-    const dispose = globals.trackManager.registerTrack(trackDesc);
+    const dispose = globals.trackManager.registerTrack({
+      ...trackDesc,
+      pluginId: this.pluginId,
+    });
     this.trash.use(dispose);
   }
 
@@ -224,14 +227,9 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
 
     pinTracksByPredicate(predicate: TrackPredicate) {
       const tracks = Object.values(globals.state.tracks);
-      const groups = globals.state.trackGroups;
       for (const track of tracks) {
-        const tags = {
-          name: track.name,
-          groupName: (track.trackGroup ? groups[track.trackGroup] : undefined)
-            ?.name,
-        };
-        if (predicate(tags) && !isPinned(track.key)) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
+        if (trackDesc && predicate(trackDesc) && !isPinned(track.key)) {
           globals.dispatch(
             Actions.toggleTrackPinned({
               trackKey: track.key,
@@ -244,10 +242,8 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     unpinTracksByPredicate(predicate: TrackPredicate) {
       const tracks = Object.values(globals.state.tracks);
       for (const track of tracks) {
-        const tags = {
-          name: track.name,
-        };
-        if (predicate(tags) && isPinned(track.key)) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
+        if (trackDesc && predicate(trackDesc) && isPinned(track.key)) {
           globals.dispatch(
             Actions.toggleTrackPinned({
               trackKey: track.key,
@@ -260,10 +256,8 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     removeTracksByPredicate(predicate: TrackPredicate) {
       const trackKeysToRemove = Object.values(globals.state.tracks)
         .filter((track) => {
-          const tags = {
-            name: track.name,
-          };
-          return predicate(tags);
+          const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
+          return trackDesc && predicate(trackDesc);
         })
         .map((trackState) => trackState.key);
 
@@ -315,7 +309,7 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
           ? groups[trackState.trackGroup]
           : undefined;
         return {
-          displayName: trackState.name,
+          title: trackState.name,
           uri: trackState.uri,
           key: trackState.key,
           groupName: group?.name,
@@ -329,16 +323,15 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     },
 
     setViewportTime(start: time, end: time): void {
-      const interval = HighPrecisionTimeSpan.fromTime(start, end);
-      globals.timeline.updateVisibleTime(interval);
+      globals.timeline.updateVisibleTime(new TimeSpan(start, end));
     },
 
-    get viewport(): Span<time, duration> {
-      return globals.timeline.visibleTimeSpan;
+    get viewport(): TimeSpan {
+      return globals.timeline.visibleWindow.toTimeSpan();
     },
   };
 
-  dispose(): void {
+  [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
   }
@@ -508,7 +501,7 @@ export class PluginManager {
     await doPluginTraceUnload(pluginDetails);
 
     plugin.onDeactivate && plugin.onDeactivate(context);
-    context.dispose();
+    context[Symbol.dispose]();
 
     this._plugins.delete(id);
 
@@ -615,7 +608,7 @@ async function doPluginTraceUnload(
 
   if (traceContext) {
     plugin.onTraceUnload && (await plugin.onTraceUnload(traceContext));
-    traceContext.dispose();
+    traceContext[Symbol.dispose]();
     pluginDetails.traceContext = undefined;
   }
 }

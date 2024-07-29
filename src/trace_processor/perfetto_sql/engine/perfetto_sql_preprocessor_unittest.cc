@@ -26,6 +26,8 @@
 namespace perfetto::trace_processor {
 namespace {
 
+using ::testing::HasSubstr;
+
 using Macro = PerfettoSqlPreprocessor::Macro;
 
 class PerfettoSqlPreprocessorUnittest : public ::testing::Test {
@@ -286,6 +288,136 @@ TEST_F(PerfettoSqlPreprocessorUnittest, ZipJoin) {
     ASSERT_TRUE(preprocessor.NextStatement())
         << preprocessor.status().message();
     ASSERT_EQ(preprocessor.statement().sql(), "foo AS baz , bar AS bat");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+}
+
+TEST_F(PerfettoSqlPreprocessorUnittest, TokenApply) {
+  auto foo = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO G(a Expr, b Expr) Returns Expr AS $a AS $b");
+  macros_.Insert("G", Macro{
+                          false,
+                          "G",
+                          {"a", "b"},
+                          FindSubstr(foo, "$a AS $b"),
+                      });
+
+  auto tp = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO TokApply(a Expr, b Expr, c Expr) Returns Expr "
+      "AS __intrinsic_token_apply!($a, $b, $c)");
+  macros_.Insert("TokApply",
+                 Macro{
+                     false,
+                     "TokApply",
+                     {"a", "b", "c"},
+                     FindSubstr(tp, "__intrinsic_token_apply!($a, $b, $c)"),
+                 });
+  {
+    auto source =
+        SqlSource::FromExecuteQuery("__intrinsic_token_apply!((), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "foo AS bar");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar), (baz, bat)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "foo AS bar AND baz AS bat");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar), (baz, bat, bada)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_FALSE(preprocessor.NextStatement());
+    ASSERT_THAT(preprocessor.status().message(), HasSubstr("too many args"));
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar), (baz)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_FALSE(preprocessor.NextStatement());
+    ASSERT_THAT(preprocessor.status().message(), HasSubstr("too few args"));
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "TokApply!(((foo, bar), (baz, bat)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "foo AS bar AND baz AS bat");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+}
+
+TEST_F(PerfettoSqlPreprocessorUnittest, TokenMapJoin) {
+  auto foo = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO G(a Expr) Returns Expr AS baza.$a");
+  macros_.Insert("G", Macro{
+                          false,
+                          "G",
+                          {"a"},
+                          FindSubstr(foo, "baza.$a"),
+                      });
+
+  auto tp = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO TokMapJoin(a Expr, b Expr, c Expr) Returns Expr "
+      "AS __intrinsic_token_map_join!($a, $b, $c)");
+  macros_.Insert("TokMapJoin",
+                 Macro{
+                     false,
+                     "TokMapJoin",
+                     {"a", "b", "c"},
+                     FindSubstr(tp, "__intrinsic_token_map_join!($a, $b, $c)"),
+                 });
+  {
+    auto source =
+        SqlSource::FromExecuteQuery("__intrinsic_token_map_join!((), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_map_join!((foo), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "baza.foo");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_map_join!((foo, baz), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "baza.foo AND baza.baz");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source =
+        SqlSource::FromExecuteQuery("TokMapJoin!((foo, bar), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "baza.foo AND baza.bar");
     ASSERT_FALSE(preprocessor.NextStatement());
   }
 }

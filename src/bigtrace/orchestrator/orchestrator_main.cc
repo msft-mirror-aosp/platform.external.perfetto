@@ -34,8 +34,7 @@
 #include "src/bigtrace/orchestrator/orchestrator_impl.h"
 #include "src/trace_processor/util/status_macros.h"
 
-namespace perfetto {
-namespace bigtrace {
+namespace perfetto::bigtrace {
 namespace {
 
 struct CommandLineOptions {
@@ -162,7 +161,11 @@ base::Status OrchestratorMain(int argc, char** argv) {
                                    ? "ipv4:"
                                    : options->name_resolution_scheme;
 
-  uint32_t pool_size = options->pool_size == 0 ? 5 : options->pool_size;
+  uint32_t pool_size = options->pool_size == 0
+                           ? std::thread::hardware_concurrency()
+                           : options->pool_size;
+
+  PERFETTO_DCHECK(pool_size);
 
   if (worker_address_list.empty()) {
     // Use a set of n workers incrementing from a starting port
@@ -198,8 +201,7 @@ base::Status OrchestratorMain(int argc, char** argv) {
 }
 
 }  // namespace
-}  // namespace bigtrace
-}  // namespace perfetto
+}  // namespace perfetto::bigtrace
 
 int main(int argc, char** argv) {
   auto status = perfetto::bigtrace::OrchestratorMain(argc, argv);
