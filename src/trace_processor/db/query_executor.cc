@@ -16,12 +16,15 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <sys/types.h>
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
+#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/db/column/data_layer.h"
 #include "src/trace_processor/db/column/types.h"
@@ -33,12 +36,14 @@ namespace perfetto::trace_processor {
 namespace {
 
 using Range = RowMap::Range;
+using Indices = column::DataLayerChain::Indices;
+using OrderedIndices = column::DataLayerChain::OrderedIndices;
 
 }  // namespace
 
-void QueryExecutor::FilterColumn(const Constraint& c,
-                                 const column::DataLayerChain& chain,
-                                 RowMap* rm) {
+void QueryExecutor::ApplyConstraint(const Constraint& c,
+                                    const column::DataLayerChain& chain,
+                                    RowMap* rm) {
   // Shortcut of empty row map.
   uint32_t rm_size = rm->size();
   if (rm_size == 0)
@@ -57,12 +62,14 @@ void QueryExecutor::FilterColumn(const Constraint& c,
     }
   }
 
-  // Comparison of NULL with any operation apart from |IS_NULL| and
-  // |IS_NOT_NULL| should return no rows.
-  if (c.value.is_null() && c.op != FilterOp::kIsNull &&
-      c.op != FilterOp::kIsNotNull) {
-    rm->Clear();
-    return;
+  switch (chain.ValidateSearchConstraints(c.op, c.value)) {
+    case SearchValidationResult::kNoData:
+      rm->Clear();
+      return;
+    case SearchValidationResult::kAllData:
+      return;
+    case SearchValidationResult::kOk:
+      break;
   }
 
   uint32_t rm_last = rm->Get(rm_size - 1);
@@ -116,7 +123,6 @@ void QueryExecutor::IndexSearch(const Constraint& c,
   // Create outmost TableIndexVector.
   std::vector<uint32_t> table_indices = std::move(*rm).TakeAsIndexVector();
 
-  using Indices = column::DataLayerChain::Indices;
   Indices indices = Indices::Create(table_indices, Indices::State::kMonotonic);
   chain.IndexSearch(c.op, c.value, indices);
 
@@ -129,22 +135,13 @@ void QueryExecutor::IndexSearch(const Constraint& c,
   *rm = RowMap(std::move(table_indices));
 }
 
-RowMap QueryExecutor::FilterLegacy(const Table* table,
-                                   const std::vector<Constraint>& c_vec) {
-  RowMap rm(0, table->row_count());
-  for (const auto& c : c_vec) {
-    FilterColumn(c, table->ChainForColumn(c.col_idx), &rm);
-  }
-  return rm;
-}
-
 void QueryExecutor::SortLegacy(const Table* table,
                                const std::vector<Order>& ob,
                                std::vector<uint32_t>& out) {
   // Setup the sort token payload to match the input vector of indices. The
   // value of the payload will be untouched by the algorithm even while the
   // order changes to match the ordering defined by the input constraint set.
-  std::vector<column::DataLayerChain::SortToken> rows(out.size());
+  std::vector<Token> rows(out.size());
   for (uint32_t i = 0; i < out.size(); ++i) {
     rows[i].payload = out[i];
   }
@@ -172,22 +169,22 @@ void QueryExecutor::SortLegacy(const Table* table,
   //     the sort is stable).
   //
   // TODO(lalitm): it is possible that we could sort the last constraint (i.e.
-  // the first constraint in the below loop) in a non-stable way. However, this
-  // is more subtle than it appears as we would then need special handling where
-  // there are order bys on a column which is already sorted (e.g. ts, id).
-  // Investigate whether the performance gains from this are worthwhile. This
-  // also needs changes to the constraint modification logic in DbSqliteTable
-  // which currently eliminates constraints on sorted columns.
+  // the first constraint in the below loop) in a non-stable way. However,
+  // this is more subtle than it appears as we would then need special
+  // handling where there are order bys on a column which is already sorted
+  // (e.g. ts, id). Investigate whether the performance gains from this are
+  // worthwhile. This also needs changes to the constraint modification logic
+  // in DbSqliteTable which currently eliminates constraints on sorted
+  // columns.
   for (auto it = ob.rbegin(); it != ob.rend(); ++it) {
     // Reset the index to the payload at the start of each iote
     for (uint32_t i = 0; i < out.size(); ++i) {
       rows[i].index = rows[i].payload;
     }
     table->ChainForColumn(it->col_idx)
-        .StableSort(rows.data(), rows.data() + rows.size(),
-                    it->desc
-                        ? column::DataLayerChain::SortDirection::kDescending
-                        : column::DataLayerChain::SortDirection::kAscending);
+        .StableSort(
+            rows.data(), rows.data() + rows.size(),
+            it->desc ? SortDirection::kDescending : SortDirection::kAscending);
   }
 
   // Recapture the payload from each of the sort tokens whose order now

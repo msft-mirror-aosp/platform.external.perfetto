@@ -18,13 +18,13 @@
 #define SRC_TRACE_PROCESSOR_CONTAINERS_INTERVAL_TREE_H_
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <map>
 #include <memory>
-#include <optional>
-#include <set>
+#include <utility>
 #include <vector>
+
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/small_vector.h"
 
@@ -33,21 +33,22 @@ namespace perfetto::trace_processor {
 using Ts = uint64_t;
 using Id = uint32_t;
 
+struct Interval {
+  Ts start;
+  Ts end;
+  Id id;
+};
+
 // An implementation of a centered interval tree data structure, designed to
 // efficiently find all overlap queries on a set of intervals. Centered interval
 // tree has a build complexity of O(N*logN) and a query time of O(logN + k),
 // where k is the number of overlaps in the dataset.
 class IntervalTree {
  public:
-  // Maps to one trace processor slice.
-  struct Interval {
-    Ts start;
-    Ts end;
-    Id id;
-  };
-
-  // Creates an interval tree from the vector of intervals.
+  // Creates an interval tree from the vector of intervals if needed. Otherwise
+  // copies the vector of intervals.
   explicit IntervalTree(const std::vector<Interval>& sorted_intervals) {
+    PERFETTO_CHECK(!sorted_intervals.empty());
     nodes_.reserve(sorted_intervals.size());
     Node root_node(sorted_intervals.data(), sorted_intervals.size(), nodes_);
     nodes_.emplace_back(std::move(root_node));
@@ -73,6 +74,42 @@ class IntervalTree {
 
         if (e > i.start && s < i.end) {
           res.push_back(i.id);
+        }
+      }
+
+      if (e > n->center_ &&
+          n->right_node_ != std::numeric_limits<size_t>::max()) {
+        stack.push_back(&nodes_[n->right_node_]);
+      }
+      if (s < n->center_ &&
+          n->left_node_ != std::numeric_limits<size_t>::max()) {
+        stack.push_back(&nodes_[n->left_node_]);
+      }
+    }
+  }
+
+  // Modifies |res| to contain all overlaps (as Intervals) that overlap interval
+  // (s, e). Has a complexity of O(log(size of tree) + (number of overlaps)).
+  void FindOverlaps(Ts s, Ts e, std::vector<Interval>& res) const {
+    std::vector<const Node*> stack{nodes_.data() + root_};
+    while (!stack.empty()) {
+      const Node* n = stack.back();
+      stack.pop_back();
+
+      for (const Interval& i : n->intervals_) {
+        // As we know that each interval overlaps the center, if the interval
+        // starts after the |end| we know [start,end] can't intersect the
+        // center.
+        if (i.start > e) {
+          break;
+        }
+
+        if (e > i.start && s < i.end) {
+          Interval new_int;
+          new_int.start = std::max(s, i.start);
+          new_int.end = std::min(e, i.end);
+          new_int.id = i.id;
+          res.push_back(new_int);
         }
       }
 
@@ -142,7 +179,6 @@ class IntervalTree {
   size_t root_;
   std::vector<Node> nodes_;
 };
-
 }  // namespace perfetto::trace_processor
 
 #endif  // SRC_TRACE_PROCESSOR_CONTAINERS_INTERVAL_TREE_H_

@@ -17,6 +17,7 @@
 #ifndef SRC_TRACE_PROCESSOR_DB_TABLE_H_
 #define SRC_TRACE_PROCESSOR_DB_TABLE_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -25,17 +26,32 @@
 #include <vector>
 
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/status_or.h"
+#include "perfetto/base/status.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/ref_counted.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/overlay_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column_storage_overlay.h"
 
 namespace perfetto::trace_processor {
+
+namespace {
+
+using OrderedIndices = column::DataLayerChain::OrderedIndices;
+
+OrderedIndices OrderedIndicesFromIndex(const std::vector<uint32_t>& index) {
+  OrderedIndices o;
+  o.data = index.data();
+  o.size = static_cast<uint32_t>(index.size());
+  return o;
+}
+
+}  // namespace
 
 // Represents a table of data with named, strongly typed columns.
 class Table {
@@ -94,21 +110,6 @@ class Table {
     // Returns the storage index for the last overlay.
     uint32_t StorageIndexForLastOverlay() const { return its_.back().index(); }
 
-    // Looks for a column in a table.
-    // TODO(mayzner): This is not a long term function, it should be used with
-    // caution.
-    std::optional<uint32_t> ColumnIdxFromName(
-        const std::string& col_name) const {
-      auto x = std::find_if(table_->columns_.begin(), table_->columns_.end(),
-                            [col_name](const ColumnLegacy& col) {
-                              return col_name.compare(col.name()) == 0;
-                            });
-
-      return (x == table_->columns_.end())
-                 ? std::nullopt
-                 : std::make_optional(x->index_in_table());
-    }
-
    private:
     const Table* table_ = nullptr;
     std::vector<ColumnStorageOverlay> overlays_;
@@ -155,6 +156,53 @@ class Table {
     return Iterator(this, std::move(rm));
   }
 
+  std::optional<OrderedIndices> GetIndex(
+      const std::vector<uint32_t>& cols) const {
+    for (const auto& idx : indexes_) {
+      if (cols.size() >= idx.index.size()) {
+        continue;
+      }
+      if (std::equal(cols.begin(), cols.end(), idx.columns.begin())) {
+        return OrderedIndicesFromIndex(idx.index);
+      }
+    }
+    return std::nullopt;
+  }
+
+  // Adds an index onto column.
+  // Returns an error if index already exists and `!replace`.
+  base::Status SetIndex(const std::string& name,
+                        std::vector<uint32_t> col_idxs,
+                        std::vector<uint32_t> index,
+                        bool replace = false) {
+    auto it = std::find_if(
+        indexes_.begin(), indexes_.end(),
+        [&name](const ColumnIndex& idx) { return idx.name == name; });
+    if (it == indexes_.end()) {
+      indexes_.push_back({name, std::move(col_idxs), std::move(index)});
+      return base::OkStatus();
+    }
+    if (replace) {
+      it->columns = std::move(col_idxs);
+      it->index = std::move(index);
+      return base::OkStatus();
+    }
+    return base::ErrStatus("Index of this name already exists on this table.");
+  }
+
+  // Removes index from the table.
+  // Returns an error if index doesn't exist.
+  base::Status DropIndex(const std::string& name) {
+    auto it = std::find_if(
+        indexes_.begin(), indexes_.end(),
+        [&name](const ColumnIndex& idx) { return idx.name == name; });
+    if (it == indexes_.end()) {
+      return base::ErrStatus("Index '%s' not found.", name.c_str());
+    }
+    indexes_.erase(it);
+    return base::OkStatus();
+  }
+
   // Sorts the table using the specified order by constraints.
   Table Sort(const std::vector<Order>&) const;
 
@@ -164,13 +212,24 @@ class Table {
   // Creates a copy of this table.
   Table Copy() const;
 
+  // Looks for a column in a table.
+  // TODO(mayzner): This is not a long term function, it should be used with
+  // caution.
+  std::optional<uint32_t> ColumnIdxFromName(const std::string& col_name) const {
+    auto x = std::find_if(
+        columns_.begin(), columns_.end(),
+        [col_name](const ColumnLegacy& col) { return col_name == col.name(); });
+    return x == columns_.end() ? std::nullopt
+                               : std::make_optional(x->index_in_table());
+  }
+
   uint32_t row_count() const { return row_count_; }
   StringPool* string_pool() const { return string_pool_; }
   const std::vector<ColumnLegacy>& columns() const { return columns_; }
-  const std::vector<RefPtr<column::DataLayer>>& storage_layers() const {
+  const std::vector<RefPtr<column::StorageLayer>>& storage_layers() const {
     return storage_layers_;
   }
-  const std::vector<RefPtr<column::DataLayer>>& null_layers() const {
+  const std::vector<RefPtr<column::OverlayLayer>>& null_layers() const {
     return null_layers_;
   }
 
@@ -198,9 +257,9 @@ class Table {
   }
 
   void OnConstructionCompleted(
-      std::vector<RefPtr<column::DataLayer>> storage_layers,
-      std::vector<RefPtr<column::DataLayer>> null_layers,
-      std::vector<RefPtr<column::DataLayer>> overlay_layers);
+      std::vector<RefPtr<column::StorageLayer>> storage_layers,
+      std::vector<RefPtr<column::OverlayLayer>> null_layers,
+      std::vector<RefPtr<column::OverlayLayer>> overlay_layers);
 
   ColumnLegacy* GetColumn(uint32_t index) { return &columns_[index]; }
 
@@ -211,6 +270,12 @@ class Table {
  private:
   friend class ColumnLegacy;
 
+  struct ColumnIndex {
+    std::string name;
+    std::vector<uint32_t> columns;
+    std::vector<uint32_t> index;
+  };
+
   void CreateChains() const;
 
   Table CopyExceptOverlays() const;
@@ -218,15 +283,19 @@ class Table {
   void ApplyDistinct(const Query&, RowMap*) const;
   void ApplySort(const Query&, RowMap*) const;
 
+  RowMap TryApplyIndex(std::vector<Constraint>&) const;
+
   StringPool* string_pool_ = nullptr;
   uint32_t row_count_ = 0;
   std::vector<ColumnStorageOverlay> overlays_;
   std::vector<ColumnLegacy> columns_;
 
-  std::vector<RefPtr<column::DataLayer>> storage_layers_;
-  std::vector<RefPtr<column::DataLayer>> null_layers_;
-  std::vector<RefPtr<column::DataLayer>> overlay_layers_;
+  std::vector<RefPtr<column::StorageLayer>> storage_layers_;
+  std::vector<RefPtr<column::OverlayLayer>> null_layers_;
+  std::vector<RefPtr<column::OverlayLayer>> overlay_layers_;
   mutable std::vector<std::unique_ptr<column::DataLayerChain>> chains_;
+
+  std::vector<ColumnIndex> indexes_;
 };
 
 }  // namespace perfetto::trace_processor

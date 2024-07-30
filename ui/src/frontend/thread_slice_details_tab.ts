@@ -15,7 +15,7 @@
 import m from 'mithril';
 
 import {Icons} from '../base/semantic_icons';
-import {duration, Time, TimeSpan} from '../base/time';
+import {Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
 import {raf} from '../core/raf_scheduler';
 import {Engine} from '../trace_processor/engine';
@@ -25,21 +25,25 @@ import {DetailsShell} from '../widgets/details_shell';
 import {GridLayout, GridLayoutColumn} from '../widgets/grid_layout';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 import {Section} from '../widgets/section';
-import {Tree, TreeNode} from '../widgets/tree';
+import {Tree} from '../widgets/tree';
 
 import {BottomTab, NewBottomTabArgs} from './bottom_tab';
-import {FlowPoint, globals} from './globals';
+import {addDebugSliceTrack} from './debug_tracks/debug_tracks';
+import {Flow, FlowPoint, globals} from './globals';
+import {addQueryResultsTab} from './query_result_tab';
 import {hasArgs, renderArguments} from './slice_args';
 import {renderDetails} from './slice_details';
-import {getSlice, SliceDetails, SliceRef} from './sql/slice';
+import {getSlice, SliceDetails} from '../trace_processor/sql_utils/slice';
 import {
   BreakdownByThreadState,
   breakDownIntervalByThreadState,
 } from './sql/thread_state';
-import {asSliceSqlId} from './sql_types';
+import {asSliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {DurationWidget} from './widgets/duration';
-import {addDebugSliceTrack} from './debug_tracks';
-import {addQueryResultsTab} from './query_result_tab';
+import {addSqlTableTab} from './sql_table_tab';
+import {SqlTables} from './widgets/sql/table/well_known_sql_tables';
+import {SliceRef} from './widgets/slice';
+import {BasicTable} from '../widgets/basic_table';
 
 interface ContextMenuItem {
   name: string;
@@ -85,6 +89,30 @@ function hasThreadName(slice: SliceDetails): boolean {
 
 const ITEMS: ContextMenuItem[] = [
   {
+    name: 'Ancestor slices',
+    shouldDisplay: (slice: SliceDetails) => slice.parentId !== undefined,
+    run: (slice: SliceDetails) =>
+      addSqlTableTab({
+        table: SqlTables.slice,
+        filters: [
+          `id IN (SELECT id FROM _slice_ancestor_and_self(${slice.id}))`,
+        ],
+        imports: ['slices.hierarchy'],
+      }),
+  },
+  {
+    name: 'Descendant slices',
+    shouldDisplay: () => true,
+    run: (slice: SliceDetails) =>
+      addSqlTableTab({
+        table: SqlTables.slice,
+        filters: [
+          `id IN (SELECT id FROM _slice_descendant_and_self(${slice.id}))`,
+        ],
+        imports: ['slices.hierarchy'],
+      }),
+  },
+  {
     name: 'Average duration of slice name',
     shouldDisplay: (slice: SliceDetails) => hasName(slice),
     run: (slice: SliceDetails) =>
@@ -102,7 +130,9 @@ const ITEMS: ContextMenuItem[] = [
       hasPid(slice),
     run: (slice: SliceDetails) => {
       const engine = getEngine();
-      if (engine === undefined) return;
+      if (engine === undefined) {
+        return;
+      }
       engine
         .query(
           `
@@ -112,7 +142,13 @@ const ITEMS: ContextMenuItem[] = [
         )
         .then(() =>
           addDebugSliceTrack(
-            engine,
+            // NOTE(stevegolton): This is a temporary patch, this menu should
+            // become part of another plugin, at which point we can just use the
+            // plugin's context object.
+            {
+              engine,
+              registerTrack: (x) => globals.trackManager.registerTrack(x),
+            },
             {
               sqlSource: `
                                 WITH merged AS (
@@ -328,12 +364,35 @@ export class ThreadSliceDetailsTab extends BottomTab<ThreadSliceDetailsTabConfig
       return m(
         Section,
         {title: 'Preceding Flows'},
-        m(
-          Tree,
-          inFlows.map(({begin, dur}) =>
-            this.renderFlow(begin, dur, !isRunTask),
-          ),
-        ),
+        m(BasicTable, {
+          columns: [
+            {
+              title: 'Slice',
+              render: (flow: Flow) =>
+                m(SliceRef, {
+                  id: asSliceSqlId(flow.begin.sliceId),
+                  name:
+                    flow.begin.sliceChromeCustomName ?? flow.begin.sliceName,
+                  ts: flow.begin.sliceStartTs,
+                  dur: flow.begin.sliceEndTs - flow.begin.sliceStartTs,
+                  sqlTrackId: flow.begin.trackId,
+                }),
+            },
+            {
+              title: 'Delay',
+              render: (flow: Flow) =>
+                m(DurationWidget, {
+                  dur: flow.end.sliceStartTs - flow.begin.sliceEndTs,
+                }),
+            },
+            {
+              title: 'Thread',
+              render: (flow: Flow) =>
+                this.getThreadNameForFlow(flow.begin, !isRunTask),
+            },
+          ],
+          data: inFlows,
+        }),
       );
     } else {
       return null;
@@ -352,45 +411,47 @@ export class ThreadSliceDetailsTab extends BottomTab<ThreadSliceDetailsTabConfig
       return m(
         Section,
         {title: 'Following Flows'},
-        m(
-          Tree,
-          outFlows.map(({end, dur}) => this.renderFlow(end, dur, !isPostTask)),
-        ),
+        m(BasicTable, {
+          columns: [
+            {
+              title: 'Slice',
+              render: (flow: Flow) =>
+                m(SliceRef, {
+                  id: asSliceSqlId(flow.end.sliceId),
+                  name: flow.end.sliceChromeCustomName ?? flow.end.sliceName,
+                  ts: flow.end.sliceStartTs,
+                  dur: flow.end.sliceEndTs - flow.end.sliceStartTs,
+                  sqlTrackId: flow.end.trackId,
+                }),
+            },
+            {
+              title: 'Delay',
+              render: (flow: Flow) =>
+                m(DurationWidget, {
+                  dur: flow.end.sliceEndTs - flow.end.sliceStartTs,
+                }),
+            },
+            {
+              title: 'Thread',
+              render: (flow: Flow) =>
+                this.getThreadNameForFlow(flow.end, !isPostTask),
+            },
+          ],
+          data: outFlows,
+        }),
       );
     } else {
       return null;
     }
   }
 
-  private renderFlow(
+  private getThreadNameForFlow(
     flow: FlowPoint,
-    dur: duration,
     includeProcessName: boolean,
-  ): m.Children {
-    const description =
-      flow.sliceChromeCustomName === undefined
-        ? flow.sliceName
-        : flow.sliceChromeCustomName;
-    const threadName = includeProcessName
+  ): string {
+    return includeProcessName
       ? `${flow.threadName} (${flow.processName})`
       : flow.threadName;
-
-    return m(
-      TreeNode,
-      {left: 'Flow'},
-      m(TreeNode, {
-        left: 'Slice',
-        right: m(SliceRef, {
-          id: asSliceSqlId(flow.sliceId),
-          name: description,
-          ts: flow.sliceStartTs,
-          dur: flow.sliceEndTs - flow.sliceStartTs,
-          sqlTrackId: flow.trackId,
-        }),
-      }),
-      m(TreeNode, {left: 'Delay', right: m(DurationWidget, {dur})}),
-      m(TreeNode, {left: 'Thread', right: threadName}),
-    );
   }
 
   private renderContextButton(sliceInfo: SliceDetails): m.Children {

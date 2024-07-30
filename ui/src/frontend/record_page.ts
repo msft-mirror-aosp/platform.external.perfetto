@@ -176,9 +176,7 @@ function Instructions(cssClass: string) {
       ? m(
           'button.permalinkconfig',
           {
-            onclick: () => {
-              createPermalink({isRecordingConfig: true});
-            },
+            onclick: () => createPermalink({mode: 'RECORDING_OPTS'}),
           },
           'Share recording settings',
         )
@@ -228,8 +226,7 @@ export function displayRecordConfigs() {
       ]),
     );
   }
-  for (const validated of recordConfigStore.recordConfigs) {
-    const item = validated.result;
+  for (const item of recordConfigStore.recordConfigs) {
     configs.push(
       m('.config', [
         m('span.title-config', item.title),
@@ -275,27 +272,6 @@ export function displayRecordConfigs() {
         ),
       ]),
     );
-
-    const errorItems = [];
-    for (const extraKey of validated.extraKeys) {
-      errorItems.push(m('li', `${extraKey} is unrecognised`));
-    }
-    for (const invalidKey of validated.invalidKeys) {
-      errorItems.push(m('li', `${invalidKey} contained an invalid value`));
-    }
-
-    if (errorItems.length > 0) {
-      configs.push(
-        m(
-          '.parsing-errors',
-          'One or more errors have been found while loading configuration "' +
-            item.title +
-            '". Loading is possible, but make sure to check ' +
-            'the settings afterwards.',
-          m('ul', errorItems),
-        ),
-      );
-    }
   }
   return configs;
 }
@@ -839,9 +815,9 @@ function recordMenu(routePage: string) {
   const recInProgress = globals.state.recordingInProgress;
 
   const probes = [];
-  if (isCrOSTarget(target) || isLinuxTarget(target)) {
+  if (isLinuxTarget(target)) {
     probes.push(cpuProbe, powerProbe, memoryProbe, chromeProbe, advancedProbe);
-  } else if (isChromeTarget(target)) {
+  } else if (isChromeTarget(target) && !isCrOSTarget(target)) {
     probes.push(chromeProbe);
   } else if (isWindowsTarget(target)) {
     probes.push(chromeProbe, etwProbe);

@@ -25,17 +25,20 @@
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
 
 // Storage for SetId columns.
-class SetIdStorage final : public DataLayer {
+class SetIdStorage final : public StorageLayer {
  public:
   using SetId = uint32_t;
 
   explicit SetIdStorage(const std::vector<uint32_t>*);
   ~SetIdStorage() override;
+
+  StoragePtr GetStoragePtr() override;
 
   std::unique_ptr<DataLayerChain> MakeChain();
 
@@ -55,11 +58,9 @@ class SetIdStorage final : public DataLayer {
 
     void IndexSearchValidated(FilterOp, SqlValue, Indices&) const override;
 
-    void StableSort(SortToken* start,
-                    SortToken* end,
+    void StableSort(Token* start,
+                    Token* end,
                     SortDirection direction) const override;
-
-    void Serialize(StorageProto*) const override;
 
     void Distinct(Indices&) const override;
 
