@@ -19,19 +19,23 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/ref_counted.h"
+#include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column.h"
 #include "src/trace_processor/db/column/arrangement_overlay.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/overlay_layer.h"
 #include "src/trace_processor/db/column/range_overlay.h"
 #include "src/trace_processor/db/column/selector_overlay.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column_storage_overlay.h"
 #include "src/trace_processor/db/query_executor.h"
@@ -40,7 +44,50 @@ namespace perfetto::trace_processor {
 
 namespace {
 using Indices = column::DataLayerChain::Indices;
+
+constexpr uint32_t kIndexVectorThreshold = 1024;
+
+// Returns if |op| is an operation that can use the fact that the data is
+// sorted.
+bool IsSortingOp(FilterOp op) {
+  switch (op) {
+    case FilterOp::kEq:
+    case FilterOp::kLe:
+    case FilterOp::kLt:
+    case FilterOp::kGe:
+    case FilterOp::kGt:
+    case FilterOp::kIsNotNull:
+    case FilterOp::kIsNull:
+      return true;
+    case FilterOp::kGlob:
+    case FilterOp::kRegex:
+    case FilterOp::kNe:
+      return false;
+  }
+  PERFETTO_FATAL("For GCC");
 }
+
+void ApplyMinMaxQuery(RowMap& rm,
+                      Order o,
+                      const column::DataLayerChain& chain) {
+  std::vector<uint32_t> table_indices = std::move(rm).TakeAsIndexVector();
+  auto indices = Indices::Create(table_indices, Indices::State::kMonotonic);
+  std::optional<Token> ret_tok =
+      o.desc ? chain.MaxElement(indices) : chain.MinElement(indices);
+  rm = ret_tok.has_value() ? RowMap(std::vector<uint32_t>{ret_tok->payload})
+                           : RowMap();
+}
+
+void ApplyLimitAndOffset(RowMap& rm, const Query& q) {
+  uint32_t end = rm.size();
+  uint32_t start = std::min(q.offset, end);
+  if (q.limit) {
+    end = std::min(end, *q.limit + q.offset);
+  }
+  rm = rm.SelectRows(RowMap(start, end));
+}
+
+}  // namespace
 
 Table::Table(StringPool* pool,
              uint32_t row_count,
@@ -92,6 +139,61 @@ Table Table::CopyExceptOverlays() const {
   return {string_pool_, row_count_, std::move(cols), {}};
 }
 
+RowMap Table::TryApplyIndex(std::vector<Constraint>& c_vec) const {
+  RowMap rm(0, row_count());
+
+  // Prework - use indexes if possible and decide which one.
+  std::vector<uint32_t> maybe_idx_cols;
+  for (const auto& c : c_vec) {
+    // Id columns shouldn't use index.
+    if (columns()[c.col_idx].IsId()) {
+      break;
+    }
+    // The operation has to support sorting.
+    if (!IsSortingOp(c.op)) {
+      break;
+    }
+    maybe_idx_cols.push_back(c.col_idx);
+
+    // For the next col to be able to use index, all previous constraints have
+    // to be equality.
+    if (c.op != FilterOp::kEq) {
+      break;
+    }
+  }
+
+  OrderedIndices o_idxs;
+  while (!maybe_idx_cols.empty()) {
+    if (auto maybe_idx = GetIndex(maybe_idx_cols)) {
+      o_idxs = *maybe_idx;
+      break;
+    }
+    maybe_idx_cols.pop_back();
+  }
+
+  // If we can't use the index just apply constraints in a standard way.
+  if (maybe_idx_cols.empty()) {
+    return rm;
+  }
+
+  for (uint32_t i = 0; i < maybe_idx_cols.size(); i++) {
+    const Constraint& c = c_vec[i];
+    Range r =
+        ChainForColumn(c.col_idx).OrderedIndexSearch(c.op, c.value, o_idxs);
+    o_idxs.data += r.start;
+    o_idxs.size = r.size();
+  }
+  c_vec.erase(c_vec.begin(),
+              c_vec.begin() + static_cast<uint32_t>(maybe_idx_cols.size()));
+
+  std::vector<uint32_t> res_vec(o_idxs.data, o_idxs.data + o_idxs.size);
+  if (res_vec.size() < kIndexVectorThreshold) {
+    std::sort(res_vec.begin(), res_vec.end());
+    return RowMap(std::move(res_vec));
+  }
+  return RowMap(BitVector::FromUnsortedIndexVector(res_vec));
+}
+
 RowMap Table::QueryToRowMap(const Query& q) const {
   // We need to delay creation of the chains to this point because of Chrome
   // does not want the binary size overhead of including the chain
@@ -105,8 +207,13 @@ RowMap Table::QueryToRowMap(const Query& q) const {
     CreateChains();
   }
 
-  // Apply the query constraints.
-  RowMap rm = QueryExecutor::FilterLegacy(this, q.constraints);
+  auto cs_copy = q.constraints;
+  RowMap rm = TryApplyIndex(cs_copy);
+
+  // Filter out constraints that are not using index.
+  for (const auto& c : cs_copy) {
+    QueryExecutor::ApplyConstraint(c, ChainForColumn(c.col_idx), &rm);
+  }
 
   if (q.order_type != Query::OrderType::kSort) {
     ApplyDistinct(q, &rm);
@@ -114,42 +221,21 @@ RowMap Table::QueryToRowMap(const Query& q) const {
 
   // Fastpath for one sort, no distinct and limit 1. This type of query means we
   // need to run Max/Min on orderby column and there is no need for sorting.
-  if (q.order_type == Query::OrderType::kSort && q.orders.size() == 1 &&
-      q.limit.has_value() && *q.limit == 1) {
-    Order o = q.orders.front();
-    std::vector<uint32_t> table_indices = std::move(rm).TakeAsIndexVector();
-    auto indices = Indices::Create(table_indices, Indices::State::kMonotonic);
-    std::optional<Token> ret_tok;
-
-    if (o.desc) {
-      ret_tok = ChainForColumn(o.col_idx).MaxElement(indices);
-    } else {
-      ret_tok = ChainForColumn(o.col_idx).MinElement(indices);
-    }
-
-    if (!ret_tok.has_value()) {
-      return RowMap();
-    }
-
-    return RowMap(std::vector<uint32_t>{ret_tok->payload});
-  }
-
-  if (q.order_type != Query::OrderType::kDistinct && !q.orders.empty()) {
-    ApplySort(q, &rm);
-  }
-
-  if (!q.limit.has_value() && q.offset == 0) {
+  if (q.IsMinMaxQuery()) {
+    ApplyMinMaxQuery(rm, q.orders.front(),
+                     ChainForColumn(q.orders.front().col_idx));
     return rm;
   }
 
-  uint32_t end = rm.size();
-  uint32_t start = std::min(q.offset, end);
-
-  if (q.limit) {
-    end = std::min(end, *q.limit + q.offset);
+  if (q.RequireSort()) {
+    ApplySort(q, &rm);
   }
 
-  return rm.SelectRows(RowMap(start, end));
+  if (q.limit.has_value() || q.offset != 0) {
+    ApplyLimitAndOffset(rm, q);
+  }
+
+  return rm;
 }
 
 Table Table::Sort(const std::vector<Order>& ob) const {
@@ -180,7 +266,8 @@ Table Table::Sort(const std::vector<Order>& ob) const {
     table.columns_[ob.front().col_idx].flags_ |= ColumnLegacy::Flag::kSorted;
   }
 
-  std::vector<RefPtr<column::DataLayer>> overlay_layers(table.overlays_.size());
+  std::vector<RefPtr<column::OverlayLayer>> overlay_layers(
+      table.overlays_.size());
   for (uint32_t i = 0; i < table.overlays_.size(); ++i) {
     if (table.overlays_[i].row_map().IsIndexVector()) {
       overlay_layers[i].reset(new column::ArrangementOverlay(
@@ -200,9 +287,9 @@ Table Table::Sort(const std::vector<Order>& ob) const {
 }
 
 void Table::OnConstructionCompleted(
-    std::vector<RefPtr<column::DataLayer>> storage_layers,
-    std::vector<RefPtr<column::DataLayer>> null_layers,
-    std::vector<RefPtr<column::DataLayer>> overlay_layers) {
+    std::vector<RefPtr<column::StorageLayer>> storage_layers,
+    std::vector<RefPtr<column::OverlayLayer>> null_layers,
+    std::vector<RefPtr<column::OverlayLayer>> overlay_layers) {
   for (ColumnLegacy& col : columns_) {
     col.BindToTable(this, string_pool_);
   }
@@ -231,7 +318,7 @@ void Table::CreateChains() const {
 }
 
 void Table::ApplyDistinct(const Query& q, RowMap* rm) const {
-  auto& ob = q.orders;
+  const auto& ob = q.orders;
   PERFETTO_DCHECK(!ob.empty());
 
   // `q.orders` should be treated here only as information on what should we
