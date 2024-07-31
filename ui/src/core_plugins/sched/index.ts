@@ -28,8 +28,10 @@ import {RunnableThreadCountTrack} from './runnable_thread_count';
 
 class SchedPlugin implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace) {
+    const runnableThreadCountUri = `/runnable_thread_count`;
     ctx.registerTrack({
-      uri: RunnableThreadCountTrack.kind,
+      uri: runnableThreadCountUri,
+      title: 'Runnable thread count',
       trackFactory: (trackCtx) =>
         new RunnableThreadCountTrack({
           engine: ctx.engine,
@@ -40,14 +42,14 @@ class SchedPlugin implements Plugin {
       id: 'dev.perfetto.Sched.AddRunnableThreadCountTrackCommand',
       name: 'Add track: runnable thread count',
       callback: () =>
-        addPinnedTrack(RunnableThreadCountTrack.kind, 'Runnable thread count'),
+        addPinnedTrack(runnableThreadCountUri, 'Runnable thread count'),
     });
 
     const uri = uriForActiveCPUCountTrack();
     const title = 'Active CPU count';
     ctx.registerTrack({
       uri,
-      displayName: title,
+      title: title,
       trackFactory: (trackCtx) => new ActiveCPUCountTrack(trackCtx, ctx.engine),
     });
     ctx.registerCommand({
@@ -61,7 +63,7 @@ class SchedPlugin implements Plugin {
       const title = `Active ${cpuType} CPU count`;
       ctx.registerTrack({
         uri,
-        displayName: title,
+        title: title,
         trackFactory: (trackCtx) =>
           new ActiveCPUCountTrack(trackCtx, ctx.engine, cpuType),
       });
@@ -76,9 +78,9 @@ class SchedPlugin implements Plugin {
 }
 
 function uriForActiveCPUCountTrack(cpuType?: CPUType): string {
-  const prefix = `perfetto.sched#ActiveCPUCount`;
+  const prefix = `/active_cpus`;
   if (cpuType !== undefined) {
-    return `${prefix}.${cpuType}`;
+    return `${prefix}_${cpuType}`;
   } else {
     return prefix;
   }

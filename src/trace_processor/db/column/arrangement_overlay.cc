@@ -32,9 +32,14 @@
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
+
+void ArrangementOverlay::Flatten(std::vector<Token>& tokens) {
+  for (auto& token : tokens) {
+    token.index = (*arrangement_)[token.index];
+  }
+}
 
 ArrangementOverlay::ChainImpl::ChainImpl(
     std::unique_ptr<DataLayerChain> inner,
@@ -148,10 +153,10 @@ void ArrangementOverlay::ChainImpl::IndexSearchValidated(
   return inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void ArrangementOverlay::ChainImpl::StableSort(SortToken* start,
-                                               SortToken* end,
+void ArrangementOverlay::ChainImpl::StableSort(Token* start,
+                                               Token* end,
                                                SortDirection direction) const {
-  for (SortToken* it = start; it != end; ++it) {
+  for (Token* it = start; it != end; ++it) {
     it->index = (*arrangement_)[it->index];
   }
   inner_->StableSort(start, end, direction);
@@ -208,14 +213,6 @@ std::optional<Token> ArrangementOverlay::ChainImpl::MinElement(
 SqlValue ArrangementOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
     uint32_t index) const {
   return inner_->Get_AvoidUsingBecauseSlow((*arrangement_)[index]);
-}
-
-void ArrangementOverlay::ChainImpl::Serialize(StorageProto* storage) const {
-  auto* arrangement_overlay = storage->set_arrangement_overlay();
-  arrangement_overlay->set_values(
-      reinterpret_cast<const uint8_t*>(arrangement_->data()),
-      sizeof(uint32_t) * arrangement_->size());
-  inner_->Serialize(arrangement_overlay->set_storage());
 }
 
 }  // namespace perfetto::trace_processor::column
