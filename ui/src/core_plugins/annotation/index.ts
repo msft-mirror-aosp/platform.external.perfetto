@@ -48,12 +48,12 @@ class AnnotationPlugin implements Plugin {
       const name = it.name;
 
       ctx.registerTrack({
-        uri: `perfetto.Annotation#${id}`,
-        displayName: name,
-        kind: THREAD_SLICE_TRACK_KIND,
+        uri: `/annotation_${id}`,
+        title: name,
         tags: {
-          metric: true,
+          kind: THREAD_SLICE_TRACK_KIND,
         },
+        chips: ['metric'],
         trackFactory: ({trackKey}) => {
           return new ThreadSliceTrack(
             {
@@ -91,12 +91,12 @@ class AnnotationPlugin implements Plugin {
       const name = counterIt.name;
 
       ctx.registerTrack({
-        uri: `perfetto.Annotation#counter${trackId}`,
-        displayName: name,
-        kind: COUNTER_TRACK_KIND,
+        uri: `/annotation_counter_${trackId}`,
+        title: name,
         tags: {
-          metric: true,
+          kind: COUNTER_TRACK_KIND,
         },
+        chips: ['metric'],
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,

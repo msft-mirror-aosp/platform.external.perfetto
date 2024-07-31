@@ -815,6 +815,39 @@ message SurfaceFlingerTransactionsConfig {
 
 // End of protos/perfetto/config/android/surfaceflinger_transactions_config.proto
 
+// Begin of protos/perfetto/config/android/windowmanager_config.proto
+
+// Custom configuration for the "android.windowmanager" data source.
+message WindowManagerConfig {
+  enum LogFrequency {
+    LOG_FREQUENCY_UNSPECIFIED = 0;
+
+    // Trace state snapshots when a frame is committed.
+    LOG_FREQUENCY_FRAME = 1;
+
+    // Trace state snapshots every time a transaction is committed.
+    LOG_FREQUENCY_TRANSACTION = 2;
+  }
+  optional LogFrequency log_frequency = 1;
+
+  enum LogLevel {
+    LOG_LEVEL_UNSPECIFIED = 0;
+
+    // Logs all elements with maximum amount of information.
+    LOG_LEVEL_VERBOSE = 1;
+
+    // Logs all elements but doesn't write all configuration data.
+    LOG_LEVEL_DEBUG = 2;
+
+    // Logs only visible elements, with the minimum amount of performance
+    // overhead
+    LOG_LEVEL_CRITICAL = 3;
+  }
+  optional LogLevel log_level = 2;
+}
+
+// End of protos/perfetto/config/android/windowmanager_config.proto
+
 // Begin of protos/perfetto/config/chrome/chrome_config.proto
 
 message ChromeConfig {
@@ -2863,6 +2896,11 @@ enum MeminfoCounters {
   MEMINFO_VMALLOC_CHUNK = 31;
   MEMINFO_CMA_TOTAL = 32;
   MEMINFO_CMA_FREE = 33;
+  MEMINFO_GPU = 34;
+  MEMINFO_ZRAM = 35;
+  MEMINFO_MISC = 36;
+  MEMINFO_ION_HEAP = 37;
+  MEMINFO_ION_HEAP_POOL = 38;
 }
 
 // Counter definitions for Linux's /proc/vmstat.
@@ -3121,6 +3159,10 @@ message SysStatsConfig {
   // Polls /proc/pressure/* every X ms, if non-zero.
   // This is required to be > 10ms to avoid excessive CPU usage.
   optional uint32 psi_period_ms = 11;
+
+  // Polls /sys/class/thermal/* every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  optional uint32 thermal_period_ms = 12;
 }
 
 // End of protos/perfetto/config/sys_stats/sys_stats_config.proto
@@ -3275,7 +3317,7 @@ message TrackEventConfig {
 // Begin of protos/perfetto/config/data_source_config.proto
 
 // The configuration that is passed to each data source when starting tracing.
-// Next id: 130
+// Next id: 131
 message DataSourceConfig {
   enum SessionInitiator {
     SESSION_INITIATOR_UNSPECIFIED = 0;
@@ -3426,6 +3468,9 @@ message DataSourceConfig {
 
   // Data source name: android.pixel.modem
   optional PixelModemConfig pixel_modem_config = 129 [lazy = true];
+
+  // Data source name: android.windowmanager
+  optional WindowManagerConfig windowmanager_config = 130 [lazy = true];
 
   // This is a fallback mechanism to send a free-form text config to the
   // producer. In theory this should never be needed. All the code that
@@ -5774,7 +5819,7 @@ message DisplayState {
 // Begin of protos/perfetto/trace/android/winscope_extensions.proto
 
 message WinscopeExtensions {
-  extensions 1 to 5;
+  extensions 1 to 6;
 }
 
 // End of protos/perfetto/trace/android/winscope_extensions.proto
@@ -12796,8 +12841,11 @@ message TrackEvent {
   extensions 1000 to 1999;
   // Extension range reserved for https://b.corp.google.com/issues/301227627.
   extensions 2000 to 2000;
+  // Extension range reserved for android:
+  // protos/perfetto/trace/android/android_track_event.proto
+  extensions 2001 to 2999;
   // Extension range for future use.
-  extensions 2001 to 9899;
+  extensions 3000 to 9899;
   // Reserved for Perfetto unit and integration tests.
   extensions 9900 to 10000;
 
@@ -14331,6 +14379,14 @@ message SysStats {
   }
   // One entry per PsiResource type.
   repeated PsiSample psi = 14;
+
+  // Reading from /sys/class/thermal/*.
+  message ThermalZone {
+    optional string name = 1;
+    optional uint64 temp = 2;
+    optional string type = 3;
+  }
+  repeated ThermalZone thermal_zone = 15;
 }
 
 // End of protos/perfetto/trace/sys_stats/sys_stats.proto
@@ -14350,6 +14406,9 @@ message SystemInfo {
 
   // The SoC model from which trace is collected
   optional string android_soc_model = 9;
+
+  // The hardware reversion from android device
+  optional string android_hardware_revision = 10;
 
   // The version of traced (the same returned by `traced --version`).
   // This is a human readable string with and its format varies depending on
@@ -14394,6 +14453,10 @@ message CpuInfo {
     // /sys/devices/system/cpu/cpuX/cpufreq/scaling_available_frequencies
     // where X is the index of this CPU.
     repeated uint32 frequencies = 2;
+
+    // Cpu capacity from /sys/devices/system/cpu/cpuX/cpu_capacity where X is
+    // the index of this CPU.
+    optional uint32 capacity = 3;
   }
 
   // Describes available CPUs, one entry per CPU.

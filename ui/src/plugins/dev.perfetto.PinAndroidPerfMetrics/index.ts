@@ -16,8 +16,7 @@ import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
 import {TrackType} from '../dev.perfetto.AndroidCujs/trackUtils';
 import {METRIC_HANDLERS} from './handlers/handlerRegistry';
 import {MetricHandlerMatch} from './handlers/metricUtils';
-
-export const PLUGIN_ID = 'dev.perfetto.PinAndroidPerfMetrics';
+import {PLUGIN_ID} from './pluginId';
 
 const JANK_CUJ_QUERY_PRECONDITIONS = `
   SELECT RUN_METRIC('android/android_blocking_calls_cuj_metric.sql');
@@ -83,11 +82,13 @@ class PinAndroidPerfMetrics implements Plugin {
       return [];
     }
     const capturedString = match[1];
+    let metricList: string[] = [];
     if (capturedString.includes('--')) {
-      return capturedString.split('--');
+      metricList = capturedString.split('--');
     } else {
-      return [capturedString];
+      metricList = [capturedString];
     }
+    return metricList.map((metric) => decodeURIComponent(metric));
   }
 
   private getMetricsToShow(metricList: string[]) {

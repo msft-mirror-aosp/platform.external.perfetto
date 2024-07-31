@@ -16,7 +16,12 @@ import("../../../../../../../gn/perfetto_sql.gni")
 
 perfetto_sql_source_set("heap_graph") {
   sources = [
+    "class_tree.sql",
+    "dominator_class_tree.sql",
     "dominator_tree.sql",
     "excluded_refs.sql",
+    "heap_graph_class_aggregation.sql",
+    "helpers.sql",
+    "raw_dominator_tree.sql",
   ]
 }

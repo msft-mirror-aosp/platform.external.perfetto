@@ -39,33 +39,11 @@ using Range = RowMap::Range;
 using Indices = column::DataLayerChain::Indices;
 using OrderedIndices = column::DataLayerChain::OrderedIndices;
 
-static constexpr uint32_t kIndexVectorThreshold = 1024;
-
-// Returns if |op| is an operation that can use the fact that the data is
-// sorted.
-bool IsSortingOp(FilterOp op) {
-  switch (op) {
-    case FilterOp::kEq:
-    case FilterOp::kLe:
-    case FilterOp::kLt:
-    case FilterOp::kGe:
-    case FilterOp::kGt:
-    case FilterOp::kIsNotNull:
-    case FilterOp::kIsNull:
-      return true;
-    case FilterOp::kGlob:
-    case FilterOp::kRegex:
-    case FilterOp::kNe:
-      return false;
-  }
-  PERFETTO_FATAL("For GCC");
-}
-
 }  // namespace
 
-void QueryExecutor::FilterColumn(const Constraint& c,
-                                 const column::DataLayerChain& chain,
-                                 RowMap* rm) {
+void QueryExecutor::ApplyConstraint(const Constraint& c,
+                                    const column::DataLayerChain& chain,
+                                    RowMap* rm) {
   // Shortcut of empty row map.
   uint32_t rm_size = rm->size();
   if (rm_size == 0)
@@ -157,85 +135,13 @@ void QueryExecutor::IndexSearch(const Constraint& c,
   *rm = RowMap(std::move(table_indices));
 }
 
-RowMap QueryExecutor::FilterLegacy(const Table* table,
-                                   const std::vector<Constraint>& c_vec) {
-  RowMap rm(0, table->row_count());
-
-  // Prework - use indexes if possible and decide which one.
-  std::vector<uint32_t> maybe_idx_cols;
-
-  for (uint32_t i = 0; i < c_vec.size(); i++) {
-    const Constraint& c = c_vec[i];
-    // Id columns shouldn't use index.
-    if (table->columns()[c.col_idx].IsId()) {
-      break;
-    }
-
-    // The operation has to support sorting.
-    if (!IsSortingOp(c.op)) {
-      break;
-    }
-
-    maybe_idx_cols.push_back(c.col_idx);
-
-    // For the next col to be able to use index, all previous constraints have
-    // to be equality.
-    if (c.op != FilterOp::kEq) {
-      break;
-    }
-  }
-
-  OrderedIndices o_idxs;
-  while (!maybe_idx_cols.empty()) {
-    if (auto maybe_idx = table->GetIndex(maybe_idx_cols)) {
-      o_idxs = std::move(*maybe_idx);
-      break;
-    }
-    maybe_idx_cols.pop_back();
-  }
-
-  // If we can't use the index just filter in a standard way.
-  if (maybe_idx_cols.empty()) {
-    for (const auto& c : c_vec) {
-      FilterColumn(c, table->ChainForColumn(c.col_idx), &rm);
-    }
-    return rm;
-  }
-
-  for (uint32_t i = 0; i < maybe_idx_cols.size(); i++) {
-    const Constraint& c = c_vec[i];
-
-    Range r = table->ChainForColumn(c.col_idx).OrderedIndexSearch(c.op, c.value,
-                                                                  o_idxs);
-    o_idxs.data += r.start;
-    o_idxs.size = r.size();
-  }
-
-  std::vector<uint32_t> res_vec(o_idxs.data, o_idxs.data + o_idxs.size);
-  if (res_vec.size() < kIndexVectorThreshold) {
-    std::sort(res_vec.begin(), res_vec.end());
-    rm = RowMap(std::move(res_vec));
-  } else {
-    rm = RowMap(BitVector::FromUnsortedIndexVector(std::move(res_vec)));
-  }
-
-  // Filter the rest of constraints in a standard way.
-  for (uint32_t i = static_cast<uint32_t>(maybe_idx_cols.size());
-       i < c_vec.size(); i++) {
-    const Constraint& c = c_vec[i];
-    FilterColumn(c, table->ChainForColumn(c.col_idx), &rm);
-  }
-
-  return rm;
-}
-
 void QueryExecutor::SortLegacy(const Table* table,
                                const std::vector<Order>& ob,
                                std::vector<uint32_t>& out) {
   // Setup the sort token payload to match the input vector of indices. The
   // value of the payload will be untouched by the algorithm even while the
   // order changes to match the ordering defined by the input constraint set.
-  std::vector<column::DataLayerChain::SortToken> rows(out.size());
+  std::vector<Token> rows(out.size());
   for (uint32_t i = 0; i < out.size(); ++i) {
     rows[i].payload = out[i];
   }
@@ -276,10 +182,9 @@ void QueryExecutor::SortLegacy(const Table* table,
       rows[i].index = rows[i].payload;
     }
     table->ChainForColumn(it->col_idx)
-        .StableSort(rows.data(), rows.data() + rows.size(),
-                    it->desc
-                        ? column::DataLayerChain::SortDirection::kDescending
-                        : column::DataLayerChain::SortDirection::kAscending);
+        .StableSort(
+            rows.data(), rows.data() + rows.size(),
+            it->desc ? SortDirection::kDescending : SortDirection::kAscending);
   }
 
   // Recapture the payload from each of the sort tokens whose order now

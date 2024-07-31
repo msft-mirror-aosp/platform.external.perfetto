@@ -85,9 +85,7 @@ class FakeStorageChain : public DataLayerChain {
 
   void IndexSearchValidated(FilterOp, SqlValue, Indices&) const override;
 
-  void StableSort(SortToken* start,
-                  SortToken* end,
-                  SortDirection) const override;
+  void StableSort(Token* start, Token* end, SortDirection) const override;
 
   void Distinct(Indices&) const override;
 
@@ -96,8 +94,6 @@ class FakeStorageChain : public DataLayerChain {
   std::optional<Token> MinElement(Indices&) const override;
 
   SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const override;
-
-  void Serialize(StorageProto*) const override;
 
   uint32_t size() const override { return size_; }
 

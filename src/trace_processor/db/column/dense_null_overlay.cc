@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -32,7 +33,6 @@
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
@@ -61,6 +61,14 @@ std::optional<Token> RemoveAllNullsAndReturnTheFirstOne(
   return null_tok;
 }
 }  // namespace
+
+void DenseNullOverlay::Flatten(std::vector<Token>& tokens) {
+  for (auto& token : tokens) {
+    if (!non_null_->IsSet(token.index)) {
+      token.index = std::numeric_limits<uint32_t>::max();
+    }
+  }
+}
 
 DenseNullOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                        const BitVector* non_null)
@@ -222,12 +230,12 @@ void DenseNullOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
   inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void DenseNullOverlay::ChainImpl::StableSort(SortToken* start,
-                                             SortToken* end,
+void DenseNullOverlay::ChainImpl::StableSort(Token* start,
+                                             Token* end,
                                              SortDirection direction) const {
-  SortToken* it = std::stable_partition(
-      start, end,
-      [this](const SortToken& idx) { return !non_null_->IsSet(idx.index); });
+  Token* it = std::stable_partition(start, end, [this](const Token& idx) {
+    return !non_null_->IsSet(idx.index);
+  });
   inner_->StableSort(it, end, direction);
   if (direction == SortDirection::kDescending) {
     std::rotate(start, it, end);
@@ -277,12 +285,6 @@ SqlValue DenseNullOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
     uint32_t index) const {
   return non_null_->IsSet(index) ? inner_->Get_AvoidUsingBecauseSlow(index)
                                  : SqlValue();
-}
-
-void DenseNullOverlay::ChainImpl::Serialize(StorageProto* storage) const {
-  auto* null_overlay = storage->set_dense_null_overlay();
-  non_null_->Serialize(null_overlay->set_bit_vector());
-  inner_->Serialize(null_overlay->set_storage());
 }
 
 }  // namespace perfetto::trace_processor::column
