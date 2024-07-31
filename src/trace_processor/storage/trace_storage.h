@@ -626,6 +626,13 @@ class TraceStorage {
     return &profiler_smaps_table_;
   }
 
+  const tables::TraceFileTable& trace_file_table() const {
+    return trace_file_table_;
+  }
+  tables::TraceFileTable* mutable_trace_file_table() {
+    return &trace_file_table_;
+  }
+
   const tables::StackSampleTable& stack_sample_table() const {
     return stack_sample_table_;
   }
@@ -890,6 +897,13 @@ class TraceStorage {
     return &viewcapture_table_;
   }
 
+  const tables::WindowManagerTable& windowmanager_table() const {
+    return windowmanager_table_;
+  }
+  tables::WindowManagerTable* mutable_windowmanager_table() {
+    return &windowmanager_table_;
+  }
+
   const tables::WindowManagerShellTransitionsTable&
   window_manager_shell_transitions_table() const {
     return window_manager_shell_transitions_table_;
@@ -1149,6 +1163,8 @@ class TraceStorage {
       android_game_intervention_list_table_{&string_pool_};
   tables::ProfilerSmapsTable profiler_smaps_table_{&string_pool_};
 
+  tables::TraceFileTable trace_file_table_{&string_pool_};
+
   // Symbol tables (mappings from frames to symbol names)
   tables::SymbolTable symbol_table_{&string_pool_};
   tables::HeapGraphObjectTable heap_graph_object_table_{&string_pool_};
@@ -1203,6 +1219,7 @@ class TraceStorage {
   tables::SurfaceFlingerTransactionsTable surfaceflinger_transactions_table_{
       &string_pool_};
   tables::ViewCaptureTable viewcapture_table_{&string_pool_};
+  tables::WindowManagerTable windowmanager_table_{&string_pool_};
   tables::WindowManagerShellTransitionsTable
       window_manager_shell_transitions_table_{&string_pool_};
   tables::WindowManagerShellTransitionHandlersTable
