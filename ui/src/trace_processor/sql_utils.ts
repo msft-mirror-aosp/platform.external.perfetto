@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {SortDirection} from '../base/comparison_utils';
-import {AsyncDisposable} from '../base/disposable';
+
 import {isString} from '../base/object_utils';
 import {sqliteString} from '../base/string_utils';
 
@@ -175,7 +175,7 @@ export {SqlValue};
  * // Use the table...
  *
  * // Cleanup the table when done
- * await table.disposeAsync();
+ * await table[Symbol.asyncDispose]();
  */
 export async function createPerfettoTable(
   engine: Engine,
@@ -184,7 +184,7 @@ export async function createPerfettoTable(
 ): Promise<AsyncDisposable> {
   await engine.query(`CREATE PERFETTO TABLE ${tableName} AS ${expression}`);
   return {
-    disposeAsync: async () => {
+    [Symbol.asyncDispose]: async () => {
       await engine.tryQuery(`DROP TABLE IF EXISTS ${tableName}`);
     },
   };
@@ -209,7 +209,7 @@ export async function createPerfettoTable(
  * // Use the view...
  *
  * // Cleanup the view when done
- * await view.disposeAsync();
+ * await view[Symbol.asyncDispose]();
  */
 export async function createView(
   engine: Engine,
@@ -218,8 +218,55 @@ export async function createView(
 ): Promise<AsyncDisposable> {
   await engine.query(`CREATE VIEW ${viewName} AS ${expression}`);
   return {
-    disposeAsync: async () => {
+    [Symbol.asyncDispose]: async () => {
       await engine.tryQuery(`DROP VIEW IF EXISTS ${viewName}`);
+    },
+  };
+}
+
+export async function createVirtualTable(
+  engine: Engine,
+  tableName: string,
+  using: string,
+): Promise<AsyncDisposable> {
+  await engine.query(`CREATE VIRTUAL TABLE ${tableName} USING ${using}`);
+  return {
+    [Symbol.asyncDispose]: async () => {
+      await engine.tryQuery(`DROP TABLE IF EXISTS ${tableName}`);
+    },
+  };
+}
+
+/**
+ * Asynchronously creates a 'perfetto' index using the given engine and returns
+ * an disposable object to handle its cleanup.
+ *
+ * @param engine - The database engine to execute the query.
+ * @param indexName - The name of the index to be created.
+ * @param expression - The SQL expression containing the table and columns.
+ * @returns An AsyncDisposable which drops the created table when disposed.
+ *
+ * @example
+ * const engine = new Engine();
+ * const indexName = 'my_perfetto_index';
+ * const expression = 'my_perfetto_table(foo)';
+ *
+ * const index = await createPerfettoIndex(engine, indexName, expression);
+ *
+ * // Use the index...
+ *
+ * // Cleanup the index when done
+ * await index[Symbol.asyncDispose]();
+ */
+export async function createPerfettoIndex(
+  engine: Engine,
+  indexName: string,
+  expression: string,
+): Promise<AsyncDisposable> {
+  await engine.query(`create perfetto index ${indexName} on ${expression}`);
+  return {
+    [Symbol.asyncDispose]: async () => {
+      await engine.tryQuery(`drop perfetto index ${indexName}`);
     },
   };
 }
