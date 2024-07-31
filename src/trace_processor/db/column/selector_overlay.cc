@@ -30,14 +30,38 @@
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
 
 constexpr uint32_t kIndexOfNthSetRatio = 32;
 
+void TranslateToInnerIndices(const BitVector& selector,
+                             std::vector<Token>& tokens) {
+  if (selector.size() == selector.CountSetBits()) {
+    return;
+  }
+
+  if (tokens.size() < selector.size() / kIndexOfNthSetRatio) {
+    for (auto& token : tokens) {
+      token.index = selector.IndexOfNthSet(token.index);
+    }
+    return;
+  }
+
+  // TODO(mayzner): once we have a reverse index for IndexOfNthSet in
+  // BitVector, this should no longer be necessary.
+  std::vector<uint32_t> lookup = selector.GetSetBitIndices();
+  for (auto& token : tokens) {
+    token.index = lookup[token.index];
+  }
+}
+
 }  // namespace
+
+void SelectorOverlay::Flatten(std::vector<Token>& tokens) {
+  TranslateToInnerIndices(*selector_, tokens);
+}
 
 SelectorOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                       const BitVector* selector)
@@ -52,8 +76,8 @@ SingleSearchResult SelectorOverlay::ChainImpl::SingleSearch(FilterOp op,
 SearchValidationResult SelectorOverlay::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue sql_val) const {
-  if (sql_val.is_null() &&
-      !(op == FilterOp::kIsNotNull || op == FilterOp::kIsNull)) {
+  if (sql_val.is_null() && op != FilterOp::kIsNotNull &&
+      op != FilterOp::kIsNull) {
     return SearchValidationResult::kNoData;
   }
   return inner_->ValidateSearchConstraints(op, sql_val);
@@ -65,7 +89,7 @@ RangeOrBitVector SelectorOverlay::ChainImpl::SearchValidated(FilterOp op,
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::Search");
 
-  // Figure out the bounds of the OrderedIndices in the underlying storage and
+  // Figure out the bounds of the indicess in the underlying storage and
   // search it.
   uint32_t start_idx = selector_->IndexOfNthSet(in.start);
   uint32_t end_idx = selector_->IndexOfNthSet(in.end - 1) + 1;
@@ -97,16 +121,16 @@ void SelectorOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
                                                       Indices& indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::IndexSearch");
-  TranslateToInnerIndices(indices);
+  TranslateToInnerIndices(*selector_, indices.tokens);
   return inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void SelectorOverlay::ChainImpl::StableSort(SortToken* start,
-                                            SortToken* end,
+void SelectorOverlay::ChainImpl::StableSort(Token* start,
+                                            Token* end,
                                             SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::StableSort");
-  for (SortToken* it = start; it != end; ++it) {
+  for (Token* it = start; it != end; ++it) {
     it->index = selector_->IndexOfNthSet(it->index);
   }
   inner_->StableSort(start, end, direction);
@@ -115,7 +139,7 @@ void SelectorOverlay::ChainImpl::StableSort(SortToken* start,
 void SelectorOverlay::ChainImpl::Distinct(Indices& indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::Distinct");
-  TranslateToInnerIndices(indices);
+  TranslateToInnerIndices(*selector_, indices.tokens);
   return inner_->Distinct(indices);
 }
 
@@ -123,7 +147,7 @@ std::optional<Token> SelectorOverlay::ChainImpl::MaxElement(
     Indices& indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::MaxElement");
-  TranslateToInnerIndices(indices);
+  TranslateToInnerIndices(*selector_, indices.tokens);
   return inner_->MaxElement(indices);
 }
 
@@ -131,40 +155,13 @@ std::optional<Token> SelectorOverlay::ChainImpl::MinElement(
     Indices& indices) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SelectorOverlay::ChainImpl::MinElement");
-  TranslateToInnerIndices(indices);
+  TranslateToInnerIndices(*selector_, indices.tokens);
   return inner_->MinElement(indices);
 }
 
 SqlValue SelectorOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
     uint32_t index) const {
   return inner_->Get_AvoidUsingBecauseSlow(selector_->IndexOfNthSet(index));
-}
-
-void SelectorOverlay::ChainImpl::Serialize(StorageProto* storage) const {
-  auto* selector_overlay = storage->set_selector_overlay();
-  inner_->Serialize(selector_overlay->set_storage());
-  selector_->Serialize(selector_overlay->set_bit_vector());
-}
-
-void SelectorOverlay::ChainImpl::TranslateToInnerIndices(
-    Indices& indices) const {
-  if (selector_->size() == selector_->CountSetBits()) {
-    return;
-  }
-
-  if (indices.tokens.size() < selector_->size() / kIndexOfNthSetRatio) {
-    for (auto& token : indices.tokens) {
-      token.index = selector_->IndexOfNthSet(token.index);
-    }
-    return;
-  }
-
-  // TODO(mayzner): once we have a reverse index for IndexOfNthSet in
-  // BitVector, this should no longer be necessary.
-  std::vector<uint32_t> lookup = selector_->GetSetBitIndices();
-  for (auto& token : indices.tokens) {
-    token.index = lookup[token.index];
-  }
 }
 
 }  // namespace perfetto::trace_processor::column

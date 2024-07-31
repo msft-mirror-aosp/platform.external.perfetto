@@ -17,6 +17,7 @@
 #define SRC_TRACE_PROCESSOR_DB_COLUMN_TYPES_H_
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -26,6 +27,7 @@
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/row_map.h"
+#include "src/trace_processor/containers/string_pool.h"
 
 namespace perfetto::trace_processor {
 
@@ -122,6 +124,22 @@ struct Query {
 
   // OFFSET value. Can be "!= 0" only if `limit` has value.
   uint32_t offset = 0;
+
+  // Returns true if query should be used for fetching minimum or maximum value
+  // of singular column.
+  inline bool IsMinMaxQuery() const {
+    // Order needs to specify the sorting.
+    return order_type == Query::OrderType::kSort
+           // There can be only one column for sorting.
+           && orders.size() == 1
+           // Limit has value 1
+           && limit.has_value() && *limit == 1;
+  }
+
+  // Returns true if query should be used for sorting.
+  inline bool RequireSort() const {
+    return order_type != Query::OrderType::kDistinct && !orders.empty();
+  }
 };
 
 // The enum type of the column.
@@ -160,6 +178,12 @@ struct Token {
       return a.payload < b.payload;
     }
   };
+};
+
+// Indicates the direction of the sort on a single chain.
+enum class SortDirection {
+  kAscending,
+  kDescending,
 };
 
 }  // namespace perfetto::trace_processor

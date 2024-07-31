@@ -71,11 +71,13 @@ struct Dfs : public SqliteAggregateFunction<Dfs> {
     }
     PERFETTO_DCHECK(!graph->empty());
 
+    // If the array is empty, be forgiving and return an empty array. We could
+    // return an error here but in 99% of cases, the caller will simply want
+    // an empty table instead.
     auto* start_ids =
         sqlite::value::Pointer<perfetto_sql::IntArray>(argv[1], "ARRAY<LONG>");
     if (!start_ids) {
-      return sqlite::result::Error(
-          ctx, "dfs: second argument must a non-empty array of integers");
+      return sqlite::result::UniquePointer(ctx, std::move(table), "TABLE");
     }
     PERFETTO_DCHECK(!start_ids->empty());
 
@@ -125,31 +127,37 @@ struct Bfs : public SqliteAggregateFunction<Bfs> {
     }
     PERFETTO_DCHECK(!graph->empty());
 
+    // If the array is empty, be forgiving and return an empty array. We could
+    // return an error here but in 99% of cases, the caller will simply want
+    // an empty table instead.
     auto* start_ids =
         sqlite::value::Pointer<perfetto_sql::IntArray>(argv[1], "ARRAY<LONG>");
     if (!start_ids) {
-      return sqlite::result::Error(
-          ctx, "bfs: second argument must a non-empty array of integers");
+      return sqlite::result::UniquePointer(ctx, std::move(table), "TABLE");
     }
     PERFETTO_DCHECK(!start_ids->empty());
 
     std::vector<bool> visited(graph->size());
     base::CircularQueue<State> queue;
-    for (int64_t x : *start_ids) {
-      queue.emplace_back(State{static_cast<uint32_t>(x), std::nullopt});
+    for (int64_t raw_id : *start_ids) {
+      auto id = static_cast<uint32_t>(raw_id);
+      if (id >= graph->size() || visited[id]) {
+        continue;
+      }
+      visited[id] = true;
+      queue.emplace_back(State{id, std::nullopt});
     }
     while (!queue.empty()) {
       State state = queue.front();
       queue.pop_front();
+      table->Insert({state.id, state.parent_id});
 
       auto& node = (*graph)[state.id];
-      if (visited[state.id]) {
-        continue;
-      }
-      table->Insert({state.id, state.parent_id});
-      visited[state.id] = true;
-
       for (uint32_t n : node.outgoing_edges) {
+        if (visited[n]) {
+          continue;
+        }
+        visited[n] = true;
         queue.emplace_back(State{n, state.id});
       }
     }

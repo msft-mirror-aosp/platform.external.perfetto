@@ -20,7 +20,7 @@ import {
   autosaveConfigStore,
   recordTargetStore,
 } from '../frontend/record_config';
-import {SqlTables} from '../frontend/sql_table/well_known_tables';
+import {SqlTables} from '../frontend/widgets/sql/table/well_known_sql_tables';
 
 import {NonSerializableState, State, STATE_VERSION} from './state';
 
@@ -101,15 +101,6 @@ export function createEmptyState(): State {
       : createEmptyRecordConfig(),
     displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
-
-    frontendLocalState: {
-      visibleState: {
-        start: Time.ZERO,
-        end: Time.fromSeconds(10),
-        lastUpdate: 0,
-        resolution: 0n,
-      },
-    },
 
     omniboxState: {
       omnibox: '',

@@ -18,28 +18,26 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <type_traits>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 
-#include "perfetto/base/compiler.h"
+#include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
-#include "src/trace_processor/containers/row_map.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 
 namespace perfetto::trace_processor::column {
 
 // Storage for all numeric type data (i.e. doubles, int32, int64, uint32).
-class NumericStorageBase : public DataLayer {
+class NumericStorageBase : public StorageLayer {
  protected:
   class ChainImpl : public DataLayerChain {
    public:
@@ -50,9 +48,11 @@ class NumericStorageBase : public DataLayer {
 
     void IndexSearchValidated(FilterOp, SqlValue, Indices&) const override;
 
-    void Serialize(StorageProto*) const override;
-
     std::string DebugString() const override { return "NumericStorage"; }
+
+    bool is_sorted() const { return is_sorted_; }
+
+    ColumnType column_type() const { return storage_type_; }
 
    protected:
     ChainImpl(const void* vector_ptr, ColumnType type, bool is_sorted);
@@ -86,6 +86,8 @@ class NumericStorage final : public NumericStorageBase {
   PERFETTO_NO_INLINE NumericStorage(const std::vector<T>* vec,
                                     ColumnType type,
                                     bool is_sorted);
+
+  StoragePtr GetStoragePtr() override { return vector_->data(); }
 
   // The implementation of this function is given by
   // make_chain.cc/make_chain_minimal.cc depending on whether this is a minimal
@@ -121,12 +123,8 @@ class NumericStorage final : public NumericStorageBase {
                            [this](const Token& t1, const Token& t2) {
                              return (*vector_)[t1.index] < (*vector_)[t2.index];
                            });
-
-      if (tok == indices.tokens.end()) {
-        return std::nullopt;
-      }
-
-      return *tok;
+      return tok == indices.tokens.end() ? std::nullopt
+                                         : std::make_optional(*tok);
     }
 
     std::optional<Token> MinElement(Indices& indices) const override {
@@ -135,11 +133,8 @@ class NumericStorage final : public NumericStorageBase {
                            [this](const Token& t1, const Token& t2) {
                              return (*vector_)[t1.index] < (*vector_)[t2.index];
                            });
-      if (tok == indices.tokens.end()) {
-        return std::nullopt;
-      }
-
-      return *tok;
+      return tok == indices.tokens.end() ? std::nullopt
+                                         : std::make_optional(*tok);
     }
 
     SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const override {
@@ -149,22 +144,20 @@ class NumericStorage final : public NumericStorageBase {
       return SqlValue::Long((*vector_)[index]);
     }
 
-    void StableSort(SortToken* start,
-                    SortToken* end,
+    void StableSort(Token* start,
+                    Token* end,
                     SortDirection direction) const override {
       const T* base = vector_->data();
       switch (direction) {
         case SortDirection::kAscending:
-          std::stable_sort(start, end,
-                           [base](const SortToken& a, const SortToken& b) {
-                             return base[a.index] < base[b.index];
-                           });
+          std::stable_sort(start, end, [base](const Token& a, const Token& b) {
+            return base[a.index] < base[b.index];
+          });
           break;
         case SortDirection::kDescending:
-          std::stable_sort(start, end,
-                           [base](const SortToken& a, const SortToken& b) {
-                             return base[a.index] > base[b.index];
-                           });
+          std::stable_sort(start, end, [base](const Token& a, const Token& b) {
+            return base[a.index] > base[b.index];
+          });
           break;
       }
     }
