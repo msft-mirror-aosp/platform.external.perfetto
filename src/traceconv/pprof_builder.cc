@@ -264,7 +264,7 @@ PreprocessInliningInfo(trace_processor::TraceProcessor* tp,
     int64_t symbol_set_id = it.Get(0).AsLong();
     auto func_sysname = it.Get(1).is_null() ? "" : it.Get(1).AsString();
     auto filename = it.Get(2).is_null() ? "" : it.Get(2).AsString();
-    int64_t line_no = it.Get(3).AsLong();
+    int64_t line_no = it.Get(3).is_null() ? 0 : it.Get(3).AsLong();
 
     inlines[symbol_set_id].emplace_back(interner->InternString(func_sysname),
                                         interner->InternString(filename),
@@ -974,7 +974,7 @@ LocationTracker PreprocessLocationsForJavaHeap(
 
       // Find parent of the parent
       auto parent_id_it = parents.find(current_parent_id);
-      PERFETTO_CHECK(parent_id_it != interned_ids.end());
+      PERFETTO_CHECK(parent_id_it != parents.end());
 
       current_parent_id = parent_id_it->second;
     }
