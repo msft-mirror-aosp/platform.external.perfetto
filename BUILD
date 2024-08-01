@@ -1417,12 +1417,16 @@ perfetto_filegroup(
         "src/trace_processor/db/column/null_overlay.h",
         "src/trace_processor/db/column/numeric_storage.cc",
         "src/trace_processor/db/column/numeric_storage.h",
+        "src/trace_processor/db/column/overlay_layer.cc",
+        "src/trace_processor/db/column/overlay_layer.h",
         "src/trace_processor/db/column/range_overlay.cc",
         "src/trace_processor/db/column/range_overlay.h",
         "src/trace_processor/db/column/selector_overlay.cc",
         "src/trace_processor/db/column/selector_overlay.h",
         "src/trace_processor/db/column/set_id_storage.cc",
         "src/trace_processor/db/column/set_id_storage.h",
+        "src/trace_processor/db/column/storage_layer.cc",
+        "src/trace_processor/db/column/storage_layer.h",
         "src/trace_processor/db/column/string_storage.cc",
         "src/trace_processor/db/column/string_storage.h",
         "src/trace_processor/db/column/types.h",
@@ -2076,6 +2080,7 @@ perfetto_filegroup(
     name = "src_trace_processor_metrics_sql_android_android",
     srcs = [
         "src/trace_processor/metrics/sql/android/ad_services_metric.sql",
+        "src/trace_processor/metrics/sql/android/android_anomaly.sql",
         "src/trace_processor/metrics/sql/android/android_anr.sql",
         "src/trace_processor/metrics/sql/android/android_auto_multiuser.sql",
         "src/trace_processor/metrics/sql/android/android_batt.sql",
@@ -2878,6 +2883,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/slices.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/threads.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/threads_w_processes.sql",
+        "src/trace_processor/perfetto_sql/stdlib/viz/summary/trace.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/summary/tracks.sql",
     ],
 )
@@ -2888,6 +2894,7 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/viz/flamegraph.sql",
         "src/trace_processor/perfetto_sql/stdlib/viz/slices.sql",
+        "src/trace_processor/perfetto_sql/stdlib/viz/threads.sql",
     ],
 )
 
@@ -4751,6 +4758,7 @@ perfetto_proto_library(
     name = "protos_perfetto_metrics_android_protos",
     srcs = [
         "protos/perfetto/metrics/android/ad_services_metric.proto",
+        "protos/perfetto/metrics/android/android_anomaly_metric.proto",
         "protos/perfetto/metrics/android/android_blocking_call.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_unagg.proto",
