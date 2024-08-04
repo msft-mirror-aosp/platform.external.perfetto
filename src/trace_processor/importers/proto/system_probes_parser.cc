@@ -15,6 +15,8 @@
  */
 
 #include "src/trace_processor/importers/proto/system_probes_parser.h"
+
+#include <cstdint>
 #include <optional>
 
 #include "perfetto/base/logging.h"
@@ -731,9 +733,13 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
   }
 
   if (packet.has_timezone_off_mins()) {
+    static constexpr int64_t kNanosInMinute =
+        60ull * 1000ull * 1000ull * 1000ull;
     context_->metadata_tracker->SetMetadata(
         metadata::timezone_off_mins,
         Variadic::Integer(packet.timezone_off_mins()));
+    context_->clock_tracker->set_timezone_offset(packet.timezone_off_mins() *
+                                                 kNanosInMinute);
   }
 
   if (packet.has_android_build_fingerprint()) {
@@ -768,9 +774,8 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
   if (packet.has_android_hardware_revision()) {
     context_->metadata_tracker->SetMetadata(
         metadata::android_hardware_revision,
-        Variadic::String(
-            context_->storage->InternString(
-                packet.android_hardware_revision())));
+        Variadic::String(context_->storage->InternString(
+            packet.android_hardware_revision())));
   }
 
   page_size_ = packet.page_size();
@@ -815,6 +820,10 @@ void SystemProbesParser::ParseCpuInfo(ConstBytes blob) {
       std::all_of(cpu_infos.begin(), cpu_infos.end(),
                   [](CpuInfo info) { return info.capacity.has_value(); });
 
+  bool valid_frequencies =
+      std::all_of(cpu_infos.begin(), cpu_infos.end(),
+                  [](CpuInfo info) { return !info.frequencies.empty(); });
+
   std::vector<uint32_t> cluster_ids(cpu_infos.size());
   uint32_t cluster_id = 0;
 
@@ -831,7 +840,7 @@ void SystemProbesParser::ParseCpuInfo(ConstBytes blob) {
       }
       cluster_ids[cpu_info.cpu] = cluster_id;
     }
-  } else {
+  } else if (valid_frequencies) {
     // Use max frequency if capacities are invalid
     std::vector<CpuMaxFrequency> cpu_max_freqs;
     for (CpuInfo& info : cpu_infos) {
