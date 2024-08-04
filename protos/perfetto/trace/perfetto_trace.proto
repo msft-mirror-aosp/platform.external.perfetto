@@ -733,6 +733,9 @@ message ProtoLogConfig {
   repeated ProtoLogGroup group_overrides = 1;
   // Specified what tracing mode to use for the tracing instance.
   optional TracingMode tracing_mode = 2;
+  // If set, any message with log level higher than this level (inclusive) will
+  // be traced. Group overrides take precedence over this value.
+  optional ProtoLogLevel default_log_from_level = 3;
 }
 
 message ProtoLogGroup {
@@ -5070,6 +5073,8 @@ message ProtoLogViewerConfig {
     optional ProtoLogLevel level = 3;
     // the id of the log group this message belongs to
     optional uint32 group_id = 4;
+    // path to the file where the message was logged
+    optional string location = 5;
   }
 
   /* information about a ProtoLog log group */
