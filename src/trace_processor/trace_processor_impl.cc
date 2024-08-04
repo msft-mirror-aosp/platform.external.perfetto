@@ -46,7 +46,7 @@
 #include "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_reader.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
-#include "src/trace_processor/importers/common/metadata_tracker.h"
+#include "src/trace_processor/importers/common/trace_file_tracker.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_trace_tokenizer.h"
@@ -104,21 +104,17 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_sched_upid.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_slice_layout.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.h"
-#include "src/trace_processor/perfetto_sql/prelude/tables_views.h"
 #include "src/trace_processor/perfetto_sql/stdlib/stdlib.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_aggregate_function.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_result.h"
-#include "src/trace_processor/sqlite/scoped_db.h"
 #include "src/trace_processor/sqlite/sql_source.h"
 #include "src/trace_processor/sqlite/sql_stats_table.h"
 #include "src/trace_processor/sqlite/stats_table.h"
-#include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/tp_metatrace.h"
 #include "src/trace_processor/trace_processor_storage_impl.h"
 #include "src/trace_processor/trace_reader_registry.h"
 #include "src/trace_processor/types/trace_processor_context.h"
-#include "src/trace_processor/types/variadic.h"
 #include "src/trace_processor/util/descriptors.h"
 #include "src/trace_processor/util/gzip_utils.h"
 #include "src/trace_processor/util/protozero_to_json.h"
@@ -133,7 +129,6 @@
 #include "protos/perfetto/trace/perfetto/perfetto_metatrace.pbzero.h"
 #include "protos/perfetto/trace/trace.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
-#include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
 
 namespace perfetto::trace_processor {
 namespace {
@@ -297,34 +292,6 @@ void InsertIntoTraceMetricsTable(sqlite3* db, const std::string& metric_name) {
   }
 }
 
-const char* TraceTypeToString(TraceType trace_type) {
-  switch (trace_type) {
-    case kUnknownTraceType:
-      return "unknown";
-    case kProtoTraceType:
-      return "proto";
-    case kJsonTraceType:
-      return "json";
-    case kFuchsiaTraceType:
-      return "fuchsia";
-    case kSystraceTraceType:
-      return "systrace";
-    case kGzipTraceType:
-      return "gzip";
-    case kCtraceTraceType:
-      return "ctrace";
-    case kNinjaLogTraceType:
-      return "ninja_log";
-    case kZipFile:
-      return "zip";
-    case kPerfDataTraceType:
-      return "perf_data";
-    case kAndroidLogcatTraceType:
-      return "android_logcat";
-  }
-  PERFETTO_FATAL("For GCC");
-}
-
 sql_modules::NameToModule GetStdlibModules() {
   sql_modules::NameToModule modules;
   for (const auto& file_to_sql : stdlib::kFileToSql) {
@@ -333,17 +300,6 @@ sql_modules::NameToModule GetStdlibModules() {
     modules.Insert(module, {}).first->push_back({import_key, file_to_sql.sql});
   }
   return modules;
-}
-
-void InitializePreludeTablesViews(sqlite3* db) {
-  for (const auto& file_to_sql : prelude::tables_views::kFileToSql) {
-    char* errmsg_raw = nullptr;
-    int err = sqlite3_exec(db, file_to_sql.sql, nullptr, nullptr, &errmsg_raw);
-    ScopedSqliteString errmsg(errmsg_raw);
-    if (err != SQLITE_OK) {
-      PERFETTO_FATAL("Failed to initialize prelude %s", errmsg_raw);
-    }
-  }
 }
 
 }  // namespace
@@ -446,14 +402,6 @@ void TraceProcessorImpl::SetCurrentTraceName(const std::string& name) {
 
 void TraceProcessorImpl::Flush() {
   TraceProcessorStorageImpl::Flush();
-
-  context_.metadata_tracker->SetMetadata(
-      metadata::trace_size_bytes,
-      Variadic::Integer(static_cast<int64_t>(bytes_parsed_)));
-  const StringId trace_type_id =
-      context_.storage->InternString(TraceTypeToString(context_.trace_type));
-  context_.metadata_tracker->SetMetadata(metadata::trace_type,
-                                         Variadic::String(trace_type_id));
   BuildBoundsTable(engine_->sqlite_engine()->db(),
                    context_.storage->GetTraceTimestampBoundsNs());
 }
@@ -807,9 +755,6 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
           "__intrinsic_ii_with_interval_tree",
           std::make_unique<IntervalIntersectOperator::Context>(engine_.get()));
 
-  // Initalize the tables and views in the prelude.
-  InitializePreludeTablesViews(db);
-
   // Register stdlib modules.
   auto stdlib_modules = GetStdlibModules();
   for (auto module_it = stdlib_modules.GetIterator(); module_it; ++module_it) {
@@ -855,6 +800,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->mutable_thread_table());
   RegisterStaticTable(storage->mutable_process_table());
   RegisterStaticTable(storage->mutable_filedescriptor_table());
+  RegisterStaticTable(storage->mutable_trace_file_table());
 
   RegisterStaticTable(storage->mutable_slice_table());
   RegisterStaticTable(storage->mutable_flow_table());
@@ -1009,12 +955,6 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   // Metrics.
   RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
 
-  for (const auto& metric : sql_metrics_) {
-    if (metric.proto_field_name) {
-      InsertIntoTraceMetricsTable(db, *metric.proto_field_name);
-    }
-  }
-
   // Import prelude module.
   {
     auto result = engine_->Execute(SqlSource::FromTraceProcessorImplementation(
@@ -1022,6 +962,12 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
     if (!result.status().ok()) {
       PERFETTO_FATAL("Failed to import prelude: %s",
                      result.status().c_message());
+    }
+  }
+
+  for (const auto& metric : sql_metrics_) {
+    if (metric.proto_field_name) {
+      InsertIntoTraceMetricsTable(db, *metric.proto_field_name);
     }
   }
 

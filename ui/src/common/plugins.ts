@@ -33,6 +33,7 @@ import {
   TrackPredicate,
   GroupPredicate,
   TrackRef,
+  SidebarMenuItem,
 } from '../public';
 import {EngineBase, Engine} from '../trace_processor/engine';
 import {Actions} from './actions';
@@ -55,26 +56,6 @@ export class PluginContextImpl implements PluginContext, Disposable {
   private trash = new DisposableStack();
   private alive = true;
 
-  readonly sidebar = {
-    hide() {
-      globals.dispatch(
-        Actions.setSidebar({
-          visible: false,
-        }),
-      );
-    },
-    show() {
-      globals.dispatch(
-        Actions.setSidebar({
-          visible: true,
-        }),
-      );
-    },
-    isVisible() {
-      return globals.state.sidebarVisible;
-    },
-  };
-
   registerCommand(cmd: Command): void {
     // Silently ignore if context is dead.
     if (!this.alive) return;
@@ -93,6 +74,10 @@ export class PluginContextImpl implements PluginContext, Disposable {
   [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
+  }
+
+  addSidebarMenuItem(menuItem: SidebarMenuItem): void {
+    this.trash.use(globals.sidebarMenuItems.register(menuItem));
   }
 }
 
@@ -120,6 +105,13 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
 
     const dispose = globals.commandManager.registerCommand(cmd);
     this.trash.use(dispose);
+  }
+
+  addSidebarMenuItem(menuItem: SidebarMenuItem): void {
+    // Silently ignore if context is dead.
+    if (!this.alive) return;
+
+    this.trash.use(globals.sidebarMenuItems.register(menuItem));
   }
 
   registerTrack(trackDesc: TrackDescriptor): void {
@@ -169,10 +161,6 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     const tabMan = globals.tabManager;
     const unregister = tabMan.registerLegacyDetailsPanel(detailsPanel);
     this.trash.use(unregister);
-  }
-
-  get sidebar() {
-    return this.ctx.sidebar;
   }
 
   readonly tabs = {
