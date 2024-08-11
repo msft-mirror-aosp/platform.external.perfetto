@@ -15,12 +15,16 @@
 import m from 'mithril';
 
 import {CpuProfileDetailsPanel} from '../../frontend/cpu_profile_panel';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  CPU_PROFILE_TRACK_KIND,
+  Plugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {CpuProfileTrack} from './cpu_profile_track';
 import {getThreadUriPrefix} from '../../public/utils';
-
-export const CPU_PROFILE_TRACK_KIND = 'CpuProfileTrack';
+import {exists} from '../../base/utils';
 
 class CpuProfile implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -54,6 +58,7 @@ class CpuProfile implements Plugin {
         tags: {
           kind: CPU_PROFILE_TRACK_KIND,
           utid,
+          ...(exists(upid) && {upid}),
         },
         trackFactory: () => new CpuProfileTrack(ctx.engine, utid),
       });
