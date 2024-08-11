@@ -21,6 +21,21 @@ from python.generators.diff_tests.testing import TestSuite
 
 class Frames(TestSuite):
 
+  def test_android_frames_get_frame_table_with_id(self):
+    return DiffTestBlueprint(
+        trace=Path('../../metrics/graphics/android_doframe_depth.py'),
+        query="""
+        INCLUDE PERFETTO MODULE android.frames.timeline;
+        SELECT frame_id, name, depth
+        FROM android_frames_choreographer_do_frame doframe
+        JOIN slice USING(id);
+        """,
+        out=Csv("""
+        "frame_id","name","depth"
+        10,"Choreographer#doFrame 10",0
+        11,"Choreographer#doFrame 11",1
+        """))
+
   def test_android_frames_choreographer_do_frame(self):
     return DiffTestBlueprint(
         trace=Path('../../metrics/graphics/android_jank_cuj.py'),
@@ -157,19 +172,19 @@ class Frames(TestSuite):
         SELECT * FROM android_app_vsync_delay_per_frame;
         """,
         out=Csv("""
-        "frame_id","app_vsync_delay"
-        10,0
-        30,0
-        40,0
-        60,0
-        90,0
-        100,0
-        110,0
-        120,0
-        140,100000
-        150,500000
-        160,270000000
-        1000,0
+        "frame_id","app_vsync_delay","start_latency"
+        10,0,0
+        30,0,0
+        40,0,0
+        60,0,0
+        90,0,0
+        100,0,0
+        110,0,0
+        120,0,0
+        140,100000,8600000
+        150,500000,500000
+        160,270000000,270000000
+        1000,0,0
         """))
 
   def test_android_cpu_time_per_frame(self):

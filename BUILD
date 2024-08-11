@@ -2206,8 +2206,8 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup.sql",
-        "src/trace_processor/metrics/sql/android/wattson_estimate.sql",
         "src/trace_processor/metrics/sql/android/wattson_rail_relations.sql",
+        "src/trace_processor/metrics/sql/android/wattson_trace_rails.sql",
     ],
 )
 
@@ -2628,6 +2628,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/android/battery.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/battery_stats.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/binder.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/binder_breakdown.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/broadcasts.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/critical_blocking_calls.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/device.sql",
@@ -3037,6 +3038,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_tables_tables",
     srcs = [
+        "src/trace_processor/tables/macros_internal.cc",
         "src/trace_processor/tables/macros_internal.h",
         "src/trace_processor/tables/table_destructors.cc",
     ],
@@ -5743,7 +5745,6 @@ perfetto_proto_library(
         "protos/perfetto/trace/track_event/counter_descriptor.proto",
         "protos/perfetto/trace/track_event/debug_annotation.proto",
         "protos/perfetto/trace/track_event/log_message.proto",
-        "protos/perfetto/trace/track_event/pixel_modem.proto",
         "protos/perfetto/trace/track_event/process_descriptor.proto",
         "protos/perfetto/trace/track_event/range_of_interest.proto",
         "protos/perfetto/trace/track_event/screenshot.proto",
