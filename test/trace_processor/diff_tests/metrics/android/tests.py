@@ -369,12 +369,12 @@ class AndroidMetrics(TestSuite):
         query=Metric("android_broadcasts"),
         out=Path('android_broadcasts.out'))
 
-  def test_wattson_app_startup_output(self):
+  def test_wattson_app_startup_rails_output(self):
     return DiffTestBlueprint(
         trace=DataPath('android_calculator_startup.pb'),
-        query=Metric("wattson_app_startup"),
+        query=Metric("wattson_app_startup_rails"),
         out=Csv("""
-        wattson_app_startup {
+        wattson_app_startup_rails {
           metric_version: 2
           period_info {
             period_id: 1
@@ -456,6 +456,12 @@ class AndroidMetrics(TestSuite):
           }
         }
         """))
+
+  def test_wattson_trace_threads_output(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_cpu_eos.pb'),
+        query=Metric("wattson_trace_threads"),
+        out=Path('wattson_trace_threads.out'))
 
   def test_anomaly_metric(self):
     return DiffTestBlueprint(
