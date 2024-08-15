@@ -165,9 +165,7 @@ class BitVector {
   // Returns whether the bit at |idx| is set.
   bool IsSet(uint32_t idx) const {
     PERFETTO_DCHECK(idx < size());
-
-    Address addr = IndexToAddress(idx);
-    return ConstBlockFromIndex(addr.block_idx).IsSet(addr.block_offset);
+    return ConstBitWord(&words_[WordFloor(idx)]).IsSet(idx % BitWord::kBits);
   }
 
   // Returns the number of set bits in the BitVector.
@@ -352,6 +350,11 @@ class BitVector {
   // - last value smaller than numeric limit of uint32_t.
   PERFETTO_WARN_UNUSED_RESULT static BitVector FromSortedIndexVector(
       const std::vector<int64_t>&);
+
+  // Creates BitVector from a vector of unsorted indices. Set bits in the
+  // resulting BitVector are values from the index vector.
+  PERFETTO_WARN_UNUSED_RESULT static BitVector FromUnsortedIndexVector(
+      const std::vector<uint32_t>&);
 
   // Creates a BitVector of size `min(range_end, size())` with bits between
   // |start| and |end| filled with corresponding bits from |this| BitVector.

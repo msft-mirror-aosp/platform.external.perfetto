@@ -271,7 +271,9 @@ namespace stats {
   F(perf_unknown_record_type,             kIndexed, kInfo,     kAnalysis, ""), \
   F(perf_record_skipped,                  kSingle,  kError,    kAnalysis, ""), \
   F(perf_samples_skipped,                 kSingle,  kError,    kAnalysis, ""), \
+  F(perf_counter_skipped_because_no_cpu,  kSingle,  kError,    kAnalysis, ""), \
   F(perf_features_skipped,                kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_samples_cpu_mode_unknown,        kSingle,  kError,    kAnalysis, ""), \
   F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,    ""), \
   F(perf_dummy_mapping_used,              kSingle,  kInfo,     kAnalysis, ""), \
   F(perf_invalid_event_id,                kSingle,  kError,    kTrace,    ""), \
@@ -302,6 +304,10 @@ namespace stats {
   F(v8_intern_errors,                                                          \
                                           kSingle,  kDataLoss, kAnalysis,      \
       "Failed to resolve V8 interned data."),                                  \
+  F(v8_isolate_has_no_code_range,                                              \
+                                          kSingle,  kError,    kAnalysis,      \
+      "V8 isolate had no code range. THis is currently no supported and means" \
+      "we will be unable to parse JS code events for this isolate."),          \
   F(v8_no_defaults,                                                            \
                                           kSingle,  kDataLoss, kAnalysis,      \
       "Failed to resolve V8 default data."),                                   \
@@ -357,13 +363,25 @@ namespace stats {
   F(winscope_viewcapture_missing_interned_string_parse_errors,                 \
                                           kSingle,  kInfo,     kAnalysis,      \
       "Failed to find interned ViewCapture string."),                          \
+  F(winscope_windowmanager_parse_errors, kSingle,  kInfo,     kAnalysis,       \
+      "WindowManager state packet has unknown fields, which results "          \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
   F(jit_unknown_frame,                    kSingle,  kDataLoss, kTrace,         \
       "Indicates that we were unable to determine the function for a frame in "\
       "a jitted memory region"),                                               \
   F(ftrace_missing_event_id,              kSingle,  kInfo,    kAnalysis,       \
       "Indicates that the ftrace event was dropped because the event id was "  \
       "missing. This is an 'info' stat rather than an error stat because "     \
-      "this can be legitimately missing due to proto filtering.")
+      "this can be legitimately missing due to proto filtering."),             \
+  F(android_input_event_parse_errors,     kSingle,  kInfo,     kAnalysis,      \
+      "Android input event packet has unknown fields, which results "          \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
+  F(mali_unknown_mcu_state_id,            kSingle,  kError,   kAnalysis,       \
+      "An invalid Mali GPU MCU state ID was detected."),                       \
+  F(pixel_modem_negative_timestamp,       kSingle,  kError,   kAnalysis,       \
+      "A negative timestamp was received from a Pixel modem event.")
 // clang-format on
 
 enum Type {

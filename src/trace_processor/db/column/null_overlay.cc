@@ -18,7 +18,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -33,7 +33,6 @@
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
@@ -110,6 +109,18 @@ BitVector ReconcileStorageResult(FilterOp op,
 
 }  // namespace
 
+void NullOverlay::Flatten(uint32_t* start,
+                          const uint32_t* end,
+                          uint32_t stride) {
+  for (uint32_t* it = start; it < end; it += stride) {
+    if (non_null_->IsSet(*it)) {
+      *it = non_null_->CountSetBits(*it);
+    } else {
+      *it = std::numeric_limits<uint32_t>::max();
+    }
+  }
+}
+
 SingleSearchResult NullOverlay::ChainImpl::SingleSearch(FilterOp op,
                                                         SqlValue sql_val,
                                                         uint32_t index) const {
@@ -147,6 +158,9 @@ SearchValidationResult NullOverlay::ChainImpl::ValidateSearchConstraints(
     SqlValue sql_val) const {
   if (op == FilterOp::kIsNull || op == FilterOp::kIsNotNull) {
     return SearchValidationResult::kOk;
+  }
+  if (sql_val.is_null()) {
+    return SearchValidationResult::kNoData;
   }
   return inner_->ValidateSearchConstraints(op, sql_val);
 }
@@ -256,15 +270,15 @@ void NullOverlay::ChainImpl::IndexSearchValidated(FilterOp op,
   inner_->IndexSearchValidated(op, sql_val, indices);
 }
 
-void NullOverlay::ChainImpl::StableSort(SortToken* start,
-                                        SortToken* end,
+void NullOverlay::ChainImpl::StableSort(Token* start,
+                                        Token* end,
                                         SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "NullOverlay::ChainImpl::StableSort");
-  SortToken* middle = std::stable_partition(
-      start, end,
-      [this](const SortToken& idx) { return !non_null_->IsSet(idx.index); });
-  for (SortToken* it = middle; it != end; ++it) {
+  Token* middle = std::stable_partition(start, end, [this](const Token& idx) {
+    return !non_null_->IsSet(idx.index);
+  });
+  for (Token* it = middle; it != end; ++it) {
     it->index = non_null_->CountSetBits(it->index);
   }
   inner_->StableSort(middle, end, direction);
@@ -324,12 +338,6 @@ SqlValue NullOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
   return non_null_->IsSet(index)
              ? inner_->Get_AvoidUsingBecauseSlow(non_null_->CountSetBits(index))
              : SqlValue();
-}
-
-void NullOverlay::ChainImpl::Serialize(StorageProto* storage) const {
-  auto* null_storage = storage->set_null_overlay();
-  non_null_->Serialize(null_storage->set_bit_vector());
-  inner_->Serialize(null_storage->set_storage());
 }
 
 }  // namespace perfetto::trace_processor::column

@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -31,12 +30,12 @@
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
@@ -52,6 +51,10 @@ void IndexSearchWithComparator(uint32_t val, DataLayerChain::Indices& indices) {
 
 }  // namespace
 
+StorageLayer::StoragePtr IdStorage::GetStoragePtr() {
+  return Id{};
+}
+
 SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
     SqlValue val) const {
@@ -60,12 +63,6 @@ SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
     if (op == FilterOp::kIsNotNull) {
       return SearchValidationResult::kAllData;
     }
-    if (op == FilterOp::kIsNull) {
-      return SearchValidationResult::kNoData;
-    }
-    PERFETTO_DFATAL(
-        "Invalid filter operation. NULL should only be compared with 'IS NULL' "
-        "and 'IS NOT NULL'");
     return SearchValidationResult::kNoData;
   }
 
@@ -270,19 +267,19 @@ Range IdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   PERFETTO_FATAL("FilterOp not matched");
 }
 
-void IdStorage::ChainImpl::StableSort(SortToken* start,
-                                      SortToken* end,
+void IdStorage::ChainImpl::StableSort(Token* start,
+                                      Token* end,
                                       SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "IdStorage::ChainImpl::StableSort");
   switch (direction) {
     case SortDirection::kAscending:
-      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+      std::stable_sort(start, end, [](const Token& a, const Token& b) {
         return a.index < b.index;
       });
       return;
     case SortDirection::kDescending:
-      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+      std::stable_sort(start, end, [](const Token& a, const Token& b) {
         return a.index > b.index;
       });
       return;
@@ -324,10 +321,6 @@ std::optional<Token> IdStorage::ChainImpl::MinElement(Indices& indices) const {
 
 SqlValue IdStorage::ChainImpl::Get_AvoidUsingBecauseSlow(uint32_t index) const {
   return SqlValue::Long(index);
-}
-
-void IdStorage::ChainImpl::Serialize(StorageProto* storage) const {
-  storage->set_id_storage();
 }
 
 }  // namespace perfetto::trace_processor::column

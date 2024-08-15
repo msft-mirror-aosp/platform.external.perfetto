@@ -40,6 +40,9 @@ namespace tables {
 AndroidDumpstateTable::~AndroidDumpstateTable() = default;
 AndroidGameInterventionListTable::~AndroidGameInterventionListTable() = default;
 AndroidLogTable::~AndroidLogTable() = default;
+AndroidKeyEventsTable::~AndroidKeyEventsTable() = default;
+AndroidMotionEventsTable::~AndroidMotionEventsTable() = default;
+AndroidInputEventDispatchTable::~AndroidInputEventDispatchTable() = default;
 
 // counter_tables_py.h
 CounterTable::~CounterTable() = default;
@@ -61,6 +64,7 @@ ProcessTable::~ProcessTable() = default;
 FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 MachineTable::~MachineTable() = default;
+TraceFileTable::~TraceFileTable() = default;
 
 // profiler_tables_py.h
 StackProfileMappingTable::~StackProfileMappingTable() = default;
@@ -94,6 +98,7 @@ GraphicsFrameSliceTable::~GraphicsFrameSliceTable() = default;
 ExpectedFrameTimelineSliceTable::~ExpectedFrameTimelineSliceTable() = default;
 ActualFrameTimelineSliceTable::~ActualFrameTimelineSliceTable() = default;
 ExperimentalFlatSliceTable::~ExperimentalFlatSliceTable() = default;
+AndroidNetworkPacketsTable::~AndroidNetworkPacketsTable() = default;
 
 // track_tables_py.h
 TrackTable::~TrackTable() = default;
@@ -146,6 +151,7 @@ SurfaceFlingerLayersSnapshotTable::~SurfaceFlingerLayersSnapshotTable() =
 SurfaceFlingerLayerTable::~SurfaceFlingerLayerTable() = default;
 SurfaceFlingerTransactionsTable::~SurfaceFlingerTransactionsTable() = default;
 ViewCaptureTable::~ViewCaptureTable() = default;
+WindowManagerTable::~WindowManagerTable() = default;
 WindowManagerShellTransitionsTable::~WindowManagerShellTransitionsTable() =
     default;
 WindowManagerShellTransitionHandlersTable::
