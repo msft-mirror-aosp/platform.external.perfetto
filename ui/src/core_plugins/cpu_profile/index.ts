@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
 import {CpuProfileDetailsPanel} from '../../frontend/cpu_profile_panel';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  CPU_PROFILE_TRACK_KIND,
+  Plugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {CpuProfileTrack} from './cpu_profile_track';
-
-export const CPU_PROFILE_TRACK_KIND = 'CpuProfileTrack';
+import {getThreadUriPrefix} from '../../public/utils';
+import {exists} from '../../base/utils';
 
 class CpuProfile implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -43,12 +50,16 @@ class CpuProfile implements Plugin {
     });
     for (; it.valid(); it.next()) {
       const utid = it.utid;
+      const upid = it.upid;
       const threadName = it.threadName;
       ctx.registerTrack({
-        uri: `perfetto.CpuProfile#${utid}`,
-        displayName: `${threadName} (CPU Stack Samples)`,
-        kind: CPU_PROFILE_TRACK_KIND,
-        utid,
+        uri: `${getThreadUriPrefix(upid, utid)}_cpu_samples`,
+        title: `${threadName} (CPU Stack Samples)`,
+        tags: {
+          kind: CPU_PROFILE_TRACK_KIND,
+          utid,
+          ...(exists(upid) && {upid}),
+        },
         trackFactory: () => new CpuProfileTrack(ctx.engine, utid),
       });
     }

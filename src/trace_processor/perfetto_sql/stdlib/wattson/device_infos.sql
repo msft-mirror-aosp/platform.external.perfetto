@@ -42,21 +42,84 @@ WITH data(device, wattson_device) AS (
   ("oriole", "Tensor"),
   ("raven", "Tensor"),
   ("bluejay", "Tensor"),
-  ("eos", "monaco")
+  ("eos", "monaco"),
+  ("aurora", "monaco")
 )
 select * from data;
 
-CREATE PERFETTO TABLE _wattson_device
-AS
-WITH soc AS (
-  SELECT str_value as model
-  FROM metadata
-  WHERE name = 'android_soc_model'
+CREATE PERFETTO TABLE _wattson_device AS
+WITH soc_model AS (
+  SELECT COALESCE(
+    -- Get model from metadata
+    (SELECT str_value FROM metadata WHERE name = 'android_soc_model'),
+    -- Get device name from metadata and map it to model
+    (
+      SELECT wattson_device
+      FROM _wattson_device_map map
+      JOIN android_device_name ad ON ad.name = map.device
+    )
+  ) as name
 )
-SELECT
-  COALESCE(soc.model, map.wattson_device) as name
-FROM _wattson_device_map as map
-CROSS JOIN android_device_name as ad
-LEFT JOIN soc ON TRUE
-WHERE ad.name = map.device;
+-- Once model is obtained, check to see if the model is supported by Wattson
+-- via checking if model is within a key-value pair mapping
+SELECT DISTINCT name
+FROM soc_model
+JOIN _device_cpu_deep_idle_offsets AS map ON map.device = name;
 
+-- Device specific mapping from CPU to policy
+CREATE PERFETTO TABLE _cpu_to_policy_map
+AS
+WITH data(device, cpu, policy) AS (
+  VALUES
+  ("monaco", 0, 0),
+  ("monaco", 1, 0),
+  ("monaco", 2, 0),
+  ("monaco", 3, 0),
+  ("Tensor", 0, 0),
+  ("Tensor", 1, 0),
+  ("Tensor", 2, 0),
+  ("Tensor", 3, 0),
+  ("Tensor", 4, 4),
+  ("Tensor", 5, 4),
+  ("Tensor", 6, 6),
+  ("Tensor", 7, 6)
+)
+select * from data;
+
+-- Prefilter table based on device
+CREATE PERFETTO TABLE _dev_cpu_policy_map
+AS
+SELECT
+  cpu, policy
+FROM _cpu_to_policy_map as cp_map
+JOIN _wattson_device as device
+ON cp_map.device = device.name
+ORDER by cpu;
+
+-- Policy and freq that will give minimum volt vote
+CREATE PERFETTO TABLE _device_min_volt_vote
+AS
+WITH data(device, policy, freq) AS (
+  VALUES
+  ("monaco", 0, 614400),
+  ("Tensor", 4, 400000)
+)
+select * from data;
+
+-- Get policy corresponding to minimum volt vote
+CREATE PERFETTO FUNCTION _get_min_policy_vote()
+RETURNS INT AS
+SELECT
+  vote_tbl.policy
+FROM _device_min_volt_vote as vote_tbl
+JOIN _wattson_device as device
+WHERE vote_tbl.device = device.name;
+
+-- Get frequency corresponding to minimum volt vote
+CREATE PERFETTO FUNCTION _get_min_freq_vote()
+RETURNS INT AS
+SELECT
+ vote_tbl.freq
+FROM _device_min_volt_vote as vote_tbl
+JOIN _wattson_device as device
+WHERE vote_tbl.device = device.name;

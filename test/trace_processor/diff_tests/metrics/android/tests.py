@@ -139,6 +139,12 @@ class AndroidMetrics(TestSuite):
         query=Metric('android_sysui_notifications_blocking_calls_metric'),
         out=Path('android_sysui_notifications_blocking_calls_metric.out'))
 
+  def test_android_blocking_calls_cuj_different_ui_thread(self):
+    return DiffTestBlueprint(
+        trace=Path('android_blocking_calls_cuj_different_ui_thread.py'),
+        query=Metric('android_blocking_calls_cuj_metric'),
+        out=Path('android_blocking_calls_cuj_different_ui_thread.out'))
+
   def test_sysui_notif_shade_list_builder(self):
     return DiffTestBlueprint(
         trace=Path('android_sysui_notif_shade_list_builder_metric.py'),
@@ -356,3 +362,150 @@ class AndroidMetrics(TestSuite):
         trace=DataPath('android_postboot_unlock.pftrace'),
         query=Metric("android_oom_adjuster"),
         out=Path('android_oom_adjuster.out'))
+
+  def test_android_broadcasts(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_postboot_unlock.pftrace'),
+        query=Metric("android_broadcasts"),
+        out=Path('android_broadcasts.out'))
+
+  def test_wattson_app_startup_rails_output(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_calculator_startup.pb'),
+        query=Metric("wattson_app_startup_rails"),
+        out=Csv("""
+        wattson_app_startup_rails {
+          metric_version: 2
+          period_info {
+            period_id: 1
+            period_dur: 384847394
+            cpu_subsystem {
+              estimate_mw: 4567.958008
+              policy0 {
+                estimate_mw: 578.353088
+                cpu0 {
+                  estimate_mw: 149.026062
+                }
+                cpu1 {
+                  estimate_mw: 130.140015
+                }
+                cpu2 {
+                  estimate_mw: 127.601807
+                }
+                cpu3 {
+                  estimate_mw: 171.585205
+                }
+              }
+              policy4 {
+                estimate_mw: 684.187256
+                cpu4 {
+                  estimate_mw: 344.394531
+                }
+                cpu5 {
+                  estimate_mw: 339.792725
+                }
+              }
+              policy6 {
+                estimate_mw: 2163.018066
+                cpu6 {
+                  estimate_mw: 1080.465820
+                }
+                cpu7 {
+                  estimate_mw: 1082.552246
+                }
+              }
+              dsu_scu {
+                estimate_mw: 1142.399658
+              }
+            }
+          }
+        }
+        """))
+
+  def test_wattson_estimate_output(self):
+    return DiffTestBlueprint(
+        trace=DataPath('wattson_eos_suspend.pb'),
+        query=Metric("wattson_trace_rails"),
+        out=Csv("""
+        wattson_trace_rails {
+          metric_version: 2
+          period_info {
+            period_id: 1
+            period_dur: 61792614416
+            cpu_subsystem {
+              estimate_mw: 42.126297
+              policy0 {
+                estimate_mw: 34.721622
+                cpu0 {
+                  estimate_mw: 10.706565
+                }
+                cpu1 {
+                  estimate_mw: 8.314949
+                }
+                cpu2 {
+                  estimate_mw: 7.7762628
+                }
+                cpu3 {
+                  estimate_mw: 7.9238434
+                }
+              }
+              dsu_scu {
+                estimate_mw: 7.404674
+              }
+            }
+          }
+        }
+        """))
+
+  def test_wattson_trace_threads_output(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_cpu_eos.pb'),
+        query=Metric("wattson_trace_threads"),
+        out=Path('wattson_trace_threads.out'))
+
+  def test_anomaly_metric(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_binder_metric_trace.atr'),
+        query=Metric('android_anomaly'),
+        out=Path('android_anomaly_metric.out'))
+
+  def test_wattson_markers_threads_output(self):
+    return DiffTestBlueprint(
+        trace=DataPath('wattson_w_packages_Imarkers.pb'),
+        query=Metric("wattson_markers_threads"),
+        out=Path('wattson_markers_threads.out'))
+
+  def test_wattson_markers_rails_output(self):
+    return DiffTestBlueprint(
+        trace=DataPath('wattson_w_packages_Imarkers.pb'),
+        query=Metric("wattson_markers_rails"),
+        out=Csv("""
+        wattson_markers_rails {
+          metric_version: 2
+          period_info {
+            period_id: 1
+            period_dur: 2031870211
+            cpu_subsystem {
+              estimate_mw: 46.524994
+              policy0 {
+                estimate_mw: 34.021542
+                cpu0 {
+                  estimate_mw: 14.416650
+                }
+                cpu1 {
+                  estimate_mw: 6.641433
+                }
+                cpu2 {
+                  estimate_mw: 8.134795
+                }
+                cpu3 {
+                  estimate_mw: 4.828665
+                }
+              }
+              dsu_scu {
+                estimate_mw: 12.503452
+              }
+            }
+          }
+        }
+        """))

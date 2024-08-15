@@ -118,7 +118,7 @@ std::string CreateTableStatementFromSchema(const Table::Schema& schema,
   std::string stmt = "CREATE TABLE x(";
   for (const auto& col : schema.columns) {
     std::string c =
-        col.name + " " + sqlite::utils::SqlValueTypeToString(col.type);
+        col.name + " " + sqlite::utils::SqlValueTypeToSqliteTypeName(col.type);
     if (col.is_hidden) {
       c += " HIDDEN";
     }
@@ -163,6 +163,13 @@ inline uint32_t ReadLetterAndInt(char letter, base::StringSplitter* splitter) {
   return *base::CStringToUInt32(splitter->cur_token() + 1);
 }
 
+inline uint64_t ReadLetterAndLong(char letter, base::StringSplitter* splitter) {
+  PERFETTO_CHECK(splitter->Next());
+  PERFETTO_DCHECK(splitter->cur_token_size() >= 2);
+  PERFETTO_DCHECK(splitter->cur_token()[0] == letter);
+  return *base::CStringToUInt64(splitter->cur_token() + 1);
+}
+
 int ReadIdxStrAndUpdateCursor(DbSqliteModule::Cursor* cursor,
                               const char* idx_str,
                               sqlite3_value** argv) {
@@ -201,6 +208,9 @@ int ReadIdxStrAndUpdateCursor(DbSqliteModule::Cursor* cursor,
   q.order_type =
       static_cast<Query::OrderType>(ReadLetterAndInt('D', &splitter));
 
+  // Cols used
+  q.cols_used = ReadLetterAndLong('U', &splitter);
+
   // LIMIT
   if (ReadLetterAndInt('L', &splitter)) {
     auto val_op = sqlite::utils::SqliteValueToSqlValue(argv[c_offset++]);
@@ -212,7 +222,7 @@ int ReadIdxStrAndUpdateCursor(DbSqliteModule::Cursor* cursor,
   }
 
   // OFFSET
-  if (ReadLetterAndInt('O', &splitter)) {
+  if (ReadLetterAndInt('F', &splitter)) {
     auto val_op = sqlite::utils::SqliteValueToSqlValue(argv[c_offset++]);
     if (val_op.type != SqlValue::kLong) {
       return sqlite::utils::SetError(cursor->pVtab,
@@ -413,15 +423,24 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   auto* t = GetVtab(vtab);
   auto* s = sqlite::ModuleStateManager<DbSqliteModule>::GetState(t->state);
 
+  const Table* table = nullptr;
+  switch (s->computation) {
+    case TableComputation::kStatic:
+      table = s->static_table;
+      break;
+    case TableComputation::kRuntime:
+      table = s->runtime_table.get();
+      break;
+    case TableComputation::kTableFunction:
+      break;
+  }
+
   uint32_t row_count;
   int argv_index;
   switch (s->computation) {
     case TableComputation::kStatic:
-      row_count = s->static_table->row_count();
-      argv_index = 1;
-      break;
     case TableComputation::kRuntime:
-      row_count = s->runtime_table->row_count();
+      row_count = table->row_count();
       argv_index = 1;
       break;
     case TableComputation::kTableFunction:
@@ -447,6 +466,7 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   // constraints and only add them to `idx_str` later.
   int limit = -1;
   int offset = -1;
+  bool has_unknown_constraint = false;
 
   cs_idxes.reserve(static_cast<uint32_t>(info->nConstraint));
   for (int i = 0; i < info->nConstraint; ++i) {
@@ -459,6 +479,8 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
         limit = i;
       } else if (c.op == SQLITE_INDEX_CONSTRAINT_OFFSET) {
         offset = i;
+      } else {
+        has_unknown_constraint = true;
       }
       continue;
     }
@@ -471,30 +493,47 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   // Reorder constraints to consider the constraints on columns which are
   // cheaper to filter first.
   {
-    std::sort(cs_idxes.begin(), cs_idxes.end(), [s, info](int a, int b) {
-      auto a_idx = static_cast<uint32_t>(info->aConstraint[a].iColumn);
-      auto b_idx = static_cast<uint32_t>(info->aConstraint[b].iColumn);
-      const auto& a_col = s->schema.columns[a_idx];
-      const auto& b_col = s->schema.columns[b_idx];
+    std::sort(
+        cs_idxes.begin(), cs_idxes.end(), [s, info, &table](int a, int b) {
+          auto a_idx = static_cast<uint32_t>(info->aConstraint[a].iColumn);
+          auto b_idx = static_cast<uint32_t>(info->aConstraint[b].iColumn);
+          const auto& a_col = s->schema.columns[a_idx];
+          const auto& b_col = s->schema.columns[b_idx];
 
-      // Id columns are always very cheap to filter on so try and get them
-      // first.
-      if (a_col.is_id || b_col.is_id)
-        return a_col.is_id && !b_col.is_id;
+          // Id columns are the most efficient to filter, as they don't have a
+          // support in real data.
+          if (a_col.is_id || b_col.is_id)
+            return a_col.is_id && !b_col.is_id;
 
-      // Set id columns are always very cheap to filter on so try and get them
-      // second.
-      if (a_col.is_set_id || b_col.is_set_id)
-        return a_col.is_set_id && !b_col.is_set_id;
+          // Set id columns are inherently sorted and have fast filtering
+          // operations.
+          if (a_col.is_set_id || b_col.is_set_id)
+            return a_col.is_set_id && !b_col.is_set_id;
 
-      // Sorted columns are also quite cheap to filter so order them after
-      // any id/set id columns.
-      if (a_col.is_sorted || b_col.is_sorted)
-        return a_col.is_sorted && !b_col.is_sorted;
+          // Intrinsically sorted column is more efficient to sort than
+          // extrinsically sorted column.
+          if (a_col.is_sorted || b_col.is_sorted)
+            return a_col.is_sorted && !b_col.is_sorted;
 
-      // TODO(lalitm): introduce more orderings here based on empirical data.
-      return false;
-    });
+          // Extrinsically sorted column is more efficient to sort than unsorted
+          // column.
+          if (table) {
+            auto a_has_idx = table->GetIndex({a_idx});
+            auto b_has_idx = table->GetIndex({b_idx});
+            if (a_has_idx || b_has_idx)
+              return a_has_idx && !b_has_idx;
+          }
+
+          bool a_is_eq = sqlite::utils::IsOpEq(info->aConstraint[a].op);
+          bool b_is_eq = sqlite::utils::IsOpEq(info->aConstraint[a].op);
+          if (a_is_eq || b_is_eq) {
+            return a_is_eq && !b_is_eq;
+          }
+
+          // TODO(lalitm): introduce more orderings here based on empirical
+          // data.
+          return false;
+        });
   }
 
   // Remove any order by constraints which also have an equality constraint.
@@ -527,17 +566,20 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   }
 
   // Create index string. It contains information query Trace Processor will
-  // have to run. It can be split into 3 segments: C (constraints), O (orders)
-  // and D (distinct). It can be directly mapped into `Query` type. The number
-  // after C and O signifies how many constraints/orders there are. The number
-  // after D maps to the Query::Distinct enum value.
-  // "C2,0,0,2,1,O1,0,1,D1,L0,O1" maps to:
+  // have to run. It can be split into 6 segments: C (constraints), O (orders),
+  // D (distinct), U (used), L (limit) and F (offset). It can be directly mapped
+  // into `Query` type. The number after C and O signifies how many
+  // constraints/orders there are. The number after D maps to the
+  // Query::Distinct enum value.
+  //
+  // "C2,0,0,2,1,O1,0,1,D1,U5,L0,F1" maps to:
   // - "C2,0,0,2,1" - two constraints: kEq on first column and kNe on third
   //   column.
   // - "O1,0,1" - one order by: descending on first column.
   // - "D1" - kUnsorted distinct.
+  // - "U5" - Columns 0 and 2 used.
   // - "L1" - LIMIT set. "L0" if no limit.
-  // - "O1" - OFFSET set. Can only be set if "L1".
+  // - "F1" - OFFSET set. Can only be set if "L1".
 
   // Constraints:
   std::string idx_str = "C";
@@ -595,9 +637,14 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   }
   idx_str += ",";
 
+  // Columns used.
+  idx_str += "U";
+  idx_str += std::to_string(info->colUsed);
+  idx_str += ",";
+
   // LIMIT. Save as "L1" if limit is present and "L0" if not.
   idx_str += "L";
-  if (limit == -1) {
+  if (limit == -1 || has_unknown_constraint) {
     idx_str += "0";
   } else {
     auto& o = info->aConstraintUsage[limit];
@@ -607,9 +654,9 @@ int DbSqliteModule::BestIndex(sqlite3_vtab* vtab, sqlite3_index_info* info) {
   }
   idx_str += ",";
 
-  // OFFSET. Save as "O1" if offset is present and "O0" if not.
-  idx_str += "O";
-  if (offset == -1) {
+  // OFFSET. Save as "F1" if offset is present and "F0" if not.
+  idx_str += "F";
+  if (offset == -1 || has_unknown_constraint) {
     idx_str += "0";
   } else {
     auto& o = info->aConstraintUsage[offset];
@@ -775,6 +822,7 @@ int DbSqliteModule::Column(sqlite3_vtab_cursor* cursor,
   SqlValue value = c->mode == Cursor::Mode::kSingleRow
                        ? source_table->columns()[idx].Get(*c->single_row)
                        : c->iterator->Get(idx);
+
   // We can say kSqliteStatic for strings because all strings are expected
   // to come from the string pool. Thus they will be valid for the lifetime
   // of trace processor. Similarily, for bytes, we can also use
@@ -896,7 +944,7 @@ DbSqliteModule::QueryCost DbSqliteModule::EstimateCost(
   return QueryCost{final_cost, current_row_count};
 }
 
-DbSqliteModule::State::State(const Table* _table, Table::Schema _schema)
+DbSqliteModule::State::State(Table* _table, Table::Schema _schema)
     : State(TableComputation::kStatic, std::move(_schema)) {
   static_table = _table;
 }

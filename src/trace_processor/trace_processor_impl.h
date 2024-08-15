@@ -59,7 +59,7 @@ class TraceProcessorImpl : public TraceProcessor,
   // TraceProcessorStorage implementation:
   base::Status Parse(TraceBlobView) override;
   void Flush() override;
-  void NotifyEndOfFile() override;
+  base::Status NotifyEndOfFile() override;
 
   // TraceProcessor implementation:
   Iterator ExecuteQuery(const std::string& sql) override;
@@ -102,7 +102,7 @@ class TraceProcessorImpl : public TraceProcessor,
   friend class IteratorImpl;
 
   template <typename Table>
-  void RegisterStaticTable(const Table& table) {
+  void RegisterStaticTable(Table* table) {
     engine_->RegisterStaticTable(table, Table::Name(),
                                  Table::ComputeStaticSchema());
   }

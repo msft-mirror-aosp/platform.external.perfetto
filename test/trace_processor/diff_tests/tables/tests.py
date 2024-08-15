@@ -36,143 +36,7 @@ class Tables(TestSuite):
         0,9223372036854775807,0
         """))
 
-  def test_simple_interval_intersect_rev(self):
-    return DiffTestBlueprint(
-        trace=TextProto(""),
-        query="""
 
-        CREATE PERFETTO TABLE A AS
-          WITH data(id, ts, ts_end) AS (
-            VALUES
-            (0, 1, 7)
-          )
-          SELECT * FROM data;
-
-        CREATE PERFETTO TABLE B AS
-          WITH data(id, ts, ts_end) AS (
-            VALUES
-            (0, 0, 2),
-            (1, 3, 5),
-            (2, 6, 8)
-          )
-          SELECT * FROM data;
-
-        SELECT a.id AS a_id, b.id AS b_id
-        FROM __intrinsic_ii_with_interval_tree('A') a
-        JOIN __intrinsic_ii_with_interval_tree('B') b
-        WHERE a.ts < b.ts_end AND a.ts_end > b.ts
-        """,
-        out=Csv("""
-        "a_id","b_id"
-        0,1
-        0,0
-        0,2
-        """))
-
-  def test_compare_with_ii_macro(self):
-    return DiffTestBlueprint(
-        trace=DataPath('example_android_trace_30s.pb'),
-        query="""
-        INCLUDE PERFETTO MODULE intervals.intersect;
-
-        CREATE PERFETTO TABLE big_foo AS
-        SELECT
-          ts,
-          ts + dur as ts_end,
-          id * 10 AS id
-        FROM sched
-        WHERE utid == 1;
-
-        CREATE PERFETTO TABLE small_foo AS
-        SELECT
-        ts + 1000 AS ts,
-        ts + dur + 1000 AS ts_end,
-        id
-        FROM sched
-        WHERE utid == 1;
-
-        CREATE PERFETTO TABLE small_foo_for_ii AS
-        SELECT id, ts, ts_end - ts AS dur
-        FROM small_foo;
-
-        CREATE PERFETTO TABLE big_foo_for_ii AS
-        SELECT id, ts, ts_end - ts AS dur
-        FROM big_foo;
-
-        CREATE PERFETTO TABLE both AS
-        SELECT
-          left_id,
-          right_id,
-          cat,
-          count() AS c,
-          MAX(ts) AS max_ts, MAX(dur) AS max_dur
-        FROM (
-          SELECT a.id AS left_id, b.id AS right_id, 0 AS ts, 0 AS dur, "it" AS cat
-          FROM __intrinsic_ii_with_interval_tree('big_foo') a
-          JOIN __intrinsic_ii_with_interval_tree('small_foo') b
-          WHERE a.ts < b.ts_end AND a.ts_end > b.ts
-          UNION
-          SELECT left_id, right_id, ts, dur, "ii" AS cat
-          FROM _interval_intersect!(big_foo_for_ii, small_foo_for_ii)
-          WHERE dur != 0
-        )
-          GROUP BY left_id, right_id;
-
-        SELECT
-          SUM(c) FILTER (WHERE c == 2) AS good,
-          SUM(c) FILTER (WHERE c != 2) AS bad
-        FROM both;
-        """,
-        out=Csv("""
-          "good","bad"
-          314,"[NULL]"
-        """))
-
-  def test_ii_operator_big(self):
-    return DiffTestBlueprint(
-        trace=DataPath('example_android_trace_30s.pb'),
-        query="""
-        CREATE PERFETTO TABLE big_foo AS
-        SELECT
-          id,
-          ts,
-          ts+dur AS ts_end
-        FROM sched
-        WHERE dur != -1
-        ORDER BY ts;
-
-        CREATE PERFETTO TABLE small_foo AS
-        SELECT
-        id * 10 AS id,
-        ts + 1000 AS ts,
-        ts_end + 1000 AS ts_end
-        FROM big_foo
-        LIMIT 10
-        OFFSET 5;
-
-        CREATE PERFETTO TABLE res AS
-        SELECT a.id AS a_id, b.id AS b_id
-        FROM __intrinsic_ii_with_interval_tree('small_foo') a
-        JOIN __intrinsic_ii_with_interval_tree('big_foo') b
-        WHERE a.ts < b.ts_end AND a.ts_end > b.ts;
-
-        SELECT * FROM res
-        ORDER BY a_id, b_id
-        LIMIT 10;
-        """,
-        out=Csv("""
-        "a_id","b_id"
-        50,1
-        50,5
-        50,6
-        60,1
-        60,6
-        60,7
-        60,8
-        70,1
-        70,6
-        70,7
-        """))
 
   # Null printing
   def test_nulls(self):
@@ -433,8 +297,8 @@ class Tables(TestSuite):
         """,
         out=Csv("""
         "type","cpu"
-        "cpu_track",0
-        "cpu_track",1
+        "__intrinsic_cpu_track",0
+        "__intrinsic_cpu_track",1
         """))
 
   def test_thread_state_flattened_aggregated(self):
@@ -596,14 +460,16 @@ class Tables(TestSuite):
         """),
         query="""
         SELECT
-          type,
-          cpu,
-          machine_id
-        FROM cpu_track
-        ORDER BY type, cpu
+          ct.type,
+          ct.ucpu,
+          c.cpu,
+          ct.machine_id
+        FROM cpu_track AS ct
+        JOIN cpu AS c ON ct.ucpu = c.id
+        ORDER BY ct.type, c.cpu
         """,
         out=Csv("""
-        "type","cpu","machine_id"
-        "cpu_track",0,1
-        "cpu_track",1,1
+        "type","ucpu","cpu","machine_id"
+        "__intrinsic_cpu_track",4096,0,1
+        "__intrinsic_cpu_track",4097,1,1
         """))
