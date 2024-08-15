@@ -33,6 +33,7 @@ import {
   TrackPredicate,
   GroupPredicate,
   TrackRef,
+  SidebarMenuItem,
 } from '../public';
 import {EngineBase, Engine} from '../trace_processor/engine';
 import {Actions} from './actions';
@@ -55,26 +56,6 @@ export class PluginContextImpl implements PluginContext, Disposable {
   private trash = new DisposableStack();
   private alive = true;
 
-  readonly sidebar = {
-    hide() {
-      globals.dispatch(
-        Actions.setSidebar({
-          visible: false,
-        }),
-      );
-    },
-    show() {
-      globals.dispatch(
-        Actions.setSidebar({
-          visible: true,
-        }),
-      );
-    },
-    isVisible() {
-      return globals.state.sidebarVisible;
-    },
-  };
-
   registerCommand(cmd: Command): void {
     // Silently ignore if context is dead.
     if (!this.alive) return;
@@ -93,6 +74,10 @@ export class PluginContextImpl implements PluginContext, Disposable {
   [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
+  }
+
+  addSidebarMenuItem(menuItem: SidebarMenuItem): void {
+    this.trash.use(globals.sidebarMenuItems.register(menuItem));
   }
 }
 
@@ -120,6 +105,13 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
 
     const dispose = globals.commandManager.registerCommand(cmd);
     this.trash.use(dispose);
+  }
+
+  addSidebarMenuItem(menuItem: SidebarMenuItem): void {
+    // Silently ignore if context is dead.
+    if (!this.alive) return;
+
+    this.trash.use(globals.sidebarMenuItems.register(menuItem));
   }
 
   registerTrack(trackDesc: TrackDescriptor): void {
@@ -169,10 +161,6 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     const tabMan = globals.tabManager;
     const unregister = tabMan.registerLegacyDetailsPanel(detailsPanel);
     this.trash.use(unregister);
-  }
-
-  get sidebar() {
-    return this.ctx.sidebar;
   }
 
   readonly tabs = {
@@ -480,6 +468,7 @@ export class PluginManager {
     // call onTraceLoad().
     if (this.engine) {
       await doPluginTraceLoad(pluginDetails, this.engine);
+      await doPluginTraceReady(pluginDetails);
     }
 
     this._plugins.set(id, pluginDetails);
@@ -563,6 +552,16 @@ export class PluginManager {
     }
   }
 
+  async onTraceReady(): Promise<void> {
+    const pluginsShuffled = Array.from(this._plugins.values())
+      .map((plugin) => ({plugin, sort: Math.random()}))
+      .sort((a, b) => a.sort - b.sort);
+
+    for (const {plugin} of pluginsShuffled) {
+      await doPluginTraceReady(plugin);
+    }
+  }
+
   onTraceClose() {
     for (const pluginDetails of this._plugins.values()) {
       doPluginTraceUnload(pluginDetails);
@@ -582,6 +581,12 @@ export class PluginManager {
   }
 }
 
+async function doPluginTraceReady(pluginDetails: PluginDetails): Promise<void> {
+  const {plugin, traceContext} = pluginDetails;
+  await Promise.resolve(plugin.onTraceReady?.(assertExists(traceContext)));
+  raf.scheduleFullRedraw();
+}
+
 async function doPluginTraceLoad(
   pluginDetails: PluginDetails,
   engine: EngineBase,
@@ -592,13 +597,11 @@ async function doPluginTraceLoad(
   pluginDetails.traceContext = traceCtx;
 
   const startTime = performance.now();
-  const result = await Promise.resolve(plugin.onTraceLoad?.(traceCtx));
+  await Promise.resolve(plugin.onTraceLoad?.(traceCtx));
   const loadTime = performance.now() - startTime;
   pluginDetails.previousOnTraceLoadTimeMillis = loadTime;
 
   raf.scheduleFullRedraw();
-
-  return result;
 }
 
 async function doPluginTraceUnload(
