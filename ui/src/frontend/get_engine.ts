@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TableColumn, TableColumnSet} from './column';
+import {assertExists} from '../base/logging';
+import {Engine} from '../public';
 
-export interface SqlTableDescription {
-  readonly imports?: string[];
-  name: string;
-  // In some cases, the name of the table we are querying is different from the name of the table we want to display to the user -- typically because the underlying table is wrapped into a view.
-  displayName?: string;
-  columns: (TableColumn | TableColumnSet)[];
+import {globals} from './globals';
+
+// TODO(stevegolton): Find a way to make this more elegant.
+export function getEngine(tag: string): Engine {
+  const engConfig = globals.getCurrentEngine();
+  const engineId = assertExists(engConfig).id;
+  return assertExists(globals.engines.get(engineId)).getProxy(tag);
 }
