@@ -219,8 +219,10 @@
       font-size: 18px;
     }
 
-    &:hover {
+    &.pf-clickable {
       cursor: pointer;
+    }
+    &:hover {
       .fold-button {
         color: hsl(45, 100%, 48%);
       }
@@ -242,7 +244,7 @@
 }
 
 .pf-track-details-dropdown {
-  width: 400px;
+  max-width: 400px;
 }
 
 .pf-panel-group {

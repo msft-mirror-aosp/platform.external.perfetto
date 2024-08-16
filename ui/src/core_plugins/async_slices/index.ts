@@ -37,7 +37,7 @@ class AsyncSlicePlugin implements Plugin {
           count() as trackCount
         from track t
         join _slice_track_summary using (id)
-        where t.type in ('track', 'gpu_track', 'cpu_track')
+        where t.type in ('__intrinsic_track', 'gpu_track', 'cpu_track')
         group by parent_id, name
       )
       select
@@ -70,6 +70,7 @@ class AsyncSlicePlugin implements Plugin {
         tags: {
           trackIds,
           kind: ASYNC_SLICE_TRACK_KIND,
+          scope: 'global',
         },
         trackFactory: ({trackKey}) => {
           return new AsyncSliceTrack({engine, trackKey}, maxDepth, trackIds);
@@ -124,6 +125,8 @@ class AsyncSlicePlugin implements Plugin {
         tags: {
           trackIds,
           kind: ASYNC_SLICE_TRACK_KIND,
+          scope: 'process',
+          upid,
         },
         trackFactory: ({trackKey}) => {
           return new AsyncSliceTrack(
@@ -193,6 +196,7 @@ class AsyncSlicePlugin implements Plugin {
         tags: {
           trackIds,
           kind: ASYNC_SLICE_TRACK_KIND,
+          scope: 'user',
         },
         trackFactory: ({trackKey}) => {
           return new AsyncSliceTrack({engine, trackKey}, maxDepth, trackIds);

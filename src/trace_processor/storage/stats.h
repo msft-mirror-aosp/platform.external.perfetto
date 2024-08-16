@@ -273,6 +273,7 @@ namespace stats {
   F(perf_samples_skipped,                 kSingle,  kError,    kAnalysis, ""), \
   F(perf_counter_skipped_because_no_cpu,  kSingle,  kError,    kAnalysis, ""), \
   F(perf_features_skipped,                kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_samples_cpu_mode_unknown,        kSingle,  kError,    kAnalysis, ""), \
   F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,    ""), \
   F(perf_dummy_mapping_used,              kSingle,  kInfo,     kAnalysis, ""), \
   F(perf_invalid_event_id,                kSingle,  kError,    kTrace,    ""), \
@@ -378,7 +379,9 @@ namespace stats {
       "in some arguments missing. You may need a newer version of trace "      \
       "processor to parse them."),                                             \
   F(mali_unknown_mcu_state_id,            kSingle,  kError,   kAnalysis,       \
-      "An invalid Mali GPU MCU state ID was detected.")
+      "An invalid Mali GPU MCU state ID was detected."),                       \
+  F(pixel_modem_negative_timestamp,       kSingle,  kError,   kAnalysis,       \
+      "A negative timestamp was received from a Pixel modem event.")
 // clang-format on
 
 enum Type {

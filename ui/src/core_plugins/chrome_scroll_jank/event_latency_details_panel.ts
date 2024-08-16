@@ -25,10 +25,12 @@ import {
   getSlice,
   getSliceFromConstraints,
   SliceDetails,
-  sliceRef,
   SliceTreeNode,
-} from '../../frontend/sql/slice';
-import {asSliceSqlId, SliceSqlId} from '../../frontend/sql_types';
+} from '../../trace_processor/sql_utils/slice';
+import {
+  asSliceSqlId,
+  SliceSqlId,
+} from '../../trace_processor/sql_utils/core_types';
 import {
   ColumnDescriptor,
   Table,
@@ -56,7 +58,8 @@ import {
   getSliceForTrack,
   ScrollJankSlice,
 } from './scroll_jank_slice';
-import {ScrollJankV3TrackKind} from './common';
+import {sliceRef} from '../../frontend/widgets/slice';
+import {SCROLL_JANK_V3_TRACK_KIND} from '../../public';
 
 // Given a node in the slice tree, return a path from root to it.
 function getPath(slice: SliceTreeNode): string[] {
@@ -409,7 +412,7 @@ export class EventLatencySliceDetailsPanel extends BottomTab<GenericSliceDetails
           left: this.jankySlice
             ? getSliceForTrack(
                 this.jankySlice,
-                ScrollJankV3TrackKind,
+                SCROLL_JANK_V3_TRACK_KIND,
                 'Jank Interval',
               )
             : 'Jank Interval',
