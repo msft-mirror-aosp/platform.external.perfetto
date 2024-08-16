@@ -37,7 +37,7 @@ import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {Analytics, initAnalytics} from './analytics';
 import {Timeline} from './timeline';
-import {SliceSqlId} from './sql_types';
+import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
 import {Optional, exists} from '../base/utils';
 import {OmniboxManager} from './omnibox_manager';
@@ -51,6 +51,8 @@ import {
 } from './search_overview_track';
 import {AppContext} from './app_context';
 import {TraceContext} from './trace_context';
+import {Registry} from '../base/registry';
+import {SidebarMenuItem} from '../public';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -184,6 +186,16 @@ export const defaultTraceContext: TraceContext = {
   gpuCount: 0,
 };
 
+interface SqlModule {
+  readonly name: string;
+  readonly sql: string;
+}
+
+interface SqlPackage {
+  readonly name: string;
+  readonly modules: SqlModule[];
+}
+
 /**
  * Global accessors for state/dispatch in the frontend.
  */
@@ -234,8 +246,11 @@ class Globals implements AppContext {
   showPanningHint = false;
   permalinkHash?: string;
   showTraceErrorPopup = true;
+  extraSqlPackages: SqlPackage[] = [];
 
   traceContext = defaultTraceContext;
+
+  readonly sidebarMenuItems = new Registry<SidebarMenuItem>((m) => m.commandId);
 
   // This is the app's equivalent of a plugin's onTraceLoad() function.
   // TODO(stevegolton): Eventually initialization that should be done on trace
