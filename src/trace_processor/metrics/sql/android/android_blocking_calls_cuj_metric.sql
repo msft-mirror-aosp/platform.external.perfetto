@@ -32,6 +32,9 @@ WITH latency_cujs AS (
     SELECT
         ROW_NUMBER() OVER (ORDER BY ts) AS cuj_id,
         process.upid AS upid,
+        -- Latency CUJs don't have a well defined thread. Let's always consider
+        -- the app main thread for those.
+        process.upid AS utid,
         process.name AS process_name,
         process_metadata.metadata AS process_metadata,
         -- Extracts "CUJ_NAME" from "L<CUJ_NAME>"
@@ -52,7 +55,8 @@ WITH latency_cujs AS (
 all_cujs AS (
     SELECT
         cuj_id,
-        upid,
+        cuj.upid,
+        t.utid as ui_thread,
         process_name,
         process_metadata,
         cuj_name,
@@ -60,11 +64,13 @@ all_cujs AS (
         tb.dur,
         tb.ts_end
     FROM android_jank_cuj_main_thread_cuj_boundary tb
-        JOIN android_jank_cuj using (cuj_id)
+        JOIN android_jank_cuj cuj USING (cuj_id)
+        JOIN android_jank_cuj_main_thread t USING (cuj_id)
 UNION
     SELECT
         cuj_id,
         upid,
+        utid as ui_thread,
         process_name,
         process_metadata,
         cuj_name,
@@ -85,10 +91,8 @@ FROM all_cujs;
 --      slice, there needs to be 2 entries for that slice, one for each cuj id.
 --  (2) each slice needs to be trimmed to be fully inside the cuj associated
 --      (as we don't care about what's outside cujs)
-DROP TABLE IF EXISTS android_blocking_calls_cuj_calls;
-CREATE TABLE android_blocking_calls_cuj_calls AS
-WITH
-main_thread_slices_scoped_to_cujs AS (
+DROP TABLE IF EXISTS main_thread_slices_scoped_to_cujs;
+CREATE PERFETTO TABLE main_thread_slices_scoped_to_cujs AS
 SELECT
     s.id,
     s.id AS slice_id,
@@ -107,7 +111,12 @@ FROM _android_critical_blocking_calls s
     ON s.ts + s.dur > cuj.ts AND s.ts < cuj.ts_end
         -- and are from the same process
         AND s.upid = cuj.upid
-)
+        -- from the CUJ ui thread only
+        AND s.utid = cuj.ui_thread;
+
+
+DROP TABLE IF EXISTS android_blocking_calls_cuj_calls;
+CREATE TABLE android_blocking_calls_cuj_calls AS
 SELECT
     name,
     COUNT(*) AS occurrences,

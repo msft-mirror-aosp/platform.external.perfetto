@@ -226,14 +226,14 @@ export class SliceDetailsPanel extends SlicePanel {
       return;
     }
 
-    let trackKey: string | number | undefined;
+    let trackKey: string | undefined;
     for (const track of Object.values(globals.state.tracks)) {
       const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
       // TODO(stevegolton): Handle v2.
       if (
         trackDesc &&
-        trackDesc.kind === THREAD_STATE_TRACK_KIND &&
-        trackDesc.utid === threadInfo.utid
+        trackDesc.tags?.kind === THREAD_STATE_TRACK_KIND &&
+        trackDesc.tags?.utid === threadInfo.utid
       ) {
         trackKey = track.key;
       }

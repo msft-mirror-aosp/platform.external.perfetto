@@ -1540,6 +1540,7 @@ message StartUp {
     HOME_SCREEN_SHORTCUT = 16;
     SHARE_INTENT = 17;
     NFC = 18;
+    AUTH_TAB = 19;
   }
 
   optional int64 activity_id = 1;
@@ -1557,6 +1558,15 @@ message WebContentInteraction {
 
   optional Type type = 1;
   optional int64 total_duration_ms = 2;
+}
+
+message ScrollMetrics {
+  optional int64 frame_count = 1;
+  optional int64 vsync_count = 2;
+  optional int64 missed_vsync_max = 3;
+  optional int64 missed_vsync_sum = 4;
+  optional int64 delayed_frame_count = 5;
+  optional int64 predictor_janky_frame_count = 6;
 }
 
 // The EventForwarder is a subsystem in android that forwards events from Java
@@ -1900,13 +1910,25 @@ message AnimationFrameScriptTimingInfo {
     WORD_PRESS = 2;
     GOOGLE_ANALYTICS = 3;
     GOOGLE_FONT_API = 4;
+    GOOGLE_TAG_MANAGER = 5;
+    GOOGLE_MAPS = 6;
+    META_PIXEL = 7;
+    YOUTUBE = 8;
+    ADOBE_ANALYTICS = 9;
+    TIKTOK_PIXEL = 10;
+    HOTJAR = 11;
+    GOOGLE_ADSENSE = 12;
+    GOOGLE_PUBLISHER_TAG = 13;
+    GOOGLE_ADS_LIBRARIES = 14;
+    FUNDING_CHOICES = 15;
+    ELEMENTOR = 16;
   }
   optional ThirdPartyTechnology third_party_technology = 10;
 }
 
 message ChromeTrackEvent {
   // Extension range for Chrome: 1000-1999
-  // Next ID: 1066
+  // Next ID: 1067
   extend TrackEvent {
     optional ChromeAppState chrome_app_state = 1000;
 
@@ -2046,5 +2068,7 @@ message ChromeTrackEvent {
 
     optional AnimationFrameScriptTimingInfo animation_frame_script_timing_info =
         1065;
+
+    optional ScrollMetrics scroll_metrics = 1066;
   }
 }

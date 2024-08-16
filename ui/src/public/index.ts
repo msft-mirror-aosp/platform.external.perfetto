@@ -15,14 +15,14 @@
 import m from 'mithril';
 
 import {Hotkey} from '../base/hotkeys';
-import {Span, duration, time} from '../base/time';
+import {TimeSpan, duration, time} from '../base/time';
 import {Migrate, Store} from '../base/store';
 import {ColorScheme} from '../core/colorizer';
 import {PrimaryTrackSortKey} from '../common/state';
 import {Engine} from '../trace_processor/engine';
-import {TraceContext} from '../frontend/globals';
 import {PromptOption} from '../frontend/omnibox_manager';
-import {LegacyDetailsPanel, TrackDescriptor, TrackTags} from './tracks';
+import {LegacyDetailsPanel, TrackDescriptor} from './tracks';
+import {TraceContext} from '../frontend/trace_context';
 
 export {Engine} from '../trace_processor/engine';
 export {
@@ -133,6 +133,19 @@ export interface MetricVisualisation {
   path: string[];
 }
 
+export interface SidebarMenuItem {
+  readonly commandId: string;
+  readonly group:
+    | 'navigation'
+    | 'current_trace'
+    | 'convert_trace'
+    | 'example_traces'
+    | 'support';
+  when?(): boolean;
+  readonly icon: string;
+  readonly priority?: number;
+}
+
 // This interface defines a context for a plugin, which is an object passed to
 // most hooks within the plugin. It should be used to interact with Perfetto.
 export interface PluginContext {
@@ -146,17 +159,10 @@ export interface PluginContext {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runCommand(id: string, ...args: any[]): any;
 
-  // Control of the sidebar.
-  sidebar: {
-    // Show the sidebar.
-    show(): void;
-
-    // Hide the sidebar.
-    hide(): void;
-
-    // Returns true if the sidebar is visible.
-    isVisible(): boolean;
-  };
+  // Adds a new menu item to the sidebar.
+  // All entries must map to a command. This will allow the shortcut and
+  // optional shortcut to be displayed on the UI.
+  addSidebarMenuItem(menuItem: SidebarMenuItem): void;
 }
 
 export interface SliceTrackColNames {
@@ -253,7 +259,7 @@ export interface PluginContextTrace extends PluginContext {
     setViewportTime(start: time, end: time): void;
 
     // A span representing the current viewport location
-    readonly viewport: Span<time, duration>;
+    readonly viewport: TimeSpan;
   };
 
   // Control over the bottom details pane.
@@ -300,7 +306,7 @@ export interface PluginContextTrace extends PluginContext {
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;
 
-  trace: TraceContext;
+  readonly trace: TraceContext;
 
   // When the trace is opened via postMessage deep-linking, returns the sub-set
   // of postMessageData.pluginArgs[pluginId] for the current plugin. If not
@@ -314,6 +320,7 @@ export interface Plugin {
   // Lifecycle methods.
   onActivate?(ctx: PluginContext): void;
   onTraceLoad?(ctx: PluginContextTrace): Promise<void>;
+  onTraceReady?(ctx: PluginContextTrace): Promise<void>;
   onTraceUnload?(ctx: PluginContextTrace): Promise<void>;
   onDeactivate?(ctx: PluginContext): void;
 
@@ -339,27 +346,27 @@ export interface PluginClass {
 // Describes a reference to a registered track.
 export interface TrackRef {
   // URI of the registered track.
-  uri: string;
+  readonly uri: string;
 
   // A human readable name for this track - displayed in the track shell.
-  displayName: string;
+  readonly title: string;
 
   // Optional: Used to define default sort order for new traces.
   // Note: This will be deprecated soon in favour of tags & sort rules.
-  sortKey?: PrimaryTrackSortKey;
+  readonly sortKey?: PrimaryTrackSortKey;
 
   // Optional: Add tracks to a group with this name.
-  groupName?: string;
+  readonly groupName?: string;
 
   // Optional: Track key
-  key?: string;
+  readonly key?: string;
 
   // Optional: Whether the track is pinned
-  isPinned?: boolean;
+  readonly isPinned?: boolean;
 }
 
 // A predicate for selecting a subset of tracks.
-export type TrackPredicate = (info: TrackTags) => boolean;
+export type TrackPredicate = (info: TrackDescriptor) => boolean;
 
 // Describes a reference to a group of tracks.
 export interface GroupRef {

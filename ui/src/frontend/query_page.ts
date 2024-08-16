@@ -14,7 +14,6 @@
 
 import m from 'mithril';
 
-import {Disposable} from '../base/disposable';
 import {SimpleResizeObserver} from '../base/resize_observer';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
 import {QueryResponse, runQuery} from '../common/queries';
@@ -92,7 +91,7 @@ class QueryInput implements m.ClassComponent {
 
   onremove(): void {
     if (this.resize) {
-      this.resize.dispose();
+      this.resize[Symbol.dispose]();
       this.resize = undefined;
     }
   }
@@ -112,6 +111,7 @@ class QueryInput implements m.ClassComponent {
 
       onUpdate: (text: string) => {
         state.enteredText = text;
+        raf.scheduleFullRedraw();
       },
     });
   }
@@ -122,6 +122,14 @@ export const QueryPage = createPage({
     return m(
       '.query-page',
       m(Callout, 'Enter query and press Cmd/Ctrl + Enter'),
+      state.enteredText.includes('"') &&
+        m(
+          Callout,
+          {icon: 'warning'},
+          `" (double quote) character observed in query; if this is being used to ` +
+            `define a string, please use ' (single quote) instead. Using double quotes ` +
+            `can cause subtle problems which are very hard to debug.`,
+        ),
       m(QueryInput),
       state.executedQuery === undefined
         ? null

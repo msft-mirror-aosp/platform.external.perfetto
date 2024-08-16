@@ -1501,6 +1501,9 @@ if (enable_perfetto_grpc) {
   config("grpc_boringssl_config") {
     visibility = _buildtools_visibility
     include_dirs = [ "grpc/src/third_party/boringssl-with-bazel/src/include" ]
+    if (is_gcc) {
+      cflags = [ "-Wno-stringop-overflow" ]
+    }
   }
 
   config("grpc_upb_config") {
@@ -1568,5 +1571,19 @@ if (enable_perfetto_grpc) {
       perfetto_isystem_cflag,
       rebase_path("grpc/src/include", root_build_dir),
     ]
+  }
+  config("cpp_httplib_config") {
+    visibility = _buildtools_visibility
+    cflags = [
+      perfetto_isystem_cflag,
+      rebase_path("cpp-httplib", root_build_dir),
+    ]
+  }
+
+  source_set("cpp_httplib") {
+    visibility = _buildtools_visibility
+    sources = [ "cpp-httplib/httplib.h" ]
+    public_configs = [ ":cpp_httplib_config" ]
+    deps = [ "//gn:default_deps" ]
   }
 }

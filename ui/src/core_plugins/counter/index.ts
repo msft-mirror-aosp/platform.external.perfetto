@@ -26,12 +26,12 @@ import {
   Engine,
   COUNTER_TRACK_KIND,
 } from '../../public';
-import {getTrackName} from '../../public/utils';
+import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {CounterOptions} from '../../frontend/base_counter_track';
 import {TraceProcessorCounterTrack} from './trace_processor_counter_track';
 import {CounterDetailsPanel} from './counter_details_panel';
 import {Time, duration, time} from '../../base/time';
-import {Optional} from '../../base/utils';
+import {exists, Optional} from '../../base/utils';
 
 const NETWORK_TRACK_REGEX = new RegExp('^.* (Received|Transmitted)( KB)?$');
 const ENTITY_RESIDENCY_REGEX = new RegExp('^Entity residency:');
@@ -177,10 +177,12 @@ class CounterPlugin implements Plugin {
       const displayName = it.name;
       const unit = it.unit ?? undefined;
       ctx.registerStaticTrack({
-        uri: `perfetto.Counter#${trackId}`,
-        displayName,
-        kind: COUNTER_TRACK_KIND,
-        trackIds: [trackId],
+        uri: `/counter_${trackId}`,
+        title: displayName,
+        tags: {
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [trackId],
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -210,7 +212,7 @@ class CounterPlugin implements Plugin {
       order by name asc
     `;
 
-    this.addCpuCounterTracks(ctx, cpuFreqLimitCounterTracksSql);
+    this.addCpuCounterTracks(ctx, cpuFreqLimitCounterTracksSql, 'cpuFreqLimit');
   }
 
   async addCpuPerfCounterTracks(ctx: PluginContextTrace): Promise<void> {
@@ -226,12 +228,13 @@ class CounterPlugin implements Plugin {
       join _counter_track_summary using (id)
       order by perf_session_id asc, pct.name asc, cpu asc
     `;
-    this.addCpuCounterTracks(ctx, addCpuPerfCounterTracksSql);
+    this.addCpuCounterTracks(ctx, addCpuPerfCounterTracksSql, 'cpuPerf');
   }
 
   async addCpuCounterTracks(
     ctx: PluginContextTrace,
     sql: string,
+    scope: string,
   ): Promise<void> {
     const result = await ctx.engine.query(sql);
 
@@ -244,10 +247,13 @@ class CounterPlugin implements Plugin {
       const name = it.name;
       const trackId = it.id;
       ctx.registerTrack({
-        uri: `perfetto.Counter#cpu${trackId}`,
-        displayName: name,
-        kind: COUNTER_TRACK_KIND,
-        trackIds: [trackId],
+        uri: `counter.cpu.${trackId}`,
+        title: name,
+        tags: {
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [trackId],
+          scope,
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -293,6 +299,7 @@ class CounterPlugin implements Plugin {
     });
     for (; it.valid(); it.next()) {
       const utid = it.utid;
+      const upid = it.upid;
       const tid = it.tid;
       const trackId = it.trackId;
       const trackName = it.trackName;
@@ -307,10 +314,15 @@ class CounterPlugin implements Plugin {
         threadTrack: true,
       });
       ctx.registerTrack({
-        uri: `perfetto.Counter#thread${trackId}`,
-        displayName: name,
-        kind,
-        trackIds: [trackId],
+        uri: `${getThreadUriPrefix(upid, utid)}_counter_${trackId}`,
+        title: name,
+        tags: {
+          kind,
+          trackIds: [trackId],
+          utid,
+          upid: upid ?? undefined,
+          scope: 'thread',
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -359,12 +371,17 @@ class CounterPlugin implements Plugin {
         pid,
         kind,
         processName,
+        ...(exists(trackName) && {trackName}),
       });
       ctx.registerTrack({
-        uri: `perfetto.Counter#process${trackId}`,
-        displayName: name,
-        kind: COUNTER_TRACK_KIND,
-        trackIds: [trackId],
+        uri: `/process_${upid}/counter_${trackId}`,
+        title: name,
+        tags: {
+          kind,
+          trackIds: [trackId],
+          upid,
+          scope: 'process',
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -397,13 +414,16 @@ class CounterPlugin implements Plugin {
       `);
       if (freqExistsResult.numRows() > 0) {
         const trackId = freqExistsResult.firstRow({id: NUM}).id;
-        const uri = `perfetto.Counter#gpu_freq${gpu}`;
+        const uri = `/gpu_frequency_${gpu}`;
         const name = `Gpu ${gpu} Frequency`;
         ctx.registerTrack({
           uri,
-          displayName: name,
-          kind: COUNTER_TRACK_KIND,
-          trackIds: [trackId],
+          title: name,
+          tags: {
+            kind: COUNTER_TRACK_KIND,
+            trackIds: [trackId],
+            scope: 'gpuFreq',
+          },
           trackFactory: (trackCtx) => {
             return new TraceProcessorCounterTrack({
               engine: ctx.engine,

@@ -73,23 +73,23 @@ SELECT
 FROM _idle_freq_l3_hit_l3_miss_slice as base
 LEFT JOIN _filtered_curves_2d lut4 ON
   base.freq_0 = lut4.freq_khz AND
-  base.freq_4 = lut4.other_freq_khz AND
   base.policy_4 = lut4.other_policy AND
+  base.freq_4 = lut4.other_freq_khz AND
   lut4.idle = 255
 LEFT JOIN _filtered_curves_2d lut5 ON
   base.freq_0 = lut5.freq_khz AND
-  base.freq_5 = lut5.other_freq_khz AND
   base.policy_5 = lut5.other_policy AND
+  base.freq_5 = lut5.other_freq_khz AND
   lut5.idle = 255
 LEFT JOIN _filtered_curves_2d lut6 ON
   base.freq_0 = lut6.freq_khz AND
-  base.freq_6 = lut6.other_freq_khz AND
   base.policy_6 = lut6.other_policy AND
+  base.freq_6 = lut6.other_freq_khz AND
   lut6.idle = 255
 LEFT JOIN _filtered_curves_2d lut7 ON
   base.freq_0 = lut7.freq_khz AND
-  base.freq_7 = lut7.other_freq_khz AND
   base.policy_7 = lut7.other_policy AND
+  base.freq_7 = lut7.other_freq_khz AND
   lut7.idle = 255
 -- Needs to be at least 1us to reduce inconsequential rows.
 WHERE dur > time_from_us(1);
@@ -169,44 +169,68 @@ SELECT
 FROM _get_max_vote as base
 -- LUT for 2D dependencies
 LEFT JOIN _filtered_curves_2d lut0 ON
-  lut0.idle = base.idle_0 AND
   lut0.freq_khz = base.freq_0 AND
+  lut0.other_policy = base.max_policy_vote AND
   lut0.other_freq_khz = base.max_freq_vote AND
-  lut0.other_policy = base.max_policy_vote
+  lut0.idle = base.idle_0
 LEFT JOIN _filtered_curves_2d lut1 ON
-  lut1.idle = base.idle_1 AND
   lut1.freq_khz = base.freq_1 AND
+  lut1.other_policy = base.max_policy_vote AND
   lut1.other_freq_khz = base.max_freq_vote AND
-  lut1.other_policy = base.max_policy_vote
+  lut1.idle = base.idle_1
 LEFT JOIN _filtered_curves_2d lut2 ON
-  lut2.idle = base.idle_2 AND
   lut2.freq_khz = base.freq_2 AND
+  lut2.other_policy = base.max_policy_vote AND
   lut2.other_freq_khz = base.max_freq_vote AND
-  lut2.other_policy = base.max_policy_vote
+  lut2.idle = base.idle_2
 LEFT JOIN _filtered_curves_2d lut3 ON
-  lut3.idle = base.idle_3 AND
   lut3.freq_khz = base.freq_3 AND
+  lut3.other_policy = base.max_policy_vote AND
   lut3.other_freq_khz = base.max_freq_vote AND
-  lut3.other_policy = base.max_policy_vote
+  lut3.idle = base.idle_3
 -- LUT for static curve lookup
 LEFT JOIN _filtered_curves_2d static_2d ON
   static_2d.freq_khz = base.freq_0 AND
-  static_2d.other_freq_khz = base.max_freq_vote AND
   static_2d.other_policy = base.max_policy_vote AND
+  static_2d.other_freq_khz = base.max_freq_vote AND
   static_2d.idle = 255
 LEFT JOIN _filtered_curves_1d static_1d ON
-  static_1d.freq_khz = base.freq_0 AND
   static_1d.policy = 0 AND
+  static_1d.freq_khz = base.freq_0 AND
   static_1d.idle = 255
 -- LUT joins for L3 cache
 LEFT JOIN _filtered_curves_l3 l3_hit_lut ON
-  l3_hit_lut.action= 'hit' AND
   l3_hit_lut.freq_khz = base.freq_0 AND
+  l3_hit_lut.other_policy = base.max_policy_vote AND
   l3_hit_lut.other_freq_khz = base.max_freq_vote AND
-  l3_hit_lut.other_policy = base.max_policy_vote
+  l3_hit_lut.action = 'hit'
 LEFT JOIN _filtered_curves_l3 l3_miss_lut ON
-  l3_miss_lut.action = 'miss' AND
   l3_miss_lut.freq_khz = base.freq_0 AND
+  l3_miss_lut.other_policy = base.max_policy_vote AND
   l3_miss_lut.other_freq_khz = base.max_freq_vote AND
-  l3_miss_lut.other_policy = base.max_policy_vote;
+  l3_miss_lut.action = 'miss';
+
+-- The most basic components of Wattson, all normalized to be in mW on a per
+-- system state basis
+CREATE PERFETTO TABLE _system_state_mw
+AS
+SELECT
+  ts,
+  dur,
+  cpu0_curve as cpu0_mw,
+  cpu1_curve as cpu1_mw,
+  cpu2_curve as cpu2_mw,
+  cpu3_curve as cpu3_mw,
+  cpu4_curve as cpu4_mw,
+  cpu5_curve as cpu5_mw,
+  cpu6_curve as cpu6_mw,
+  cpu7_curve as cpu7_mw,
+  -- LUT for l3 is scaled by 10^6 to save resolution and in units of kWs. Scale
+  -- this by 10^3 so when divided by ns, result is in units of mW
+  (
+    (
+      IFNULL(l3_hit_value, 0) + IFNULL(l3_miss_value, 0)
+    ) * 1000 / dur
+  ) + static_curve as dsu_scu_mw
+FROM _system_state_curves;
 

@@ -65,7 +65,7 @@ class PerfettoSqlEngine {
     ExecutionStats stats;
   };
 
-  explicit PerfettoSqlEngine(StringPool* pool);
+  PerfettoSqlEngine(StringPool* pool, bool enable_extra_checks);
 
   // Executes all the statements in |sql| and returns a |ExecutionResult|
   // object. The metadata will reference all the statements executed and the
@@ -276,6 +276,23 @@ class PerfettoSqlEngine {
 
   base::Status ExecuteDropIndex(const PerfettoSqlParser::DropIndex&);
 
+  enum class CreateTableType {
+    kCreateTable,
+    // For now, bytes columns are not supported in CREATE PERFETTO TABLE,
+    // but supported in CREATE PERFETTO VIEW, so we skip them when validating
+    // views.
+    kValidateOnly
+  };
+  // |effective_schema| should have been normalised and its column order
+  // should match |column_names|.
+  base::StatusOr<std::unique_ptr<RuntimeTable>> CreateTableImpl(
+      const char* tag,
+      const std::string& name,
+      SqliteEngine::PreparedStatement source,
+      const std::vector<std::string>& column_names,
+      const std::vector<sql_argument::ArgumentDefinition>& effective_schema,
+      CreateTableType type);
+
   template <typename Function>
   base::Status RegisterFunctionWithSqlite(
       const char* name,
@@ -284,17 +301,21 @@ class PerfettoSqlEngine {
       bool deterministic = true);
 
   // Get the column names from a statement.
-  // |operator_name| is used in the error message if the statement is invalid.
-  static base::StatusOr<std::vector<std::string>>
-  GetColumnNamesFromSelectStatement(const SqliteEngine::PreparedStatement& stmt,
-                                    const char* tag);
+  // |tag| is used in the error message if the statement is invalid.
+  base::StatusOr<std::vector<std::string>> GetColumnNamesFromSelectStatement(
+      const SqliteEngine::PreparedStatement& stmt,
+      const char* tag) const;
 
   // Validates that the column names in |column_names| match the |schema|.
-  // |operator_name| is used in the error message if the statement is invalid.
-  static base::Status ValidateColumnNames(
+  // Given that PerfettoSQL supports an arbitrary order of columns in the
+  // schema, this function also normalises the schema by reordering the schema
+  // columns to match the order of columns in the query. |tag| is used in the
+  // error message if the statement is invalid.
+  base::StatusOr<std::vector<sql_argument::ArgumentDefinition>>
+  ValidateAndGetEffectiveSchema(
       const std::vector<std::string>& column_names,
       const std::vector<sql_argument::ArgumentDefinition>& schema,
-      const char* operator_name);
+      const char* tag) const;
 
   // Given a module and a key, include the correct file(s) from the module.
   // The key can contain a wildcard to include all files in the module with the
@@ -310,6 +331,9 @@ class PerfettoSqlEngine {
       const PerfettoSqlParser& parser);
 
   StringPool* pool_ = nullptr;
+  // If true, engine will perform additional consistency checks when e.g.
+  // creating tables and views.
+  const bool enable_extra_checks_;
 
   uint64_t static_function_count_ = 0;
   uint64_t static_aggregate_function_count_ = 0;

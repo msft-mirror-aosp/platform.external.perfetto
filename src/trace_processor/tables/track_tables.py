@@ -21,21 +21,24 @@ from python.generators.trace_processor_table.public import CppString
 from python.generators.trace_processor_table.public import Table
 from python.generators.trace_processor_table.public import TableDoc
 from python.generators.trace_processor_table.public import ColumnDoc
+from python.generators.trace_processor_table.public import ColumnFlag
 from python.generators.trace_processor_table.public import CppSelfTableId
 from python.generators.trace_processor_table.public import CppTableId
 from python.generators.trace_processor_table.public import CppUint32
 
-from src.trace_processor.tables.metadata_tables import MACHINE_TABLE
+from src.trace_processor.tables.metadata_tables import CPU_TABLE, MACHINE_TABLE
 
 TRACK_TABLE = Table(
     python_module=__file__,
     class_name="TrackTable",
-    sql_name="track",
+    sql_name="__intrinsic_track",
     columns=[
         C("name", CppString()),
         C("parent_id", CppOptional(CppSelfTableId())),
         C("source_arg_set_id", CppOptional(CppUint32())),
         C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
+        C("classification", CppOptional(CppString()), flags=ColumnFlag.HIDDEN),
+        C("tags", CppOptional(CppUint32()), flags=ColumnFlag.HIDDEN),
     ],
     tabledoc=TableDoc(
         doc='''
@@ -68,6 +71,15 @@ TRACK_TABLE = Table(
                 '''
                   Machine identifier, non-null for tracks on a remote machine.
                 ''',
+            'classification':
+                '''
+                  Classification of this track. Responsible for grouping
+                  similar tracks together.
+                ''',
+            'tags':
+                ColumnDoc(
+                    doc='Additional details about the track.',
+                    joinable='args.arg_set_id'),
         }))
 
 PROCESS_TRACK_TABLE = Table(
@@ -114,15 +126,17 @@ THREAD_TRACK_TABLE = Table(
 CPU_TRACK_TABLE = Table(
     python_module=__file__,
     class_name='CpuTrackTable',
-    sql_name='cpu_track',
+    sql_name='__intrinsic_cpu_track',
     columns=[
-        C('cpu', CppUint32()),
+        C('ucpu', CppTableId(CPU_TABLE)),
     ],
     parent=TRACK_TABLE,
     tabledoc=TableDoc(
         doc='Tracks which are associated to a single CPU',
         group='Tracks',
-        columns={'cpu': 'The CPU associated with this track'}))
+        columns={
+            'ucpu': 'The unique CPU identifier associated with this track.',
+        }))
 
 GPU_TRACK_TABLE = Table(
     python_module=__file__,
@@ -241,15 +255,17 @@ PROCESS_COUNTER_TRACK_TABLE = Table(
 CPU_COUNTER_TRACK_TABLE = Table(
     python_module=__file__,
     class_name='CpuCounterTrackTable',
-    sql_name='cpu_counter_track',
+    sql_name='__intrinsic_cpu_counter_track',
     columns=[
-        C('cpu', CppUint32()),
+        C('ucpu', CppTableId(CPU_TABLE)),
     ],
     parent=COUNTER_TRACK_TABLE,
     tabledoc=TableDoc(
         doc='Tracks containing counter-like events associated to a CPU.',
         group='Counter Tracks',
-        columns={'cpu': 'The CPU this track is associated with'}))
+        columns={
+            'ucpu': 'The unique CPU identifier associated with this track.'
+        }))
 
 IRQ_COUNTER_TRACK_TABLE = Table(
     python_module=__file__,
