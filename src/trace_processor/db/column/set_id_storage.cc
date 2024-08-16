@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -35,7 +36,6 @@
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
@@ -65,6 +65,10 @@ uint32_t LowerBoundIntrinsic(const SetId* data, SetId id, Range range) {
 
 }  // namespace
 
+SetIdStorage::StoragePtr SetIdStorage::GetStoragePtr() {
+  return values_->data();
+}
+
 SetIdStorage::ChainImpl::ChainImpl(const std::vector<uint32_t>* values)
     : values_(values) {}
 
@@ -82,12 +86,7 @@ SearchValidationResult SetIdStorage::ChainImpl::ValidateSearchConstraints(
     if (op == FilterOp::kIsNotNull) {
       return SearchValidationResult::kAllData;
     }
-    if (op == FilterOp::kIsNull) {
-      return SearchValidationResult::kNoData;
-    }
-    PERFETTO_FATAL(
-        "Invalid filter operation. NULL should only be compared with 'IS NULL' "
-        "and 'IS NOT NULL'");
+    return SearchValidationResult::kNoData;
   }
 
   // FilterOp checks. Switch so that we get a warning if new FilterOp is not
@@ -280,23 +279,21 @@ Range SetIdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   return {};
 }
 
-void SetIdStorage::ChainImpl::StableSort(SortToken* start,
-                                         SortToken* end,
+void SetIdStorage::ChainImpl::StableSort(Token* start,
+                                         Token* end,
                                          SortDirection direction) const {
   PERFETTO_TP_TRACE(metatrace::Category::DB,
                     "SetIdStorage::ChainImpl::StableSort");
   switch (direction) {
     case SortDirection::kAscending:
-      std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return (*values_)[a.index] < (*values_)[b.index];
-                       });
+      std::stable_sort(start, end, [this](const Token& a, const Token& b) {
+        return (*values_)[a.index] < (*values_)[b.index];
+      });
       break;
     case SortDirection::kDescending:
-      std::stable_sort(start, end,
-                       [this](const SortToken& a, const SortToken& b) {
-                         return (*values_)[a.index] > (*values_)[b.index];
-                       });
+      std::stable_sort(start, end, [this](const Token& a, const Token& b) {
+        return (*values_)[a.index] > (*values_)[b.index];
+      });
       break;
   }
 }
@@ -349,12 +346,6 @@ std::optional<Token> SetIdStorage::ChainImpl::MinElement(
 SqlValue SetIdStorage::ChainImpl::Get_AvoidUsingBecauseSlow(
     uint32_t index) const {
   return SqlValue::Long((*values_)[index]);
-}
-
-void SetIdStorage::ChainImpl::Serialize(StorageProto* msg) const {
-  auto* vec_msg = msg->set_set_id_storage();
-  vec_msg->set_values(reinterpret_cast<const uint8_t*>(values_->data()),
-                      sizeof(SetId) * size());
 }
 
 }  // namespace perfetto::trace_processor::column

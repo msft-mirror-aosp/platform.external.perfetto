@@ -102,6 +102,55 @@ packet {
   }
 }
 packet {
+  trusted_uid: 1000
+  trusted_packet_sequence_id: 3
+  interned_data {
+    protolog_string_args {
+      iid: 12
+      str: "MyTestString"
+    }
+  }
+  trusted_pid: 1716
+}
+packet {
+  trusted_uid: 1000
+  trusted_packet_sequence_id: 3
+  protolog_viewer_config {
+    groups {
+      id: 12
+      name: "MY_NON_PROCESSED_GROUP"
+      tag: "MyNonProcessedGroup"
+    }
+  }
+}
+packet {
+  trusted_uid: 1000
+  trusted_packet_sequence_id: 3
+  protolog_viewer_config {
+    messages {
+      message_id: 9084537961316395367
+      message: "My non-processed proto message with a string (%s), an int (%d), a double %g, and a boolean %b."
+      level: PROTOLOG_LEVEL_VERBOSE
+      group_id: 12
+    }
+  }
+}
+packet {
+  trusted_uid: 1000
+  trusted_packet_sequence_id: 3
+  sequence_flags: 2
+  trusted_pid: 1716
+  timestamp: 857384140
+  protolog_message {
+    message_id: 9084537961316395367
+    str_param_iids: 12
+    sint64_params: 888
+    double_params: 8.88
+    boolean_params: 1
+    stacktrace_iid: 1
+  }
+}
+packet {
   trusted_uid: 10224
   trusted_packet_sequence_id: 10
   previous_packet_dropped: true
@@ -112,18 +161,21 @@ packet {
       message_id: 6924537961316301726
       message: "Test message with a string (%s), an int (%d), a double %g, and a boolean %b."
       level: PROTOLOG_LEVEL_DEBUG
+      location: "com/test/TestClass.java:123"
       group_id: 1
     }
     messages {
       message_id: 1994837961123301128
       message: "Test message with different int formats: %d, 0o%o, 0x%x, %f, %e."
       level: PROTOLOG_LEVEL_WARN
+      location: "com/test/TestClass.java:567"
       group_id: 2
     }
     messages {
       message_id: 9274895847396301003
       message: "Message re-using interned string '%s' == '%s', but '%s' != '%s'"
       level: PROTOLOG_LEVEL_ERROR
+      location: "com/test/TestClass.java:527"
       group_id: 3
     }
     groups {

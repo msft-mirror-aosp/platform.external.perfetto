@@ -733,6 +733,9 @@ message ProtoLogConfig {
   repeated ProtoLogGroup group_overrides = 1;
   // Specified what tracing mode to use for the tracing instance.
   optional TracingMode tracing_mode = 2;
+  // If set, any message with log level higher than this level (inclusive) will
+  // be traced. Group overrides take precedence over this value.
+  optional ProtoLogLevel default_log_from_level = 3;
 }
 
 message ProtoLogGroup {
@@ -815,6 +818,42 @@ message SurfaceFlingerTransactionsConfig {
 
 // End of protos/perfetto/config/android/surfaceflinger_transactions_config.proto
 
+// Begin of protos/perfetto/config/android/windowmanager_config.proto
+
+// Custom configuration for the "android.windowmanager" data source.
+message WindowManagerConfig {
+  enum LogFrequency {
+    LOG_FREQUENCY_UNSPECIFIED = 0;
+
+    // Trace state snapshots when a frame is committed.
+    LOG_FREQUENCY_FRAME = 1;
+
+    // Trace state snapshots every time a transaction is committed.
+    LOG_FREQUENCY_TRANSACTION = 2;
+
+    // Trace single state snapshots when the data source is started.
+    LOG_FREQUENCY_SINGLE_DUMP = 3;
+  }
+  optional LogFrequency log_frequency = 1;
+
+  enum LogLevel {
+    LOG_LEVEL_UNSPECIFIED = 0;
+
+    // Logs all elements with maximum amount of information.
+    LOG_LEVEL_VERBOSE = 1;
+
+    // Logs all elements but doesn't write all configuration data.
+    LOG_LEVEL_DEBUG = 2;
+
+    // Logs only visible elements, with the minimum amount of performance
+    // overhead
+    LOG_LEVEL_CRITICAL = 3;
+  }
+  optional LogLevel log_level = 2;
+}
+
+// End of protos/perfetto/config/android/windowmanager_config.proto
+
 // Begin of protos/perfetto/config/chrome/chrome_config.proto
 
 message ChromeConfig {
@@ -887,13 +926,17 @@ message EtwConfig {
 
 // Begin of protos/perfetto/config/ftrace/ftrace_config.proto
 
-// Next id: 28
+// Next id: 29
 message FtraceConfig {
   // Ftrace events to record, example: "sched/sched_switch".
   repeated string ftrace_events = 1;
   // Android-specific event categories:
   repeated string atrace_categories = 2;
   repeated string atrace_apps = 3;
+  // Some processes can emit data through atrace or through the perfetto SDK via
+  // the "track_event" data source. For these categories, the SDK will be
+  // preferred, if possible, for this config.
+  repeated string atrace_categories_prefer_sdk = 28;
 
   // Size of each per-cpu kernel ftrace ring buffer.
   // Not guaranteed if there are multiple concurrent tracing sessions, as the
@@ -2859,6 +2902,11 @@ enum MeminfoCounters {
   MEMINFO_VMALLOC_CHUNK = 31;
   MEMINFO_CMA_TOTAL = 32;
   MEMINFO_CMA_FREE = 33;
+  MEMINFO_GPU = 34;
+  MEMINFO_ZRAM = 35;
+  MEMINFO_MISC = 36;
+  MEMINFO_ION_HEAP = 37;
+  MEMINFO_ION_HEAP_POOL = 38;
 }
 
 // Counter definitions for Linux's /proc/vmstat.
@@ -3117,6 +3165,14 @@ message SysStatsConfig {
   // Polls /proc/pressure/* every X ms, if non-zero.
   // This is required to be > 10ms to avoid excessive CPU usage.
   optional uint32 psi_period_ms = 11;
+
+  // Polls /sys/class/thermal/* every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  optional uint32 thermal_period_ms = 12;
+
+  // Polls /sys/devices/system/cpu/cpu*/cpuidle/state* every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  optional uint32 cpuidle_period_ms = 13;
 }
 
 // End of protos/perfetto/config/sys_stats/sys_stats_config.proto
@@ -3271,7 +3327,7 @@ message TrackEventConfig {
 // Begin of protos/perfetto/config/data_source_config.proto
 
 // The configuration that is passed to each data source when starting tracing.
-// Next id: 130
+// Next id: 131
 message DataSourceConfig {
   enum SessionInitiator {
     SESSION_INITIATOR_UNSPECIFIED = 0;
@@ -3423,6 +3479,9 @@ message DataSourceConfig {
   // Data source name: android.pixel.modem
   optional PixelModemConfig pixel_modem_config = 129 [lazy = true];
 
+  // Data source name: android.windowmanager
+  optional WindowManagerConfig windowmanager_config = 130 [lazy = true];
+
   // This is a fallback mechanism to send a free-form text config to the
   // producer. In theory this should never be needed. All the code that
   // is part of the platform (i.e. traced service) is supposed to *not* truncate
@@ -3448,7 +3507,7 @@ message DataSourceConfig {
 // It contains the general config for the logging buffer(s) and the configs for
 // all the data source being enabled.
 //
-// Next id: 39.
+// Next id: 40.
 message TraceConfig {
   message BufferConfig {
     optional uint32 size_kb = 1;
@@ -4114,6 +4173,51 @@ message TraceConfig {
     optional uint32 max_delay_ms = 2;
   }
   optional CmdTraceStartDelay cmd_trace_start_delay = 35;
+
+  // When non-empty, ensures that for a each semaphore named `name at most
+  // `max_other_session_count`` *other* sessions (whose value is taken of the
+  // minimum of all values specified by this config or any already-running
+  // session) can be be running.
+  //
+  // If a semaphore "acquisition" fails, EnableTracing will return an error
+  // and the tracing session will not be started (or elgible to start in
+  // the case of deferred sessions).
+  //
+  // This is easiest to explain with an example. Suppose the tracing service has
+  // the following active tracing sessions:
+  //   S1 = [{name=foo, max_other_session_count=2},
+  //         {name=bar, max_other_session_count=0}]
+  //   S2 = [{name=foo, max_other_session_count=1},
+  //         {name=baz, max_other_session_count=1}]
+  //
+  // Then, for a new session, the following would be the expected behaviour of
+  // EnableSession given the state of `session_semaphores`.
+  //   Q: session_semaphores = []
+  //   A: Allowed because it does not specify any semaphores. Will be allowed
+  //      no matter the state of any other tracing session.
+  //   Q: session_semaphores = [{name=baz, max_other_session_count=1}]
+  //   A: Allowed because both S2 and this config specify
+  //      max_other_session_count=1 for baz.
+  //   Q: session_semaphores = [{name=foo, max_other_session_count=3}]
+  //   A: Denied because S2 specified max_other_session_count=1 for foo and S1
+  //      takes that slot.
+  //   Q: session_semaphores = [{name=bar, max_other_session_count=0}]
+  //   A: Denied because S1 takes the the slot specified by both S1 and
+  //      this config.
+  //
+  // Introduced in 24Q3 (Android V).
+  message SessionSemaphore {
+    // The name of the semaphore. Acts as a unique identifier across all
+    // tracing sessions (including the one being started).
+    optional string name = 1;
+
+    // The maximum number of *other* sesssions which specify the same semaphore
+    // which can be active. The minimum of this value across all tracing
+    // sessions and the value specified by the config is used when deciding
+    // whether the tracing session can be started.
+    optional uint64 max_other_session_count = 2;
+  }
+  repeated SessionSemaphore session_semaphores = 39;
 }
 
 // End of protos/perfetto/config/trace_config.proto
@@ -4357,125 +4461,6 @@ message AndroidGameInterventionList {
 }
 
 // End of protos/perfetto/trace/android/android_game_intervention_list.proto
-
-// Begin of protos/perfetto/trace/android/android_input_event.proto
-
-// A representation of an Android MotionEvent.
-// See: https://developer.android.com/reference/android/view/MotionEvent
-message AndroidMotionEvent {
-  // A representation of one pointer inside a MotionEvent.
-  // Each Pointer contains the values present in its corresponding
-  // MotionEvent.PointerCoords and MotionEvent.PointerProperties.
-  message Pointer {
-     message AxisValue {
-      optional int32 axis = 1;
-      optional float value = 2;
-    }
-    repeated AxisValue axis_value = 1;
-    optional int32 pointer_id = 2;
-    optional int32 tool_type = 3;
-  }
-
-  // The randomly-generated ID used to track the event through the pipeline.
-  optional fixed32 event_id = 1;
-  // The event's timestamp - generated by the kernel.
-  optional int64 event_time_nanos = 2;
-  optional uint32 source = 3;
-  optional int32 action = 4;
-  optional int32 device_id = 5;
-  // Use a signed int for display_id, because -1 (DISPLAY_IS_NONE) is a common value.
-  optional sint32 display_id = 6;
-  optional int32 classification = 7;
-  optional uint32 flags = 8;
-  repeated Pointer pointer = 9;
-
-  // Field numbers 10-15 are reserved for commonly used fields.
-
-  // If this event was synthesized as a result of one or more different
-  // event, original_event_ids are the event_ids associated with the original events.
-  // For example, if this is an ACTION_HOVER_ENTER event that is synthesized
-  // due to an ACTION_HOVER_MOVE event entering the bounds of a window, the
-  // id of the original hover move event will be listed here.
-  repeated fixed32 original_event_id = 16 [packed = true];
-  // The timestamp of the ACTION_DOWN event associated with this gesture.
-  optional int64 down_time_nanos = 17;
-  optional float cursor_position_x = 18;
-  optional float cursor_position_y = 19;
-  optional int32 action_button = 20;
-  optional uint32 button_state = 21;
-  optional uint32 meta_state = 22;
-  optional uint32 policy_flags = 23;
-  optional float precision_x = 24;
-  optional float precision_y = 25;
-}
-
-// A representation of an Android KeyEvent.
-// See: https://developer.android.com/reference/android/view/KeyEvent
-message AndroidKeyEvent {
-  // The randomly-generated ID used to track the event through the pipeline.
-  optional fixed32 event_id = 1;
-  // The event's timestamp - generated by the kernel.
-  optional int64 event_time_nanos = 2;
-  // The timestamp of the ACTION_DOWN event associated with this gesture.
-  optional int64 down_time_nanos = 3;
-  optional uint32 source = 4;
-  optional int32 action = 5;
-  optional int32 device_id = 6;
-  // Use a signed int for display_id, because -1 (DISPLAY_IS_NONE) is a common value.
-  optional sint32 display_id = 7;
-  optional int32 key_code = 8;
-  optional uint32 scan_code = 9;
-  optional uint32 meta_state = 10;
-  optional int32 repeat_count = 11;
-  optional uint32 flags = 12;
-  optional uint32 policy_flags = 13;
-}
-
-// An event that traces an input event being dispatched by the system to one window.
-message AndroidWindowInputDispatchEvent {
-  // Stores x/y values for each pointer sent to the window for events
-  // that are dispatched to a certain location on the screen. This is not relevant
-  // for KeyEvents and MotionEvents that are dispatched to focused windows.
-  message DispatchedPointer {
-    optional int32 pointer_id = 1;
-    // The coordinates of the pointer in the logical display space, AKA "raw coordinates".
-    optional float x_in_display = 2;
-    optional float y_in_display = 3;
-    // The axis values for this pointer that were modified by the window transform.
-    repeated AndroidMotionEvent.Pointer.AxisValue axis_value_in_window = 4;
-  }
-
-  // The event_id of the event that was dispatched to the window.
-  optional fixed32 event_id = 1;
-  // The vsync_id of the frame in which the decision was made to dispatch the event to
-  // the window.
-  optional int64 vsync_id = 2;
-  // The id of the window to which the event was dispatched.
-  optional int32 window_id = 3;
-  // Only relevant for MotionEvents that are dispatched to a screen location.
-  // Each DispatchedPointer has a 1:1 correspondence with the Pointers in the AndroidMotionEvent.
-  repeated DispatchedPointer dispatched_pointer = 4;
-  // The event flags that were used when dispatching the event to this window.
-  // If the same event is dispatched to more than one window, it is possible that they
-  // were dispatched using different flag values for each window.
-  optional uint32 resolved_flags = 5;
-}
-
-message AndroidInputEvent {
-  oneof event {
-    // Traces input events received by or generated by InputDispatcher
-    AndroidMotionEvent dispatcher_motion_event = 1;
-    AndroidMotionEvent dispatcher_motion_event_redacted = 2;
-    AndroidKeyEvent dispatcher_key_event = 3;
-    AndroidKeyEvent dispatcher_key_event_redacted = 4;
-
-    // Traces an event being dispatched to a window.
-    AndroidWindowInputDispatchEvent dispatcher_window_dispatch_event = 5;
-    AndroidWindowInputDispatchEvent dispatcher_window_dispatch_event_redacted = 6;
-  }
-}
-
-// End of protos/perfetto/trace/android/android_input_event.proto
 
 // Begin of protos/perfetto/trace/android/android_log.proto
 
@@ -5091,6 +5076,8 @@ message ProtoLogViewerConfig {
     optional ProtoLogLevel level = 3;
     // the id of the log group this message belongs to
     optional uint32 group_id = 4;
+    // path to the file where the message was logged
+    optional string location = 5;
   }
 
   /* information about a ProtoLog log group */
@@ -5844,7 +5831,7 @@ message DisplayState {
 // Begin of protos/perfetto/trace/android/winscope_extensions.proto
 
 message WinscopeExtensions {
-  extensions 1 to 4;
+  extensions 1 to 6;
 }
 
 // End of protos/perfetto/trace/android/winscope_extensions.proto
@@ -6887,6 +6874,22 @@ message AndroidFsFsyncStartFtraceEvent {
 }
 
 // End of protos/perfetto/trace/ftrace/android_fs.proto
+
+// Begin of protos/perfetto/trace/ftrace/bcl_exynos.proto
+
+message BclIrqTriggerFtraceEvent {
+  optional int32 id = 1;
+  optional int32 throttle = 2;
+  optional int32 cpu0_limit = 3;
+  optional int32 cpu1_limit = 4;
+  optional int32 cpu2_limit = 5;
+  optional int32 tpu_limit = 6;
+  optional int32 gpu_limit = 7;
+  optional int32 voltage = 8;
+  optional int32 capacity = 9;
+}
+
+// End of protos/perfetto/trace/ftrace/bcl_exynos.proto
 
 // Begin of protos/perfetto/trace/ftrace/binder.proto
 
@@ -8752,6 +8755,53 @@ message IrqHandlerExitFtraceEvent {
 message KgslGpuFrequencyFtraceEvent {
   optional uint32 gpu_freq = 1;
   optional uint32 gpu_id = 2;
+}
+message KgslAdrenoCmdbatchQueuedFtraceEvent {
+  optional uint32 id = 1;
+  optional uint32 timestamp = 2;
+  optional uint32 queued = 3;
+  optional uint32 flags = 4;
+  optional uint32 prio = 5;
+}
+message KgslAdrenoCmdbatchSubmittedFtraceEvent {
+  optional uint32 id = 1;
+  optional uint32 timestamp = 2;
+  optional int64 inflight = 3;
+  optional uint32 flags = 4;
+  optional uint64 ticks = 5;
+  optional uint64 secs = 6;
+  optional uint64 usecs = 7;
+  optional int32 prio = 8;
+  optional int32 rb_id = 9;
+  optional uint32 rptr = 10;
+  optional uint32 wptr = 11;
+  optional int32 q_inflight = 12;
+  optional int32 dispatch_queue = 13;
+}
+message KgslAdrenoCmdbatchSyncFtraceEvent {
+  optional uint32 id = 1;
+  optional uint32 timestamp = 2;
+  optional uint64 ticks = 3;
+  optional int32 prio = 4;
+}
+message KgslAdrenoCmdbatchRetiredFtraceEvent {
+  optional uint32 id = 1;
+  optional uint32 timestamp = 2;
+  optional int64 inflight = 3;
+  optional uint32 recovery = 4;
+  optional uint32 flags = 5;
+  optional uint64 start = 6;
+  optional uint64 retire = 7;
+  optional int32 prio = 8;
+  optional int32 rb_id = 9;
+  optional uint32 rptr = 10;
+  optional uint32 wptr = 11;
+  optional int32 q_inflight = 12;
+  optional uint64 fault_recovery = 13;
+  optional uint32 dispatch_queue = 14;
+  optional uint64 submitted_to_rb = 15;
+  optional uint64 retired_on_gmu = 16;
+  optional uint64 active = 17;
 }
 
 // End of protos/perfetto/trace/ftrace/kgsl.proto
@@ -11037,6 +11087,11 @@ message FtraceEvent {
     MaliMaliPMMCUPENDONRELOADFtraceEvent mali_mali_PM_MCU_PEND_ON_RELOAD = 530;
     MaliMaliPMMCUPOWERDOWNFtraceEvent mali_mali_PM_MCU_POWER_DOWN = 531;
     MaliMaliPMMCURESETWAITFtraceEvent mali_mali_PM_MCU_RESET_WAIT = 532;
+    BclIrqTriggerFtraceEvent bcl_irq_trigger = 533;
+    KgslAdrenoCmdbatchQueuedFtraceEvent kgsl_adreno_cmdbatch_queued = 534;
+    KgslAdrenoCmdbatchSubmittedFtraceEvent kgsl_adreno_cmdbatch_submitted = 535;
+    KgslAdrenoCmdbatchSyncFtraceEvent kgsl_adreno_cmdbatch_sync = 536;
+    KgslAdrenoCmdbatchRetiredFtraceEvent kgsl_adreno_cmdbatch_retired = 537;
   }
 }
 
@@ -12289,7 +12344,10 @@ message ChromeFrameReporter {
   optional bool has_smooth_input_main = 9;
 
   // Whether the frame contained any missing content (i.e. whether there was
-  // checkerboarding in the frame).
+  // checkerboarding in the frame).  If has_missing_content,
+  // checkerboarded_needs_raster and checkerboarded_needs_record all have
+  // values, has_missing_content should equal checkerboarded_needs_raster ||
+  // checkerboarded_needs_record.
   optional bool has_missing_content = 10;
 
   // The id of layer_tree_host that the frame has been produced for.
@@ -12311,6 +12369,12 @@ message ChromeFrameReporter {
   // The breakdown stage of PipelineReporter that is most likely accountable for
   // high latency.
   repeated string high_latency_contribution_stage = 14;
+
+  // Whether the frame contained any content that is not fully rastered.
+  optional bool checkerboarded_needs_raster = 15;
+
+  // Whether the frame contained any content that is not fully recorded.
+  optional bool checkerboarded_needs_record = 16;
 }
 
 // End of protos/perfetto/trace/track_event/chrome_frame_reporter.proto
@@ -12395,6 +12459,19 @@ message ChromeLatencyInfo {
   optional bool is_coalesced = 5;
   optional int64 gesture_scroll_id = 6;
   optional int64 touch_id = 7;
+
+  enum InputType {
+    UNSPECIFIED_OR_OTHER = 0;
+    TOUCH_MOVED = 1;
+    GESTURE_SCROLL_BEGIN = 2;
+    GESTURE_SCROLL_UPDATE = 3;
+    GESTURE_SCROLL_END = 4;
+    GESTURE_TAP = 5;
+    GESTURE_TAP_CANCEL = 6;
+  }
+
+  // The type of input corresponding to this `ChromeLatencyInfo`.
+  optional InputType input_type = 8;
 }
 
 // End of protos/perfetto/trace/track_event/chrome_latency_info.proto
@@ -12559,16 +12636,6 @@ message ChromeWindowHandleEventInfo {
 }
 
 // End of protos/perfetto/trace/track_event/chrome_window_handle_event_info.proto
-
-// Begin of protos/perfetto/trace/track_event/pixel_modem.proto
-
-// Event insights emitted by the Pixel modem.
-message PixelModemEventInsight {
-  // Opaque string containing arguments from the modem.
-  optional string detokenized_message = 1;
-}
-
-// End of protos/perfetto/trace/track_event/pixel_modem.proto
 
 // Begin of protos/perfetto/trace/track_event/screenshot.proto
 
@@ -12809,7 +12876,6 @@ message TrackEvent {
       43;
   optional ChromeActiveProcesses chrome_active_processes = 49;
   optional Screenshot screenshot = 50;
-  optional PixelModemEventInsight pixel_modem_event_insight = 51;
 
   // This field is used only if the source location represents the function that
   // executes during this event.
@@ -12840,8 +12906,11 @@ message TrackEvent {
   extensions 1000 to 1999;
   // Extension range reserved for https://b.corp.google.com/issues/301227627.
   extensions 2000 to 2000;
+  // Extension range reserved for android:
+  // protos/perfetto/trace/android/android_track_event.proto
+  extensions 2001 to 2999;
   // Extension range for future use.
-  extensions 2001 to 9899;
+  extensions 3000 to 9899;
   // Reserved for Perfetto unit and integration tests.
   extensions 9900 to 10000;
 
@@ -12957,6 +13026,8 @@ message TrackEvent {
   }
 
   optional LegacyEvent legacy_event = 6;
+
+  reserved 51;
 }
 
 // Default values for fields of all TrackEvents on the same packet sequence.
@@ -14375,8 +14446,27 @@ message SysStats {
   }
   // One entry per PsiResource type.
   repeated PsiSample psi = 14;
-}
 
+  // Reading from /sys/class/thermal/*.
+  message ThermalZone {
+    optional string name = 1;
+    optional uint64 temp = 2;
+    optional string type = 3;
+  }
+  repeated ThermalZone thermal_zone = 15;
+
+  // Reading from /sys/devices/system/cpu/cpu*/cpuidle/state*.
+  message CpuIdleStateEntry {
+    // Name of the idle state, e.g. C1-C10
+    optional string state = 1;
+    optional uint64 duration_us = 2;
+  }
+  message CpuIdleState {
+    optional uint32 cpu_id = 1;
+    repeated CpuIdleStateEntry cpuidle_state_entry = 2;
+  }
+  repeated CpuIdleState cpuidle_state = 16;
+}
 // End of protos/perfetto/trace/sys_stats/sys_stats.proto
 
 // Begin of protos/perfetto/trace/system_info.proto
@@ -14394,6 +14484,9 @@ message SystemInfo {
 
   // The SoC model from which trace is collected
   optional string android_soc_model = 9;
+
+  // The hardware reversion from android device
+  optional string android_hardware_revision = 10;
 
   // The version of traced (the same returned by `traced --version`).
   // This is a human readable string with and its format varies depending on
@@ -14438,6 +14531,10 @@ message CpuInfo {
     // /sys/devices/system/cpu/cpuX/cpufreq/scaling_available_frequencies
     // where X is the index of this CPU.
     repeated uint32 frequencies = 2;
+
+    // Cpu capacity from /sys/devices/system/cpu/cpuX/cpu_capacity where X is
+    // the index of this CPU.
+    optional uint32 capacity = 3;
   }
 
   // Describes available CPUs, one entry per CPU.
@@ -15198,10 +15295,6 @@ message TracePacket {
     V8WasmCode v8_wasm_code = 101;
     V8RegExpCode v8_reg_exp_code = 102;
     V8CodeMove v8_code_move = 103;
-
-    // InputFlinger traces
-    AndroidInputEvent android_input_event = 106;
-
     // Clock synchronization with remote machines.
     RemoteClockSync remote_clock_sync = 107;
 
@@ -15216,6 +15309,9 @@ message TracePacket {
     //   the field id is large enough.
     TestEvent for_testing = 900;
   }
+
+  // AndroidInputEvent android_input_event (moved to winscope_extensions)
+  reserved 106;
 
   // Trusted user id of the producer which generated this packet. Keep in sync
   // with TrustedPacket.trusted_uid.

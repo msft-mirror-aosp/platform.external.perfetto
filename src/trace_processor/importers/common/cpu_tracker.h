@@ -18,7 +18,12 @@
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_CPU_TRACKER_H_
 
 #include <bitset>
+#include <cstdint>
+#include <optional>
 
+#include "perfetto/base/logging.h"
+#include "perfetto/ext/base/string_view.h"
+#include "perfetto/public/compiler.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
@@ -46,16 +51,19 @@ class CpuTracker {
     auto ucpu = ucpu_offset_ + cpu;
     if (PERFETTO_LIKELY(cpu_ids_[cpu]))
       return tables::CpuTable::Id(ucpu);
+    cpu_ids_.set(cpu);
 
     // Populate the optional |cpu| column.
-    context_->storage->mutable_cpu_table()->mutable_cpu()->Set(ucpu, cpu);
+    auto& cpu_table = *context_->storage->mutable_cpu_table();
+    cpu_table[ucpu].set_cpu(cpu);
     return tables::CpuTable::Id(ucpu);
   }
 
   // Sets or updates the information for the specified CPU in the CpuTable.
   tables::CpuTable::Id SetCpuInfo(uint32_t cpu,
                                   base::StringView processor,
-                                  uint32_t cluster_id);
+                                  uint32_t cluster_id,
+                                  std::optional<uint32_t> capacity);
 
  private:
   TraceProcessorContext* const context_;

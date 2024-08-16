@@ -19,9 +19,8 @@ import {exists} from '../../base/utils';
 import {raf} from '../../core/raf_scheduler';
 import {BottomTab, NewBottomTabArgs} from '../../frontend/bottom_tab';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {getSlice, SliceDetails} from '../../frontend/sql/slice';
-import {asSliceSqlId} from '../../frontend/sql_types';
-import {sqlValueToString} from '../../frontend/sql_utils';
+import {getSlice, SliceDetails} from '../../trace_processor/sql_utils/slice';
+import {asSliceSqlId} from '../../trace_processor/sql_utils/core_types';
 import {DurationWidget} from '../../frontend/widgets/duration';
 import {Timestamp} from '../../frontend/widgets/timestamp';
 import {Engine} from '../../trace_processor/engine';
@@ -39,7 +38,7 @@ import {
   getEventLatencySlice,
   getSliceForTrack,
 } from './scroll_jank_slice';
-import {CHROME_EVENT_LATENCY_TRACK_KIND} from './common';
+import {CHROME_EVENT_LATENCY_TRACK_KIND} from '../../public';
 
 interface Data {
   name: string;
@@ -224,7 +223,7 @@ export class ScrollJankV3DetailsPanel extends BottomTab<GenericSliceDetailsTabCo
   private renderDetailsDictionary(): m.Child[] {
     const details: {[key: string]: m.Child} = {};
     if (exists(this.data)) {
-      details['Name'] = sqlValueToString(this.data.name);
+      details['Name'] = this.data.name;
       details['Expected Frame Presentation Timestamp'] = m(Timestamp, {
         ts: this.data.ts,
       });
@@ -272,7 +271,7 @@ export class ScrollJankV3DetailsPanel extends BottomTab<GenericSliceDetailsTabCo
             CHROME_EVENT_LATENCY_TRACK_KIND,
             this.data.jankCause,
           )
-        : sqlValueToString(this.data.jankCause);
+        : this.data.jankCause;
 
       if (this.hasSubcause()) {
         result['Sub-cause of Jank'] = exists(this.subcauseSliceDetails)
@@ -281,7 +280,7 @@ export class ScrollJankV3DetailsPanel extends BottomTab<GenericSliceDetailsTabCo
               CHROME_EVENT_LATENCY_TRACK_KIND,
               this.data.jankSubcause,
             )
-          : sqlValueToString(this.data.jankSubcause);
+          : this.data.jankSubcause;
       }
 
       const children = dictToTreeNodes(result);
@@ -297,7 +296,7 @@ export class ScrollJankV3DetailsPanel extends BottomTab<GenericSliceDetailsTabCo
           }),
         );
       } else {
-        children.unshift(sqlValueToString('Event Latency'));
+        children.unshift('Event Latency');
       }
 
       return children;

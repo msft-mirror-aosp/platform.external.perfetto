@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Disposable} from '../base/disposable';
 import {FuzzyFinder, FuzzySegment} from '../base/fuzzy';
 import {Registry} from '../base/registry';
 import {Command} from '../public';
@@ -23,6 +22,10 @@ export interface CommandWithMatchInfo extends Command {
 
 export class CommandManager {
   private readonly registry = new Registry<Command>((cmd) => cmd.id);
+
+  getCommand(commandId: string): Command {
+    return this.registry.get(commandId);
+  }
 
   get commands(): Command[] {
     return Array.from(this.registry.values());

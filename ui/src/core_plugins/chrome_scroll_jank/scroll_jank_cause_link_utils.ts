@@ -23,7 +23,7 @@ import {
   focusHorizontalRange,
   verticalScrollToTrack,
 } from '../../frontend/scroll_helper';
-import {SliceSqlId} from '../../frontend/sql_types';
+import {SliceSqlId} from '../../trace_processor/sql_utils/core_types';
 import {Engine} from '../../trace_processor/engine';
 import {LONG, NUM, STR} from '../../trace_processor/query_result';
 import {Anchor} from '../../widgets/anchor';
@@ -211,11 +211,9 @@ export function getCauseLink(
 
             globals.dispatch(
               Actions.selectArea({
-                area: {
-                  start: ts,
-                  end: Time.fromRaw(ts + dur),
-                  tracks: trackKeys,
-                },
+                start: ts,
+                end: Time.fromRaw(ts + dur),
+                tracks: trackKeys,
               }),
             );
           }

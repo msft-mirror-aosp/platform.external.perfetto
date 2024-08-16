@@ -64,6 +64,7 @@ ProcessTable::~ProcessTable() = default;
 FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 MachineTable::~MachineTable() = default;
+TraceFileTable::~TraceFileTable() = default;
 
 // profiler_tables_py.h
 StackProfileMappingTable::~StackProfileMappingTable() = default;
@@ -150,6 +151,7 @@ SurfaceFlingerLayersSnapshotTable::~SurfaceFlingerLayersSnapshotTable() =
 SurfaceFlingerLayerTable::~SurfaceFlingerLayerTable() = default;
 SurfaceFlingerTransactionsTable::~SurfaceFlingerTransactionsTable() = default;
 ViewCaptureTable::~ViewCaptureTable() = default;
+WindowManagerTable::~WindowManagerTable() = default;
 WindowManagerShellTransitionsTable::~WindowManagerShellTransitionsTable() =
     default;
 WindowManagerShellTransitionHandlersTable::

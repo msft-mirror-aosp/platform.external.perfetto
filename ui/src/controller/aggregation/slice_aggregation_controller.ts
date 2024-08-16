@@ -16,10 +16,12 @@ import {ColumnDef} from '../../common/aggregation_data';
 import {Area, Sorting} from '../../common/state';
 import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
-import {ASYNC_SLICE_TRACK_KIND} from '../../core_plugins/async_slices';
-import {THREAD_SLICE_TRACK_KIND} from '../../core_plugins/thread_slice/thread_slice_track';
 
 import {AggregationController} from './aggregation_controller';
+import {
+  ASYNC_SLICE_TRACK_KIND,
+  THREAD_SLICE_TRACK_KIND,
+} from '../../core/track_kinds';
 
 export function getSelectedTrackKeys(area: Area): number[] {
   const selectedTrackKeys: number[] = [];
@@ -28,11 +30,13 @@ export function getSelectedTrackKeys(area: Area): number[] {
     // Track will be undefined for track groups.
     if (track?.uri !== undefined) {
       const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      if (trackInfo?.kind === THREAD_SLICE_TRACK_KIND) {
-        trackInfo.trackIds && selectedTrackKeys.push(...trackInfo.trackIds);
+      if (trackInfo?.tags?.kind === THREAD_SLICE_TRACK_KIND) {
+        trackInfo.tags.trackIds &&
+          selectedTrackKeys.push(...trackInfo.tags.trackIds);
       }
-      if (trackInfo?.kind === ASYNC_SLICE_TRACK_KIND) {
-        trackInfo.trackIds && selectedTrackKeys.push(...trackInfo.trackIds);
+      if (trackInfo?.tags?.kind === ASYNC_SLICE_TRACK_KIND) {
+        trackInfo.tags.trackIds &&
+          selectedTrackKeys.push(...trackInfo.tags.trackIds);
       }
     }
   }
@@ -41,24 +45,23 @@ export function getSelectedTrackKeys(area: Area): number[] {
 
 export class SliceAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
-    await engine.query(`drop view if exists ${this.kind};`);
-
     const selectedTrackKeys = getSelectedTrackKeys(area);
 
     if (selectedTrackKeys.length === 0) return false;
 
-    const query = `create view ${this.kind} as
-        SELECT
+    await engine.query(`
+      create or replace perfetto table ${this.kind} as
+      select
         name,
         sum(dur) AS total_dur,
-        sum(dur)/count(1) as avg_dur,
-        count(1) as occurrences
-        FROM slices
-        WHERE track_id IN (${selectedTrackKeys}) AND
-        ts + dur > ${area.start} AND
-        ts < ${area.end} group by name`;
-
-    await engine.query(query);
+        sum(dur)/count() as avg_dur,
+        count() as occurrences
+        from slices
+      where track_id in (${selectedTrackKeys})
+        and ts + dur > ${area.start}
+        and ts < ${area.end}
+      group by name
+    `);
     return true;
   }
 

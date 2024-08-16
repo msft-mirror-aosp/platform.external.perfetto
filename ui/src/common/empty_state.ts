@@ -20,7 +20,6 @@ import {
   autosaveConfigStore,
   recordTargetStore,
 } from '../frontend/record_config';
-import {SqlTables} from '../frontend/sql_table/well_known_tables';
 
 import {NonSerializableState, State, STATE_VERSION} from './state';
 
@@ -58,19 +57,27 @@ export function createEmptyNonSerializableState(): NonSerializableState {
     pivotTable: {
       queryResult: null,
       selectedPivots: [
-        {kind: 'regular', table: SqlTables.slice.name, column: 'name'},
+        {
+          kind: 'regular',
+          table: '_slice_with_thread_and_process_info',
+          column: 'name',
+        },
       ],
       selectedAggregations: [
         {
           aggregationFunction: 'SUM',
-          column: {kind: 'regular', table: SqlTables.slice.name, column: 'dur'},
+          column: {
+            kind: 'regular',
+            table: '_slice_with_thread_and_process_info',
+            column: 'dur',
+          },
           sortDirection: 'DESC',
         },
         {
           aggregationFunction: 'SUM',
           column: {
             kind: 'regular',
-            table: SqlTables.slice.name,
+            table: '_slice_with_thread_and_process_info',
             column: 'thread_dur',
           },
         },
@@ -93,7 +100,6 @@ export function createEmptyState(): State {
     trackGroups: {},
     pinnedTracks: [],
     scrollingTracks: [],
-    areas: {},
     queries: {},
     notes: {},
 
@@ -102,15 +108,6 @@ export function createEmptyState(): State {
       : createEmptyRecordConfig(),
     displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
-
-    frontendLocalState: {
-      visibleState: {
-        start: Time.ZERO,
-        end: Time.fromSeconds(10),
-        lastUpdate: 0,
-        resolution: 0n,
-      },
-    },
 
     omniboxState: {
       omnibox: '',
@@ -152,5 +149,7 @@ export function createEmptyState(): State {
 
     // Somewhere to store plugins' persistent state.
     plugins: {},
+
+    trackFilterTerm: undefined,
   };
 }
