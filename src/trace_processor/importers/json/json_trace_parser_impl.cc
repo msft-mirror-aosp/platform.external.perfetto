@@ -128,7 +128,7 @@ void JsonTraceParserImpl::ParseJsonPacket(int64_t timestamp,
 
   std::string id = value.isMember("id") ? value["id"].asString() : "";
 
-  base::StringView cat = value.isMember("cat")
+  base::StringView cat = value.isMember("cat") && value["cat"].isString()
                              ? base::StringView(value["cat"].asCString())
                              : base::StringView();
   StringId cat_id = storage->InternString(cat);
@@ -289,8 +289,8 @@ void JsonTraceParserImpl::ParseJsonPacket(int64_t timestamp,
 
       TrackId track_id;
       if (scope == "g") {
-        track_id = context_->track_tracker
-                       ->GetOrCreateLegacyChromeGlobalInstantTrack();
+        track_id = context_->track_tracker->InternUniqueTrack(
+            TrackTracker::UniqueTrackType::kChromeLegacyGlobalInstant);
       } else if (scope == "p") {
         if (!opt_pid) {
           context_->storage->IncrementStats(stats::json_parser_failure);
