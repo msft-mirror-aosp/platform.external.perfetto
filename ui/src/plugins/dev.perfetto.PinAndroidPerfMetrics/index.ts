@@ -13,9 +13,8 @@
 // limitations under the License.
 
 import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
-import {TrackType} from '../dev.perfetto.AndroidCujs/trackUtils';
 import {METRIC_HANDLERS} from './handlers/handlerRegistry';
-import {MetricHandlerMatch} from './handlers/metricUtils';
+import {MetricData, MetricHandlerMatch} from './handlers/metricUtils';
 import {PLUGIN_ID} from './pluginId';
 
 const JANK_CUJ_QUERY_PRECONDITIONS = `
@@ -47,19 +46,15 @@ class PinAndroidPerfMetrics implements Plugin {
         metric = prompt('Metrics names (separated by comma)', '');
         if (metric === null) return;
         const metricList = metric.split(',');
-        this.callHandlers(metricList, ctx, 'debug');
+        this.callHandlers(metricList, ctx);
       },
     });
     if (this.metrics.length !== 0) {
-      this.callHandlers(this.metrics, ctx, 'debug');
+      this.callHandlers(this.metrics, ctx);
     }
   }
 
-  private async callHandlers(
-    metricsList: string[],
-    ctx: PluginContextTrace,
-    type: TrackType,
-  ) {
+  private async callHandlers(metricsList: string[], ctx: PluginContextTrace) {
     // List of metrics that actually match some handler
     const metricsToShow: MetricHandlerMatch[] =
       this.getMetricsToShow(metricsList);
@@ -70,7 +65,7 @@ class PinAndroidPerfMetrics implements Plugin {
 
     await ctx.engine.query(JANK_CUJ_QUERY_PRECONDITIONS);
     for (const {metricData, metricHandler} of metricsToShow) {
-      metricHandler.addMetricTrack(metricData, ctx, type);
+      metricHandler.addMetricTrack(metricData, ctx);
     }
   }
 
@@ -91,28 +86,30 @@ class PinAndroidPerfMetrics implements Plugin {
     return metricList.map((metric) => decodeURIComponent(metric));
   }
 
-  private getMetricsToShow(metricList: string[]) {
+  private getMetricsToShow(metricList: string[]): MetricHandlerMatch[] {
+    const sortedMetricList = [...metricList].sort();
     const validMetrics: MetricHandlerMatch[] = [];
-    metricList.forEach((metric) => {
-      const matchedHandler = this.matchMetricToHandler(metric);
-      if (matchedHandler) {
-        validMetrics.push(matchedHandler);
+    const alreadyMatchedMetricData: Set<string> = new Set();
+    for (const metric of sortedMetricList) {
+      for (const metricHandler of METRIC_HANDLERS) {
+        const metricData = metricHandler.match(metric);
+        if (!metricData) continue;
+        const jsonMetricData = this.metricDataToJson(metricData);
+        if (!alreadyMatchedMetricData.has(jsonMetricData)) {
+          alreadyMatchedMetricData.add(jsonMetricData);
+          validMetrics.push({
+            metricData: metricData,
+            metricHandler: metricHandler,
+          });
+        }
       }
-    });
+    }
     return validMetrics;
   }
 
-  private matchMetricToHandler(metric: string): MetricHandlerMatch | null {
-    for (const metricHandler of METRIC_HANDLERS) {
-      const match = metricHandler.match(metric);
-      if (match) {
-        return {
-          metricData: match,
-          metricHandler: metricHandler,
-        };
-      }
-    }
-    return null;
+  private metricDataToJson(metricData: MetricData): string {
+    // Used to have a deterministic keys order.
+    return JSON.stringify(metricData, Object.keys(metricData).sort());
   }
 }
 

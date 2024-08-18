@@ -14,16 +14,16 @@
 
 import m from 'mithril';
 
-import {DetailsShell} from '../../../widgets/details_shell';
-import {uuidv4} from '../../../base/uuid';
-import {BottomTab, NewBottomTabArgs} from '../../bottom_tab';
-import {VegaView} from '../../../widgets/vega_view';
-import {addEphemeralTab} from '../../../common/addEphemeralTab';
-import {HistogramState} from './state';
 import {stringifyJsonWithBigints} from '../../../base/json_utils';
+import {uuidv4} from '../../../base/uuid';
+import {addBottomTab} from '../../../common/addEphemeralTab';
 import {Engine} from '../../../public';
-import {isString} from '../../../base/object_utils';
-import {Filter} from '../../widgets/sql/table/state';
+import {DetailsShell} from '../../../widgets/details_shell';
+import {VegaView} from '../../../widgets/vega_view';
+import {BottomTab, NewBottomTabArgs} from '../../bottom_tab';
+import {Filter, filterTitle} from '../../widgets/sql/table/column';
+
+import {HistogramState} from './state';
 
 interface HistogramTabConfig {
   columnTitle: string; // Human readable column name (ex: Duration)
@@ -43,7 +43,7 @@ export function addHistogramTab(
     uuid: uuidv4(),
   });
 
-  addEphemeralTab(histogramTab, 'histogramTab');
+  addBottomTab(histogramTab, 'histogramTab');
 }
 
 export class HistogramTab extends BottomTab<HistogramTabConfig> {
@@ -122,14 +122,8 @@ export class HistogramTab extends BottomTab<HistogramTabConfig> {
     let desc = `Count distribution for ${this.config.tableDisplay ?? ''} table`;
 
     if (this.config.filters) {
-      const filterStrings: string[] = [];
       desc += ' where ';
-
-      for (const f of this.config.filters) {
-        filterStrings.push(`${isString(f) ? f : `${f.argName} ${f.op}`}`);
-      }
-
-      desc += filterStrings.join(', ');
+      desc += this.config.filters.map((f) => filterTitle(f)).join(', ');
     }
 
     return desc;
