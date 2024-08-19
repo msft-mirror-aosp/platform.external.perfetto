@@ -37,8 +37,14 @@ import {TimeAxisPanel} from './time_axis_panel';
 import {TimeSelectionPanel} from './time_selection_panel';
 import {DISMISSED_PANNING_HINT_KEY} from './topbar';
 import {TrackGroupPanel} from './track_group_panel';
-import {TrackPanel} from './track_panel';
+import {TrackPanel, getTitleFontSize} from './track_panel';
 import {assertExists} from '../base/logging';
+import {PxSpan, TimeScale} from './time_scale';
+import {TrackGroupState} from '../common/state';
+import {FuzzyFinder, fuzzyMatch, FuzzySegment} from '../base/fuzzy';
+import {exists} from '../base/utils';
+import {EmptyState} from '../widgets/empty_state';
+import {removeFalsyValues} from '../base/array_utils';
 
 const OVERVIEW_PANEL_FLAG = featureFlags.register({
   id: 'overviewVisible',
@@ -49,7 +55,10 @@ const OVERVIEW_PANEL_FLAG = featureFlags.register({
 
 // Checks if the mousePos is within 3px of the start or end of the
 // current selected time range.
-function onTimeRangeBoundary(mousePos: number): 'START' | 'END' | null {
+function onTimeRangeBoundary(
+  timescale: TimeScale,
+  mousePos: number,
+): 'START' | 'END' | null {
   const selection = globals.state.selection;
   if (selection.kind === 'area') {
     // If frontend selectedArea exists then we are in the process of editing the
@@ -57,9 +66,8 @@ function onTimeRangeBoundary(mousePos: number): 'START' | 'END' | null {
     const area = globals.timeline.selectedArea
       ? globals.timeline.selectedArea
       : selection;
-    const {visibleTimeScale} = globals.timeline;
-    const start = visibleTimeScale.timeToPx(area.start);
-    const end = visibleTimeScale.timeToPx(area.end);
+    const start = timescale.timeToPx(area.start);
+    const end = timescale.timeToPx(area.end);
     const startDrag = mousePos - TRACK_SHELL_WIDTH;
     const startDistance = Math.abs(start - startDrag);
     const endDistance = Math.abs(end - startDrag);
@@ -86,21 +94,27 @@ class TraceViewer implements m.ClassComponent {
   private timeSelectionPanel = new TimeSelectionPanel();
   private notesPanel = new NotesPanel();
   private tickmarkPanel = new TickmarkPanel();
+  private timelineWidthPx?: number;
 
   private readonly PAN_ZOOM_CONTENT_REF = 'pan-and-zoom-content';
 
   oncreate(vnode: m.CVnodeDOM) {
-    const timeline = globals.timeline;
     const panZoomElRaw = findRef(vnode.dom, this.PAN_ZOOM_CONTENT_REF);
     const panZoomEl = toHTMLElement(assertExists(panZoomElRaw));
 
     this.zoomContent = new PanAndZoomHandler({
       element: panZoomEl,
       onPanned: (pannedPx: number) => {
-        const {visibleTimeScale} = globals.timeline;
+        const timeline = globals.timeline;
+
+        if (this.timelineWidthPx === undefined) return;
 
         this.keepCurrentSelection = true;
-        const tDelta = visibleTimeScale.pxDeltaToDuration(pannedPx);
+        const timescale = new TimeScale(
+          timeline.visibleWindow,
+          new PxSpan(0, this.timelineWidthPx),
+        );
+        const tDelta = timescale.pxToDuration(pannedPx);
         timeline.panVisibleWindow(tDelta);
 
         // If the user has panned they no longer need the hint.
@@ -108,6 +122,7 @@ class TraceViewer implements m.ClassComponent {
         raf.scheduleRedraw();
       },
       onZoomed: (zoomedPositionPx: number, zoomRatio: number) => {
+        const timeline = globals.timeline;
         // TODO(hjd): Avoid hardcoding TRACK_SHELL_WIDTH.
         // TODO(hjd): Improve support for zooming in overview timeline.
         const zoomPx = zoomedPositionPx - TRACK_SHELL_WIDTH;
@@ -117,7 +132,12 @@ class TraceViewer implements m.ClassComponent {
         raf.scheduleRedraw();
       },
       editSelection: (currentPx: number) => {
-        return onTimeRangeBoundary(currentPx) !== null;
+        if (this.timelineWidthPx === undefined) return false;
+        const timescale = new TimeScale(
+          globals.timeline.visibleWindow,
+          new PxSpan(0, this.timelineWidthPx),
+        );
+        return onTimeRangeBoundary(timescale, currentPx) !== null;
       },
       onSelection: (
         dragStartX: number,
@@ -128,32 +148,39 @@ class TraceViewer implements m.ClassComponent {
         editing: boolean,
       ) => {
         const traceTime = globals.traceContext;
-        const {visibleTimeScale} = timeline;
+        const timeline = globals.timeline;
+
+        if (this.timelineWidthPx === undefined) return;
+
+        // TODO(stevegolton): Don't get the windowSpan from globals, get it from
+        // here!
+        const {visibleWindow} = timeline;
+        const timespan = visibleWindow.toTimeSpan();
         this.keepCurrentSelection = true;
+
+        const timescale = new TimeScale(
+          timeline.visibleWindow,
+          new PxSpan(0, this.timelineWidthPx),
+        );
+
         if (editing) {
           const selection = globals.state.selection;
           if (selection.kind === 'area') {
             const area = globals.timeline.selectedArea
               ? globals.timeline.selectedArea
               : selection;
-            let newTime = visibleTimeScale
+            let newTime = timescale
               .pxToHpTime(currentX - TRACK_SHELL_WIDTH)
               .toTime();
             // Have to check again for when one boundary crosses over the other.
-            const curBoundary = onTimeRangeBoundary(prevX);
+            const curBoundary = onTimeRangeBoundary(timescale, prevX);
             if (curBoundary == null) return;
             const keepTime = curBoundary === 'START' ? area.end : area.start;
             // Don't drag selection outside of current screen.
             if (newTime < keepTime) {
-              newTime = Time.max(
-                newTime,
-                visibleTimeScale.timeSpan.start.toTime(),
-              );
+              newTime = Time.max(newTime, timespan.start);
             } else {
-              newTime = Time.min(
-                newTime,
-                visibleTimeScale.timeSpan.end.toTime(),
-              );
+              newTime = Time.min(newTime, timespan.end);
             }
             // When editing the time range we always use the saved tracks,
             // since these will not change.
@@ -167,12 +194,11 @@ class TraceViewer implements m.ClassComponent {
           let startPx = Math.min(dragStartX, currentX) - TRACK_SHELL_WIDTH;
           let endPx = Math.max(dragStartX, currentX) - TRACK_SHELL_WIDTH;
           if (startPx < 0 && endPx < 0) return;
-          const {pxSpan} = visibleTimeScale;
-          startPx = clamp(startPx, pxSpan.start, pxSpan.end);
-          endPx = clamp(endPx, pxSpan.start, pxSpan.end);
+          startPx = clamp(startPx, 0, this.timelineWidthPx);
+          endPx = clamp(endPx, 0, this.timelineWidthPx);
           timeline.selectArea(
-            visibleTimeScale.pxToHpTime(startPx).toTime('floor'),
-            visibleTimeScale.pxToHpTime(endPx).toTime('ceil'),
+            timescale.pxToHpTime(startPx).toTime('floor'),
+            timescale.pxToHpTime(endPx).toTime('ceil'),
           );
           timeline.areaY.start = dragStartY;
           timeline.areaY.end = currentY;
@@ -205,71 +231,11 @@ class TraceViewer implements m.ClassComponent {
   }
 
   onremove() {
-    if (this.zoomContent) this.zoomContent.dispose();
+    if (this.zoomContent) this.zoomContent[Symbol.dispose]();
   }
 
   view() {
-    const scrollingPanels: PanelOrGroup[] = globals.state.scrollingTracks.map(
-      (key) => {
-        const trackBundle = this.resolveTrack(key);
-        return new TrackPanel({
-          trackKey: key,
-          title: trackBundle.title,
-          tags: trackBundle.tags,
-          trackFSM: trackBundle.trackFSM,
-          closeable: trackBundle.closeable,
-        });
-      },
-    );
-
-    for (const group of Object.values(globals.state.trackGroups)) {
-      const key = group.summaryTrack;
-      let headerPanel;
-      if (key) {
-        const trackBundle = this.resolveTrack(key);
-        headerPanel = new TrackGroupPanel({
-          groupKey: group.key,
-          trackFSM: trackBundle.trackFSM,
-          labels: trackBundle.labels,
-          tags: trackBundle.tags,
-          collapsed: group.collapsed,
-          title: group.name,
-        });
-      } else {
-        headerPanel = new TrackGroupPanel({
-          groupKey: group.key,
-          collapsed: group.collapsed,
-          title: group.name,
-        });
-      }
-
-      const childTracks: Panel[] = [];
-      if (!group.collapsed) {
-        for (const key of group.tracks) {
-          const trackBundle = this.resolveTrack(key);
-          const panel = new TrackPanel({
-            trackKey: key,
-            title: trackBundle.title,
-            tags: trackBundle.tags,
-            trackFSM: trackBundle.trackFSM,
-            closeable: trackBundle.closeable,
-          });
-          childTracks.push(panel);
-        }
-      }
-
-      scrollingPanels.push({
-        kind: 'group',
-        collapsed: group.collapsed,
-        childPanels: childTracks,
-        header: headerPanel,
-      });
-    }
-
-    const overviewPanel = [];
-    if (OVERVIEW_PANEL_FLAG.get()) {
-      overviewPanel.push(this.overviewTimelinePanel);
-    }
+    const scrollingPanels = renderToplevelPanels(globals.state.trackFilterTerm);
 
     const result = m(
       '.page.viewer-page',
@@ -290,20 +256,20 @@ class TraceViewer implements m.ClassComponent {
           '.pf-timeline-header',
           m(PanelContainer, {
             className: 'header-panel-container',
-            panels: [
-              ...overviewPanel,
+            panels: removeFalsyValues([
+              OVERVIEW_PANEL_FLAG.get() && this.overviewTimelinePanel,
               this.timeAxisPanel,
               this.timeSelectionPanel,
               this.notesPanel,
               this.tickmarkPanel,
-            ],
+            ]),
           }),
           m('.scrollbar-spacer-vertical'),
         ),
         m(PanelContainer, {
           className: 'pinned-panel-container',
           panels: globals.state.pinnedTracks.map((key) => {
-            const trackBundle = this.resolveTrack(key);
+            const trackBundle = resolveTrack(key);
             return new TrackPanel({
               trackKey: key,
               title: trackBundle.title,
@@ -311,57 +277,211 @@ class TraceViewer implements m.ClassComponent {
               trackFSM: trackBundle.trackFSM,
               revealOnCreate: true,
               closeable: trackBundle.closeable,
+              chips: trackBundle.chips,
+              pluginId: trackBundle.pluginId,
             });
           }),
         }),
-        m(PanelContainer, {
-          className: 'scrolling-panel-container',
-          panels: scrollingPanels,
-          onPanelStackResize: (width) => {
-            const timelineWidth = width - TRACK_SHELL_WIDTH;
-            globals.timeline.updateLocalLimits(0, timelineWidth);
-          },
-        }),
+        scrollingPanels.length === 0 &&
+          filterTermIsValid(globals.state.trackFilterTerm)
+          ? m(
+              EmptyState,
+              {title: 'No matching tracks'},
+              `No tracks match filter term "${globals.state.trackFilterTerm}"`,
+            )
+          : m(PanelContainer, {
+              className: 'scrolling-panel-container',
+              panels: scrollingPanels,
+              onPanelStackResize: (width) => {
+                const timelineWidth = width - TRACK_SHELL_WIDTH;
+                this.timelineWidthPx = timelineWidth;
+              },
+            }),
       ),
-      this.renderTabPanel(),
+      m(TabPanel),
     );
 
     globals.trackManager.flushOldTracks();
     return result;
   }
+}
 
-  // Resolve a track and its metadata through the track cache
-  private resolveTrack(key: string): TrackBundle {
-    const trackState = globals.state.tracks[key];
-    const {uri, params, name, labels, closeable} = trackState;
-    const trackDesc = globals.trackManager.resolveTrackInfo(uri);
-    const trackCacheEntry =
-      trackDesc && globals.trackManager.resolveTrack(key, trackDesc, params);
-    const trackFSM = trackCacheEntry;
-    const tags = trackCacheEntry?.desc.tags;
-    const trackIds = trackCacheEntry?.desc.trackIds;
-    return {
-      title: name,
-      tags,
-      trackFSM,
-      labels,
-      trackIds,
-      closeable: closeable ?? false,
-    };
+// Given a set of fuzzy matched results, render the matching segments in bold
+function renderFuzzyMatchedTrackTitle(title: FuzzySegment[]): m.Children {
+  return title.map(({matching, value}) => {
+    return matching ? m('b', value) : value;
+  });
+}
+
+function filterTermIsValid(
+  filterTerm: undefined | string,
+): filterTerm is string {
+  // Note: Boolean(filterTerm) returns the same result, but this is clearer
+  return filterTerm !== undefined && filterTerm !== '';
+}
+
+// Split filter term on commas into a list of tokens, cleaning up any whitespace
+// before and after the token and removing any blank tokens
+function tokenizeFilterTerm(term: string): ReadonlyArray<string> {
+  return term
+    .split(',')
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+}
+
+// Render the toplevel "scrolling" tracks and track groups
+function renderToplevelPanels(filterTerm: string | undefined): PanelOrGroup[] {
+  const scrollingPanels: PanelOrGroup[] = renderTrackPanels(
+    globals.state.scrollingTracks,
+    filterTerm,
+  );
+
+  for (const group of Object.values(globals.state.trackGroups)) {
+    if (filterTermIsValid(filterTerm)) {
+      const tokens = tokenizeFilterTerm(filterTerm);
+      // Match group names that match any of the tokens
+      const result = fuzzyMatch(group.name, ...tokens);
+      if (result.matches) {
+        // If the group name matches, render the entire group as normal
+        const title = renderFuzzyMatchedTrackTitle(result.segments);
+        scrollingPanels.push({
+          kind: 'group',
+          collapsed: group.collapsed,
+          childPanels: group.collapsed ? [] : renderTrackPanels(group.tracks),
+          header: renderTrackGroupPanel(group, true, group.collapsed, title),
+        });
+      } else {
+        // If we are filtering, render the group header only if it contains
+        // matching tracks
+        const childPanels = renderTrackPanels(group.tracks, filterTerm);
+        if (childPanels.length === 0) continue;
+        scrollingPanels.push({
+          kind: 'group',
+          collapsed: false,
+          childPanels,
+          header: renderTrackGroupPanel(group, false, false),
+        });
+      }
+    } else {
+      // Always render the group header, but only render child tracks if not
+      // collapsed
+      scrollingPanels.push({
+        kind: 'group',
+        collapsed: group.collapsed,
+        childPanels: group.collapsed ? [] : renderTrackPanels(group.tracks),
+        header: renderTrackGroupPanel(group, true, group.collapsed),
+      });
+    }
   }
 
-  private renderTabPanel() {
-    return m(TabPanel);
+  return scrollingPanels;
+}
+
+// Given a list of tracks and a filter term, return a list pf panels filtered by
+// the filter term
+function renderTrackPanels(trackKeys: string[], filterTerm?: string): Panel[] {
+  if (filterTermIsValid(filterTerm)) {
+    const tokens = tokenizeFilterTerm(filterTerm);
+    const matcher = new FuzzyFinder(trackKeys, (key) => {
+      return globals.state.tracks[key].name;
+    });
+    // Filter tracks which match any of the tokens
+    const filtered = matcher.find(...tokens);
+    return filtered.map(({item: key, segments}) => {
+      return renderTrackPanel(key, renderFuzzyMatchedTrackTitle(segments));
+    });
+  } else {
+    // No point in applying any filtering...
+    return trackKeys.map((key) => {
+      return renderTrackPanel(key);
+    });
   }
 }
 
+function renderTrackPanel(key: string, title?: m.Children) {
+  const trackBundle = resolveTrack(key);
+  return new TrackPanel({
+    trackKey: key,
+    title: m(
+      'span',
+      {
+        style: {
+          'font-size': getTitleFontSize(trackBundle.title),
+        },
+      },
+      Boolean(title) ? title : trackBundle.title,
+    ),
+    tags: trackBundle.tags,
+    trackFSM: trackBundle.trackFSM,
+    closeable: trackBundle.closeable,
+    chips: trackBundle.chips,
+    pluginId: trackBundle.pluginId,
+  });
+}
+
+function renderTrackGroupPanel(
+  group: TrackGroupState,
+  collapsable: boolean,
+  collapsed: boolean,
+  title?: m.Children,
+): TrackGroupPanel {
+  const summaryTrackKey = group.summaryTrack;
+
+  if (exists(summaryTrackKey)) {
+    const trackBundle = resolveTrack(summaryTrackKey);
+    return new TrackGroupPanel({
+      groupKey: group.key,
+      trackFSM: trackBundle.trackFSM,
+      subtitle: trackBundle.subtitle,
+      tags: trackBundle.tags,
+      chips: trackBundle.chips,
+      collapsed,
+      title: exists(title) ? title : group.name,
+      tooltip: group.name,
+      collapsable,
+    });
+  } else {
+    return new TrackGroupPanel({
+      groupKey: group.key,
+      collapsed,
+      title: exists(title) ? title : group.name,
+      tooltip: group.name,
+      collapsable,
+    });
+  }
+}
+
+// Resolve a track and its metadata through the track cache
+function resolveTrack(key: string): TrackBundle {
+  const trackState = globals.state.tracks[key];
+  const {uri, name, closeable} = trackState;
+  const trackDesc = globals.trackManager.resolveTrackInfo(uri);
+  const trackCacheEntry =
+    trackDesc && globals.trackManager.resolveTrack(key, trackDesc);
+  const trackFSM = trackCacheEntry;
+  const tags = trackCacheEntry?.desc.tags;
+  const subtitle = trackCacheEntry?.desc.subtitle;
+  const chips = trackCacheEntry?.desc.chips;
+  const plugin = trackCacheEntry?.desc.pluginId;
+  return {
+    title: name,
+    subtitle,
+    closeable: closeable ?? false,
+    tags,
+    trackFSM,
+    chips,
+    pluginId: plugin,
+  };
+}
+
 interface TrackBundle {
-  title: string;
-  closeable: boolean;
-  trackFSM?: TrackCacheEntry;
-  tags?: TrackTags;
-  labels?: string[];
-  trackIds?: number[];
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly closeable: boolean;
+  readonly trackFSM?: TrackCacheEntry;
+  readonly tags?: TrackTags;
+  readonly chips?: ReadonlyArray<string>;
+  readonly pluginId?: string;
 }
 
 export const ViewerPage = createPage({

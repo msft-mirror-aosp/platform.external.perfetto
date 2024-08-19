@@ -24,15 +24,11 @@
 #include <utility>
 #include <vector>
 
-#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/ref_counted.h"
 #include "src/trace_processor/db/column/types.h"
-
-namespace perfetto::protos::pbzero {
-class SerializedColumn_Storage;
-}
 
 namespace perfetto::trace_processor::column {
 class DataLayerChain;
@@ -92,24 +88,6 @@ class DataLayer : public RefCounted {
 // functionality for querying the transformed data of the entire chain.
 class DataLayerChain {
  public:
-  // Indicates the direction of the sort on a single chain.
-  enum class SortDirection {
-    kAscending,
-    kDescending,
-  };
-  // Struct wrapping indices to elements of this chain. Passed to sorting
-  // functions.
-  struct SortToken {
-    // An index pointing to an element in this chain. Indicates the element
-    // at this index should be compared.
-    uint32_t index;
-
-    // An opaque value which can be set to some value meaningful to the
-    // caller. Implementations *should not* read at this value.
-    uint32_t payload;
-  };
-  using StorageProto = protos::pbzero::SerializedColumn_Storage;
-
   // Index vector related data required to Filter using IndexSearch.
   struct Indices {
     enum class State {
@@ -249,20 +227,20 @@ class DataLayerChain {
     PERFETTO_FATAL("For GCC");
   }
 
-  // Stable sorts an array of SortToken elements between |start| and |end|
+  // Stable sorts an array of Token elements between |start| and |end|
   // using a comparator defined by looking up the elements in this chain using
-  // the index given by SortToken::index. |direction| indicates the direction of
+  // the index given by Token::index. |direction| indicates the direction of
   // the sort (ascending or descending).
   //
   // In simple terms the expectation is for implementations do something like:
   // ```
-  // std::stable_sort(start, index, [](const SortToken& a, const SortToken& b) {
+  // std::stable_sort(start, index, [](const Token& a, const Token& b) {
   //  return Get(a.index) < Get(b.index);
   // });
   // ```
   // with |Get| being a function to lookup the element in this chain.
-  virtual void StableSort(SortToken* start,
-                          SortToken* end,
+  virtual void StableSort(Token* start,
+                          Token* end,
                           SortDirection direction) const = 0;
 
   // Removes all indices pointing to values that are duplicates, as a result the
@@ -282,9 +260,6 @@ class DataLayerChain {
   // present it will point to the first index with the smallest value in the
   // chain.
   virtual std::optional<Token> MinElement(Indices&) const = 0;
-
-  // Serializes storage data to proto format.
-  virtual void Serialize(StorageProto*) const = 0;
 
   // Returns a string which represents the column for debugging purposes.
   //

@@ -79,9 +79,10 @@ export class TabPanel implements m.ClassComponent {
       .filter((tab) => tab.isEphemeral === false)
       .map(({content, uri}): TabDropdownEntry => {
         // Check if the tab is already open
-        const isOpen = globals.state.tabs.openTabs.find((openTabUri) => {
-          return openTabUri === uri;
-        });
+        const isOpen =
+          globals.state.tabs.openTabs.find((openTabUri) => {
+            return openTabUri === uri;
+          }) !== undefined;
         const clickAction = isOpen
           ? Actions.hideTab({uri})
           : Actions.showTab({uri});
@@ -89,7 +90,7 @@ export class TabPanel implements m.ClassComponent {
           key: uri,
           title: content.getTitle(),
           onClick: () => globals.dispatch(clickAction),
-          checked: isOpen !== undefined,
+          checked: isOpen,
         };
       });
 
@@ -143,6 +144,23 @@ export class TabPanel implements m.ClassComponent {
           'Selection details will appear here',
         ),
       };
+    }
+
+    // Show single selection panels if they are registered
+    if (currentSelection.kind === 'single') {
+      const trackKey = currentSelection.trackKey;
+      const uri = globals.state.tracks[trackKey]?.uri;
+
+      if (uri) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(uri);
+        const panel = trackDesc?.detailsPanel;
+        if (panel) {
+          return {
+            content: panel.render(currentSelection.eventId),
+            isLoading: panel.isLoading?.() ?? false,
+          };
+        }
+      }
     }
 
     // Get the first "truthy" details panel

@@ -214,62 +214,6 @@ class ColumnLegacy {
   // Gets the value of the Column at the given |row|.
   SqlValue Get(uint32_t row) const { return GetAtIdx(overlay().Get(row)); }
 
-  // Returns the row containing the given value in the Column.
-  std::optional<uint32_t> IndexOf(SqlValue value) const {
-    switch (type_) {
-      // TODO(lalitm): investigate whether we could make this more efficient
-      // by first checking the type of the column and comparing explicitly
-      // based on that type.
-      case ColumnType::kInt32:
-      case ColumnType::kUint32:
-      case ColumnType::kInt64:
-      case ColumnType::kDouble:
-      case ColumnType::kString: {
-        for (uint32_t i = 0; i < overlay().size(); i++) {
-          if (compare::SqlValue(Get(i), value) == 0)
-            return i;
-        }
-        return std::nullopt;
-      }
-      case ColumnType::kId: {
-        if (value.type != SqlValue::Type::kLong)
-          return std::nullopt;
-        return overlay().RowOf(static_cast<uint32_t>(value.long_value));
-      }
-      case ColumnType::kDummy:
-        PERFETTO_FATAL("IndexOf not allowed on dummy column");
-    }
-    PERFETTO_FATAL("For GCC");
-  }
-
-  // Returns the minimum value in this column. Returns std::nullopt if this
-  // column is empty.
-  std::optional<SqlValue> Min() const {
-    if (overlay().empty())
-      return std::nullopt;
-
-    if (IsSorted())
-      return Get(0);
-
-    Iterator b(this, 0);
-    Iterator e(this, overlay().size());
-    return *std::min_element(b, e, &compare::SqlValueComparator);
-  }
-
-  // Returns the minimum value in this column. Returns std::nullopt if this
-  // column is empty.
-  std::optional<SqlValue> Max() const {
-    if (overlay().empty())
-      return std::nullopt;
-
-    if (IsSorted())
-      return Get(overlay().size() - 1);
-
-    Iterator b(this, 0);
-    Iterator e(this, overlay().size());
-    return *std::max_element(b, e, &compare::SqlValueComparator);
-  }
-
   // Returns the backing RowMap for this Column.
   // This function is defined out of line because of a circular dependency
   // between |Table| and |Column|.
@@ -277,9 +221,6 @@ class ColumnLegacy {
 
   // Returns the name of the column.
   const char* name() const { return name_; }
-
-  // Returns the type of this Column in terms of SqlValue::Type.
-  SqlValue::Type type() const { return ToSqlValueType(type_); }
 
   // Returns the type of this Column in terms of ColumnType.
   ColumnType col_type() const { return type_; }
@@ -383,6 +324,23 @@ class ColumnLegacy {
 
   const ColumnStorageBase& storage_base() const { return *storage_; }
 
+  static SqlValue::Type ToSqlValueType(ColumnType type) {
+    switch (type) {
+      case ColumnType::kInt32:
+      case ColumnType::kUint32:
+      case ColumnType::kInt64:
+      case ColumnType::kId:
+        return SqlValue::Type::kLong;
+      case ColumnType::kDouble:
+        return SqlValue::Type::kDouble;
+      case ColumnType::kString:
+        return SqlValue::Type::kString;
+      case ColumnType::kDummy:
+        PERFETTO_FATAL("ToSqlValueType not allowed on dummy column");
+    }
+    PERFETTO_FATAL("For GCC");
+  }
+
  protected:
   // Returns the backing sparse vector cast to contain data of type T.
   // Should only be called when |type_| == ToColumnType<T>().
@@ -485,23 +443,6 @@ class ColumnLegacy {
     // The non-null flag should always be set for set id columns.
     // The column type should always be kUint32.
     return IsSorted(flags) && !IsNullable(flags) && type == ColumnType::kUint32;
-  }
-
-  static SqlValue::Type ToSqlValueType(ColumnType type) {
-    switch (type) {
-      case ColumnType::kInt32:
-      case ColumnType::kUint32:
-      case ColumnType::kInt64:
-      case ColumnType::kId:
-        return SqlValue::Type::kLong;
-      case ColumnType::kDouble:
-        return SqlValue::Type::kDouble;
-      case ColumnType::kString:
-        return SqlValue::Type::kString;
-      case ColumnType::kDummy:
-        PERFETTO_FATAL("ToSqlValueType not allowed on dummy column");
-    }
-    PERFETTO_FATAL("For GCC");
   }
 
   // Returns the string at the index |idx|.

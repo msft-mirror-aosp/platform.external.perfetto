@@ -14,9 +14,11 @@
 
 import {Draft} from 'immer';
 
+import {SortDirection} from '../base/comparison_utils';
 import {assertExists, assertTrue} from '../base/logging';
 import {duration, time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
+import {randomColor} from '../core/colorizer';
 import {
   GenericSliceDetailsTabConfig,
   GenericSliceDetailsTabConfigBase,
@@ -28,9 +30,7 @@ import {
   tableColumnEquals,
   toggleEnabled,
 } from '../frontend/pivot_table_types';
-import {PrimaryTrackSortKey} from '../public/index';
 
-import {randomColor} from '../core/colorizer';
 import {
   computeIntervals,
   DropDirection,
@@ -52,16 +52,15 @@ import {
   OmniboxState,
   PendingDeeplinkState,
   PivotTableResult,
+  PrimaryTrackSortKey,
   ProfileType,
   RecordingTarget,
   SCROLLING_TRACK_GROUP,
-  SortDirection,
   State,
   Status,
   ThreadTrackSortKey,
   TrackSortKey,
   UtidToTrackSortKey,
-  VisibleState,
 } from './state';
 
 type StateDraft = Draft<State>;
@@ -70,10 +69,8 @@ export interface AddTrackArgs {
   key?: string;
   uri: string;
   name: string;
-  labels?: string[];
   trackSortKey: TrackSortKey;
   trackGroup?: string;
-  params?: unknown;
   closeable?: boolean;
 }
 
@@ -85,6 +82,16 @@ export interface PostedTrace {
   uuid?: string;
   localOnly?: boolean;
   keepApiOpen?: boolean;
+
+  // Allows to pass extra arguments to plugins. This can be read by plugins
+  // onTraceLoad() and can be used to trigger plugin-specific-behaviours (e.g.
+  // allow dashboards like APC to pass extra data to materialize onto tracks).
+  // The format is the following:
+  // pluginArgs: {
+  //   'dev.perfetto.PluginFoo': { 'key1': 'value1', 'key2': 1234 }
+  //   'dev.perfetto.PluginBar': { 'key3': '...', 'key4': ... }
+  // }
+  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
 }
 
 export interface PostedScrollToRange {
@@ -203,9 +210,7 @@ export const StateActions = {
         name,
         trackSortKey: track.trackSortKey,
         trackGroup: track.trackGroup,
-        labels: track.labels,
         uri: track.uri,
-        params: track.params,
         closeable: track.closeable,
       };
       if (track.trackGroup === SCROLLING_TRACK_GROUP) {
@@ -542,22 +547,6 @@ export const StateActions = {
     }
   },
 
-  selectCounter(
-    state: StateDraft,
-    args: {leftTs: time; rightTs: time; id: number; trackKey: string},
-  ): void {
-    state.selection = {
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'COUNTER',
-        leftTs: args.leftTs,
-        rightTs: args.rightTs,
-        id: args.id,
-        trackKey: args.trackKey,
-      },
-    };
-  },
-
   selectHeapProfile(
     state: StateDraft,
     args: {id: number; upid: number; ts: time; type: ProfileType},
@@ -578,7 +567,8 @@ export const StateActions = {
     state: StateDraft,
     args: {
       id: number;
-      upid: number;
+      utid?: number;
+      upid?: number;
       leftTs: time;
       rightTs: time;
       type: ProfileType;
@@ -589,6 +579,7 @@ export const StateActions = {
       legacySelection: {
         kind: 'PERF_SAMPLES',
         id: args.id,
+        utid: args.utid,
         upid: args.upid,
         leftTs: args.leftTs,
         rightTs: args.rightTs,
@@ -779,10 +770,6 @@ export const StateActions = {
     // if (oldSelection !== state.selection) etc.
     // To solve this re-create the selection object here:
     state.selection = Object.assign({}, state.selection);
-  },
-
-  setVisibleTraceTime(state: StateDraft, args: VisibleState): void {
-    state.frontendLocalState.visibleState = {...args};
   },
 
   setChromeCategories(state: StateDraft, args: {categories: string[]}): void {
@@ -1001,6 +988,13 @@ export const StateActions = {
         aggregations,
       );
   },
+
+  setTrackFilterTerm(
+    state: StateDraft,
+    args: {filterTerm: string | undefined},
+  ) {
+    state.trackFilterTerm = args.filterTerm;
+  },
 };
 
 // When we are on the frontend side, we don't really want to execute the
@@ -1022,9 +1016,10 @@ export interface DeferredAction<Args = {}> {
 // DeferredActions<T> has an attribute:
 // (args: Args) => DeferredAction<Args>
 type ActionFunction<Args> = (state: StateDraft, args: Args) => void;
-type DeferredActionFunc<T> = T extends ActionFunction<infer Args>
-  ? (args: Args) => DeferredAction<Args>
-  : never;
+type DeferredActionFunc<T> =
+  T extends ActionFunction<infer Args>
+    ? (args: Args) => DeferredAction<Args>
+    : never;
 type DeferredActions<C> = {
   [P in keyof C]: DeferredActionFunc<C[P]>;
 };

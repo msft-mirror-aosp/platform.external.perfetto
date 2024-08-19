@@ -22,6 +22,7 @@ import {
   MetatraceCategories,
   QueryArgs,
   QueryResult as ProtoQueryResult,
+  RegisterSqlModuleArgs,
   ResetTraceProcessorArgs,
   TraceProcessorRpc,
   TraceProcessorRpcStream,
@@ -36,7 +37,7 @@ import {
 } from './query_result';
 
 import TPM = TraceProcessorRpc.TraceProcessorMethod;
-import {Disposable} from '../base/disposable';
+
 import {Result} from '../base/utils';
 
 export interface LoadingTracker {
@@ -126,6 +127,7 @@ export abstract class EngineBase implements Engine {
   private pendingRestoreTables = new Array<Deferred<void>>();
   private pendingComputeMetrics = new Array<Deferred<string | Uint8Array>>();
   private pendingReadMetatrace?: Deferred<DisableAndReadMetatraceResult>;
+  private pendingRegisterSqlModule?: Deferred<void>;
   private _isMetatracingEnabled = false;
 
   constructor(tracker?: LoadingTracker) {
@@ -247,9 +249,9 @@ export abstract class EngineBase implements Engine {
           pendingComputeMetric.reject(error);
         } else {
           const result =
-            metricRes.metricsAsPrototext ||
-            metricRes.metricsAsJson ||
-            metricRes.metrics ||
+            metricRes.metricsAsPrototext ??
+            metricRes.metricsAsJson ??
+            metricRes.metrics ??
             '';
           pendingComputeMetric.resolve(result);
         }
@@ -260,6 +262,15 @@ export abstract class EngineBase implements Engine {
         ) as DisableAndReadMetatraceResult;
         assertExists(this.pendingReadMetatrace).resolve(metatraceRes);
         this.pendingReadMetatrace = undefined;
+        break;
+      case TPM.TPM_REGISTER_SQL_MODULE:
+        const registerResult = assertExists(rpc.registerSqlModuleResult);
+        const res = assertExists(this.pendingRegisterSqlModule);
+        if (registerResult.error && registerResult.error.length > 0) {
+          res.reject(registerResult.error);
+        } else {
+          res.resolve();
+        }
         break;
       default:
         console.log(
@@ -437,7 +448,7 @@ export abstract class EngineBase implements Engine {
   enableMetatrace(categories?: MetatraceCategories) {
     const rpc = TraceProcessorRpc.create();
     rpc.request = TPM.TPM_ENABLE_METATRACE;
-    if (categories) {
+    if (categories !== undefined && categories !== MetatraceCategories.NONE) {
       rpc.enableMetatraceArgs = new EnableMetatraceArgs();
       rpc.enableMetatraceArgs.categories = categories;
     }
@@ -457,6 +468,26 @@ export abstract class EngineBase implements Engine {
     rpc.request = TPM.TPM_DISABLE_AND_READ_METATRACE;
     this._isMetatracingEnabled = false;
     this.pendingReadMetatrace = result;
+    this.rpcSendRequest(rpc);
+    return result;
+  }
+
+  registerSqlModules(p: {
+    name: string;
+    modules: {name: string; sql: string}[];
+  }): Promise<void> {
+    if (this.pendingRegisterSqlModule) {
+      return Promise.reject(new Error('Already finalising a metatrace'));
+    }
+
+    const result = defer<void>();
+
+    const rpc = TraceProcessorRpc.create();
+    rpc.request = TPM.TPM_REGISTER_SQL_MODULE;
+    const args = (rpc.registerSqlModuleArgs = new RegisterSqlModuleArgs());
+    args.topLevelPackageName = p.name;
+    args.modules = p.modules;
+    this.pendingRegisterSqlModule = result;
     this.rpcSendRequest(rpc);
     return result;
   }
@@ -525,7 +556,7 @@ export class EngineProxy implements Engine, Disposable {
     return this.engine.id;
   }
 
-  dispose() {
+  [Symbol.dispose]() {
     this._isAlive = false;
   }
 }

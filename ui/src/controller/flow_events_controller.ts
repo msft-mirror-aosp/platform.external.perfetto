@@ -17,14 +17,16 @@ import {AreaSelection, getLegacySelection} from '../common/state';
 import {featureFlags} from '../core/feature_flags';
 import {Flow, globals} from '../frontend/globals';
 import {publishConnectedFlows, publishSelectedFlows} from '../frontend/publish';
-import {asSliceSqlId} from '../frontend/sql_types';
+import {asSliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, STR_NULL} from '../trace_processor/query_result';
-import {THREAD_SLICE_TRACK_KIND} from '../core_plugins/thread_slice/thread_slice_track';
-import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../core_plugins/frames';
 
 import {Controller} from './controller';
 import {Monitor} from '../base/monitor';
+import {
+  ACTUAL_FRAMES_SLICE_TRACK_KIND,
+  THREAD_SLICE_TRACK_KIND,
+} from '../core/track_kinds';
 
 export interface FlowEventsControllerArgs {
   engine: Engine;
@@ -232,7 +234,7 @@ export class FlowEventsController extends Controller<'main'> {
       // that case experimental_slice_layout is just an expensive way
       // to find out depth === layout_depth.
       const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      const trackIds = trackInfo?.trackIds;
+      const trackIds = trackInfo?.tags?.trackIds;
       if (trackIds === undefined || trackIds.length <= 1) {
         uiTrackIdToInfo.set(uiTrackId, null);
         trackIdToInfo.set(trackId, null);
@@ -241,7 +243,7 @@ export class FlowEventsController extends Controller<'main'> {
 
       const newInfo = {
         uiTrackId,
-        siblingTrackIds: trackIds,
+        siblingTrackIds: [...trackIds],
         sliceIds: [],
         nodes: [],
       };
@@ -360,13 +362,13 @@ export class FlowEventsController extends Controller<'main'> {
       const track = globals.state.tracks[uiTrackId];
       if (track?.uri !== undefined) {
         const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        const kind = trackInfo?.kind;
+        const kind = trackInfo?.tags?.kind;
         if (
           kind === THREAD_SLICE_TRACK_KIND ||
           kind === ACTUAL_FRAMES_SLICE_TRACK_KIND
         ) {
-          if (trackInfo?.trackIds) {
-            for (const trackId of trackInfo.trackIds) {
+          if (trackInfo?.tags?.trackIds) {
+            for (const trackId of trackInfo.tags.trackIds) {
               trackIds.push(trackId);
             }
           }

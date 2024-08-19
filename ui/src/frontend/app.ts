@@ -15,7 +15,7 @@
 import m from 'mithril';
 
 import {copyToClipboard} from '../base/clipboard';
-import {Trash} from '../base/disposable';
+
 import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
 import {assertExists, assertUnreachable} from '../base/logging';
@@ -45,8 +45,6 @@ import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
 import {AggregationsTabs} from './aggregation_tab';
-import {addSqlTableTab} from './sql_table/tab';
-import {SqlTables} from './sql_table/well_known_tables';
 import {
   findCurrentSelection,
   focusOtherFlow,
@@ -54,9 +52,12 @@ import {
 } from './keyboard_event_handler';
 import {publishPermalinkHash} from './publish';
 import {OmniboxMode, PromptOption} from './omnibox_manager';
-import {Utid} from './sql_types';
-import {getThreadInfo} from './thread_and_process_info';
-import {THREAD_STATE_TRACK_KIND} from '../core_plugins/thread_state';
+import {Utid} from '../trace_processor/sql_utils/core_types';
+import {THREAD_STATE_TRACK_KIND} from '../core/track_kinds';
+import {DisposableStack} from '../base/disposable_stack';
+import {addSqlTableTab} from './sql_table_tab';
+import {getThreadInfo} from '../trace_processor/sql_utils/thread';
+import {SqlTables} from './widgets/sql/table/well_known_sql_tables';
 
 function renderPermalink(): m.Children {
   const hash = globals.permalinkHash;
@@ -112,14 +113,14 @@ const criticalPathsliceLiteColumnNames = [
 ];
 
 export class App implements m.ClassComponent {
-  private trash = new Trash();
+  private trash = new DisposableStack();
   static readonly OMNIBOX_INPUT_REF = 'omnibox';
   private omniboxInputEl?: HTMLInputElement;
   private recentCommands: string[] = [];
 
   constructor() {
-    this.trash.add(new Notes());
-    this.trash.add(new AggregationsTabs());
+    this.trash.use(new Notes());
+    this.trash.use(new AggregationsTabs());
   }
 
   private getEngine(): Engine | undefined {
@@ -142,10 +143,10 @@ export class App implements m.ClassComponent {
         const trackInfo = globals.state.tracks[firstThreadStateTrack];
         const trackDesc = globals.trackManager.resolveTrackInfo(trackInfo.uri);
         if (
-          trackDesc?.kind === THREAD_STATE_TRACK_KIND &&
-          trackDesc?.utid !== undefined
+          trackDesc?.tags?.kind === THREAD_STATE_TRACK_KIND &&
+          trackDesc?.tags?.utid !== undefined
         ) {
-          return trackDesc?.utid;
+          return trackDesc.tags.utid;
         }
       }
     }
@@ -210,7 +211,7 @@ export class App implements m.ClassComponent {
       name: `Critical path lite`,
       callback: async () => {
         const trackUtid = this.getFirstUtidOfSelectionOrVisibleWindow();
-        const window = getTimeSpanOfSelectionOrVisibleWindow();
+        const window = await getTimeSpanOfSelectionOrVisibleWindow();
         const engine = this.getEngine();
 
         if (engine !== undefined && trackUtid != 0) {
@@ -218,7 +219,13 @@ export class App implements m.ClassComponent {
             `INCLUDE PERFETTO MODULE sched.thread_executing_span;`,
           );
           await addDebugSliceTrack(
-            engine,
+            // NOTE(stevegolton): This is a temporary patch, this menu should
+            // become part of a critical path plugin, at which point we can just
+            // use the plugin's context object.
+            {
+              engine,
+              registerTrack: (x) => globals.trackManager.registerTrack(x),
+            },
             {
               sqlSource: `
                    SELECT
@@ -252,7 +259,7 @@ export class App implements m.ClassComponent {
       name: `Critical path`,
       callback: async () => {
         const trackUtid = this.getFirstUtidOfSelectionOrVisibleWindow();
-        const window = getTimeSpanOfSelectionOrVisibleWindow();
+        const window = await getTimeSpanOfSelectionOrVisibleWindow();
         const engine = this.getEngine();
 
         if (engine !== undefined && trackUtid != 0) {
@@ -260,7 +267,13 @@ export class App implements m.ClassComponent {
             `INCLUDE PERFETTO MODULE sched.thread_executing_span_with_slice;`,
           );
           await addDebugSliceTrack(
-            engine,
+            // NOTE(stevegolton): This is a temporary patch, this menu should
+            // become part of a critical path plugin, at which point we can just
+            // use the plugin's context object.
+            {
+              engine,
+              registerTrack: (x) => globals.trackManager.registerTrack(x),
+            },
             {
               sqlSource: `
                         SELECT cr.id, cr.utid, cr.ts, cr.dur, cr.name, cr.table_name
@@ -283,9 +296,9 @@ export class App implements m.ClassComponent {
     {
       id: 'perfetto.CriticalPathPprof',
       name: `Critical path pprof`,
-      callback: () => {
+      callback: async () => {
         const trackUtid = this.getFirstUtidOfSelectionOrVisibleWindow();
-        const window = getTimeSpanOfSelectionOrVisibleWindow();
+        const window = await getTimeSpanOfSelectionOrVisibleWindow();
         const engine = this.getEngine();
 
         if (engine !== undefined && trackUtid != 0) {
@@ -304,12 +317,11 @@ export class App implements m.ClassComponent {
       },
     },
     {
-      id: 'perfetto.ShowSliceTable',
-      name: 'Open new slice table tab',
+      id: 'perfetto.ShowTable.slice',
+      name: 'Open table: slice',
       callback: () => {
         addSqlTableTab({
           table: SqlTables.slice,
-          displayName: 'slice',
         });
       },
     },
@@ -351,7 +363,6 @@ export class App implements m.ClassComponent {
       id: 'perfetto.RunQuery',
       name: 'Run query',
       callback: () => globals.omnibox.setMode(OmniboxMode.Query),
-      defaultHotkey: '!Mod+O',
     },
     {
       id: 'perfetto.Search',
@@ -368,8 +379,8 @@ export class App implements m.ClassComponent {
     {
       id: 'perfetto.CopyTimeWindow',
       name: `Copy selected time window to clipboard`,
-      callback: () => {
-        const window = getTimeSpanOfSelectionOrVisibleWindow();
+      callback: async () => {
+        const window = await getTimeSpanOfSelectionOrVisibleWindow();
         const query = `ts >= ${window.start} and ts < ${window.end}`;
         copyToClipboard(query);
       },
@@ -393,8 +404,8 @@ export class App implements m.ClassComponent {
     {
       id: 'perfetto.SetTemporarySpanNote',
       name: 'Set the temporary span note based on the current selection',
-      callback: () => {
-        const range = globals.findTimeRangeOfSelection();
+      callback: async () => {
+        const range = await globals.findTimeRangeOfSelection();
         if (range) {
           globals.dispatch(
             Actions.addSpanNote({
@@ -410,8 +421,8 @@ export class App implements m.ClassComponent {
     {
       id: 'perfetto.AddSpanNote',
       name: 'Add a new span note based on the current selection',
-      callback: () => {
-        const range = globals.findTimeRangeOfSelection();
+      callback: async () => {
+        const range = await globals.findTimeRangeOfSelection();
         if (range) {
           globals.dispatch(
             Actions.addSpanNote({start: range.start, end: range.end}),
@@ -807,7 +818,7 @@ export class App implements m.ClassComponent {
     // Register each command with the command manager
     this.cmds.forEach((cmd) => {
       const dispose = globals.commandManager.registerCommand(cmd);
-      this.trash.add(dispose);
+      this.trash.use(dispose);
     });
   }
 

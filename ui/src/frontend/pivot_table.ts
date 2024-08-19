@@ -16,11 +16,12 @@
 
 import m from 'mithril';
 
+import {SortDirection} from '../base/comparison_utils';
 import {sqliteString} from '../base/string_utils';
 import {Actions} from '../common/actions';
 import {DropDirection} from '../common/dragndrop_logic';
 import {COUNT_AGGREGATION} from '../common/empty_state';
-import {Area, PivotTableResult, SortDirection} from '../common/state';
+import {Area, PivotTableResult} from '../common/state';
 import {raf} from '../core/raf_scheduler';
 import {ColumnType} from '../trace_processor/query_result';
 
@@ -41,10 +42,10 @@ import {
 } from './pivot_table_types';
 import {PopupMenuButton, popupMenuIcon, PopupMenuItem} from './popup_menu';
 import {ReorderableCell, ReorderableCellGroup} from './reorderable_cells';
-import {addSqlTableTab} from './sql_table/tab';
-import {SqlTables} from './sql_table/well_known_tables';
 import {AttributeModalHolder} from './tables/attribute_modal_holder';
 import {DurationWidget} from './widgets/duration';
+import {addSqlTableTab} from './sql_table_tab';
+import {SqlTables} from './widgets/sql/table/well_known_sql_tables';
 
 interface PathItem {
   tree: PivotTree;
@@ -136,7 +137,8 @@ export class PivotTable implements m.ClassComponent<PivotTableAttrs> {
             }
             addSqlTableTab({
               table: SqlTables.slice,
-              filters: queryFilters,
+              // TODO(altimin): this should properly reference the required columns, but it works for now (until the pivot table is going to be rewritten to be more flexible).
+              filters: queryFilters.map((f) => ({op: () => f, columns: []})),
             });
           },
         },

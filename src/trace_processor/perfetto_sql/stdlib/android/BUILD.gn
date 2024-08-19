@@ -17,7 +17,10 @@ import("../../../../../gn/perfetto_sql.gni")
 perfetto_sql_source_set("android") {
   deps = [
     "auto",
+    "cpu",
     "frames",
+    "gpu",
+    "memory",
     "startup",
     "winscope",
   ]
@@ -27,6 +30,7 @@ perfetto_sql_source_set("android") {
     "battery.sql",
     "battery_stats.sql",
     "binder.sql",
+    "binder_breakdown.sql",
     "broadcasts.sql",
     "critical_blocking_calls.sql",
     "device.sql",
@@ -47,5 +51,6 @@ perfetto_sql_source_set("android") {
     "statsd.sql",
     "suspend.sql",
     "thread.sql",
+    "version.sql",
   ]
 }
