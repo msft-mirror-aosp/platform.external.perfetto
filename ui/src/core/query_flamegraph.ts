@@ -193,27 +193,27 @@ async function computeFlamegraphTree(
     showStackAndPivot.length === 0
       ? '0'
       : showStackAndPivot
-          .map((x, i) => `((name like '%${x}%') << ${i})`)
+          .map((x, i) => `((name like '${makeSqlFilter(x)}') << ${i})`)
           .join(' | ');
   const showStackBits = (1 << showStackAndPivot.length) - 1;
 
   const hideStackFilter =
     hideStack.length === 0
       ? 'false'
-      : hideStack.map((x) => `name like '%${x}%'`).join(' OR ');
+      : hideStack.map((x) => `name like '${makeSqlFilter(x)}'`).join(' OR ');
 
   const showFromFrameFilter =
     showFromFrame.length === 0
       ? '0'
       : showFromFrame
-          .map((x, i) => `((name like '%${x}%') << ${i})`)
+          .map((x, i) => `((name like '${makeSqlFilter(x)}') << ${i})`)
           .join(' | ');
   const showFromFrameBits = (1 << showFromFrame.length) - 1;
 
   const hideFrameFilter =
     hideFrame.length === 0
       ? 'false'
-      : hideFrame.map((x) => `name like '%${x}%'`).join(' OR ');
+      : hideFrame.map((x) => `name like '${makeSqlFilter(x)}'`).join(' OR ');
 
   const pivotFilter = getPivotFilter(view);
 
@@ -383,6 +383,7 @@ async function computeFlamegraphTree(
     name: STR,
     selfValue: NUM,
     cumulativeValue: NUM,
+    parentCumulativeValue: NUM_NULL,
     xStart: NUM,
     xEnd: NUM,
     ...Object.fromEntries(unaggCols.map((m) => [m, STR_NULL])),
@@ -408,6 +409,7 @@ async function computeFlamegraphTree(
       name: it.name,
       selfValue: it.selfValue,
       cumulativeValue: it.cumulativeValue,
+      parentCumulativeValue: it.parentCumulativeValue ?? undefined,
       xStart: it.xStart,
       xEnd: it.xEnd,
       properties,
@@ -434,9 +436,16 @@ async function computeFlamegraphTree(
   };
 }
 
+function makeSqlFilter(x: string) {
+  if (x.startsWith('^') && x.endsWith('$')) {
+    return x.slice(1, -1);
+  }
+  return `%${x}%`;
+}
+
 function getPivotFilter(view: FlamegraphView) {
   if (view.kind === 'PIVOT') {
-    return `name like '%${view.pivot}%'`;
+    return `name like '${makeSqlFilter(view.pivot)}'`;
   }
   if (view.kind === 'BOTTOM_UP') {
     return 'value > 0';
