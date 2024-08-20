@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TableColumn, TableColumnSet} from './column';
+import type {Engine} from '../../../../public';
+import type {RenderedValue, SqlIdRefRenderer} from './details';
 
-export interface SqlTableDescription {
-  readonly imports?: string[];
-  name: string;
-  // In some cases, the name of the table we are querying is different from the name of the table we want to display to the user -- typically because the underlying table is wrapped into a view.
-  displayName?: string;
-  columns: (TableColumn | TableColumnSet)[];
+// Type-safe helper to create a SqlIdRefRenderer, which ensures that the
+// type returned from the fetch is the same type that renderer takes.
+export function createSqlIdRefRenderer<Data extends {}>(
+  fetch: (engine: Engine, id: bigint) => Promise<Data>,
+  render: (data: Data) => RenderedValue,
+): SqlIdRefRenderer {
+  return {fetch, render: render as (data: {}) => RenderedValue};
 }
+
+export const sqlIdRegistry: {[key: string]: SqlIdRefRenderer} = {};

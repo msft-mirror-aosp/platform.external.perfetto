@@ -89,7 +89,6 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/utils.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/window_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/counter_mipmap_operator.h"
-#include "src/trace_processor/perfetto_sql/intrinsics/operators/interval_intersect_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/slice_mipmap_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/span_join_operator.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/window_operator.h"
@@ -145,20 +144,33 @@ void RegisterFunction(PerfettoSqlEngine* engine,
     PERFETTO_ELOG("%s", status.c_message());
 }
 
-void RegisterAllProtoBuilderFunctions(DescriptorPool* pool,
-                                      PerfettoSqlEngine* engine,
-                                      TraceProcessor* tp) {
+base::Status RegisterAllProtoBuilderFunctions(
+    DescriptorPool* pool,
+    std::unordered_map<std::string, std::string>* proto_fn_name_to_path,
+    PerfettoSqlEngine* engine,
+    TraceProcessor* tp) {
   for (uint32_t i = 0; i < pool->descriptors().size(); ++i) {
     // Convert the full name (e.g. .perfetto.protos.TraceMetrics.SubMetric)
     // into a function name of the form (TraceMetrics_SubMetric).
     const auto& desc = pool->descriptors()[i];
     auto fn_name = desc.full_name().substr(desc.package_name().size() + 1);
     std::replace(fn_name.begin(), fn_name.end(), '.', '_');
+    auto registered_fn = proto_fn_name_to_path->find(fn_name);
+    if (registered_fn != proto_fn_name_to_path->end() &&
+        registered_fn->second != desc.full_name()) {
+      return base::ErrStatus(
+          "Attempt to create new metric function '%s' for different descriptor "
+          "'%s' that conflicts with '%s'",
+          fn_name.c_str(), desc.full_name().c_str(),
+          registered_fn->second.c_str());
+    }
     RegisterFunction<metrics::BuildProto>(
         engine, fn_name.c_str(), -1,
         std::make_unique<metrics::BuildProto::Context>(
             metrics::BuildProto::Context{tp, pool, i}));
+    proto_fn_name_to_path->emplace(fn_name, desc.full_name());
   }
+  return base::OkStatus();
 }
 
 void BuildBoundsTable(sqlite3* db, std::pair<int64_t, int64_t> bounds) {
@@ -634,7 +646,8 @@ base::Status TraceProcessorImpl::ExtendMetricsProto(
     size_t size,
     const std::vector<std::string>& skip_prefixes) {
   RETURN_IF_ERROR(pool_.AddFromFileDescriptorSet(data, size, skip_prefixes));
-  RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
+  RETURN_IF_ERROR(RegisterAllProtoBuilderFunctions(
+      &pool_, &proto_fn_name_to_path_, engine_.get(), this));
   return base::OkStatus();
 }
 
@@ -806,10 +819,6 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   engine_->sqlite_engine()->RegisterVirtualTableModule<SliceMipmapOperator>(
       "__intrinsic_slice_mipmap",
       std::make_unique<SliceMipmapOperator::Context>(engine_.get()));
-  engine_->sqlite_engine()
-      ->RegisterVirtualTableModule<IntervalIntersectOperator>(
-          "__intrinsic_ii_with_interval_tree",
-          std::make_unique<IntervalIntersectOperator::Context>(engine_.get()));
 
   // Register stdlib modules.
   auto stdlib_modules = GetStdlibModules();
@@ -1009,7 +1018,13 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       context_.storage->mutable_string_pool());
 
   // Metrics.
-  RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
+  {
+    auto status = RegisterAllProtoBuilderFunctions(
+        &pool_, &proto_fn_name_to_path_, engine_.get(), this);
+    if (!status.ok()) {
+      PERFETTO_FATAL("%s", status.c_message());
+    }
+  }
 
   // Import prelude module.
   {
