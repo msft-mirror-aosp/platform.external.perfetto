@@ -31,13 +31,13 @@ import {SqlTableState} from './widgets/sql/table/state';
 import {SqlTable} from './widgets/sql/table/table';
 import {SqlTableDescription} from './widgets/sql/table/table_description';
 
-interface SqlTableTabConfig {
+export interface SqlTableTabConfig {
   table: SqlTableDescription;
   filters?: Filter[];
   imports?: string[];
 }
 
-export function addSqlTableTab(config: SqlTableTabConfig): void {
+export function addSqlTableTabImpl(config: SqlTableTabConfig): void {
   const queryResultsTab = new SqlTableTab({
     config,
     engine: getEngine('QueryResult'),
@@ -84,6 +84,9 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
       }),
     ];
     const {selectStatement, columns} = this.state.getCurrentRequest();
+    const debugTrackColumns = Object.values(columns).filter(
+      (c) => !c.startsWith('__'),
+    );
     const addDebugTrack = m(
       Popup,
       {
@@ -92,8 +95,8 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
       },
       m(AddDebugTrackMenu, {
         dataSource: {
-          sqlSource: selectStatement,
-          columns: Object.values(columns).filter((c) => !c.startsWith('__')),
+          sqlSource: `SELECT ${debugTrackColumns.join(', ')} FROM (${selectStatement})`,
+          columns: debugTrackColumns,
         },
         engine: this.engine,
       }),
