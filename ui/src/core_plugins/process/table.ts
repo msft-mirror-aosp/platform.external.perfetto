@@ -15,27 +15,26 @@
 import {SqlTableDescription} from '../../frontend/widgets/sql/table/table_description';
 import {
   ArgSetColumnSet,
-  DurationColumn,
-  SliceIdColumn,
+  ProcessColumn,
   StandardColumn,
   TimestampColumn,
 } from '../../frontend/widgets/sql/table/well_known_columns';
 
-export const chromeTasksTable: SqlTableDescription = {
-  imports: ['chrome.tasks'],
-  name: 'chrome_tasks',
-  columns: [
-    new SliceIdColumn('id', {title: 'ID'}),
-    new TimestampColumn('ts', {title: 'Timestamp'}),
-    new DurationColumn('dur', {title: 'Duration'}),
-    new DurationColumn('thread_dur', {title: 'Thread duration'}),
-    new StandardColumn('name', {title: 'Name'}),
-    new StandardColumn('track_id', {title: 'Track ID', startsHidden: true}),
-    new StandardColumn('thread_name', {title: 'Thread name'}),
-    new StandardColumn('utid', {startsHidden: true}),
-    new StandardColumn('tid'),
-    new StandardColumn('process_name', {title: 'Process name'}),
-    new StandardColumn('upid', {startsHidden: true}),
-    new ArgSetColumnSet('arg_set_id'),
-  ],
-};
+export function getProcessTable(): SqlTableDescription {
+  return {
+    name: 'process',
+    columns: [
+      new StandardColumn('upid'),
+      new StandardColumn('pid'),
+      new StandardColumn('name'),
+      new TimestampColumn('start_ts'),
+      new TimestampColumn('end_ts'),
+      new ProcessColumn('parent_upid'),
+      new StandardColumn('uid'),
+      new StandardColumn('android_appid'),
+      new StandardColumn('cmdline', {startsHidden: true}),
+      new StandardColumn('machine_id'),
+      new ArgSetColumnSet('arg_set_id'),
+    ],
+  };
+}
