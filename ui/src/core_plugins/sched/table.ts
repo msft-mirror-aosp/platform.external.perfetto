@@ -14,28 +14,38 @@
 
 import {SqlTableDescription} from '../../frontend/widgets/sql/table/table_description';
 import {
-  ArgSetColumnSet,
   DurationColumn,
-  SliceIdColumn,
+  ProcessColumn,
+  SchedIdColumn,
   StandardColumn,
+  ThreadColumn,
   TimestampColumn,
 } from '../../frontend/widgets/sql/table/well_known_columns';
 
-export const chromeTasksTable: SqlTableDescription = {
-  imports: ['chrome.tasks'],
-  name: 'chrome_tasks',
-  columns: [
-    new SliceIdColumn('id', {title: 'ID'}),
-    new TimestampColumn('ts', {title: 'Timestamp'}),
-    new DurationColumn('dur', {title: 'Duration'}),
-    new DurationColumn('thread_dur', {title: 'Thread duration'}),
-    new StandardColumn('name', {title: 'Name'}),
-    new StandardColumn('track_id', {title: 'Track ID', startsHidden: true}),
-    new StandardColumn('thread_name', {title: 'Thread name'}),
-    new StandardColumn('utid', {startsHidden: true}),
-    new StandardColumn('tid'),
-    new StandardColumn('process_name', {title: 'Process name'}),
-    new StandardColumn('upid', {startsHidden: true}),
-    new ArgSetColumnSet('arg_set_id'),
-  ],
-};
+export function getSchedTable(): SqlTableDescription {
+  return {
+    name: 'sched',
+    columns: [
+      new SchedIdColumn('id'),
+      new TimestampColumn('ts'),
+      new DurationColumn('dur'),
+      new StandardColumn('cpu'),
+      new StandardColumn('priority'),
+      new ThreadColumn('utid', {title: 'Thread'}),
+      new ProcessColumn(
+        {
+          column: 'upid',
+          source: {
+            table: 'thread',
+            joinOn: {
+              utid: 'utid',
+            },
+          },
+        },
+        {title: 'Process'},
+      ),
+      new StandardColumn('end_state'),
+      new StandardColumn('ucpu'),
+    ],
+  };
+}
