@@ -18,7 +18,7 @@ import {asThreadStateSqlId} from '../../trace_processor/sql_utils/core_types';
 import {ThreadStateTab} from '../../frontend/thread_state_tab';
 import {
   BottomTabToSCSAdapter,
-  Plugin,
+  PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
 } from '../../public';
@@ -26,8 +26,11 @@ import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {ThreadStateTrack} from './thread_state_track';
 import {removeFalsyValues} from '../../base/array_utils';
+import {getThreadStateTable} from './table';
+import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
+import {addSqlTableTab} from '../../frontend/sql_table_tab_command';
 
-class ThreadState implements Plugin {
+class ThreadState implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const {engine} = ctx;
 
@@ -102,6 +105,17 @@ class ThreadState implements Plugin {
         },
       }),
     );
+
+    sqlTableRegistry['thread_state'] = getThreadStateTable();
+    ctx.registerCommand({
+      id: 'perfetto.ShowTable.thread_state',
+      name: 'Open table: thread_state',
+      callback: () => {
+        addSqlTableTab({
+          table: getThreadStateTable(),
+        });
+      },
+    });
   }
 }
 
