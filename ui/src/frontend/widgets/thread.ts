@@ -19,6 +19,7 @@ import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
 import {addEphemeralTab} from '../../common/addEphemeralTab';
 import {
+  getThreadInfo,
   getThreadName,
   ThreadInfo,
 } from '../../trace_processor/sql_utils/thread';
@@ -26,14 +27,21 @@ import {Anchor} from '../../widgets/anchor';
 import {MenuItem, PopupMenu2} from '../../widgets/menu';
 import {getEngine} from '../get_engine';
 import {ThreadDetailsTab} from '../thread_details_tab';
+import {
+  createSqlIdRefRenderer,
+  sqlIdRegistry,
+} from './sql/details/sql_ref_renderer_registry';
+import {asUtid} from '../../trace_processor/sql_utils/core_types';
+import {Utid} from '../../trace_processor/sql_utils/core_types';
 
-export function renderThreadRef(info: ThreadInfo): m.Children {
+export function threadRefMenuItems(info: {
+  utid: Utid;
+  name?: string;
+  tid?: number;
+}): m.Children {
+  // We capture a copy to be able to pass it across async boundary to `onclick`.
   const name = info.name;
-  return m(
-    PopupMenu2,
-    {
-      trigger: m(Anchor, getThreadName(info)),
-    },
+  return [
     exists(name) &&
       m(MenuItem, {
         icon: Icons.Copy,
@@ -64,5 +72,26 @@ export function renderThreadRef(info: ThreadInfo): m.Children {
           }),
         ),
     }),
+  ];
+}
+
+export function renderThreadRef(info: {
+  utid: Utid;
+  name?: string;
+  tid?: number;
+}): m.Children {
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getThreadName(info)),
+    },
+    threadRefMenuItems(info),
   );
 }
+
+sqlIdRegistry['thread'] = createSqlIdRefRenderer<ThreadInfo>(
+  async (engine, id) => await getThreadInfo(engine, asUtid(Number(id))),
+  (data: ThreadInfo) => ({
+    value: renderThreadRef(data),
+  }),
+);

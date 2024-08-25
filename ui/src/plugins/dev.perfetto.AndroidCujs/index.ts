@@ -14,7 +14,11 @@
 
 import {SimpleSliceTrackConfig} from '../../frontend/simple_slice_track';
 import {addDebugSliceTrack} from '../../public';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  PerfettoPlugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {addAndPinSliceTrack} from './trackUtils';
 
 /**
@@ -106,7 +110,7 @@ const JANK_CUJ_QUERY = `
                   )
             )
           THEN ' ✅ '
-        ELSE NULL
+        ELSE ' ❓ '
         END || cuj.name AS name,
       total_frames,
       missed_app_frames,
@@ -158,7 +162,7 @@ const LATENCY_CUJ_QUERY = `
                 cuj_state_marker.ts >= cuj.ts
                 AND cuj_state_marker.ts + cuj_state_marker.dur <= cuj.ts + cuj.dur
                 AND marker_track.name = cuj.name AND (
-                    cuj_state_marker.name GLOB 'cancel' 
+                    cuj_state_marker.name GLOB 'cancel'
                     OR cuj_state_marker.name GLOB 'timeout')
             )
           THEN ' ❌ '
@@ -213,7 +217,7 @@ const BLOCKING_CALLS_DURING_CUJS_COLUMNS = [
   'table_name',
 ];
 
-class AndroidCujs implements Plugin {
+class AndroidCujs implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     ctx.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinJankCUJs',

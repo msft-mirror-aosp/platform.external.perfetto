@@ -15,7 +15,6 @@
 import {v4 as uuidv4} from 'uuid';
 
 import {uuidv4Sql} from '../../base/uuid';
-import {DeferredAction} from '../../common/actions';
 import {generateSqlWithInternalLayout} from '../../common/internal_layout_utils';
 import {featureFlags} from '../../core/feature_flags';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
@@ -24,7 +23,7 @@ import {
   CHROME_EVENT_LATENCY_TRACK_KIND,
   CHROME_TOPLEVEL_SCROLLS_KIND,
   NUM,
-  Plugin,
+  PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
   CHROME_SCROLL_JANK_TRACK_KIND,
@@ -33,7 +32,7 @@ import {
 import {Engine} from '../../trace_processor/engine';
 
 import {ChromeTasksScrollJankTrack} from './chrome_tasks_scroll_jank_track';
-import {DecideTracksResult, ENABLE_CHROME_SCROLL_JANK_PLUGIN} from './common';
+import {ENABLE_CHROME_SCROLL_JANK_PLUGIN} from './common';
 import {EventLatencySliceDetailsPanel} from './event_latency_details_panel';
 import {EventLatencyTrack, JANKY_LATENCY_NAME} from './event_latency_track';
 import {ScrollDetailsPanel} from './scroll_details_panel';
@@ -49,12 +48,7 @@ const ENABLE_SCROLL_JANK_PLUGIN_V2 = featureFlags.register({
   defaultValue: false,
 });
 
-export type ScrollJankTrackGroup = {
-  tracks: DecideTracksResult;
-  addTrackGroup: DeferredAction;
-};
-
-class ChromeScrollJankPlugin implements Plugin {
+class ChromeScrollJankPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     if (ENABLE_CHROME_SCROLL_JANK_PLUGIN.get()) {
       await this.addChromeScrollJankTrack(ctx);

@@ -18,7 +18,9 @@ import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
 import {addEphemeralTab} from '../../common/addEphemeralTab';
+import {Upid} from '../../trace_processor/sql_utils/core_types';
 import {
+  getProcessInfo,
   getProcessName,
   ProcessInfo,
 } from '../../trace_processor/sql_utils/process';
@@ -26,14 +28,20 @@ import {Anchor} from '../../widgets/anchor';
 import {MenuItem, PopupMenu2} from '../../widgets/menu';
 import {getEngine} from '../get_engine';
 import {ProcessDetailsTab} from '../process_details_tab';
+import {
+  createSqlIdRefRenderer,
+  sqlIdRegistry,
+} from './sql/details/sql_ref_renderer_registry';
+import {asUpid} from '../../trace_processor/sql_utils/core_types';
 
-export function renderProcessRef(info: ProcessInfo): m.Children {
+export function processRefMenuItems(info: {
+  upid: Upid;
+  name?: string;
+  pid?: number;
+}): m.Children {
+  // We capture a copy to be able to pass it across async boundary to `onclick`.
   const name = info.name;
-  return m(
-    PopupMenu2,
-    {
-      trigger: m(Anchor, getProcessName(info)),
-    },
+  return [
     exists(name) &&
       m(MenuItem, {
         icon: Icons.Copy,
@@ -58,11 +66,28 @@ export function renderProcessRef(info: ProcessInfo): m.Children {
         addEphemeralTab(
           'processDetails',
           new ProcessDetailsTab({
-            engine: getEngine('processDetails'),
+            engine: getEngine('ProcessDetails'),
             upid: info.upid,
             pid: info.pid,
           }),
         ),
     }),
+  ];
+}
+
+export function renderProcessRef(info: ProcessInfo): m.Children {
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getProcessName(info)),
+    },
+    processRefMenuItems(info),
   );
 }
+
+sqlIdRegistry['process'] = createSqlIdRefRenderer<ProcessInfo>(
+  async (engine, id) => await getProcessInfo(engine, asUpid(Number(id))),
+  (data: ProcessInfo) => ({
+    value: renderProcessRef(data),
+  }),
+);
