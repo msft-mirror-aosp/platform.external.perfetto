@@ -18,7 +18,7 @@ import {Actions} from '../../common/actions';
 import {globals} from '../../frontend/globals';
 import {openInOldUIWithSizeCheck} from '../../frontend/legacy_trace_viewer';
 import {
-  Plugin,
+  PerfettoPlugin,
   PluginContext,
   PluginContextTrace,
   PluginDescriptor,
@@ -28,6 +28,11 @@ import {
   openFileWithLegacyTraceViewer,
 } from '../../frontend/legacy_trace_viewer';
 import {DisposableStack} from '../../base/disposable_stack';
+import {ADD_SQL_TABLE_TAB_COMMAND_ID} from '../../frontend/sql_table_tab_command';
+import {
+  addSqlTableTabImpl,
+  SqlTableTabConfig,
+} from '../../frontend/sql_table_tab';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -95,7 +100,7 @@ group by
 order by total_self_size desc
 limit 100;`;
 
-class CoreCommandsPlugin implements Plugin {
+class CoreCommandsPlugin implements PerfettoPlugin {
   private readonly disposable = new DisposableStack();
 
   onActivate(ctx: PluginContext) {
@@ -275,6 +280,22 @@ class CoreCommandsPlugin implements Plugin {
       name: 'Show current selection tab',
       callback: () => {
         ctx.tabs.showTab('current_selection');
+      },
+    });
+
+    ctx.registerCommand({
+      id: ADD_SQL_TABLE_TAB_COMMAND_ID,
+      name: 'Open SQL table viewer',
+      callback: (args: unknown) => {
+        if (args === undefined) {
+          // If we are being run from the command palette, args will be
+          // undefined, so there's not a lot we can do here...
+
+          // Perhaps in the future we could just open the table in a new tab and
+          // allow the user to browse the tables..?
+          return;
+        }
+        addSqlTableTabImpl(args as SqlTableTabConfig);
       },
     });
   }
