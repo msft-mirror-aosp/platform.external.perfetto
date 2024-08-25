@@ -13,13 +13,17 @@
 // limitations under the License.
 
 import {ASYNC_SLICE_TRACK_KIND} from '../../public';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  PerfettoPlugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {getTrackName} from '../../public/utils';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../../trace_processor/query_result';
 
 import {AsyncSliceTrack} from './async_slice_track';
 
-class AsyncSlicePlugin implements Plugin {
+class AsyncSlicePlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     await this.addGlobalAsyncTracks(ctx);
     await this.addProcessAsyncSliceTracks(ctx);
@@ -37,7 +41,7 @@ class AsyncSlicePlugin implements Plugin {
           count() as trackCount
         from track t
         join _slice_track_summary using (id)
-        where t.type in ('track', 'gpu_track', 'cpu_track')
+        where t.type in ('__intrinsic_track', 'gpu_track', 'cpu_track')
         group by parent_id, name
       )
       select

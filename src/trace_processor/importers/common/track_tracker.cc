@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "src/trace_processor/importers/common/args_tracker.h"
@@ -60,6 +61,86 @@ const char* GetNameForGroup(TrackTracker::Group group) {
   PERFETTO_FATAL("For GCC");
 }
 
+const char* GetTrackName(TrackTracker::GlobalTrackType type) {
+  if (type == TrackTracker::GlobalTrackType::kTrigger)
+    return "Trace Triggers";
+  if (type == TrackTracker::GlobalTrackType::kInterconnect)
+    return "Interconnect Events";
+  return "";
+}
+
+std::string GetTrackName(TrackTracker::CpuTrackType type, uint32_t cpu) {
+  if (type == TrackTracker::CpuTrackType::kIrqCpu)
+    return base::StackString<255>("Irq Cpu %u", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kSortIrqCpu)
+    return base::StackString<255>("SoftIrq Cpu %u", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kNapiGroCpu)
+    return base::StackString<255>("Napi Gro Cpu %u", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kMaxFreqCpu)
+    return base::StackString<255>("Cpu %u Max Freq Limit", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kMinFreqCpu)
+    return base::StackString<255>("Cpu %u Min Freq Limit", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kFuncgraphCpu)
+    return base::StackString<255>("swapper%u -funcgraph", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kMaliIrqCpu)
+    return base::StackString<255>("Mali Irq Cpu %u", cpu).c_str();
+  if (type == TrackTracker::CpuTrackType::kPkvmHypervisor)
+    return base::StackString<255>("pkVM Hypervisor CPU %u", cpu).c_str();
+  return "";
+}
+
+std::string GetTrackName(TrackTracker::CpuCounterTrackType type, uint32_t cpu) {
+  if (type == TrackTracker::CpuCounterTrackType::kFrequency)
+    return "cpufreq";
+  if (type == TrackTracker::CpuCounterTrackType::kFreqThrottle)
+    return "cpufreq_throttle";
+  if (type == TrackTracker::CpuCounterTrackType::kIdle)
+    return "cpuidle";
+  if (type == TrackTracker::CpuCounterTrackType::kUtilization)
+    return base::StackString<255>("Cpu %u Util", cpu).c_str();
+  if (type == TrackTracker::CpuCounterTrackType::kCapacity)
+    return base::StackString<255>("Cpu %u Cap", cpu).c_str();
+  if (type == TrackTracker::CpuCounterTrackType::kNrRunning)
+    return base::StackString<255>("Cpu %u Nr Running", cpu).c_str();
+  if (type == TrackTracker::CpuCounterTrackType::kMaxFreqLimit)
+    return base::StackString<255>("Cpu %u Max Freq Limit", cpu).c_str();
+  if (type == TrackTracker::CpuCounterTrackType::kMinFreqLimit)
+    return base::StackString<255>("Cpu %u Min Freq Limit", cpu).c_str();
+  if (type == TrackTracker::CpuCounterTrackType::kUserTime)
+    return "cpu.times.user_ns";
+  if (type == TrackTracker::CpuCounterTrackType::kNiceUserTime)
+    return "cpu.times.user_nice_ns";
+  if (type == TrackTracker::CpuCounterTrackType::kSystemModeTime)
+    return "cpu.times.system_mode_ns";
+  if (type == TrackTracker::CpuCounterTrackType::kIdleTime)
+    return "cpu.times.idle_ns";
+  if (type == TrackTracker::CpuCounterTrackType::kIoWaitTime)
+    return "cpu.times.io_wait_ns";
+  if (type == TrackTracker::CpuCounterTrackType::kIrqTime)
+    return "cpu.times.irq_ns";
+  if (type == TrackTracker::CpuCounterTrackType::kSoftIrqTime)
+    return "cpu.times.softirq_ns";
+  return "";
+}
+
+const char* GetTrackName(TrackTracker::GpuCounterTrackType type) {
+  if (type == TrackTracker::GpuCounterTrackType::kFrequency)
+    return "gpufreq";
+  return "";
+}
+
+const char* GetTrackName(TrackTracker::IrqCounterTrackType type) {
+  if (type == TrackTracker::IrqCounterTrackType::kCount)
+    return "num_irq";
+  return "";
+}
+
+const char* GetTrackName(TrackTracker::SoftIrqCounterTrackType type) {
+  if (type == TrackTracker::SoftIrqCounterTrackType::kCount)
+    return "num_softirq";
+  return "";
+}
+
 }  // namespace
 
 TrackTracker::TrackTracker(TraceProcessorContext* context)
@@ -99,14 +180,9 @@ TrackId TrackTracker::InternProcessTrack(UniquePid upid) {
   return id;
 }
 
-TrackId TrackTracker::InternFuchsiaAsyncTrack(StringId name,
-                                              uint32_t upid,
-                                              int64_t correlation_id) {
-  return InternLegacyChromeAsyncTrack(name, upid, correlation_id, false,
-                                      StringId());
-}
-
-TrackId TrackTracker::InternCpuTrack(StringId name, uint32_t cpu) {
+TrackId TrackTracker::InternCpuTrack(CpuTrackType type, uint32_t cpu) {
+  std::string track_name = GetTrackName(type, cpu);
+  StringId name = context_->storage->InternString(track_name.c_str());
   auto it = cpu_tracks_.find(std::make_pair(name, cpu));
   if (it != cpu_tracks_.end()) {
     return it->second;
@@ -115,10 +191,39 @@ TrackId TrackTracker::InternCpuTrack(StringId name, uint32_t cpu) {
   tables::CpuTrackTable::Row row(name);
   row.ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
   row.machine_id = context_->machine_id();
+  row.classification = context_->storage->InternString(
+      std::string("cpu:" + GetClassification(type)).c_str());
   auto id = context_->storage->mutable_cpu_track_table()->Insert(row).id;
   cpu_tracks_[std::make_pair(name, cpu)] = id;
+  return id;
+}
+
+TrackId TrackTracker::InternGlobalTrack(GlobalTrackType type) {
+  auto it = unique_tracks_.find(type);
+  if (it != unique_tracks_.end())
+    return it->second;
+
+  tables::TrackTable::Row row;
+  row.name = context_->storage->InternString(GetTrackName(type));
+  row.machine_id = context_->machine_id();
+  row.classification = context_->storage->InternString(
+      std::string("global:" + GetClassification(type)).c_str());
+  TrackId id = context_->storage->mutable_track_table()->Insert(row).id;
+  unique_tracks_[type] = id;
+
+  if (type == GlobalTrackType::kChromeLegacyGlobalInstant) {
+    context_->args_tracker->AddArgsTo(id).AddArg(
+        source_key_, Variadic::String(chrome_source_));
+  }
 
   return id;
+}
+
+TrackId TrackTracker::InternFuchsiaAsyncTrack(StringId name,
+                                              uint32_t upid,
+                                              int64_t correlation_id) {
+  return InternLegacyChromeAsyncTrack(name, upid, correlation_id, false,
+                                      StringId());
 }
 
 TrackId TrackTracker::InternGpuTrack(const tables::GpuTrackTable::Row& row) {
@@ -240,42 +345,6 @@ TrackId TrackTracker::InternLegacyChromeProcessInstantTrack(UniquePid upid) {
   return id;
 }
 
-TrackId TrackTracker::GetOrCreateLegacyChromeGlobalInstantTrack() {
-  if (!chrome_global_instant_track_id_) {
-    tables::TrackTable::Row row;
-    row.machine_id = context_->machine_id();
-    chrome_global_instant_track_id_ =
-        context_->storage->mutable_track_table()->Insert(row).id;
-
-    context_->args_tracker->AddArgsTo(*chrome_global_instant_track_id_)
-        .AddArg(source_key_, Variadic::String(chrome_source_));
-  }
-  return *chrome_global_instant_track_id_;
-}
-
-TrackId TrackTracker::GetOrCreateTriggerTrack() {
-  if (trigger_track_id_) {
-    return *trigger_track_id_;
-  }
-  tables::TrackTable::Row row;
-  row.name = context_->storage->InternString("Trace Triggers");
-  row.machine_id = context_->machine_id();
-  trigger_track_id_ = context_->storage->mutable_track_table()->Insert(row).id;
-  return *trigger_track_id_;
-}
-
-TrackId TrackTracker::GetOrCreateInterconnectTrack() {
-  if (interconnect_events_track_id_) {
-    return *interconnect_events_track_id_;
-  }
-  tables::TrackTable::Row row;
-  row.name = context_->storage->InternString("Interconnect Events");
-  row.machine_id = context_->machine_id();
-  interconnect_events_track_id_ =
-      context_->storage->mutable_track_table()->Insert(row).id;
-  return *interconnect_events_track_id_;
-}
-
 TrackId TrackTracker::InternGlobalCounterTrack(TrackTracker::Group group,
                                                StringId name,
                                                SetArgsCallback callback,
@@ -301,20 +370,42 @@ TrackId TrackTracker::InternGlobalCounterTrack(TrackTracker::Group group,
   return track;
 }
 
-TrackId TrackTracker::InternCpuCounterTrack(StringId name, uint32_t cpu) {
-  auto it = cpu_counter_tracks_.find(std::make_pair(name, cpu));
+TrackId TrackTracker::InternCpuCounterTrack(CpuCounterTrackTuple tuple) {
+  StringPool::Id name = tuple.name.is_null()
+                            ? context_->storage->InternString(
+                                  GetTrackName(tuple.type, tuple.cpu).c_str())
+                            : tuple.name;
+  auto it = cpu_counter_tracks_.find(tuple);
   if (it != cpu_counter_tracks_.end()) {
     return it->second;
   }
 
   tables::CpuCounterTrackTable::Row row(name);
-  row.ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
+  row.ucpu = context_->cpu_tracker->GetOrCreateCpu(tuple.cpu);
   row.machine_id = context_->machine_id();
+  row.classification = context_->storage->InternString(
+      std::string("cpu_counter:" + GetClassification(tuple.type)).c_str());
 
   TrackId track =
       context_->storage->mutable_cpu_counter_track_table()->Insert(row).id;
-  cpu_counter_tracks_[std::make_pair(name, cpu)] = track;
+  cpu_counter_tracks_[tuple] = track;
   return track;
+}
+
+TrackId TrackTracker::InternCpuCounterTrack(CpuCounterTrackType track_type,
+                                            uint32_t cpu) {
+  CpuCounterTrackTuple tuple{track_type, cpu};
+  return InternCpuCounterTrack(tuple);
+}
+
+TrackId TrackTracker::InternCpuIdleStateTrack(uint32_t cpu, StringId state) {
+  std::string name =
+      "cpuidle." + context_->storage->GetString(state).ToStdString();
+
+  CpuCounterTrackTuple tuple{TrackTracker::CpuCounterTrackType::kIdleState, cpu,
+                             context_->storage->InternString(name.c_str()),
+                             state.raw_id()};
+  return InternCpuCounterTrack(tuple);
 }
 
 TrackId TrackTracker::InternThreadCounterTrack(StringId name, UniqueTid utid) {
@@ -356,46 +447,63 @@ TrackId TrackTracker::InternProcessCounterTrack(StringId raw_name,
   return track;
 }
 
-TrackId TrackTracker::InternIrqCounterTrack(StringId name, int32_t irq) {
-  auto it = irq_counter_tracks_.find(std::make_pair(name, irq));
+TrackId TrackTracker::InternIrqCounterTrack(IrqCounterTrackType type,
+                                            int32_t irq) {
+  auto it = irq_counter_tracks_.find(std::make_pair(type, irq));
   if (it != irq_counter_tracks_.end()) {
     return it->second;
   }
 
-  tables::IrqCounterTrackTable::Row row(name);
+  tables::IrqCounterTrackTable::Row row(
+      context_->storage->InternString(GetTrackName(type)));
   row.irq = irq;
   row.machine_id = context_->machine_id();
+  row.classification = context_->storage->InternString(
+      std::string("irq_counter:" + GetClassification(type)).c_str());
 
   TrackId track =
       context_->storage->mutable_irq_counter_track_table()->Insert(row).id;
-  irq_counter_tracks_[std::make_pair(name, irq)] = track;
+  irq_counter_tracks_[std::make_pair(type, irq)] = track;
   return track;
 }
 
-TrackId TrackTracker::InternSoftirqCounterTrack(StringId name,
+TrackId TrackTracker::InternSoftirqCounterTrack(SoftIrqCounterTrackType type,
                                                 int32_t softirq) {
-  auto it = softirq_counter_tracks_.find(std::make_pair(name, softirq));
+  auto it = softirq_counter_tracks_.find(std::make_pair(type, softirq));
   if (it != softirq_counter_tracks_.end()) {
     return it->second;
   }
 
-  tables::SoftirqCounterTrackTable::Row row(name);
+  tables::SoftirqCounterTrackTable::Row row(
+      context_->storage->InternString(GetTrackName(type)));
   row.softirq = softirq;
   row.machine_id = context_->machine_id();
+  row.classification = context_->storage->InternString(
+      std::string("softirq_counter:" + GetClassification(type)).c_str());
 
   TrackId track =
       context_->storage->mutable_softirq_counter_track_table()->Insert(row).id;
-  softirq_counter_tracks_[std::make_pair(name, softirq)] = track;
+  softirq_counter_tracks_[std::make_pair(type, softirq)] = track;
   return track;
 }
 
-TrackId TrackTracker::InternGpuCounterTrack(StringId name, uint32_t gpu_id) {
-  auto it = gpu_counter_tracks_.find(std::make_pair(name, gpu_id));
+TrackId TrackTracker::InternGpuCounterTrack(GpuCounterTrackType type,
+                                            uint32_t gpu_id) {
+  StringId name = context_->storage->InternString(GetTrackName(type));
+  auto it = gpu_counter_tracks_.find(std::make_pair(type, gpu_id));
   if (it != gpu_counter_tracks_.end()) {
     return it->second;
   }
-  TrackId track = CreateGpuCounterTrack(name, gpu_id);
-  gpu_counter_tracks_[std::make_pair(name, gpu_id)] = track;
+  tables::GpuCounterTrackTable::Row row;
+  row.name = name;
+  row.gpu_id = gpu_id;
+  row.machine_id = context_->machine_id();
+  row.classification = row.classification = context_->storage->InternString(
+      std::string("gpu_counter:" + GetClassification(type)).c_str());
+
+  TrackId track =
+      context_->storage->mutable_gpu_counter_track_table()->Insert(row).id;
+  gpu_counter_tracks_[std::make_pair(type, gpu_id)] = track;
   return track;
 }
 

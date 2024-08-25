@@ -90,10 +90,19 @@ function renderArgKey(engine: Engine, key: string, value?: Arg): m.Children {
             table: SqlTables.slice,
             filters: [
               {
-                type: 'arg_filter',
-                argSetIdColumn: 'arg_set_id',
-                argName: fullKey,
-                op: `= ${sqliteString(displayValue)}`,
+                op: (cols) => `${cols[0]} = ${sqliteString(displayValue)}`,
+                columns: [
+                  {
+                    column: 'display_value',
+                    source: {
+                      table: 'args',
+                      joinOn: {
+                        arg_set_id: 'arg_set_id',
+                        key: sqliteString(fullKey),
+                      },
+                    },
+                  },
+                ],
               },
             ],
           });
