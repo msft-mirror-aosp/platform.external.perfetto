@@ -22,7 +22,6 @@ import {Anchor} from '../../widgets/anchor';
 import {Icons} from '../../base/semantic_icons';
 import {globals} from '../globals';
 import {THREAD_STATE_TRACK_KIND} from '../../core/track_kinds';
-import {Actions} from '../../common/actions';
 import {scrollToTrackAndTs} from '../scroll_helper';
 import {ThreadState} from '../../trace_processor/sql_utils/thread_state';
 
@@ -33,6 +32,11 @@ interface ThreadStateRefAttrs {
   utid: Utid;
   // If not present, a placeholder name will be used.
   name?: string;
+
+  // Whether clicking on the reference should change the current tab
+  // to "current selection" tab in addition to updating the selection
+  // and changing the viewport. True by default.
+  readonly switchToCurrentSelectionTab?: boolean;
 }
 
 export class ThreadStateRef implements m.ClassComponent<ThreadStateRefAttrs> {
@@ -54,16 +58,23 @@ export class ThreadStateRef implements m.ClassComponent<ThreadStateRefAttrs> {
             }
           }
 
-          if (trackKey) {
-            globals.makeSelection(
-              Actions.selectThreadState({
-                id: vnode.attrs.id,
-                trackKey: trackKey.toString(),
-              }),
-            );
+          if (trackKey === undefined) return;
 
-            scrollToTrackAndTs(trackKey, vnode.attrs.ts, true);
-          }
+          globals.setLegacySelection(
+            {
+              kind: 'THREAD_STATE',
+              id: vnode.attrs.id,
+              trackKey,
+            },
+            {
+              clearSearch: true,
+              pendingScrollId: undefined,
+              switchToCurrentSelectionTab:
+                vnode.attrs.switchToCurrentSelectionTab ?? true,
+            },
+          );
+
+          scrollToTrackAndTs(trackKey, vnode.attrs.ts, true);
         },
       },
       vnode.attrs.name ?? `Thread State ${vnode.attrs.id}`,
