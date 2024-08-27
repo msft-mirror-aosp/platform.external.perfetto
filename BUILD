@@ -1634,6 +1634,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/ftrace/iostat_tracker.h",
         "src/trace_processor/importers/ftrace/mali_gpu_event_tracker.cc",
         "src/trace_processor/importers/ftrace/mali_gpu_event_tracker.h",
+        "src/trace_processor/importers/ftrace/pixel_mm_kswapd_event_tracker.cc",
+        "src/trace_processor/importers/ftrace/pixel_mm_kswapd_event_tracker.h",
         "src/trace_processor/importers/ftrace/pkvm_hyp_cpu_tracker.cc",
         "src/trace_processor/importers/ftrace/pkvm_hyp_cpu_tracker.h",
         "src/trace_processor/importers/ftrace/rss_stat_tracker.cc",
@@ -2751,6 +2753,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/frequency.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/idle.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/idle_stats.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/idle_time_in_state.sql",
     ],
 )
 
@@ -2894,6 +2897,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/wattson/cpu_split.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/device.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/grouped.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/idle_attribution.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/ungrouped.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/utils.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/device_infos.sql",
@@ -5239,6 +5243,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/oom.proto",
         "protos/perfetto/trace/ftrace/panel.proto",
         "protos/perfetto/trace/ftrace/perf_trace_counters.proto",
+        "protos/perfetto/trace/ftrace/pixel_mm.proto",
         "protos/perfetto/trace/ftrace/power.proto",
         "protos/perfetto/trace/ftrace/printk.proto",
         "protos/perfetto/trace/ftrace/raw_syscalls.proto",

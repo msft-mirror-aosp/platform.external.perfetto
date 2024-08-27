@@ -13,15 +13,14 @@
 // limitations under the License.
 
 import {
-  Plugin,
+  PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
-  TrackRef,
 } from '../../public';
 
 import * as cameraConstants from './googleCameraConstants';
 
-class GoogleCamera implements Plugin {
+class GoogleCamera implements PerfettoPlugin {
   private ctx!: PluginContextTrace;
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -58,15 +57,11 @@ class GoogleCamera implements Plugin {
     this.pinTracks(cameraConstants.STARTUP_RELATED_TRACKS);
   }
 
-  private pinTracks(trackNames: string[]) {
-    const tracks: TrackRef[] = this.ctx.timeline.tracks;
-    trackNames.forEach((trackName) => {
-      const desiredTracks = tracks.filter((track) => {
-        return track.title.match(trackName);
-      });
-      desiredTracks.forEach((desiredTrack) => {
-        this.ctx.timeline.pinTrack(desiredTrack.key!);
-      });
+  private pinTracks(trackNames: ReadonlyArray<string>) {
+    this.ctx.timeline.workspace.flatTracks.forEach((track) => {
+      if (trackNames.includes(track.displayName)) {
+        track.pin();
+      }
     });
   }
 }

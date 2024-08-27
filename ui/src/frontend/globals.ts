@@ -35,7 +35,7 @@ import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
 import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
-import {Analytics, initAnalytics} from './analytics';
+import type {Analytics} from './analytics';
 import {Timeline} from './timeline';
 import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
@@ -53,6 +53,7 @@ import {AppContext} from './app_context';
 import {TraceContext} from './trace_context';
 import {Registry} from '../base/registry';
 import {SidebarMenuItem} from '../public';
+import {Workspace} from './workspace';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -196,6 +197,8 @@ interface SqlPackage {
   readonly modules: SqlModule[];
 }
 
+const DEFAULT_WORKSPACE_NAME = 'Default Workspace';
+
 /**
  * Global accessors for state/dispatch in the frontend.
  */
@@ -233,15 +236,17 @@ class Globals implements AppContext {
   private _hideSidebar?: boolean = undefined;
   private _cmdManager = new CommandManager();
   private _tabManager = new TabManager();
-  private _trackManager = new TrackManager(this._store);
+  private _trackManager = new TrackManager();
   private _selectionManager = new SelectionManager(this._store);
   private _hasFtrace: boolean = false;
   private _searchOverviewTrack?: SearchOverviewTrack;
+  readonly workspaces: Workspace[] = [];
+  private _currentWorkspace: Workspace;
 
   omnibox = new OmniboxManager();
   areaFlamegraphCache = new LegacyFlamegraphCache('area');
 
-  scrollToTrackKey?: string | number;
+  scrollToTrackUri?: string;
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
@@ -251,6 +256,21 @@ class Globals implements AppContext {
   traceContext = defaultTraceContext;
 
   readonly sidebarMenuItems = new Registry<SidebarMenuItem>((m) => m.commandId);
+
+  get workspace(): Workspace {
+    return this._currentWorkspace;
+  }
+
+  resetWorkspaces(): void {
+    this.workspaces.length = 0;
+    const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
+    this.workspaces.push(defaultWorkspace);
+    this._currentWorkspace = defaultWorkspace;
+  }
+
+  switchWorkspace(workspace: Workspace): void {
+    this._currentWorkspace = workspace;
+  }
 
   // This is the app's equivalent of a plugin's onTraceLoad() function.
   // TODO(stevegolton): Eventually initialization that should be done on trace
@@ -294,7 +314,7 @@ class Globals implements AppContext {
     eventIds: new Float64Array(0),
     tses: new BigInt64Array(0),
     utids: new Float64Array(0),
-    trackKeys: [],
+    trackUris: [],
     sources: [],
     totalResults: 0,
   };
@@ -304,9 +324,16 @@ class Globals implements AppContext {
   constructor() {
     const {start, end} = defaultTraceContext;
     this._timeline = new Timeline(this._store, new TimeSpan(start, end));
+
+    const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
+    this.workspaces.push(defaultWorkspace);
+    this._currentWorkspace = defaultWorkspace;
   }
 
-  initialize(dispatchMultiple: DispatchMultiple) {
+  initialize(
+    dispatchMultiple: DispatchMultiple,
+    initAnalytics: () => Analytics,
+  ) {
     this._dispatchMultiple = dispatchMultiple;
 
     setPerfHooks(
@@ -321,6 +348,12 @@ class Globals implements AppContext {
       /* eslint-disable @typescript-eslint/strict-boolean-expressions */
       self.location && self.location.search.indexOf('testing=1') >= 0;
     /* eslint-enable */
+
+    // TODO(stevegolton): This is a mess. We should just inject this object in,
+    // instead of passing in a function. The only reason this is done like this
+    // is because the current implementation of initAnalytics depends on the
+    // state of globals.testing, so this needs to be set before we run the
+    // function.
     this._logging = initAnalytics();
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
@@ -587,11 +620,11 @@ class Globals implements AppContext {
   }
 
   selectSingleEvent(
-    trackKey: string,
+    trackUri: string,
     eventId: number,
     args: Partial<LegacySelectionArgs> = {},
   ): void {
-    this._selectionManager.setEvent(trackKey, eventId);
+    this._selectionManager.setEvent(trackUri, eventId);
     this.handleSelectionArgs(args);
   }
 
@@ -640,7 +673,7 @@ class Globals implements AppContext {
       eventIds: new Float64Array(0),
       tses: new BigInt64Array(0),
       utids: new Float64Array(0),
-      trackKeys: [],
+      trackUris: [],
       sources: [],
       totalResults: 0,
     };
@@ -741,17 +774,15 @@ class Globals implements AppContext {
         }
       }
     } else if (sel.kind === 'single') {
-      const uri = globals.state.tracks[sel.trackKey]?.uri;
-      if (uri) {
-        const bounds = await globals.trackManager
-          .resolveTrackInfo(uri)
-          ?.getEventBounds?.(sel.eventId);
-        if (bounds) {
-          return {
-            start: bounds.ts,
-            end: Time.add(bounds.ts, bounds.dur),
-          };
-        }
+      const uri = sel.trackUri;
+      const bounds = await globals.trackManager
+        .resolveTrackInfo(uri)
+        ?.getEventBounds?.(sel.eventId);
+      if (bounds) {
+        return {
+          start: bounds.ts,
+          end: Time.add(bounds.ts, bounds.dur),
+        };
       }
       return undefined;
     }

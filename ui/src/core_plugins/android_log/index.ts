@@ -15,12 +15,15 @@
 import m from 'mithril';
 
 import {LogFilteringCriteria, LogPanel} from './logs_panel';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  PerfettoPlugin,
+  ANDROID_LOGS_TRACK_KIND,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {NUM} from '../../trace_processor/query_result';
 import {AndroidLogTrack} from './logs_track';
 import {exists} from '../../base/utils';
-
-export const ANDROID_LOGS_TRACK_KIND = 'AndroidLogTrack';
 
 const VERSION = 1;
 
@@ -40,7 +43,7 @@ interface AndroidLogPluginState {
   filter: LogFilteringCriteria;
 }
 
-class AndroidLog implements Plugin {
+class AndroidLog implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const store = ctx.mountStore<AndroidLogPluginState>((init) => {
       return exists(init) && (init as {version: unknown}).version === VERSION

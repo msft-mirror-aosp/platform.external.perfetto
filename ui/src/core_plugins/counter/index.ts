@@ -17,10 +17,9 @@ import {
   STR_NULL,
   LONG_NULL,
   NUM,
-  Plugin,
+  PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
-  PrimaryTrackSortKey,
   STR,
   LONG,
   Engine,
@@ -138,7 +137,7 @@ async function getCounterEventBounds(
   return {ts: leftTs, dur: duration};
 }
 
-class CounterPlugin implements Plugin {
+class CounterPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     await this.addCounterTracks(ctx);
     await this.addGpuFrequencyTracks(ctx);
@@ -186,7 +185,7 @@ class CounterPlugin implements Plugin {
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
+            uri: trackCtx.trackUri,
             trackId,
             options: {
               ...getDefaultCounterOptions(displayName),
@@ -194,7 +193,6 @@ class CounterPlugin implements Plugin {
             },
           });
         },
-        sortKey: PrimaryTrackSortKey.COUNTER_TRACK,
         detailsPanel: new CounterDetailsPanel(ctx.engine, trackId, displayName),
         getEventBounds: async (id) => {
           return await getCounterEventBounds(ctx.engine, trackId, id);
@@ -257,7 +255,7 @@ class CounterPlugin implements Plugin {
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
+            uri: trackCtx.trackUri,
             trackId: trackId,
             options: getDefaultCounterOptions(name),
           });
@@ -326,7 +324,7 @@ class CounterPlugin implements Plugin {
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
+            uri: trackCtx.trackUri,
             trackId: trackId,
             options: getDefaultCounterOptions(name),
           });
@@ -385,7 +383,7 @@ class CounterPlugin implements Plugin {
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
+            uri: trackCtx.trackUri,
             trackId: trackId,
             options: getDefaultCounterOptions(name),
           });
@@ -427,7 +425,7 @@ class CounterPlugin implements Plugin {
           trackFactory: (trackCtx) => {
             return new TraceProcessorCounterTrack({
               engine: ctx.engine,
-              trackKey: trackCtx.trackKey,
+              uri: trackCtx.trackUri,
               trackId: trackId,
               options: getDefaultCounterOptions(name),
             });

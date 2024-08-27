@@ -25,7 +25,11 @@ import {
   LegacyFlamegraphDetailsPanel,
   profileType,
 } from '../../frontend/legacy_flamegraph_panel';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  PerfettoPlugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {
   LegacySelection,
@@ -51,7 +55,7 @@ export interface Data extends TrackData {
   tsStarts: BigInt64Array;
 }
 
-class PerfSamplesProfilePlugin implements Plugin {
+class PerfSamplesProfilePlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const pResult = await ctx.engine.query(`
       select distinct upid
@@ -68,11 +72,11 @@ class PerfSamplesProfilePlugin implements Plugin {
           kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
           upid,
         },
-        trackFactory: ({trackKey}) =>
+        trackFactory: ({trackUri}) =>
           new ProcessPerfSamplesProfileTrack(
             {
               engine: ctx.engine,
-              trackKey,
+              uri: trackUri,
             },
             upid,
           ),
@@ -111,11 +115,11 @@ class PerfSamplesProfilePlugin implements Plugin {
           utid,
           upid: upid ?? undefined,
         },
-        trackFactory: ({trackKey}) =>
+        trackFactory: ({trackUri}) =>
           new ThreadPerfSamplesProfileTrack(
             {
               engine: ctx.engine,
-              trackKey,
+              uri: trackUri,
             },
             utid,
           ),
@@ -131,6 +135,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
     () => this.sel?.leftTs,
     () => this.sel?.rightTs,
     () => this.sel?.upid,
+    () => this.sel?.utid,
     () => this.sel?.type,
   ]);
   private flamegraphAttrs?: QueryFlamegraphAttrs;
@@ -143,7 +148,11 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
       this.sel = undefined;
       return undefined;
     }
-    if (!USE_NEW_FLAMEGRAPH_IMPL.get() && sel.upid !== undefined) {
+    if (
+      !USE_NEW_FLAMEGRAPH_IMPL.get() &&
+      sel.utid === undefined &&
+      sel.upid !== undefined
+    ) {
       this.sel = undefined;
       return m(LegacyFlamegraphDetailsPanel, {
         cache: this.cache,
@@ -163,7 +172,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
         engine: this.engine,
         metrics: [
           ...metricsFromTableOrSubquery(
-            upid === undefined
+            utid !== undefined
               ? `
                 (
                   select
@@ -199,7 +208,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
                       join thread t using (utid)
                       where p.ts >= ${leftTs}
                         and p.ts <= ${rightTs}
-                        and t.upid = ${upid}
+                        and t.upid = ${assertExists(upid)}
                     ))
                   )
                 `,

@@ -14,7 +14,7 @@
 
 import {
   COUNTER_TRACK_KIND,
-  Plugin,
+  PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
 } from '../../public';
@@ -23,7 +23,7 @@ import {NUM, NUM_NULL, STR, STR_NULL} from '../../trace_processor/query_result';
 import {TraceProcessorCounterTrack} from '../counter/trace_processor_counter_track';
 import {THREAD_SLICE_TRACK_KIND} from '../../public';
 
-class AnnotationPlugin implements Plugin {
+class AnnotationPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     await this.addAnnotationTracks(ctx);
     await this.addAnnotationCounterTracks(ctx);
@@ -62,11 +62,11 @@ class AnnotationPlugin implements Plugin {
           ...(groupName && {groupName}),
         },
         chips: ['metric'],
-        trackFactory: ({trackKey}) => {
+        trackFactory: ({trackUri}) => {
           return new ThreadSliceTrack(
             {
               engine: ctx.engine,
-              trackKey,
+              uri: trackUri,
             },
             id,
             0,
@@ -111,7 +111,7 @@ class AnnotationPlugin implements Plugin {
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
+            uri: trackCtx.trackUri,
             trackId,
             rootTable: 'annotation_counter',
           });

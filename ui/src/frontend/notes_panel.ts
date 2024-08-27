@@ -29,13 +29,13 @@ import {globals} from './globals';
 import {getMaxMajorTicks, generateTicks, TickType} from './gridline_helper';
 import {Size} from '../base/geom';
 import {Panel} from './panel_container';
-import {isTraceLoaded} from './sidebar';
 import {Timestamp} from './widgets/timestamp';
 import {uuidv4} from '../base/uuid';
 import {assertUnreachable} from '../base/logging';
 import {DetailsPanel} from '../public';
 import {PxSpan, TimeScale} from './time_scale';
 import {canvasClip} from '../common/canvas_utils';
+import {isTraceLoaded} from './trace_attrs';
 
 const FLAG_WIDTH = 16;
 const AREA_TRIANGLE_WIDTH = 10;
@@ -65,9 +65,7 @@ export class NotesPanel implements Panel {
   private hoveredX: null | number = null;
 
   render(): m.Children {
-    const allCollapsed = Object.values(globals.state.trackGroups).every(
-      (group) => group.collapsed,
-    );
+    const allCollapsed = globals.workspace.flatGroups.every((n) => n.collapsed);
 
     return m(
       '.notes-panel',
@@ -114,7 +112,10 @@ export class NotesPanel implements Panel {
           m(Button, {
             onclick: (e: Event) => {
               e.preventDefault();
-              globals.dispatch(Actions.clearAllPinnedTracks({}));
+              globals.workspace.pinnedTracks.forEach((t) =>
+                globals.workspace.unpinTrack(t),
+              );
+              raf.scheduleFullRedraw();
             },
             title: 'Clear all pinned tracks',
             icon: 'clear_all',
