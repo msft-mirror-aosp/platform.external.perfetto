@@ -27,10 +27,11 @@ import {
   LegacyFlamegraphDetailsPanel,
   FlamegraphSelectionParams,
 } from './legacy_flamegraph_panel';
-import {AreaSelection, ProfileType, TrackState} from '../common/state';
+import {AreaSelection, ProfileType} from '../common/state';
 import {assertExists} from '../base/logging';
 import {Monitor} from '../base/monitor';
 import {
+  CPU_PROFILE_TRACK_KIND,
   PERF_SAMPLES_PROFILE_TRACK_KIND,
   THREAD_SLICE_TRACK_KIND,
 } from '../core/track_kinds';
@@ -51,6 +52,7 @@ interface View {
 class AreaDetailsPanel implements m.ClassComponent {
   private readonly monitor = new Monitor([() => globals.state.selection]);
   private currentTab: string | undefined = undefined;
+  private cpuProfileFlamegraphAttrs?: QueryFlamegraphAttrs;
   private perfSampleFlamegraphAttrs?: QueryFlamegraphAttrs;
   private sliceFlamegraphAttrs?: QueryFlamegraphAttrs;
   private legacyFlamegraphSelection?: FlamegraphSelectionParams;
@@ -87,7 +89,11 @@ class AreaDetailsPanel implements m.ClassComponent {
     }
 
     const pivotTableState = globals.state.nonSerializableState.pivotTable;
-    if (pivotTableState.selectionArea !== undefined) {
+    const tree = pivotTableState.queryResult?.tree;
+    if (
+      pivotTableState.selectionArea != undefined &&
+      (tree === undefined || tree.children.size > 0 || tree?.rows.length > 0)
+    ) {
       views.push({
         key: 'pivot_table',
         name: 'Pivot Table',
@@ -163,6 +169,15 @@ class AreaDetailsPanel implements m.ClassComponent {
   }
 
   private addFlamegraphView(isChanged: boolean, views: View[]) {
+    this.cpuProfileFlamegraphAttrs =
+      this.computeCpuProfileFlamegraphAttrs(isChanged);
+    if (this.cpuProfileFlamegraphAttrs !== undefined) {
+      views.push({
+        key: 'cpu_profile_flamegraph_selection',
+        name: 'CPU Profile Sample Flamegraph',
+        content: m(QueryFlamegraph, this.cpuProfileFlamegraphAttrs),
+      });
+    }
     this.perfSampleFlamegraphAttrs =
       this.computePerfSampleFlamegraphAttrs(isChanged);
     if (this.perfSampleFlamegraphAttrs !== undefined) {
@@ -182,6 +197,67 @@ class AreaDetailsPanel implements m.ClassComponent {
     }
   }
 
+  private computeCpuProfileFlamegraphAttrs(isChanged: boolean) {
+    const currentSelection = globals.state.selection;
+    if (currentSelection.kind !== 'area') {
+      return undefined;
+    }
+    if (!isChanged) {
+      // If the selection has not changed, just return a copy of the last seen
+      // attrs.
+      return this.cpuProfileFlamegraphAttrs;
+    }
+    const utids = [];
+    for (const trackUri of currentSelection.trackUris) {
+      const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
+      if (trackInfo?.tags?.kind === CPU_PROFILE_TRACK_KIND) {
+        utids.push(trackInfo.tags?.utid);
+      }
+    }
+    if (utids.length === 0) {
+      return undefined;
+    }
+    return {
+      engine: assertExists(this.getCurrentEngine()),
+      metrics: [
+        ...metricsFromTableOrSubquery(
+          `
+            (
+              select
+                id,
+                parent_id as parentId,
+                name,
+                mapping_name,
+                source_file,
+                cast(line_number AS text) as line_number,
+                self_count
+              from _callstacks_for_cpu_profile_stack_samples!((
+                select p.callsite_id
+                from cpu_profile_stack_sample p
+                where p.ts >= ${currentSelection.start}
+                  and p.ts <= ${currentSelection.end}
+                  and p.utid in (${utids.join(',')})
+              ))
+            )
+          `,
+          [
+            {
+              name: 'CPU Profile Samples',
+              unit: '',
+              columnName: 'self_count',
+            },
+          ],
+          'include perfetto module callstacks.stack_profile',
+          [{name: 'mapping_name', displayName: 'Mapping'}],
+          [
+            {name: 'source_file', displayName: 'Source File'},
+            {name: 'line_number', displayName: 'Line Number'},
+          ],
+        ),
+      ],
+    };
+  }
+
   private computePerfSampleFlamegraphAttrs(isChanged: boolean) {
     const currentSelection = globals.state.selection;
     if (currentSelection.kind !== 'area') {
@@ -193,38 +269,9 @@ class AreaDetailsPanel implements m.ClassComponent {
       return this.perfSampleFlamegraphAttrs;
     }
     const upids = getUpidsFromPerfSampleAreaSelection(currentSelection);
-    if (upids.length === 0) {
-      const utids = getUtidsFromPerfSampleAreaSelection(currentSelection);
-      if (utids.length === 0) {
-        return undefined;
-      }
-      return {
-        engine: assertExists(this.getCurrentEngine()),
-        metrics: [
-          ...metricsFromTableOrSubquery(
-            `
-              (
-                select id, parent_id as parentId, name, self_count
-                from _linux_perf_callstacks_for_samples!((
-                  select p.callsite_id
-                  from perf_sample p
-                  where p.ts >= ${currentSelection.start}
-                    and p.ts <= ${currentSelection.end}
-                    and p.utid in (${utids.join(',')})
-                ))
-              )
-            `,
-            [
-              {
-                name: 'Perf Samples',
-                unit: '',
-                columnName: 'self_count',
-              },
-            ],
-            'include perfetto module linux.perf.samples',
-          ),
-        ],
-      };
+    const utids = getUtidsFromPerfSampleAreaSelection(currentSelection);
+    if (utids.length === 0 && upids.length === 0) {
+      return undefined;
     }
     return {
       engine: assertExists(this.getCurrentEngine()),
@@ -239,7 +286,10 @@ class AreaDetailsPanel implements m.ClassComponent {
                 join thread t using (utid)
                 where p.ts >= ${currentSelection.start}
                   and p.ts <= ${currentSelection.end}
-                  and t.upid in (${upids.join(',')})
+                  and (
+                    p.utid in (${utids.join(',')})
+                    or t.upid in (${upids.join(',')})
+                  )
               ))
             )
           `,
@@ -267,9 +317,8 @@ class AreaDetailsPanel implements m.ClassComponent {
       return this.sliceFlamegraphAttrs;
     }
     const trackIds = [];
-    for (const trackId of currentSelection.tracks) {
-      const track: TrackState | undefined = globals.state.tracks[trackId];
-      const trackInfo = globals.trackManager.resolveTrackInfo(track?.uri);
+    for (const trackUri of currentSelection.trackUris) {
+      const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
       if (trackInfo?.tags?.kind !== THREAD_SLICE_TRACK_KIND) {
         continue;
       }
@@ -384,32 +433,28 @@ export class AggregationsTabs implements Disposable {
 
 function getUpidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
   const upids = [];
-  for (const trackId of currentSelection.tracks) {
-    const track: TrackState | undefined = globals.state.tracks[trackId];
-    const trackInfo = globals.trackManager.resolveTrackInfo(track?.uri);
-    if (trackInfo?.tags?.kind !== PERF_SAMPLES_PROFILE_TRACK_KIND) {
-      continue;
+  for (const trackUri of currentSelection.trackUris) {
+    const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
+    if (
+      trackInfo?.tags?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND &&
+      trackInfo.tags?.utid === undefined
+    ) {
+      upids.push(assertExists(trackInfo.tags?.upid));
     }
-    if (trackInfo.tags?.upid === undefined) {
-      continue;
-    }
-    upids.push(trackInfo.tags?.upid);
   }
   return upids;
 }
 
 function getUtidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
   const utids = [];
-  for (const trackId of currentSelection.tracks) {
-    const track: TrackState | undefined = globals.state.tracks[trackId];
-    const trackInfo = globals.trackManager.resolveTrackInfo(track?.uri);
-    if (trackInfo?.tags?.kind !== PERF_SAMPLES_PROFILE_TRACK_KIND) {
-      continue;
+  for (const trackUri of currentSelection.trackUris) {
+    const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
+    if (
+      trackInfo?.tags?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND &&
+      trackInfo.tags?.utid !== undefined
+    ) {
+      utids.push(trackInfo.tags?.utid);
     }
-    if (trackInfo.tags?.utid === undefined) {
-      continue;
-    }
-    utids.push(trackInfo.tags?.utid);
   }
   return utids;
 }

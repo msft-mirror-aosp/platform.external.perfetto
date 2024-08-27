@@ -72,11 +72,11 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
           kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
           upid,
         },
-        trackFactory: ({trackKey}) =>
+        trackFactory: ({trackUri}) =>
           new ProcessPerfSamplesProfileTrack(
             {
               engine: ctx.engine,
-              trackKey,
+              uri: trackUri,
             },
             upid,
           ),
@@ -115,11 +115,11 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
           utid,
           upid: upid ?? undefined,
         },
-        trackFactory: ({trackKey}) =>
+        trackFactory: ({trackUri}) =>
           new ThreadPerfSamplesProfileTrack(
             {
               engine: ctx.engine,
-              trackKey,
+              uri: trackUri,
             },
             utid,
           ),
@@ -135,6 +135,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
     () => this.sel?.leftTs,
     () => this.sel?.rightTs,
     () => this.sel?.upid,
+    () => this.sel?.utid,
     () => this.sel?.type,
   ]);
   private flamegraphAttrs?: QueryFlamegraphAttrs;
@@ -147,7 +148,11 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
       this.sel = undefined;
       return undefined;
     }
-    if (!USE_NEW_FLAMEGRAPH_IMPL.get() && sel.upid !== undefined) {
+    if (
+      !USE_NEW_FLAMEGRAPH_IMPL.get() &&
+      sel.utid === undefined &&
+      sel.upid !== undefined
+    ) {
       this.sel = undefined;
       return m(LegacyFlamegraphDetailsPanel, {
         cache: this.cache,
@@ -167,7 +172,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
         engine: this.engine,
         metrics: [
           ...metricsFromTableOrSubquery(
-            upid === undefined
+            utid !== undefined
               ? `
                 (
                   select
@@ -203,7 +208,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
                       join thread t using (utid)
                       where p.ts >= ${leftTs}
                         and p.ts <= ${rightTs}
-                        and t.upid = ${upid}
+                        and t.upid = ${assertExists(upid)}
                     ))
                   )
                 `,

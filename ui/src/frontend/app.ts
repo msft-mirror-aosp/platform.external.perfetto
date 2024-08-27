@@ -55,9 +55,7 @@ import {OmniboxMode, PromptOption} from './omnibox_manager';
 import {Utid} from '../trace_processor/sql_utils/core_types';
 import {THREAD_STATE_TRACK_KIND} from '../core/track_kinds';
 import {DisposableStack} from '../base/disposable_stack';
-import {addSqlTableTab} from './sql_table_tab';
 import {getThreadInfo} from '../trace_processor/sql_utils/thread';
-import {SqlTables} from './widgets/sql/table/well_known_sql_tables';
 
 function renderPermalink(): m.Children {
   const hash = globals.permalinkHash;
@@ -135,13 +133,9 @@ export class App implements m.ClassComponent {
   private getFirstUtidOfSelectionOrVisibleWindow(): number {
     const selection = globals.state.selection;
     if (selection.kind === 'area') {
-      const firstThreadStateTrack = selection.tracks.find((trackId) => {
-        return globals.state.tracks[trackId];
-      });
+      for (const trackUri of selection.trackUris) {
+        const trackDesc = globals.trackManager.resolveTrackInfo(trackUri);
 
-      if (firstThreadStateTrack) {
-        const trackInfo = globals.state.tracks[firstThreadStateTrack];
-        const trackDesc = globals.trackManager.resolveTrackInfo(trackInfo.uri);
         if (
           trackDesc?.tags?.kind === THREAD_STATE_TRACK_KIND &&
           trackDesc?.tags?.utid !== undefined
@@ -317,15 +311,6 @@ export class App implements m.ClassComponent {
       },
     },
     {
-      id: 'perfetto.ShowTable.slice',
-      name: 'Open table: slice',
-      callback: () => {
-        addSqlTableTab({
-          table: SqlTables.slice,
-        });
-      },
-    },
-    {
       id: 'perfetto.TogglePerformanceMetrics',
       name: 'Toggle performance metrics',
       callback: () => {
@@ -395,7 +380,6 @@ export class App implements m.ClassComponent {
       id: 'perfetto.Deselect',
       name: 'Deselect',
       callback: () => {
-        globals.timeline.deselectArea();
         globals.clearSelection();
         globals.dispatch(Actions.removeNote({id: '0'}));
       },
@@ -493,22 +477,22 @@ export class App implements m.ClassComponent {
             // If the current selection is an area which does not cover the
             // entire time range, preserve the list of selected tracks and
             // expand the time range.
-            tracksToSelect = selection.tracks;
+            tracksToSelect = selection.trackUris;
           } else {
             // If the entire time range is already covered, update the selection
             // to cover all tracks.
-            tracksToSelect = Object.keys(globals.state.tracks);
+            tracksToSelect = globals.workspace.flatTracks.map((t) => t.uri);
           }
         } else {
           // If the current selection is not an area, select all.
-          tracksToSelect = Object.keys(globals.state.tracks);
+          tracksToSelect = globals.workspace.flatTracks.map((t) => t.uri);
         }
         const {start, end} = globals.traceContext;
         globals.dispatch(
           Actions.selectArea({
             start,
             end,
-            tracks: tracksToSelect,
+            trackUris: tracksToSelect,
           }),
         );
       },
