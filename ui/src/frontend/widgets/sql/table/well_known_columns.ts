@@ -14,25 +14,10 @@
 
 import m from 'mithril';
 
-import {
-  TableColumn,
-  TableColumnSet,
-  TableManager,
-  SqlColumn,
-  sqlColumnId,
-  TableColumnParams,
-  SourceTable,
-} from './column';
-import {
-  getStandardContextMenuItems,
-  getStandardFilters,
-  renderStandardCell,
-} from './render_cell_utils';
-import {Timestamp} from '../../timestamp';
+import {Icons} from '../../../../base/semantic_icons';
+import {sqliteString} from '../../../../base/string_utils';
 import {Duration, Time} from '../../../../base/time';
-import {DurationWidget} from '../../duration';
-import {renderError} from '../../../../widgets/error';
-import {SliceRef} from '../../slice';
+import {SqlValue, STR} from '../../../../trace_processor/query_result';
 import {
   asSchedSqlId,
   asSliceSqlId,
@@ -40,32 +25,57 @@ import {
   asUpid,
   asUtid,
 } from '../../../../trace_processor/sql_utils/core_types';
-import {sqliteString} from '../../../../base/string_utils';
-import {ThreadStateRef} from '../../thread_state';
-import {MenuDivider, MenuItem, PopupMenu2} from '../../../../widgets/menu';
+import {getProcessName} from '../../../../trace_processor/sql_utils/process';
 import {getThreadName} from '../../../../trace_processor/sql_utils/thread';
 import {Anchor} from '../../../../widgets/anchor';
-import {threadRefMenuItems} from '../../thread';
-import {Icons} from '../../../../base/semantic_icons';
-import {SqlValue, STR} from '../../../../trace_processor/query_result';
-import {getProcessName} from '../../../../trace_processor/sql_utils/process';
+import {renderError} from '../../../../widgets/error';
+import {MenuDivider, MenuItem, PopupMenu2} from '../../../../widgets/menu';
+import {DurationWidget} from '../../duration';
 import {processRefMenuItems} from '../../process';
 import {SchedRef} from '../../sched';
+import {SliceRef} from '../../slice';
+import {threadRefMenuItems} from '../../thread';
+import {ThreadStateRef} from '../../thread_state';
+import {Timestamp} from '../../timestamp';
+
+import {
+  AggregationConfig,
+  SourceTable,
+  SqlColumn,
+  sqlColumnId,
+  TableColumn,
+  TableColumnParams,
+  TableColumnSet,
+  TableManager,
+} from './column';
+import {
+  getStandardContextMenuItems,
+  getStandardFilters,
+  renderStandardCell,
+} from './render_cell_utils';
 
 type ColumnParams = TableColumnParams & {
   title?: string;
 };
 
+type StandardColumnParams = ColumnParams & {
+  aggregationType?: 'nominal' | 'quantitative';
+};
+
 export class StandardColumn extends TableColumn {
   constructor(
     private column: SqlColumn,
-    private params?: ColumnParams,
+    private params?: StandardColumnParams,
   ) {
     super(params);
   }
 
   primaryColumn(): SqlColumn {
     return this.column;
+  }
+
+  aggregate(): AggregationConfig {
+    return {dataType: this.params?.aggregationType};
   }
 
   getTitle() {
@@ -146,18 +156,26 @@ function wrongTypeError(type: string, name: SqlColumn, value: SqlValue) {
   );
 }
 
+interface IdColumnParams {
+  // Whether the column is guaranteed not to have null values.
+  // (this will allow us to upgrage the joins on this column to more performant INNER JOINs).
+  notNull?: boolean;
+}
+
 export class SliceIdColumn extends TableColumn {
   private columns: {ts: SqlColumn; dur: SqlColumn; trackId: SqlColumn};
 
   constructor(
     private id: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const sliceTable: SourceTable = {
       table: 'slice',
       joinOn: {id: this.id},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -231,13 +249,15 @@ export class SchedIdColumn extends TableColumn {
 
   constructor(
     private id: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const schedTable: SourceTable = {
       table: 'sched',
       joinOn: {id: this.id},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -315,13 +335,15 @@ export class ThreadStateIdColumn extends TableColumn {
 
   constructor(
     private id: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const threadStateTable: SourceTable = {
       table: 'thread_state',
       joinOn: {id: this.id},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -399,13 +421,15 @@ export class ThreadColumn extends TableColumn {
 
   constructor(
     private utid: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const threadTable: SourceTable = {
       table: 'thread',
       joinOn: {id: this.utid},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -504,6 +528,10 @@ export class ThreadColumn extends TableColumn {
       ),
     );
   }
+
+  aggregation(): AggregationConfig {
+    return {dataType: 'nominal'};
+  }
 }
 
 export class ProcessColumn extends TableColumn {
@@ -511,13 +539,15 @@ export class ProcessColumn extends TableColumn {
 
   constructor(
     private upid: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const processTable: SourceTable = {
       table: 'process',
       joinOn: {id: this.upid},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -612,6 +642,10 @@ export class ProcessColumn extends TableColumn {
         ),
       ),
     );
+  }
+
+  aggregation(): AggregationConfig {
+    return {dataType: 'nominal'};
   }
 }
 
