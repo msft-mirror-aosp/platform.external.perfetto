@@ -36,13 +36,10 @@ export class WattsonPackageAggregationController extends AggregationController {
     if (packageInfo.firstRow({isValid: NUM}).isValid === 0) return false;
 
     const selectedCpus: number[] = [];
-    for (const trackKey of area.tracks) {
-      const track = globals.state.tracks[trackKey];
-      if (track?.uri) {
-        const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
-          exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
-        }
+    for (const trackUri of area.trackUris) {
+      const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
+      if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
+        exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
       }
     }
     if (selectedCpus.length === 0) return false;
@@ -88,14 +85,14 @@ export class WattsonPackageAggregationController extends AggregationController {
         columnId: 'dur_ms',
       },
       {
-        title: 'Average estimated power (mW)',
+        title: 'Average power (estimated mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'avg_mw',
         sum: true,
       },
       {
-        title: 'Total estimated energy (mWs)',
+        title: 'Total energy (estimated mWs)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'total_mws',
