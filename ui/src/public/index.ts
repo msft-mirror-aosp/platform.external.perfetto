@@ -163,41 +163,6 @@ export interface PluginContext {
   addSidebarMenuItem(menuItem: SidebarMenuItem): void;
 }
 
-export interface SliceTrackColNames {
-  ts: string;
-  name: string;
-  dur: string;
-}
-
-export interface DebugSliceTrackArgs {
-  // Title of the track. If omitted a placeholder name will be chosen instead.
-  trackName?: string;
-
-  // Mapping definitions of the 'ts', 'dur', and 'name' columns.
-  // By default, columns called ts, dur and name will be used.
-  // If dur is assigned the value '0', all slices shall be instant events.
-  columnMapping?: Partial<SliceTrackColNames>;
-
-  // Any extra columns to be used as args.
-  args?: string[];
-
-  // Optional renaming of columns.
-  columns?: string[];
-}
-
-export interface CounterTrackColNames {
-  ts: string;
-  value: string;
-}
-
-export interface DebugCounterTrackArgs {
-  // Title of the track. If omitted a placeholder name will be chosen instead.
-  trackName?: string;
-
-  // Mapping definitions of the ts and value columns.
-  columnMapping?: Partial<CounterTrackColNames>;
-}
-
 export interface Tab {
   render(): m.Children;
   getTitle(): string;
@@ -245,23 +210,16 @@ export interface PluginContextTrace extends PluginContext {
     hideTab(uri: string): void;
   };
 
-  // Register a new track against a unique key known as a URI.
-  // Once a track is registered it can be referenced multiple times on the
-  // timeline with different params to allow customising each instance.
+  // Register a new track against a unique key known as a URI. The track is not
+  // shown by default and callers need to either manually add it to a
+  // Workspace or use registerTrackAndShowOnTraceLoad() below.
   registerTrack(trackDesc: TrackDescriptor): void;
 
-  // Add a new entry to the pool of default tracks. Default tracks are a list
-  // of track references that describe the list of tracks that should be added
-  // to the main timeline on startup.
-  // Default tracks are only used when a trace is first loaded, not when
-  // loading from a permalink, where the existing list of tracks from the
+  // Register a track and mark it as "automatically show on trace load".
+  // These tracks are shown only when the trace is loaded from scratch, not
+  // when loading from a permalink, where the existing list of tracks from the
   // shared state is used instead.
-  addDefaultTrack(track: TrackRef): void;
-
-  // Simultaneously register a track and add it as a default track in one go.
-  // This is simply a helper which calls registerTrack() and addDefaultTrack()
-  // with the same URI.
-  registerStaticTrack(track: TrackDescriptor & TrackRef): void;
+  registerTrackAndShowOnTraceLoad(track: TrackDescriptor): void;
 
   // Register a new tab for this plugin. Will be unregistered when the plugin
   // is deactivated or when the trace is unloaded.
@@ -312,24 +270,6 @@ export interface PerfettoPlugin {
 export interface PluginClass {
   // Instantiate the plugin.
   new (): PerfettoPlugin;
-}
-
-// Describes a reference to a registered track.
-export interface TrackRef {
-  // URI of the registered track.
-  readonly uri: string;
-
-  // A human readable name for this track - displayed in the track shell.
-  readonly title: string;
-
-  // Optional: Add tracks to a group with this name.
-  readonly groupName?: string;
-
-  // Optional: Track key
-  readonly key?: string;
-
-  // Optional: Whether the track is pinned
-  readonly isPinned?: boolean;
 }
 
 // Plugins can be class refs or concrete plugin implementations.

@@ -45,7 +45,7 @@ class LinuxKernelDevices implements PerfettoPlugin {
       const displayName = it.name ?? `${trackId}`;
 
       const uri = `/kernel_devices/${displayName}`;
-      ctx.registerStaticTrack({
+      ctx.registerTrackAndShowOnTraceLoad({
         uri,
         title: displayName,
         track: new AsyncSliceTrack(
@@ -59,8 +59,8 @@ class LinuxKernelDevices implements PerfettoPlugin {
         tags: {
           kind: ASYNC_SLICE_TRACK_KIND,
           trackIds: [trackId],
+          groupName: `Linux Kernel Devices`,
         },
-        groupName: `Linux Kernel Devices`,
       });
     }
   }

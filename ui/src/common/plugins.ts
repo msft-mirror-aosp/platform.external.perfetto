@@ -27,7 +27,6 @@ import {
   Store,
   TabDescriptor,
   TrackDescriptor,
-  TrackRef,
   SidebarMenuItem,
 } from '../public';
 import {EngineBase, Engine} from '../trace_processor/engine';
@@ -120,17 +119,13 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     this.trash.use(dispose);
   }
 
-  addDefaultTrack(track: TrackRef): void {
+  registerTrackAndShowOnTraceLoad(track: TrackDescriptor): void {
+    this.registerTrack(track);
+
     // Silently ignore if context is dead.
     if (!this.alive) return;
-
-    const dispose = globals.trackManager.addPotentialTrack(track);
+    const dispose = globals.trackManager.autoShowOnTraceLoad(track);
     this.trash.use(dispose);
-  }
-
-  registerStaticTrack(track: TrackDescriptor & TrackRef): void {
-    this.registerTrack(track);
-    this.addDefaultTrack(track);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
