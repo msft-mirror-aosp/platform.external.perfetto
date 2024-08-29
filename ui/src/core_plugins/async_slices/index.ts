@@ -70,21 +70,16 @@ class AsyncSlicePlugin implements PerfettoPlugin {
       const trackIds = rawTrackIds.split(',').map((v) => Number(v));
       const maxDepth = it.maxDepth;
 
+      const uri = `/async_slices_${rawName}_${it.parentId}`;
       ctx.registerTrack({
-        uri: `/async_slices_${rawName}_${it.parentId}`,
+        uri,
         title: displayName,
         tags: {
           trackIds,
           kind: ASYNC_SLICE_TRACK_KIND,
           scope: 'global',
         },
-        trackFactory: ({trackUri}) => {
-          return new AsyncSliceTrack(
-            {engine, uri: trackUri},
-            maxDepth,
-            trackIds,
-          );
-        },
+        track: new AsyncSliceTrack({engine, uri}, maxDepth, trackIds),
       });
     }
   }
@@ -129,8 +124,9 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         kind,
       });
 
+      const uri = `/process_${upid}/async_slices_${rawTrackIds}`;
       ctx.registerTrack({
-        uri: `/process_${upid}/async_slices_${rawTrackIds}`,
+        uri,
         title: displayName,
         tags: {
           trackIds,
@@ -138,13 +134,11 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           scope: 'process',
           upid,
         },
-        trackFactory: ({trackUri}) => {
-          return new AsyncSliceTrack(
-            {engine: ctx.engine, uri: trackUri},
-            maxDepth,
-            trackIds,
-          );
-        },
+        track: new AsyncSliceTrack(
+          {engine: ctx.engine, uri},
+          maxDepth,
+          trackIds,
+        ),
       });
     }
   }
@@ -159,6 +153,8 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         t.utid,
         thread.upid,
         t.name as trackName,
+        thread.name as threadName,
+        thread.tid as tid,
         t.track_ids as trackIds,
         __max_layout_depth(t.track_count, t.track_ids) as maxDepth,
         k.is_main_thread as isMainThread,
@@ -177,23 +173,33 @@ class AsyncSlicePlugin implements PerfettoPlugin {
       maxDepth: NUM,
       isMainThread: NUM_NULL,
       isKernelThread: NUM,
+      threadName: STR_NULL,
+      tid: NUM_NULL,
     });
     for (; it.valid(); it.next()) {
-      const {utid, upid, trackName, isMainThread, isKernelThread, maxDepth} =
-        it;
+      const {
+        utid,
+        upid,
+        trackName,
+        isMainThread,
+        isKernelThread,
+        maxDepth,
+        threadName,
+        tid,
+      } = it;
       const rawTrackIds = it.trackIds;
       const trackIds = rawTrackIds.split(',').map((v) => Number(v));
-
-      const kind = ASYNC_SLICE_TRACK_KIND;
       const displayName = getTrackName({
         name: trackName,
         utid,
-        upid,
-        kind,
+        tid,
+        threadName,
+        kind: 'Slices',
       });
 
+      const uri = `/${getThreadUriPrefix(upid, utid)}_slice_${rawTrackIds}`;
       ctx.registerTrack({
-        uri: `/${getThreadUriPrefix(upid, utid)}_slice_${rawTrackIds}`,
+        uri,
         title: displayName,
         tags: {
           trackIds,
@@ -205,13 +211,11 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         chips: removeFalsyValues([
           isKernelThread === 0 && isMainThread === 1 && 'main thread',
         ]),
-        trackFactory: ({trackUri}) => {
-          return new AsyncSliceTrack(
-            {engine: ctx.engine, uri: trackUri},
-            maxDepth,
-            trackIds,
-          );
-        },
+        track: new AsyncSliceTrack(
+          {engine: ctx.engine, uri},
+          maxDepth,
+          trackIds,
+        ),
       });
     }
   }
@@ -267,8 +271,9 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         uidTrack: true,
       });
 
+      const uri = `/async_slices_${rawName}_${uid}`;
       ctx.registerTrack({
-        uri: `/async_slices_${rawName}_${uid}`,
+        uri,
         title: displayName,
         tags: {
           trackIds,
@@ -276,13 +281,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           scope: 'user',
           rawName, // Defines grouping
         },
-        trackFactory: ({trackUri}) => {
-          return new AsyncSliceTrack(
-            {engine, uri: trackUri},
-            maxDepth,
-            trackIds,
-          );
-        },
+        track: new AsyncSliceTrack({engine, uri}, maxDepth, trackIds),
       });
     }
   }
