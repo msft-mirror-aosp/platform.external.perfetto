@@ -778,10 +778,10 @@ class TrackDecider {
 
   private addPluginTracks(): void {
     const groups = new Map<string, GroupNode>();
-    const tracks = globals.trackManager.findPotentialTracks();
+    const tracks = globals.trackManager.getAutoShowTracks();
 
     for (const info of tracks) {
-      const groupName = info.groupName;
+      const groupName = info.tags?.groupName;
       let container: ContainerNode = globals.workspace;
 
       if (groupName) {
@@ -799,10 +799,6 @@ class TrackDecider {
 
       const track = new TrackNode(info.uri, info.title);
       container.addChild(track);
-
-      if (info.isPinned) {
-        track.pin();
-      }
     }
   }
 
