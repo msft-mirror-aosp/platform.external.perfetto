@@ -64,12 +64,12 @@ class FtraceRawPlugin implements PerfettoPlugin {
     for (const cpuNum of cpus) {
       const uri = `/ftrace/cpu${cpuNum}`;
 
-      ctx.registerStaticTrack({
+      ctx.registerTrackAndShowOnTraceLoad({
         uri,
-        groupName: 'Ftrace Events',
         title: `Ftrace Track for CPU ${cpuNum}`,
         tags: {
           cpu: cpuNum,
+          groupName: 'Ftrace Events',
         },
         track: new FtraceRawTrack(ctx.engine, cpuNum, filterStore),
       });
