@@ -17,11 +17,9 @@
 #ifndef SRC_TRACE_PROCESSOR_STORAGE_STATS_H_
 #define SRC_TRACE_PROCESSOR_STORAGE_STATS_H_
 
-#include <stddef.h>
+#include <cstddef>
 
-namespace perfetto {
-namespace trace_processor {
-namespace stats {
+namespace perfetto::trace_processor::stats {
 
 // Compile time list of parsing and processing stats.
 // clang-format off
@@ -381,7 +379,12 @@ namespace stats {
   F(mali_unknown_mcu_state_id,            kSingle,  kError,   kAnalysis,       \
       "An invalid Mali GPU MCU state ID was detected."),                       \
   F(pixel_modem_negative_timestamp,       kSingle,  kError,   kAnalysis,       \
-      "A negative timestamp was received from a Pixel modem event.")
+      "A negative timestamp was received from a Pixel modem event."),          \
+  F(legacy_v8_cpu_profile_invalid_callsite, kSingle,  kInfo,  kAnalysis,       \
+      "Indicates a callsite in legacy v8 CPU profiling is invalid."),          \
+  F(legacy_v8_cpu_profile_invalid_sample, kSingle,  kError,  kAnalysis,        \
+      "Indicates a sample in legacy v8 CPU profile is invalid. This will "     \
+      "cause CPU samples to be missing in the UI.")
 // clang-format on
 
 enum Type {
@@ -435,8 +438,6 @@ constexpr Source kSources[] = {PERFETTO_TP_STATS(PERFETTO_TP_STATS_SOURCE)};
 constexpr char const* kDescriptions[] = {
     PERFETTO_TP_STATS(PERFETTO_TP_STATS_DESCRIPTION)};
 
-}  // namespace stats
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor::stats
 
 #endif  // SRC_TRACE_PROCESSOR_STORAGE_STATS_H_
