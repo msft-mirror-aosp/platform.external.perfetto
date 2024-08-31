@@ -20,7 +20,6 @@ import {Icons} from '../../base/semantic_icons';
 import {globals} from '../globals';
 import {CPU_SLICE_TRACK_KIND} from '../../core/track_kinds';
 import {scrollToTrackAndTs} from '../scroll_helper';
-import {exists} from '../../base/utils';
 
 interface SchedRefAttrs {
   id: SchedSqlId;
@@ -37,29 +36,21 @@ interface SchedRefAttrs {
 }
 
 export function findSchedTrack(cpu: number): string | undefined {
-  for (const track of Object.values(globals.state.tracks)) {
-    if (exists(track?.uri)) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
-        if (trackInfo?.tags?.cpu === cpu) {
-          return track.key;
-        }
-      }
-    }
-  }
-  return undefined;
+  return globals.trackManager.findTrack((t) => {
+    return t.tags?.kind === CPU_SLICE_TRACK_KIND && t.tags.cpu === cpu;
+  })?.uri;
 }
 
 export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
-  const trackKey = findSchedTrack(cpu);
-  if (trackKey === undefined) {
+  const trackUri = findSchedTrack(cpu);
+  if (trackUri === undefined) {
     return;
   }
   globals.setLegacySelection(
     {
       kind: 'SCHED_SLICE',
       id,
-      trackKey,
+      trackUri,
     },
     {
       clearSearch: true,
@@ -68,7 +59,7 @@ export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
     },
   );
 
-  scrollToTrackAndTs(trackKey, ts);
+  scrollToTrackAndTs(trackUri, ts);
 }
 
 export class SchedRef implements m.ClassComponent<SchedRefAttrs> {
@@ -78,14 +69,14 @@ export class SchedRef implements m.ClassComponent<SchedRefAttrs> {
       {
         icon: Icons.UpdateSelection,
         onclick: () => {
-          const trackKey = findSchedTrack(vnode.attrs.cpu);
-          if (trackKey === undefined) return;
+          const trackUri = findSchedTrack(vnode.attrs.cpu);
+          if (trackUri === undefined) return;
 
           globals.setLegacySelection(
             {
               kind: 'SCHED_SLICE',
               id: vnode.attrs.id,
-              trackKey,
+              trackUri,
             },
             {
               clearSearch: true,
@@ -95,7 +86,7 @@ export class SchedRef implements m.ClassComponent<SchedRefAttrs> {
             },
           );
 
-          scrollToTrackAndTs(trackKey, vnode.attrs.ts, true);
+          scrollToTrackAndTs(trackUri, vnode.attrs.ts, true);
         },
       },
       vnode.attrs.name ?? `Sched ${vnode.attrs.id}`,

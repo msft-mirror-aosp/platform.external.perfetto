@@ -69,10 +69,6 @@ import {WattsonPackageAggregationController} from './aggregation/wattson/package
 import {ThreadAggregationController} from './aggregation/thread_aggregation_controller';
 import {Child, Children, Controller} from './controller';
 import {
-  CpuProfileController,
-  CpuProfileControllerArgs,
-} from './cpu_profile_controller';
-import {
   FlowEventsController,
   FlowEventsControllerArgs,
 } from './flow_events_controller';
@@ -94,13 +90,12 @@ import {
   TraceStream,
 } from '../core/trace_stream';
 import {decideTracks} from './track_decider';
-import {profileType} from '../frontend/legacy_flamegraph_panel';
-import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
 import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
 } from '../common/state_serialization';
 import {TraceContext} from '../frontend/trace_context';
+import {profileType} from '../core/selection_manager';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -275,11 +270,6 @@ export class TraceController extends Controller<States> {
           Child('flowEvents', FlowEventsController, flowEventsArgs),
         );
 
-        const cpuProfileArgs: CpuProfileControllerArgs = {engine};
-        childControllers.push(
-          Child('cpuProfile', CpuProfileController, cpuProfileArgs),
-        );
-
         childControllers.push(
           Child('cpu_aggregation', CpuAggregationController, {
             engine,
@@ -388,10 +378,6 @@ export class TraceController extends Controller<States> {
   onDestroy() {
     pluginManager.onTraceClose();
     globals.engines.delete(this.engineId);
-
-    // Invalidate the flamegraph cache.
-    // TODO(stevegolton): migrate this to the new system when it's ready.
-    globals.areaFlamegraphCache = new LegacyFlamegraphCache('area');
   }
 
   private async loadTrace(): Promise<EngineMode> {
@@ -548,6 +534,10 @@ export class TraceController extends Controller<States> {
 
     await defineMaxLayoutDepthSqlFunction(engine);
 
+    // Remove all workspaces, and create an empty default workspace, ready for
+    // tracks to be inserted.
+    globals.resetWorkspaces();
+
     if (globals.restoreAppStateAfterTraceLoad) {
       deserializeAppStatePhase1(globals.restoreAppStateAfterTraceLoad);
     }
@@ -557,9 +547,10 @@ export class TraceController extends Controller<States> {
     });
 
     {
-      // When we reload from a permalink don't create extra tracks:
-      const {pinnedTracks, tracks} = globals.state;
-      if (!pinnedTracks.length && !Object.keys(tracks).length) {
+      // When we reload from a permalink don't create extra tracks.
+      // TODO(stevegolton): This is a terrible way of telling whether we have
+      // loaded from a permalink or not.
+      if (globals.workspace.flatTracks.length === 0) {
         await this.listTracks();
       }
     }
@@ -582,9 +573,6 @@ export class TraceController extends Controller<States> {
       const res = await engine.query(query);
       publishHasFtrace(res.numRows() > 0);
     }
-
-    globals.dispatch(Actions.sortThreadTracks({}));
-    globals.dispatch(Actions.maybeExpandOnlyTrackGroup({}));
 
     await this.selectFirstHeapProfile();
     await this.selectPerfSample(traceDetails);
@@ -609,8 +597,6 @@ export class TraceController extends Controller<States> {
         });
       }
     }
-
-    globals.dispatch(Actions.maybeExpandOnlyTrackGroup({}));
 
     // Trace Processor doesn't support the reliable range feature for JSON
     // traces.
@@ -642,12 +628,14 @@ export class TraceController extends Controller<States> {
   }
 
   private async selectPerfSample(traceTime: {start: time; end: time}) {
-    const query = `select upid
-        from perf_sample
-        join thread using (utid)
-        where callsite_id is not null
-        order by ts desc limit 1`;
-    const profile = await assertExists(this.engine).query(query);
+    const profile = await assertExists(this.engine).query(`
+      select upid
+      from perf_sample
+      join thread using (utid)
+      where callsite_id is not null
+      order by ts desc
+      limit 1
+    `);
     if (profile.numRows() !== 1) return;
     const row = profile.firstRow({upid: NUM});
     const upid = row.upid;
@@ -665,28 +653,29 @@ export class TraceController extends Controller<States> {
   }
 
   private async selectFirstHeapProfile() {
-    const query = `select * from (
-      select
-        min(ts) AS ts,
-        'heap_profile:' || group_concat(distinct heap_name) AS type,
-        upid
-      from heap_profile_allocation
-      group by upid
-      union
-      select distinct graph_sample_ts as ts, 'graph' as type, upid
-      from heap_graph_object)
-      order by ts limit 1`;
+    const query = `
+      select * from (
+        select
+          min(ts) AS ts,
+          'heap_profile:' || group_concat(distinct heap_name) AS type,
+          upid
+        from heap_profile_allocation
+        group by upid
+        union
+        select distinct graph_sample_ts as ts, 'graph' as type, upid
+        from heap_graph_object
+      )
+      order by ts
+      limit 1
+    `;
     const profile = await assertExists(this.engine).query(query);
     if (profile.numRows() !== 1) return;
     const row = profile.firstRow({ts: LONG, type: STR, upid: NUM});
     const ts = Time.fromRaw(row.ts);
-    let profType = row.type;
-    if (profType == 'heap_profile:libc.malloc,com.android.art') {
-      profType = 'heap_profile:com.android.art,libc.malloc';
-    }
-    const type = profileType(profType);
     const upid = row.upid;
-    globals.dispatch(Actions.selectHeapProfile({id: 0, upid, ts, type}));
+    globals.dispatch(
+      Actions.selectHeapProfile({id: 0, upid, ts, type: profileType(row.type)}),
+    );
   }
 
   private async selectPendingDeeplink(link: PendingDeeplinkState) {
@@ -722,15 +711,17 @@ export class TraceController extends Controller<States> {
       });
 
       const id = row.traceProcessorTrackId;
-      const trackKey = globals.trackManager.trackKeyByTrackId.get(id);
-      if (trackKey === undefined) {
+      const track = globals.workspace.flatTracks.find((t) =>
+        globals.trackManager.getTrack(t.uri)?.tags?.trackIds?.includes(id),
+      );
+      if (track === undefined) {
         return;
       }
       globals.setLegacySelection(
         {
           kind: 'SLICE',
           id: row.id,
-          trackKey,
+          trackUri: track.uri,
           table: 'slice',
         },
         {
@@ -745,8 +736,7 @@ export class TraceController extends Controller<States> {
   private async listTracks() {
     this.updateStatus('Loading tracks');
     const engine = assertExists(this.engine);
-    const actions = await decideTracks(engine);
-    globals.dispatchMultiple(actions);
+    await decideTracks(engine);
   }
 
   // Show the list of default tabs, but don't make them active!

@@ -38,6 +38,7 @@
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
+#include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
 #include "src/trace_processor/importers/systrace/systrace_line.h"
 #include "src/trace_processor/sorter/trace_token_buffer.h"
@@ -128,6 +129,15 @@ class TraceSorter {
                          machine_id);
   }
 
+  inline void PushInstrumentsRow(
+      int64_t timestamp,
+      instruments_importer::Row row,
+      std::optional<MachineId> machine_id = std::nullopt) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(std::move(row));
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kInstrumentsRow, id,
+                         machine_id);
+  }
+
   inline void PushTracePacket(
       int64_t timestamp,
       TracePacketData data,
@@ -199,6 +209,21 @@ class TraceSorter {
     UpdateAppendMaxTs(queue);
   }
 
+  inline void PushLegacyV8CpuProfileEvent(
+      int64_t timestamp,
+      uint64_t session_id,
+      uint32_t pid,
+      uint32_t tid,
+      uint32_t callsite_id,
+      std::optional<MachineId> machine_id = std::nullopt) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(
+        LegacyV8CpuProfileEvent{session_id, pid, tid, callsite_id});
+    auto* queue = GetQueue(0, machine_id);
+    queue->Append(timestamp, TimestampedEvent::Type::kLegacyV8CpuProfileEvent,
+                  id);
+    UpdateAppendMaxTs(queue);
+  }
+
   inline void PushInlineFtraceEvent(
       uint32_t cpu,
       int64_t timestamp,
@@ -264,6 +289,7 @@ class TraceSorter {
     enum class Type : uint8_t {
       kFtraceEvent,
       kPerfRecord,
+      kInstrumentsRow,
       kTracePacket,
       kInlineSchedSwitch,
       kInlineSchedWaking,
@@ -273,7 +299,8 @@ class TraceSorter {
       kSystraceLine,
       kEtwEvent,
       kAndroidLogEvent,
-      kMax = kAndroidLogEvent,
+      kLegacyV8CpuProfileEvent,
+      kMax = kLegacyV8CpuProfileEvent,
     };
 
     // Number of bits required to store the max element in |Type|.
