@@ -148,11 +148,10 @@ export class TabPanel implements m.ClassComponent {
 
     // Show single selection panels if they are registered
     if (currentSelection.kind === 'single') {
-      const trackKey = currentSelection.trackKey;
-      const uri = globals.state.tracks[trackKey]?.uri;
+      const uri = currentSelection.trackUri;
 
       if (uri) {
-        const trackDesc = globals.trackManager.resolveTrackInfo(uri);
+        const trackDesc = globals.trackManager.getTrack(uri);
         const panel = trackDesc?.detailsPanel;
         if (panel) {
           return {
