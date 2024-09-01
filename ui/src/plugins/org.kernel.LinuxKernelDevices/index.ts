@@ -44,24 +44,23 @@ class LinuxKernelDevices implements PerfettoPlugin {
       const trackId = it.trackId;
       const displayName = it.name ?? `${trackId}`;
 
-      ctx.registerStaticTrack({
-        uri: `/kernel_devices/${displayName}`,
+      const uri = `/kernel_devices/${displayName}`;
+      ctx.registerTrackAndShowOnTraceLoad({
+        uri,
         title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new AsyncSliceTrack(
-            {
-              engine: ctx.engine,
-              trackKey,
-            },
-            0,
-            [trackId],
-          );
-        },
+        track: new AsyncSliceTrack(
+          {
+            engine: ctx.engine,
+            uri,
+          },
+          0,
+          [trackId],
+        ),
         tags: {
           kind: ASYNC_SLICE_TRACK_KIND,
           trackIds: [trackId],
+          groupName: `Linux Kernel Devices`,
         },
-        groupName: `Linux Kernel Devices`,
       });
     }
   }

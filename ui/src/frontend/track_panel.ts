@@ -19,7 +19,7 @@ import {currentTargetOffset} from '../base/dom_utils';
 import {Icons} from '../base/semantic_icons';
 import {TimeSpan} from '../base/time';
 import {Actions} from '../common/actions';
-import {TrackCacheEntry} from '../common/track_cache';
+import {TrackRenderer} from '../common/track_manager';
 import {raf} from '../core/raf_scheduler';
 import {Track, TrackTags} from '../public';
 
@@ -33,7 +33,6 @@ import {globals} from './globals';
 import {generateTicks, TickType, getMaxMajorTicks} from './gridline_helper';
 import {Size, VerticalBounds} from '../base/geom';
 import {Panel} from './panel_container';
-import {verticalScrollToTrack} from './scroll_helper';
 import {drawVerticalLineAtTime} from './vertical_line_helper';
 import {classNames} from '../base/classnames';
 import {Button, ButtonBar} from '../widgets/button';
@@ -41,13 +40,13 @@ import {Popup, PopupPosition} from '../widgets/popup';
 import {canvasClip} from '../common/canvas_utils';
 import {PxSpan, TimeScale} from './time_scale';
 import {getLegacySelection} from '../common/state';
-import {CloseTrackButton} from './close_track_button';
 import {exists, Optional} from '../base/utils';
 import {Intent} from '../widgets/common';
 import {TrackRenderContext} from '../public/tracks';
 import {calculateResolution} from '../common/resolution';
 import {featureFlags} from '../core/feature_flags';
 import {Tree, TreeNode} from '../widgets/tree';
+import {TrackNode} from '../public/workspace';
 
 export const SHOW_TRACK_DETAILS_BUTTON = featureFlags.register({
   id: 'showTrackDetailsButton',
@@ -76,14 +75,10 @@ export function getTitleFontSize(title: string): string | undefined {
   return undefined;
 }
 
-function isTrackPinned(trackKey: string) {
-  return globals.state.pinnedTracks.indexOf(trackKey) !== -1;
-}
-
-function isTrackSelected(trackKey: string) {
+function isTrackSelected(track: TrackNode) {
   const selection = globals.state.selection;
   if (selection.kind !== 'area') return false;
-  return selection.tracks.includes(trackKey);
+  return selection.trackUris.includes(track.uri);
 }
 
 interface TrackChipAttrs {
@@ -135,13 +130,13 @@ export class CrashButton implements m.ClassComponent<CrashButtonAttrs> {
 }
 
 interface TrackShellAttrs {
-  readonly trackKey: string;
   readonly title: m.Children;
   readonly buttons: m.Children;
   readonly tags?: TrackTags;
   readonly chips?: ReadonlyArray<string>;
   readonly button?: string;
   readonly pluginId?: string;
+  readonly track: TrackNode;
 }
 
 class TrackShell implements m.ClassComponent<TrackShellAttrs> {
@@ -155,14 +150,14 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     let highlightClass = undefined;
     const searchIndex = globals.state.searchIndex;
     if (searchIndex !== -1) {
-      const trackKey = globals.currentSearchResults.trackKeys[searchIndex];
-      if (trackKey === attrs.trackKey) {
+      const uri = globals.currentSearchResults.trackUris[searchIndex];
+      if (uri === attrs.track.uri) {
         highlightClass = 'flash';
       }
     }
 
     const currentSelection = globals.state.selection;
-    const pinned = isTrackPinned(attrs.trackKey);
+    const pinned = attrs.track.isPinned;
 
     return m(
       `.track-shell[draggable=true]`,
@@ -172,18 +167,18 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
           this.dragging && 'drag',
           this.dropping && `drop-${this.dropping}`,
         ),
-        ondragstart: (e: DragEvent) => this.ondragstart(e, attrs.trackKey),
+        ondragstart: (e: DragEvent) => this.ondragstart(e, attrs.track),
         ondragend: this.ondragend.bind(this),
         ondragover: this.ondragover.bind(this),
         ondragleave: this.ondragleave.bind(this),
-        ondrop: (e: DragEvent) => this.ondrop(e, attrs.trackKey),
+        ondrop: (e: DragEvent) => this.ondrop(e, attrs.track),
       },
       m(
         '.track-menubar',
         m(
           'h1',
           {
-            title: attrs.title,
+            title: attrs.track.displayName,
           },
           attrs.title,
           attrs.chips && renderChips(attrs.chips),
@@ -193,13 +188,12 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
           {className: 'track-buttons'},
           attrs.buttons,
           SHOW_TRACK_DETAILS_BUTTON.get() &&
-            this.renderTrackDetailsButton(pinned, attrs),
+            this.renderTrackDetailsButton(attrs),
           m(Button, {
             className: classNames(!pinned && 'pf-visible-on-hover'),
             onclick: () => {
-              globals.dispatch(
-                Actions.toggleTrackPinned({trackKey: attrs.trackKey}),
-              );
+              pinned ? attrs.track.unpin() : attrs.track.pin();
+              raf.scheduleFullRedraw();
             },
             icon: Icons.Pin,
             iconFilled: pinned,
@@ -210,18 +204,17 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
             ? m(Button, {
                 onclick: (e: MouseEvent) => {
                   globals.dispatch(
-                    Actions.toggleTrackSelection({
-                      key: attrs.trackKey,
-                      isTrackGroup: false,
+                    Actions.toggleTrackAreaSelection({
+                      key: attrs.track.uri,
                     }),
                   );
                   e.stopPropagation();
                 },
                 compact: true,
-                icon: isTrackSelected(attrs.trackKey)
+                icon: isTrackSelected(attrs.track)
                   ? Icons.Checkbox
                   : Icons.BlankCheckbox,
-                title: isTrackSelected(attrs.trackKey)
+                title: isTrackSelected(attrs.track)
                   ? 'Remove track'
                   : 'Add track to selection',
               })
@@ -231,12 +224,12 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     );
   }
 
-  ondragstart(e: DragEvent, trackKey: string) {
+  ondragstart(e: DragEvent, track: TrackNode) {
     const dataTransfer = e.dataTransfer;
     if (dataTransfer === null) return;
     this.dragging = true;
     raf.scheduleFullRedraw();
-    dataTransfer.setData('perfetto/track', `${trackKey}`);
+    dataTransfer.setData('perfetto/track', `${track.uri}`);
     dataTransfer.setDragImage(new Image(), 0, 0);
   }
 
@@ -269,23 +262,30 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     raf.scheduleFullRedraw();
   }
 
-  ondrop(e: DragEvent, trackKey: string) {
+  ondrop(e: DragEvent, track: TrackNode) {
     if (this.dropping === undefined) return;
     const dataTransfer = e.dataTransfer;
     if (dataTransfer === null) return;
     raf.scheduleFullRedraw();
     const srcId = dataTransfer.getData('perfetto/track');
-    const dstId = trackKey;
-    globals.dispatch(Actions.moveTrack({srcId, op: this.dropping, dstId}));
+    const dstId = track.uri;
+    console.log(srcId, dstId);
+    // globals.dispatch(Actions.moveTrack({srcId, op: this.dropping, dstId}));
     this.dropping = undefined;
   }
 
-  private renderTrackDetailsButton(pinned: boolean, attrs: TrackShellAttrs) {
+  private renderTrackDetailsButton(attrs: TrackShellAttrs) {
+    let parent = attrs.track.parent;
+    let fullPath: m.ChildArray = [attrs.track.displayName];
+    while (parent && parent !== globals.workspace) {
+      fullPath = [parent.displayName, ' \u2023 ', ...fullPath];
+      parent = parent.parent;
+    }
     return m(
       Popup,
       {
         trigger: m(Button, {
-          className: classNames(!pinned && 'pf-visible-on-hover'),
+          className: 'pf-visible-on-hover',
           icon: 'info',
           title: 'Show track details',
           compact: true,
@@ -298,10 +298,14 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
           Tree,
           m(TreeNode, {
             left: 'URI',
-            right: globals.state.tracks[attrs.trackKey]?.uri,
+            right: attrs.track.uri,
           }),
-          m(TreeNode, {left: 'Title', right: attrs.title}),
-          m(TreeNode, {left: 'Track Key', right: attrs.trackKey}),
+          m(TreeNode, {
+            left: 'Key',
+            right: attrs.track.uri,
+          }),
+          m(TreeNode, {left: 'Path', right: fullPath}),
+          m(TreeNode, {left: 'Display Name', right: attrs.track.displayName}),
           m(TreeNode, {left: 'Plugin ID', right: attrs.pluginId}),
           m(
             TreeNode,
@@ -409,7 +413,6 @@ export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
 }
 
 interface TrackComponentAttrs {
-  readonly trackKey: string;
   readonly heightPx?: number;
   readonly title: m.Children;
   readonly buttons?: m.Children;
@@ -417,8 +420,8 @@ interface TrackComponentAttrs {
   readonly chips?: ReadonlyArray<string>;
   readonly track?: Track;
   readonly error?: Error | undefined;
-  readonly closeable: boolean;
   readonly pluginId?: string;
+  readonly trackNode: TrackNode;
 
   // Issues a scrollTo() on this DOM element at creation time. Default: false.
   revealOnCreate?: boolean;
@@ -442,20 +445,19 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
           // Round up to the nearest integer number of pixels.
           height: `${Math.ceil(trackHeight)}px`,
         },
-        id: 'track_' + attrs.trackKey,
+        id: 'track_' + attrs.trackNode.uri,
       },
       [
         m(TrackShell, {
           buttons: [
             attrs.error && m(CrashButton, {error: attrs.error}),
-            attrs.closeable && m(CloseTrackButton, {trackKey: attrs.trackKey}),
             attrs.buttons,
           ],
           title: attrs.title,
-          trackKey: attrs.trackKey,
           tags: attrs.tags,
           chips: attrs.chips,
           pluginId: attrs.pluginId,
+          track: attrs.trackNode,
         }),
         attrs.track &&
           m(TrackContent, {
@@ -469,9 +471,9 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
 
   oncreate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
     const {attrs} = vnode;
-    if (globals.scrollToTrackKey === attrs.trackKey) {
-      verticalScrollToTrack(attrs.trackKey);
-      globals.scrollToTrackKey = undefined;
+    if (globals.scrollToTrackUri === attrs.trackNode.uri) {
+      vnode.dom.scrollIntoView();
+      globals.scrollToTrackUri = undefined;
     }
     this.onupdate(vnode);
 
@@ -486,14 +488,13 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
 }
 
 interface TrackPanelAttrs {
-  readonly trackKey: string;
   readonly title: m.Children;
   readonly tags?: TrackTags;
   readonly chips?: ReadonlyArray<string>;
-  readonly trackFSM?: TrackCacheEntry;
+  readonly trackRenderer?: TrackRenderer;
   readonly revealOnCreate?: boolean;
-  readonly closeable: boolean;
   readonly pluginId?: string;
+  readonly track: TrackNode;
 }
 
 export class TrackPanel implements Panel {
@@ -502,46 +503,43 @@ export class TrackPanel implements Panel {
 
   constructor(private readonly attrs: TrackPanelAttrs) {}
 
-  get trackKey(): string {
-    return this.attrs.trackKey;
+  get trackUri(): string {
+    return this.attrs.track.uri;
   }
 
   render(): m.Children {
     const attrs = this.attrs;
 
-    if (attrs.trackFSM) {
-      if (attrs.trackFSM.getError()) {
+    if (attrs.trackRenderer) {
+      if (attrs.trackRenderer.getError()) {
         return m(TrackComponent, {
           title: attrs.title,
-          trackKey: attrs.trackKey,
-          error: attrs.trackFSM.getError(),
-          track: attrs.trackFSM.track,
-          closeable: attrs.closeable,
+          error: attrs.trackRenderer.getError(),
+          track: attrs.trackRenderer.track,
           chips: attrs.chips,
           pluginId: attrs.pluginId,
+          trackNode: attrs.track,
         });
       }
       return m(TrackComponent, {
-        trackKey: attrs.trackKey,
         title: attrs.title,
-        heightPx: attrs.trackFSM.track.getHeight(),
-        buttons: attrs.trackFSM.track.getTrackShellButtons?.(),
+        heightPx: attrs.trackRenderer.track.getHeight(),
+        buttons: attrs.trackRenderer.track.getTrackShellButtons?.(),
         tags: attrs.tags,
-        track: attrs.trackFSM.track,
-        error: attrs.trackFSM.getError(),
+        track: attrs.trackRenderer.track,
+        error: attrs.trackRenderer.getError(),
         revealOnCreate: attrs.revealOnCreate,
-        closeable: attrs.closeable,
         chips: attrs.chips,
         pluginId: attrs.pluginId,
+        trackNode: attrs.track,
       });
     } else {
       return m(TrackComponent, {
-        trackKey: attrs.trackKey,
         title: attrs.title,
         revealOnCreate: attrs.revealOnCreate,
-        closeable: attrs.closeable,
         chips: attrs.chips,
         pluginId: attrs.pluginId,
+        trackNode: attrs.track,
       });
     }
   }
@@ -556,7 +554,7 @@ export class TrackPanel implements Panel {
       return;
     }
     const selectedAreaDuration = selection.end - selection.start;
-    if (selection.tracks.includes(this.attrs.trackKey)) {
+    if (selection.trackUris.includes(this.attrs.track.uri)) {
       ctx.fillStyle = SELECTION_FILL_COLOR;
       ctx.fillRect(
         timescale.timeToPx(selection.start),
@@ -582,11 +580,11 @@ export class TrackPanel implements Panel {
     );
     drawGridLines(ctx, timespan, timescale, trackSize);
 
-    const track = this.attrs.trackFSM;
+    const track = this.attrs.trackRenderer;
 
     if (track !== undefined) {
       const trackRenderCtx: TrackRenderContext = {
-        trackKey: track.trackKey,
+        trackUri: track.desc.uri,
         visibleWindow,
         size: trackSize,
         resolution: calculateResolution(visibleWindow, trackSize.width),
@@ -612,10 +610,10 @@ export class TrackPanel implements Panel {
   }
 
   getSliceVerticalBounds(depth: number): Optional<VerticalBounds> {
-    if (this.attrs.trackFSM === undefined) {
+    if (this.attrs.trackRenderer === undefined) {
       return undefined;
     }
-    return this.attrs.trackFSM.track.getSliceVerticalBounds?.(depth);
+    return this.attrs.trackRenderer.track.getSliceVerticalBounds?.(depth);
   }
 }
 

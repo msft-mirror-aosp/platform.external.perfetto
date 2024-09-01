@@ -45,7 +45,7 @@ import {AttributeModalHolder} from './tables/attribute_modal_holder';
 import {DurationWidget} from './widgets/duration';
 import {addSqlTableTab} from './sql_table_tab_command';
 import {getSqlTableDescription} from './widgets/sql/table/sql_table_registry';
-import {assertExists} from '../base/logging';
+import {assertExists, assertFalse} from '../base/logging';
 import {Filter, SqlColumn} from './widgets/sql/table/column';
 import {argSqlColumn} from './widgets/sql/table/well_known_columns';
 
@@ -206,6 +206,8 @@ export class PivotTable implements m.ClassComponent<PivotTableAttrs> {
     ) {
       if (typeof value === 'bigint') {
         return m(DurationWidget, {dur: value});
+      } else if (typeof value === 'number') {
+        return m(DurationWidget, {dur: BigInt(Math.round(value))});
       }
     }
     return `${value}`;
@@ -546,12 +548,10 @@ export class PivotTable implements m.ClassComponent<PivotTableAttrs> {
     const queryResult: PivotTableResult = state.queryResult;
 
     const renderedRows: m.Vnode[] = [];
-    const tree = state.queryResult.tree;
 
-    if (tree.children.size === 0 && tree.rows.length === 0) {
-      // Empty result, render a special message
-      return m('.empty-result', 'No slices in the current selection.');
-    }
+    // We should not even be showing the tab if there's no results.
+    const tree = state.queryResult.tree;
+    assertFalse(tree.children.size === 0 && tree.rows.length === 0);
 
     this.renderTree(
       attrs.selectionArea,
