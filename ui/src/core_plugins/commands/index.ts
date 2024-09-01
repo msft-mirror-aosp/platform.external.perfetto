@@ -28,6 +28,12 @@ import {
   openFileWithLegacyTraceViewer,
 } from '../../frontend/legacy_trace_viewer';
 import {DisposableStack} from '../../base/disposable_stack';
+import {ADD_SQL_TABLE_TAB_COMMAND_ID} from '../../frontend/sql_table_tab_command';
+import {
+  addSqlTableTabImpl,
+  SqlTableTabConfig,
+} from '../../frontend/sql_table_tab';
+import {Workspace} from '../../frontend/workspace';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -225,9 +231,8 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#UnpinAllTracks',
       name: 'Unpin all pinned tracks',
       callback: () => {
-        ctx.timeline.unpinTracksByPredicate((_) => {
-          return true;
-        });
+        const workspace = ctx.timeline.workspace;
+        workspace.pinnedTracks.forEach((t) => workspace.unpinTrack(t));
       },
     });
 
@@ -235,9 +240,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#ExpandAllGroups',
       name: 'Expand all track groups',
       callback: () => {
-        ctx.timeline.expandGroupsByPredicate((_) => {
-          return true;
-        });
+        ctx.timeline.workspace.flatGroups.forEach((g) => g.expand());
       },
     });
 
@@ -245,9 +248,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#CollapseAllGroups',
       name: 'Collapse all track groups',
       callback: () => {
-        ctx.timeline.collapseGroupsByPredicate((_) => {
-          return true;
-        });
+        ctx.timeline.workspace.flatGroups.forEach((g) => g.collapse());
       },
     });
 
@@ -275,6 +276,59 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       name: 'Show current selection tab',
       callback: () => {
         ctx.tabs.showTab('current_selection');
+      },
+    });
+
+    ctx.registerCommand({
+      id: ADD_SQL_TABLE_TAB_COMMAND_ID,
+      name: 'Open SQL table viewer',
+      callback: (args: unknown) => {
+        if (args === undefined) {
+          // If we are being run from the command palette, args will be
+          // undefined, so there's not a lot we can do here...
+
+          // Perhaps in the future we could just open the table in a new tab and
+          // allow the user to browse the tables..?
+          return;
+        }
+        addSqlTableTabImpl(args as SqlTableTabConfig);
+      },
+    });
+
+    ctx.registerCommand({
+      id: 'createNewEmptyWorkspace',
+      name: 'Create new empty workspace',
+      callback: async () => {
+        try {
+          const name = await ctx.prompt('Give it a name...');
+          const newWorkspace = new Workspace(name);
+          globals.workspaces.push(newWorkspace);
+          globals.switchWorkspace(newWorkspace);
+        } finally {
+        }
+      },
+    });
+
+    ctx.registerCommand({
+      id: 'switchWorkspace',
+      name: 'Switch workspace',
+      callback: async () => {
+        try {
+          const options = globals.workspaces.map((ws) => {
+            return {key: ws.uuid, displayName: ws.displayName};
+          });
+          const workspaceUuid = await ctx.prompt(
+            'Choose a workspace...',
+            options,
+          );
+          const workspace = globals.workspaces.find(
+            (ws) => ws.uuid === workspaceUuid,
+          );
+          if (workspace) {
+            globals.switchWorkspace(workspace);
+          }
+        } finally {
+        }
       },
     });
   }

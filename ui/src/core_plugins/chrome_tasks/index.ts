@@ -14,7 +14,7 @@
 
 import {uuidv4} from '../../base/uuid';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {addSqlTableTab} from '../../frontend/sql_table_tab';
+import {addSqlTableTab} from '../../frontend/sql_table_tab_command';
 import {asUtid} from '../../trace_processor/sql_utils/core_types';
 import {
   BottomTabToSCSAdapter,
@@ -104,8 +104,7 @@ class ChromeTasksPlugin implements PerfettoPlugin {
       const uri = `org.chromium.ChromeTasks#thread.${utid}`;
       ctx.registerStaticTrack({
         uri,
-        trackFactory: ({trackKey}) =>
-          new ChromeTasksThreadTrack(ctx.engine, trackKey, asUtid(utid)),
+        track: new ChromeTasksThreadTrack(ctx.engine, uri, asUtid(utid)),
         groupName: `Chrome Tasks`,
         title: `${it.threadName} ${it.tid}`,
       });

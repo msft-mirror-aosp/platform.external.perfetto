@@ -18,6 +18,7 @@ import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
 import {addEphemeralTab} from '../../common/addEphemeralTab';
+import {Upid} from '../../trace_processor/sql_utils/core_types';
 import {
   getProcessInfo,
   getProcessName,
@@ -33,13 +34,33 @@ import {
 } from './sql/details/sql_ref_renderer_registry';
 import {asUpid} from '../../trace_processor/sql_utils/core_types';
 
-export function renderProcessRef(info: ProcessInfo): m.Children {
+export function showProcessDetailsMenuItem(
+  upid: Upid,
+  pid?: number,
+): m.Children {
+  return m(MenuItem, {
+    icon: Icons.ExternalLink,
+    label: 'Show process details',
+    onclick: () =>
+      addEphemeralTab(
+        'processDetails',
+        new ProcessDetailsTab({
+          engine: getEngine('ProcessDetails'),
+          upid,
+          pid,
+        }),
+      ),
+  });
+}
+
+export function processRefMenuItems(info: {
+  upid: Upid;
+  name?: string;
+  pid?: number;
+}): m.Children {
+  // We capture a copy to be able to pass it across async boundary to `onclick`.
   const name = info.name;
-  return m(
-    PopupMenu2,
-    {
-      trigger: m(Anchor, getProcessName(info)),
-    },
+  return [
     exists(name) &&
       m(MenuItem, {
         icon: Icons.Copy,
@@ -57,19 +78,17 @@ export function renderProcessRef(info: ProcessInfo): m.Children {
       label: 'Copy upid',
       onclick: () => copyToClipboard(`${info.upid}`),
     }),
-    m(MenuItem, {
-      icon: Icons.ExternalLink,
-      label: 'Show process details',
-      onclick: () =>
-        addEphemeralTab(
-          'processDetails',
-          new ProcessDetailsTab({
-            engine: getEngine('processDetails'),
-            upid: info.upid,
-            pid: info.pid,
-          }),
-        ),
-    }),
+    showProcessDetailsMenuItem(info.upid, info.pid),
+  ];
+}
+
+export function renderProcessRef(info: ProcessInfo): m.Children {
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getProcessName(info)),
+    },
+    processRefMenuItems(info),
   );
 }
 

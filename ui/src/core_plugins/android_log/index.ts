@@ -17,14 +17,13 @@ import m from 'mithril';
 import {LogFilteringCriteria, LogPanel} from './logs_panel';
 import {
   PerfettoPlugin,
+  ANDROID_LOGS_TRACK_KIND,
   PluginContextTrace,
   PluginDescriptor,
 } from '../../public';
 import {NUM} from '../../trace_processor/query_result';
 import {AndroidLogTrack} from './logs_track';
 import {exists} from '../../base/utils';
-
-export const ANDROID_LOGS_TRACK_KIND = 'AndroidLogTrack';
 
 const VERSION = 1;
 
@@ -61,7 +60,7 @@ class AndroidLog implements PerfettoPlugin {
         uri: 'perfetto.AndroidLog',
         title: 'Android logs',
         tags: {kind: ANDROID_LOGS_TRACK_KIND},
-        trackFactory: () => new AndroidLogTrack(ctx.engine),
+        track: new AndroidLogTrack(ctx.engine),
       });
     }
 

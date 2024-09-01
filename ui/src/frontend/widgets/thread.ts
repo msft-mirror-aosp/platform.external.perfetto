@@ -32,14 +32,35 @@ import {
   sqlIdRegistry,
 } from './sql/details/sql_ref_renderer_registry';
 import {asUtid} from '../../trace_processor/sql_utils/core_types';
+import {Utid} from '../../trace_processor/sql_utils/core_types';
 
-export function renderThreadRef(info: ThreadInfo): m.Children {
+export function showThreadDetailsMenuItem(
+  utid: Utid,
+  tid?: number,
+): m.Children {
+  return m(MenuItem, {
+    icon: Icons.ExternalLink,
+    label: 'Show thread details',
+    onclick: () =>
+      addEphemeralTab(
+        'threadDetails',
+        new ThreadDetailsTab({
+          engine: getEngine('ThreadDetails'),
+          utid,
+          tid,
+        }),
+      ),
+  });
+}
+
+export function threadRefMenuItems(info: {
+  utid: Utid;
+  name?: string;
+  tid?: number;
+}): m.Children {
+  // We capture a copy to be able to pass it across async boundary to `onclick`.
   const name = info.name;
-  return m(
-    PopupMenu2,
-    {
-      trigger: m(Anchor, getThreadName(info)),
-    },
+  return [
     exists(name) &&
       m(MenuItem, {
         icon: Icons.Copy,
@@ -57,19 +78,21 @@ export function renderThreadRef(info: ThreadInfo): m.Children {
       label: 'Copy utid',
       onclick: () => copyToClipboard(`${info.utid}`),
     }),
-    m(MenuItem, {
-      icon: Icons.ExternalLink,
-      label: 'Show thread details',
-      onclick: () =>
-        addEphemeralTab(
-          'threadDetails',
-          new ThreadDetailsTab({
-            engine: getEngine('ThreadDetails'),
-            utid: info.utid,
-            tid: info.tid,
-          }),
-        ),
-    }),
+    showThreadDetailsMenuItem(info.utid, info.tid),
+  ];
+}
+
+export function renderThreadRef(info: {
+  utid: Utid;
+  name?: string;
+  tid?: number;
+}): m.Children {
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getThreadName(info)),
+    },
+    threadRefMenuItems(info),
   );
 }
 

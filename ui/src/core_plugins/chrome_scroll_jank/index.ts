@@ -15,7 +15,6 @@
 import {v4 as uuidv4} from 'uuid';
 
 import {uuidv4Sql} from '../../base/uuid';
-import {DeferredAction} from '../../common/actions';
 import {generateSqlWithInternalLayout} from '../../common/internal_layout_utils';
 import {featureFlags} from '../../core/feature_flags';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
@@ -33,7 +32,7 @@ import {
 import {Engine} from '../../trace_processor/engine';
 
 import {ChromeTasksScrollJankTrack} from './chrome_tasks_scroll_jank_track';
-import {DecideTracksResult, ENABLE_CHROME_SCROLL_JANK_PLUGIN} from './common';
+import {ENABLE_CHROME_SCROLL_JANK_PLUGIN} from './common';
 import {EventLatencySliceDetailsPanel} from './event_latency_details_panel';
 import {EventLatencyTrack, JANKY_LATENCY_NAME} from './event_latency_track';
 import {ScrollDetailsPanel} from './scroll_details_panel';
@@ -48,11 +47,6 @@ const ENABLE_SCROLL_JANK_PLUGIN_V2 = featureFlags.register({
   description: 'Adds new tracks and visualizations for scroll jank.',
   defaultValue: false,
 });
-
-export type ScrollJankTrackGroup = {
-  tracks: DecideTracksResult;
-  addTrackGroup: DeferredAction;
-};
 
 class ChromeScrollJankPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -117,20 +111,19 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
     });
 
     const {upid, utid} = it;
+    const uri = 'perfetto.ChromeScrollJank';
     ctx.registerTrack({
-      uri: 'perfetto.ChromeScrollJank',
+      uri,
       title: 'Scroll Jank causes - long tasks',
       tags: {
         kind: CHROME_SCROLL_JANK_TRACK_KIND,
         upid,
         utid,
       },
-      trackFactory: ({trackKey}) => {
-        return new ChromeTasksScrollJankTrack({
-          engine: ctx.engine,
-          trackKey,
-        });
-      },
+      track: new ChromeTasksScrollJankTrack({
+        engine: ctx.engine,
+        uri,
+      }),
     });
   }
 
@@ -140,18 +133,17 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
       INCLUDE PERFETTO MODULE chrome.scroll_jank.scroll_offsets;
     `);
 
+    const uri = 'perfetto.ChromeScrollJank#toplevelScrolls';
     ctx.registerTrack({
-      uri: 'perfetto.ChromeScrollJank#toplevelScrolls',
+      uri,
       title: 'Chrome Scrolls',
       tags: {
         kind: CHROME_TOPLEVEL_SCROLLS_KIND,
       },
-      trackFactory: ({trackKey}) => {
-        return new TopLevelScrollTrack({
-          engine: ctx.engine,
-          trackKey,
-        });
-      },
+      track: new TopLevelScrollTrack({
+        engine: ctx.engine,
+        uri,
+      }),
     });
 
     ctx.registerDetailsPanel(
@@ -271,15 +263,14 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
     );
     await ctx.engine.query(tableDefSql);
 
+    const uri = 'perfetto.ChromeScrollJank#eventLatency';
     ctx.registerTrack({
-      uri: 'perfetto.ChromeScrollJank#eventLatency',
+      uri,
       title: 'Chrome Scroll Input Latencies',
       tags: {
         kind: CHROME_EVENT_LATENCY_TRACK_KIND,
       },
-      trackFactory: ({trackKey}) => {
-        return new EventLatencyTrack({engine: ctx.engine, trackKey}, baseTable);
-      },
+      track: new EventLatencyTrack({engine: ctx.engine, uri}, baseTable),
     });
 
     ctx.registerDetailsPanel(
@@ -310,18 +301,17 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
       `INCLUDE PERFETTO MODULE chrome.scroll_jank.scroll_jank_intervals`,
     );
 
+    const uri = 'perfetto.ChromeScrollJank#scrollJankV3';
     ctx.registerTrack({
-      uri: 'perfetto.ChromeScrollJank#scrollJankV3',
+      uri,
       title: 'Chrome Scroll Janks',
       tags: {
         kind: SCROLL_JANK_V3_TRACK_KIND,
       },
-      trackFactory: ({trackKey}) => {
-        return new ScrollJankV3Track({
-          engine: ctx.engine,
-          trackKey,
-        });
-      },
+      track: new ScrollJankV3Track({
+        engine: ctx.engine,
+        uri,
+      }),
     });
 
     ctx.registerDetailsPanel(
