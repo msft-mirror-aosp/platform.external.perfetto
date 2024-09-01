@@ -41,12 +41,10 @@ class ScreenshotsPlugin implements PerfettoPlugin {
       ctx.registerTrack({
         uri,
         title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new ScreenshotsTrack({
-            engine: ctx.engine,
-            trackKey,
-          });
-        },
+        track: new ScreenshotsTrack({
+          engine: ctx.engine,
+          uri,
+        }),
         tags: {
           kind: ScreenshotsTrack.kind,
         },

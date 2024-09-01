@@ -12,17 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {uuidv4} from '../../base/uuid';
-import {Actions} from '../../common/actions';
-import {SCROLLING_TRACK_GROUP} from '../../common/state';
-import {globals} from '../../frontend/globals';
 import {addSqlTableTab} from '../../frontend/sql_table_tab_command';
 import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
+import {TrackNode} from '../../public/workspace';
 import {
   PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
-  PrimaryTrackSortKey,
 } from '../../public';
 
 import {ActiveCPUCountTrack, CPUType} from './active_cpu_count';
@@ -35,17 +31,16 @@ class SchedPlugin implements PerfettoPlugin {
     ctx.registerTrack({
       uri: runnableThreadCountUri,
       title: 'Runnable thread count',
-      trackFactory: (trackCtx) =>
-        new RunnableThreadCountTrack({
-          engine: ctx.engine,
-          trackKey: trackCtx.trackKey,
-        }),
+      track: new RunnableThreadCountTrack({
+        engine: ctx.engine,
+        uri: runnableThreadCountUri,
+      }),
     });
     ctx.registerCommand({
       id: 'dev.perfetto.Sched.AddRunnableThreadCountTrackCommand',
       name: 'Add track: runnable thread count',
       callback: () =>
-        addPinnedTrack(runnableThreadCountUri, 'Runnable thread count'),
+        addPinnedTrack(ctx, runnableThreadCountUri, 'Runnable thread count'),
     });
 
     const uri = uriForActiveCPUCountTrack();
@@ -53,12 +48,12 @@ class SchedPlugin implements PerfettoPlugin {
     ctx.registerTrack({
       uri,
       title: title,
-      trackFactory: (trackCtx) => new ActiveCPUCountTrack(trackCtx, ctx.engine),
+      track: new ActiveCPUCountTrack({trackUri: uri}, ctx.engine),
     });
     ctx.registerCommand({
       id: 'dev.perfetto.Sched.AddActiveCPUCountTrackCommand',
       name: 'Add track: active CPU count',
-      callback: () => addPinnedTrack(uri, title),
+      callback: () => addPinnedTrack(ctx, uri, title),
     });
 
     for (const cpuType of Object.values(CPUType)) {
@@ -67,14 +62,13 @@ class SchedPlugin implements PerfettoPlugin {
       ctx.registerTrack({
         uri,
         title: title,
-        trackFactory: (trackCtx) =>
-          new ActiveCPUCountTrack(trackCtx, ctx.engine, cpuType),
+        track: new ActiveCPUCountTrack({trackUri: uri}, ctx.engine, cpuType),
       });
 
       ctx.registerCommand({
         id: `dev.perfetto.Sched.AddActiveCPUCountTrackCommand.${cpuType}`,
         name: `Add track: active ${cpuType} CPU count`,
-        callback: () => addPinnedTrack(uri, title),
+        callback: () => addPinnedTrack(ctx, uri, title),
       });
     }
 
@@ -100,18 +94,11 @@ function uriForActiveCPUCountTrack(cpuType?: CPUType): string {
   }
 }
 
-function addPinnedTrack(uri: string, title: string) {
-  const key = uuidv4();
-  globals.dispatchMultiple([
-    Actions.addTrack({
-      key,
-      uri,
-      name: title,
-      trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
-      trackGroup: SCROLLING_TRACK_GROUP,
-    }),
-    Actions.toggleTrackPinned({trackKey: key}),
-  ]);
+function addPinnedTrack(ctx: PluginContextTrace, uri: string, title: string) {
+  const track = new TrackNode(uri, title);
+  // Add track to the top of the stack
+  ctx.timeline.workspace.prependChild(track);
+  track.pin();
 }
 
 export const plugin: PluginDescriptor = {

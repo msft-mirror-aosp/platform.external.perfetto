@@ -22,8 +22,8 @@ import {TimeScale} from '../frontend/time_scale';
 import {HighPrecisionTimeSpan} from '../common/high_precision_time_span';
 
 export interface TrackContext {
-  // This track's key, used for making selections et al.
-  readonly trackKey: string;
+  // This track's URI, used for making selections et al.
+  readonly trackUri: string;
 }
 
 /**
@@ -69,7 +69,7 @@ export interface TrackDescriptor {
   readonly uri: string;
 
   // A factory function returning a new track instance.
-  readonly trackFactory: (ctx: TrackContext) => Track;
+  readonly track: Track;
 
   // Human readable title. Always displayed.
   readonly title: string;
