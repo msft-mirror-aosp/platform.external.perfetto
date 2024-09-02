@@ -41,8 +41,6 @@ import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {SelectionManager, LegacySelection} from '../core/selection_manager';
 import {Optional, exists} from '../base/utils';
 import {OmniboxManager} from './omnibox_manager';
-import {CallsiteInfo} from '../common/legacy_flamegraph_util';
-import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {
@@ -53,7 +51,7 @@ import {AppContext} from './app_context';
 import {TraceContext} from './trace_context';
 import {Registry} from '../base/registry';
 import {SidebarMenuItem} from '../public';
-import {Workspace} from './workspace';
+import {Workspace} from '../public/workspace';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -132,13 +130,6 @@ export interface Flow {
 export interface ThreadStateDetails {
   ts?: time;
   dur?: duration;
-}
-
-export interface CpuProfileDetails {
-  id?: number;
-  ts?: time;
-  utid?: number;
-  stack?: CallsiteInfo[];
 }
 
 export interface QuantizedLoad {
@@ -224,7 +215,6 @@ class Globals implements AppContext {
   private _connectedFlows?: Flow[] = undefined;
   private _selectedFlows?: Flow[] = undefined;
   private _visibleFlowCategories?: Map<string, boolean> = undefined;
-  private _cpuProfileDetails?: CpuProfileDetails = undefined;
   private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
@@ -244,7 +234,6 @@ class Globals implements AppContext {
   private _currentWorkspace: Workspace;
 
   omnibox = new OmniboxManager();
-  areaFlamegraphCache = new LegacyFlamegraphCache('area');
 
   scrollToTrackUri?: string;
   httpRpcState: HttpRpcState = {connected: false};
@@ -371,7 +360,6 @@ class Globals implements AppContext {
     this._selectedFlows = [];
     this._visibleFlowCategories = new Map<string, boolean>();
     this._threadStateDetails = {};
-    this._cpuProfileDetails = {};
     this.engines.clear();
     this._selectionManager.clear();
   }
@@ -500,14 +488,6 @@ class Globals implements AppContext {
 
   setMetricResult(result: MetricResult) {
     this._metricResult = result;
-  }
-
-  get cpuProfileDetails() {
-    return assertExists(this._cpuProfileDetails);
-  }
-
-  set cpuProfileDetails(click: CpuProfileDetails) {
-    this._cpuProfileDetails = assertExists(click);
   }
 
   set numQueuedQueries(value: number) {
