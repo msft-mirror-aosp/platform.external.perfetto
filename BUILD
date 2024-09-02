@@ -1719,6 +1719,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_importers_instruments_instruments",
     srcs = [
+        "src/trace_processor/importers/instruments/instruments_utils.h",
         "src/trace_processor/importers/instruments/instruments_xml_tokenizer.cc",
         "src/trace_processor/importers/instruments/instruments_xml_tokenizer.h",
         "src/trace_processor/importers/instruments/row_data_tracker.cc",
@@ -1830,8 +1831,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/winscope/android_input_event_parser.h",
         "src/trace_processor/importers/proto/winscope/protolog_message_decoder.cc",
         "src/trace_processor/importers/proto/winscope/protolog_message_decoder.h",
-        "src/trace_processor/importers/proto/winscope/protolog_messages_tracker.cc",
-        "src/trace_processor/importers/proto/winscope/protolog_messages_tracker.h",
         "src/trace_processor/importers/proto/winscope/protolog_parser.cc",
         "src/trace_processor/importers/proto/winscope/protolog_parser.h",
         "src/trace_processor/importers/proto/winscope/shell_transitions_parser.cc",
