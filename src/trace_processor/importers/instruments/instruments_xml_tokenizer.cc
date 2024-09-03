@@ -19,6 +19,7 @@
 #include <map>
 
 #include <expat.h>
+#include <stdint.h>
 
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/status_or.h"
@@ -29,6 +30,11 @@
 #include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/instruments/row_data_tracker.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
+
+#if !PERFETTO_BUILDFLAG(PERFETTO_TP_INSTRUMENTS)
+#error \
+    "This file should not be built when enable_perfetto_trace_processor_mac_instruments=false"
+#endif
 
 namespace perfetto::trace_processor::instruments_importer {
 
@@ -317,7 +323,7 @@ class InstrumentsXmlTokenizer::Impl {
         base::StatusOr<int64_t> trace_ts =
             ToTraceTimestamp(current_row_.timestamp_);
         if (!trace_ts.ok()) {
-          PERFETTO_DLOG("Skipping timestamp %ld, no clock snapshot yet",
+          PERFETTO_DLOG("Skipping timestamp %" PRId64 ", no clock snapshot yet",
                         current_row_.timestamp_);
         } else {
           context_->sorter->PushInstrumentsRow(*trace_ts,
@@ -330,7 +336,8 @@ class InstrumentsXmlTokenizer::Impl {
           PERFETTO_DCHECK(current_os_log_metadata_uint64_ref_ != nullptr);
           uint64_t clock_sync_timestamp = *current_os_log_metadata_uint64_ref_;
           if (latest_clock_sync_timestamp_ > clock_sync_timestamp) {
-            PERFETTO_DLOG("Skipping timestamp %ld, non-monotonic sync deteced",
+            PERFETTO_DLOG("Skipping timestamp %" PRId64
+                          ", non-monotonic sync deteced",
                           current_row_.timestamp_);
           } else {
             latest_clock_sync_timestamp_ = clock_sync_timestamp;
