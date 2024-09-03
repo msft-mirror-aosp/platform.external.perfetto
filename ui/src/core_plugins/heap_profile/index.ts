@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertFalse} from '../../base/logging';
 import {Monitor} from '../../base/monitor';
 import {
@@ -22,17 +21,13 @@ import {
   ProfileType,
 } from '../../core/selection_manager';
 import {Timestamp} from '../../frontend/widgets/timestamp';
-import {
-  Engine,
-  HEAP_PROFILE_TRACK_KIND,
-  LegacyDetailsPanel,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Engine} from '../../trace_processor/engine';
+import {HEAP_PROFILE_TRACK_KIND} from '../../public/track_kinds';
+import {LegacyDetailsPanel} from '../../public/track';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM} from '../../trace_processor/query_result';
 import {DetailsShell} from '../../widgets/details_shell';
-
 import {HeapProfileTrack} from './heap_profile_track';
 import {
   QueryFlamegraph,
@@ -51,9 +46,11 @@ import {globals} from '../../frontend/globals';
 import {Modal} from '../../widgets/modal';
 import {Router} from '../../frontend/router';
 import {Actions} from '../../common/actions';
+import {getOrCreateGroupForProcess} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
 
 class HeapProfilePlugin implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const result = await ctx.engine.query(`
       select distinct upid from heap_profile_allocation
       union
@@ -62,9 +59,10 @@ class HeapProfilePlugin implements PerfettoPlugin {
     for (const it = result.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
       const uri = `/process_${upid}/heap_profile`;
+      const displayName = 'Heap Profile';
       ctx.registerTrack({
         uri,
-        title: 'Heap Profile',
+        title: displayName,
         tags: {
           kind: HEAP_PROFILE_TRACK_KIND,
           upid,
@@ -77,6 +75,10 @@ class HeapProfilePlugin implements PerfettoPlugin {
           upid,
         ),
       });
+      const group = getOrCreateGroupForProcess(ctx.timeline.workspace, upid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = -30;
+      group.insertChildInOrder(track);
     }
     const it = await ctx.engine.query(`
       select value from stats

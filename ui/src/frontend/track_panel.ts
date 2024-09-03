@@ -14,15 +14,13 @@
 
 import {hex} from 'color-convert';
 import m from 'mithril';
-
 import {currentTargetOffset} from '../base/dom_utils';
 import {Icons} from '../base/semantic_icons';
 import {TimeSpan} from '../base/time';
 import {Actions} from '../common/actions';
-import {TrackRenderer} from '../common/track_manager';
+import {TrackRenderer} from '../core/track_manager';
 import {raf} from '../core/raf_scheduler';
-import {Track, TrackTags} from '../public';
-
+import {Track, TrackTags} from '../public/track';
 import {checkerboard} from './checkerboard';
 import {
   SELECTION_FILL_COLOR,
@@ -31,18 +29,18 @@ import {
 } from './css_constants';
 import {globals} from './globals';
 import {generateTicks, TickType, getMaxMajorTicks} from './gridline_helper';
-import {Size, VerticalBounds} from '../base/geom';
+import {Size2D, VerticalBounds} from '../base/geom';
 import {Panel} from './panel_container';
 import {drawVerticalLineAtTime} from './vertical_line_helper';
 import {classNames} from '../base/classnames';
 import {Button, ButtonBar} from '../widgets/button';
 import {Popup, PopupPosition} from '../widgets/popup';
-import {canvasClip} from '../common/canvas_utils';
-import {PxSpan, TimeScale} from './time_scale';
+import {canvasClip} from '../base/canvas_utils';
+import {TimeScale} from '../base/time_scale';
 import {getLegacySelection} from '../common/state';
 import {exists, Optional} from '../base/utils';
 import {Intent} from '../widgets/common';
-import {TrackRenderContext} from '../public/tracks';
+import {TrackRenderContext} from '../public/track';
 import {calculateResolution} from '../common/resolution';
 import {featureFlags} from '../core/feature_flags';
 import {Tree, TreeNode} from '../widgets/tree';
@@ -338,10 +336,10 @@ export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
 
   private getTargetTimeScale(event: MouseEvent): TimeScale {
     const timeWindow = globals.timeline.visibleWindow;
-    return new TimeScale(
-      timeWindow,
-      new PxSpan(0, this.getTargetContainerSize(event)),
-    );
+    return new TimeScale(timeWindow, {
+      left: 0,
+      right: this.getTargetContainerSize(event),
+    });
   }
 
   view(node: m.CVnode<TrackContentAttrs>) {
@@ -547,7 +545,7 @@ export class TrackPanel implements Panel {
   highlightIfTrackSelected(
     ctx: CanvasRenderingContext2D,
     timescale: TimeScale,
-    size: Size,
+    size: Size2D,
   ) {
     const selection = globals.state.selection;
     if (selection.kind !== 'area') {
@@ -565,7 +563,7 @@ export class TrackPanel implements Panel {
     }
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
     const trackSize = {...size, width: size.width - TRACK_SHELL_WIDTH};
 
     ctx.save();
@@ -574,10 +572,10 @@ export class TrackPanel implements Panel {
 
     const visibleWindow = globals.timeline.visibleWindow;
     const timespan = visibleWindow.toTimeSpan();
-    const timescale = new TimeScale(
-      visibleWindow,
-      new PxSpan(0, trackSize.width),
-    );
+    const timescale = new TimeScale(visibleWindow, {
+      left: 0,
+      right: trackSize.width,
+    });
     drawGridLines(ctx, timespan, timescale, trackSize);
 
     const track = this.attrs.trackRenderer;
@@ -621,7 +619,7 @@ export function drawGridLines(
   ctx: CanvasRenderingContext2D,
   timespan: TimeSpan,
   timescale: TimeScale,
-  size: Size,
+  size: Size2D,
 ): void {
   ctx.strokeStyle = TRACK_BORDER_COLOR;
   ctx.lineWidth = 1;
@@ -644,7 +642,7 @@ export function drawGridLines(
 export function renderHoveredCursorVertical(
   ctx: CanvasRenderingContext2D,
   timescale: TimeScale,
-  size: Size,
+  size: Size2D,
 ) {
   if (globals.state.hoverCursorTimestamp !== -1n) {
     drawVerticalLineAtTime(
@@ -660,7 +658,7 @@ export function renderHoveredCursorVertical(
 export function renderHoveredNoteVertical(
   ctx: CanvasRenderingContext2D,
   timescale: TimeScale,
-  size: Size,
+  size: Size2D,
 ) {
   if (globals.state.hoveredNoteTimestamp !== -1n) {
     drawVerticalLineAtTime(
@@ -676,7 +674,7 @@ export function renderHoveredNoteVertical(
 export function renderWakeupVertical(
   ctx: CanvasRenderingContext2D,
   timescale: TimeScale,
-  size: Size,
+  size: Size2D,
 ) {
   const currentSelection = getLegacySelection(globals.state);
   if (currentSelection !== null) {
@@ -698,7 +696,7 @@ export function renderWakeupVertical(
 export function renderNoteVerticals(
   ctx: CanvasRenderingContext2D,
   timescale: TimeScale,
-  size: Size,
+  size: Size2D,
 ) {
   // All marked areas should have semi-transparent vertical lines
   // marking the start and end.

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {DetailsPanel, LegacyDetailsPanel, TabDescriptor} from '../public';
+import {DetailsPanel, LegacyDetailsPanel} from '../public/track';
+import {TabDescriptor} from '../public/tab';
 
 export interface ResolvedTab {
   uri: string;
@@ -23,7 +24,7 @@ export interface ResolvedTab {
  * Stores tab & current selection section registries.
  * Keeps track of tab lifecycles.
  */
-export class TabManager implements Disposable {
+export class TabManagerImpl implements Disposable {
   private _registry = new Map<string, TabDescriptor>();
   private _defaultTabs = new Set<string>();
   private _legacyDetailsPanelRegistry = new Set<LegacyDetailsPanel>();
