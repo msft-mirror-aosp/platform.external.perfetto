@@ -353,6 +353,12 @@ namespace perfetto::trace_processor::stats {
   F(winscope_protolog_missing_interned_stacktrace_parse_errors,                \
                                           kSingle,  kInfo,     kAnalysis,      \
       "Failed to find interned ProtoLog stacktrace."),                         \
+  F(winscope_protolog_message_decoding_failed,                                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "Failed to decode ProtoLog message."),                                   \
+  F(winscope_protolog_view_config_collision,                                   \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "Got a viewer config collision!"),                                       \
   F(winscope_viewcapture_parse_errors,                                         \
                                           kSingle,  kInfo,     kAnalysis,      \
       "ViewCapture packet has unknown fields, which results in some "          \
@@ -379,7 +385,12 @@ namespace perfetto::trace_processor::stats {
   F(mali_unknown_mcu_state_id,            kSingle,  kError,   kAnalysis,       \
       "An invalid Mali GPU MCU state ID was detected."),                       \
   F(pixel_modem_negative_timestamp,       kSingle,  kError,   kAnalysis,       \
-      "A negative timestamp was received from a Pixel modem event.")
+      "A negative timestamp was received from a Pixel modem event."),          \
+  F(legacy_v8_cpu_profile_invalid_callsite, kSingle,  kInfo,  kAnalysis,       \
+      "Indicates a callsite in legacy v8 CPU profiling is invalid."),          \
+  F(legacy_v8_cpu_profile_invalid_sample, kSingle,  kError,  kAnalysis,        \
+      "Indicates a sample in legacy v8 CPU profile is invalid. This will "     \
+      "cause CPU samples to be missing in the UI.")
 // clang-format on
 
 enum Type {

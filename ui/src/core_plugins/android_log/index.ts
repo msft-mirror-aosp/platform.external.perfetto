@@ -13,17 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {LogFilteringCriteria, LogPanel} from './logs_panel';
-import {
-  PerfettoPlugin,
-  ANDROID_LOGS_TRACK_KIND,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {ANDROID_LOGS_TRACK_KIND} from '../../public/track_kinds';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM} from '../../trace_processor/query_result';
 import {AndroidLogTrack} from './logs_track';
 import {exists} from '../../base/utils';
+import {TrackNode} from '../../public/workspace';
 
 const VERSION = 1;
 
@@ -44,7 +41,7 @@ interface AndroidLogPluginState {
 }
 
 class AndroidLog implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const store = ctx.mountStore<AndroidLogPluginState>((init) => {
       return exists(init) && (init as {version: unknown}).version === VERSION
         ? (init as AndroidLogPluginState)
@@ -55,13 +52,16 @@ class AndroidLog implements PerfettoPlugin {
       `select count(1) as cnt from android_logs`,
     );
     const logCount = result.firstRow({cnt: NUM}).cnt;
+    const uri = 'perfetto.AndroidLog';
+    const title = 'Android logs';
     if (logCount > 0) {
-      ctx.registerStaticTrack({
-        uri: 'perfetto.AndroidLog',
-        title: 'Android logs',
+      ctx.registerTrack({
+        uri,
+        title,
         tags: {kind: ANDROID_LOGS_TRACK_KIND},
         track: new AndroidLogTrack(ctx.engine),
       });
+      ctx.timeline.workspace.insertChildInOrder(new TrackNode(uri, title));
     }
 
     const androidLogsTabUri = 'perfetto.AndroidLog#tab';

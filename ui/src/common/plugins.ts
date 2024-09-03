@@ -15,39 +15,32 @@
 import {Registry} from '../base/registry';
 import {TimeSpan, time} from '../base/time';
 import {globals} from '../frontend/globals';
-import {
-  Command,
-  LegacyDetailsPanel,
-  MetricVisualisation,
-  Migrate,
-  PerfettoPlugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-  Store,
-  TabDescriptor,
-  TrackDescriptor,
-  TrackRef,
-  SidebarMenuItem,
-} from '../public';
+import {LegacyDetailsPanel, TrackDescriptor} from '../public/track';
+import {Trace} from '../public/trace';
+import {App} from '../public/app';
+import {SidebarMenuItem} from '../public/sidebar';
+import {TabDescriptor} from '../public/tab';
+import {MetricVisualisation} from '../public/plugin';
+import {PerfettoPlugin, PluginDescriptor} from '../public/plugin';
+import {Command} from '../public/command';
 import {EngineBase, Engine} from '../trace_processor/engine';
-import {Actions} from './actions';
 import {addQueryResultsTab} from '../frontend/query_result_tab';
 import {Flag, featureFlags} from '../core/feature_flags';
 import {assertExists} from '../base/logging';
 import {raf} from '../core/raf_scheduler';
 import {defaultPlugins} from '../core/default_plugins';
-import {PromptOption} from '../frontend/omnibox_manager';
+import {PromptOption} from '../public/omnibox';
 import {horizontalScrollToTs} from '../frontend/scroll_helper';
 import {DisposableStack} from '../base/disposable_stack';
 import {TraceContext} from '../frontend/trace_context';
-import {Workspace} from '../frontend/workspace';
+import {Workspace} from '../public/workspace';
+import {Migrate, Store} from '../base/store';
 
 // Every plugin gets its own PluginContext. This is how we keep track
 // what each plugin is doing and how we can blame issues on particular
 // plugins.
 // The PluginContext exists for the whole duration a plugin is active.
-export class PluginContextImpl implements PluginContext, Disposable {
+export class PluginContextImpl implements App, Disposable {
   private trash = new DisposableStack();
   private alive = true;
 
@@ -80,13 +73,13 @@ export class PluginContextImpl implements PluginContext, Disposable {
 // related resources, such as the engine and the store.
 // The PluginContextTrace exists for the whole duration a plugin is active AND a
 // trace is loaded.
-class PluginContextTraceImpl implements PluginContextTrace, Disposable {
+class PluginContextTraceImpl implements Trace, Disposable {
   private trash = new DisposableStack();
   private alive = true;
   readonly engine: Engine;
 
   constructor(
-    private ctx: PluginContext,
+    private ctx: App,
     engine: EngineBase,
   ) {
     const engineProxy = engine.getProxy(ctx.pluginId);
@@ -120,19 +113,6 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     this.trash.use(dispose);
   }
 
-  addDefaultTrack(track: TrackRef): void {
-    // Silently ignore if context is dead.
-    if (!this.alive) return;
-
-    const dispose = globals.trackManager.addPotentialTrack(track);
-    this.trash.use(dispose);
-  }
-
-  registerStaticTrack(track: TrackDescriptor & TrackRef): void {
-    this.registerTrack(track);
-    this.addDefaultTrack(track);
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runCommand(id: string, ...args: any[]): any {
     return this.ctx.runCommand(id, ...args);
@@ -164,11 +144,11 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     },
 
     showTab(uri: string): void {
-      globals.dispatch(Actions.showTab({uri}));
+      globals.tabManager.showTab(uri);
     },
 
     hideTab(uri: string): void {
-      globals.dispatch(Actions.hideTab({uri}));
+      globals.tabManager.hideTab(uri);
     },
   };
 
@@ -232,7 +212,7 @@ export class PluginRegistry extends Registry<PluginDescriptor> {
 
 export interface PluginDetails {
   plugin: PerfettoPlugin;
-  context: PluginContext & Disposable;
+  context: App & Disposable;
   traceContext?: PluginContextTraceImpl;
   previousOnTraceLoadTimeMillis?: number;
 }

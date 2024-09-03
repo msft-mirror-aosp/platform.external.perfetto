@@ -13,13 +13,10 @@
 // limitations under the License.
 
 import {Optional} from '../../base/utils';
-import {GroupNode, TrackNode} from '../../frontend/workspace';
-import {
-  PerfettoPlugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {GroupNode, TrackNode} from '../../public/workspace';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
 const PLUGIN_ID = 'dev.perfetto.RestorePinnedTrack';
 const SAVED_TRACKS_KEY = `${PLUGIN_ID}#savedPerfettoTracks`;
@@ -32,11 +29,11 @@ const SAVED_TRACKS_KEY = `${PLUGIN_ID}#savedPerfettoTracks`;
  * without numbers.
  */
 class RestorePinnedTrack implements PerfettoPlugin {
-  onActivate(_ctx: PluginContext): void {}
+  onActivate(_ctx: App): void {}
 
-  private ctx!: PluginContextTrace;
+  private ctx!: Trace;
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     this.ctx = ctx;
     ctx.registerCommand({
       id: `${PLUGIN_ID}#save`,
