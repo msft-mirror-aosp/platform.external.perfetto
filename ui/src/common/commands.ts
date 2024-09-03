@@ -23,6 +23,14 @@ export interface CommandWithMatchInfo extends Command {
 export class CommandManager {
   private readonly registry = new Registry<Command>((cmd) => cmd.id);
 
+  getCommand(commandId: string): Command {
+    return this.registry.get(commandId);
+  }
+
+  hasCommand(commandId: string): boolean {
+    return this.registry.has(commandId);
+  }
+
   get commands(): Command[] {
     return Array.from(this.registry.values());
   }

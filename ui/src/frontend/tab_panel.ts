@@ -13,12 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Gate} from '../base/mithril_utils';
 import {Actions} from '../common/actions';
 import {getLegacySelection} from '../common/state';
 import {EmptyState} from '../widgets/empty_state';
-
 import {
   DragHandle,
   Tab,
@@ -148,11 +146,10 @@ export class TabPanel implements m.ClassComponent {
 
     // Show single selection panels if they are registered
     if (currentSelection.kind === 'single') {
-      const trackKey = currentSelection.trackKey;
-      const uri = globals.state.tracks[trackKey]?.uri;
+      const uri = currentSelection.trackUri;
 
       if (uri) {
-        const trackDesc = globals.trackManager.resolveTrackInfo(uri);
+        const trackDesc = globals.trackManager.getTrack(uri);
         const panel = trackDesc?.detailsPanel;
         if (panel) {
           return {

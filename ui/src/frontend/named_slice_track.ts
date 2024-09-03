@@ -15,7 +15,6 @@
 import {getColorForSlice} from '../core/colorizer';
 import {Slice} from '../public';
 import {STR_NULL} from '../trace_processor/query_result';
-
 import {
   BASE_ROW,
   BaseSliceTrack,
@@ -72,7 +71,7 @@ export abstract class NamedSliceTrack<
       {
         kind: 'SLICE',
         id: args.slice.id,
-        trackKey: this.trackKey,
+        trackUri: this.uri,
         table: 'slice',
       },
       {

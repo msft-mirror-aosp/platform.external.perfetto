@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {Hotkey, Platform} from '../base/hotkeys';
 import {isString} from '../base/object_utils';
@@ -37,14 +36,13 @@ import {
 } from '../widgets/multiselect';
 import {Popup, PopupPosition} from '../widgets/popup';
 import {Portal} from '../widgets/portal';
-import {FilterableSelect, Select} from '../widgets/select';
+import {Select} from '../widgets/select';
 import {Spinner} from '../widgets/spinner';
 import {Switch} from '../widgets/switch';
 import {TextInput} from '../widgets/text_input';
 import {MultiParagraphText, TextParagraph} from '../widgets/text_paragraph';
 import {LazyTreeNode, Tree, TreeNode} from '../widgets/tree';
 import {VegaView} from '../widgets/vega_view';
-
 import {createPage} from './pages';
 import {PopupMenuButton} from './popup_menu';
 import {TableShowcase} from './tables/table_showcase';
@@ -722,14 +720,6 @@ export const WidgetsPage = createPage({
         initialOpts: {
           disabled: false,
         },
-      }),
-      m(WidgetShowcase, {
-        label: 'Filterable Select',
-        renderWidget: () =>
-          m(FilterableSelect, {
-            values: ['foo', 'bar', 'baz'],
-            onSelected: () => {},
-          }),
       }),
       m(WidgetShowcase, {
         label: 'Empty State',

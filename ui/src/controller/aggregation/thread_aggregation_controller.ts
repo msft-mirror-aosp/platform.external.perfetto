@@ -20,7 +20,6 @@ import {THREAD_STATE_TRACK_KIND} from '../../core/track_kinds';
 import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
-
 import {AggregationController} from './aggregation_controller';
 
 export class ThreadAggregationController extends AggregationController {
@@ -28,20 +27,16 @@ export class ThreadAggregationController extends AggregationController {
 
   setThreadStateUtids(tracks: string[]) {
     this.utids = [];
-    for (const trackId of tracks) {
-      const track = globals.state.tracks[trackId];
-      // Track will be undefined for track groups.
-      if (track?.uri) {
-        const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.tags?.kind === THREAD_STATE_TRACK_KIND) {
-          exists(trackInfo.tags.utid) && this.utids.push(trackInfo.tags.utid);
-        }
+    for (const trackUri of tracks) {
+      const trackInfo = globals.trackManager.getTrack(trackUri);
+      if (trackInfo?.tags?.kind === THREAD_STATE_TRACK_KIND) {
+        exists(trackInfo.tags.utid) && this.utids.push(trackInfo.tags.utid);
       }
     }
   }
 
   async createAggregateView(engine: Engine, area: Area) {
-    this.setThreadStateUtids(area.tracks);
+    this.setThreadStateUtids(area.trackUris);
     if (this.utids === undefined || this.utids.length === 0) return false;
 
     await engine.query(`
@@ -68,7 +63,7 @@ export class ThreadAggregationController extends AggregationController {
   }
 
   async getExtra(engine: Engine, area: Area): Promise<ThreadStateExtra | void> {
-    this.setThreadStateUtids(area.tracks);
+    this.setThreadStateUtids(area.trackUris);
     if (this.utids === undefined || this.utids.length === 0) return;
 
     const query = `

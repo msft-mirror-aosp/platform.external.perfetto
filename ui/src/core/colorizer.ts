@@ -13,10 +13,8 @@
 // limitations under the License.
 
 import {hsl} from 'color-convert';
-
 import {hash} from './hash';
 import {featureFlags} from './feature_flags';
-
 import {Color, HSLColor, HSLuvColor} from './color';
 
 // 128 would provide equal weighting between dark and light text.
@@ -238,13 +236,10 @@ export function colorForFtrace(name: string): ColorScheme {
   return materialColorScheme(name);
 }
 
-export function colorForSample(callsiteId: number, isHovered: boolean): string {
-  let colorScheme;
+export function getColorForSample(callsiteId: number): ColorScheme {
   if (USE_CONSISTENT_COLORS.get()) {
-    colorScheme = materialColorScheme(String(callsiteId));
+    return materialColorScheme(String(callsiteId));
   } else {
-    colorScheme = proceduralColorScheme(String(callsiteId));
+    return proceduralColorScheme(String(callsiteId));
   }
-
-  return isHovered ? colorScheme.variant.cssString : colorScheme.base.cssString;
 }

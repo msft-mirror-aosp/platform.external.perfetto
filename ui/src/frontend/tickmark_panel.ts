@@ -13,14 +13,13 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {getMaxMajorTicks, generateTicks, TickType} from './gridline_helper';
 import {Size} from '../base/geom';
 import {Panel} from './panel_container';
 import {PxSpan, TimeScale} from './time_scale';
-import {canvasClip} from '../common/canvas_utils';
+import {canvasClip} from '../base/canvas_utils';
 
 // This is used to display the summary of search results.
 export class TickmarkPanel implements Panel {

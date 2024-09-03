@@ -24,7 +24,6 @@ import {
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
 } from '../../frontend/tracks/custom_sql_table_slice_track';
-
 import {PageLoadDetailsPanel} from './page_load_details_panel';
 import {StartupDetailsPanel} from './startup_details_panel';
 import {WebContentInteractionPanel} from './web_content_interaction_details_panel';
@@ -139,7 +138,7 @@ export class CriticalUserInteractionTrack extends CustomSqlTableSliceTrack {
         sqlTableName: this.tableName,
         start: args.slice.ts,
         duration: args.slice.dur,
-        trackKey: this.trackKey,
+        trackUri: this.uri,
         detailsPanelConfig: {
           kind: detailsPanelConfig.kind,
           config: detailsPanelConfig.config,

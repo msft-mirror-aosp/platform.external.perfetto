@@ -13,12 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {findRef} from '../base/dom_utils';
 import {assertExists, assertTrue} from '../base/logging';
 import {Monitor} from '../base/monitor';
-import {cropText} from '../base/string_utils';
-
 import {Button, ButtonBar} from './button';
 import {EmptyState} from './empty_state';
 import {Popup, PopupPosition} from './popup';
@@ -28,7 +25,7 @@ import {Spinner} from './spinner';
 import {TagInput} from './tag_input';
 import {SegmentedButtons} from './segmented_buttons';
 
-const LABEL_FONT_STYLE = '12px Roboto Mono';
+const LABEL_FONT_STYLE = '12px Roboto';
 const NODE_HEIGHT = 20;
 const MIN_PIXEL_DISPLAYED = 3;
 const FILTER_COMMON_TEXT = `
@@ -89,6 +86,7 @@ export interface FlamegraphQueryData {
     readonly name: string;
     readonly selfValue: number;
     readonly cumulativeValue: number;
+    readonly parentCumulativeValue?: number;
     readonly properties: ReadonlyMap<string, string>;
     readonly xStart: number;
     readonly xEnd: number;
@@ -456,7 +454,7 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
       if (widthNoPadding >= LABEL_MIN_WIDTH_FOR_TEXT_PX) {
         ctx.fillStyle = 'black';
         ctx.fillText(
-          cropText(name, this.labelCharWidth, widthNoPadding),
+          name.substring(0, widthNoPadding / this.labelCharWidth),
           x + LABEL_PADDING_PX,
           y + (NODE_HEIGHT - 1) / 2,
           widthNoPadding,
@@ -592,7 +590,13 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
       );
     }
     const {queryIdx} = node.source;
-    const {name, cumulativeValue, selfValue, properties} = nodes[queryIdx];
+    const {
+      name,
+      cumulativeValue,
+      selfValue,
+      parentCumulativeValue,
+      properties,
+    } = nodes[queryIdx];
     const filterButtonClick = (filter: string) => {
       this.rawFilters = addFilter(this.rawFilters, filter);
       this.attrs.onFiltersChanged(
@@ -601,23 +605,45 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
       this.tooltipPos = undefined;
       scheduleFullRedraw();
     };
+
     const percent = displayPercentage(
       cumulativeValue,
       unfilteredCumulativeValue,
     );
     const selfPercent = displayPercentage(selfValue, unfilteredCumulativeValue);
+
+    let percentText = `all: ${percent}`;
+    let selfPercentText = `all: ${selfPercent}`;
+    if (parentCumulativeValue !== undefined) {
+      const parentPercent = displayPercentage(
+        cumulativeValue,
+        parentCumulativeValue,
+      );
+      percentText += `, parent: ${parentPercent}`;
+      const parentSelfPercent = displayPercentage(
+        selfValue,
+        parentCumulativeValue,
+      );
+      selfPercentText += `, parent: ${parentSelfPercent}`;
+    }
     return m(
       'div',
       m('.tooltip-bold-text', name),
       m(
         '.tooltip-text-line',
         m('.tooltip-bold-text', 'Cumulative:'),
-        m('.tooltip-text', `${displaySize(cumulativeValue, unit)}, ${percent}`),
+        m(
+          '.tooltip-text',
+          `${displaySize(cumulativeValue, unit)} (${percentText})`,
+        ),
       ),
       m(
         '.tooltip-text-line',
         m('.tooltip-bold-text', 'Self:'),
-        m('.tooltip-text', `${displaySize(selfValue, unit)}, ${selfPercent}`),
+        m(
+          '.tooltip-text',
+          `${displaySize(selfValue, unit)} (${selfPercentText})`,
+        ),
       ),
       Array.from(properties, ([key, value]) => {
         return m(
@@ -639,31 +665,31 @@ export class Flamegraph implements m.ClassComponent<FlamegraphAttrs> {
         m(Button, {
           label: 'Show Stack',
           onclick: () => {
-            filterButtonClick(`Show Stack: ${name}`);
+            filterButtonClick(`Show Stack: ^${name}$`);
           },
         }),
         m(Button, {
           label: 'Hide Stack',
           onclick: () => {
-            filterButtonClick(`Hide Stack: ${name}`);
+            filterButtonClick(`Hide Stack: ^${name}$`);
           },
         }),
         m(Button, {
           label: 'Hide Frame',
           onclick: () => {
-            filterButtonClick(`Hide Frame: ${name}`);
+            filterButtonClick(`Hide Frame: ^${name}$`);
           },
         }),
         m(Button, {
           label: 'Show From Frame',
           onclick: () => {
-            filterButtonClick(`Show From Frame: ${name}`);
+            filterButtonClick(`Show From Frame: ^${name}$`);
           },
         }),
         m(Button, {
           label: 'Pivot',
           onclick: () => {
-            filterButtonClick(`Pivot: ${name}`);
+            filterButtonClick(`Pivot: ^${name}$`);
           },
         }),
       ),

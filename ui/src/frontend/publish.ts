@@ -20,9 +20,7 @@ import {CurrentSearchResults} from '../common/search_data';
 import {raf} from '../core/raf_scheduler';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {getLegacySelection} from '../common/state';
-
 import {
-  CpuProfileDetails,
   Flow,
   globals,
   QuantizedLoad,
@@ -71,11 +69,6 @@ export function publishSelectedFlows(selectedFlows: Flow[]) {
 export function publishHttpRpcState(httpRpcState: HttpRpcState) {
   globals.httpRpcState = httpRpcState;
   raf.scheduleFullRedraw();
-}
-
-export function publishCpuProfileDetails(details: CpuProfileDetails) {
-  globals.cpuProfileDetails = details;
-  globals.publishRedraw();
 }
 
 export function publishHasFtrace(value: boolean): void {
@@ -143,9 +136,9 @@ export function publishThreads(data: ThreadDesc[]) {
   globals.publishRedraw();
 }
 
-export function publishSliceDetails(click: SliceDetails) {
-  globals.sliceDetails = click;
-  const id = click.id;
+export function publishSliceDetails(sliceDetails: SliceDetails) {
+  globals.sliceDetails = sliceDetails;
+  const id = sliceDetails.id;
   if (id !== undefined && id === globals.state.pendingScrollId) {
     findCurrentSelection();
     globals.dispatch(Actions.clearPendingScrollId({id: undefined}));

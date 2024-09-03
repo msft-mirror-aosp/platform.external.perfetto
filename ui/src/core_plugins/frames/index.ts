@@ -16,14 +16,19 @@ import {
   ACTUAL_FRAMES_SLICE_TRACK_KIND,
   EXPECTED_FRAMES_SLICE_TRACK_KIND,
 } from '../../public';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {
+  PerfettoPlugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
+import {getOrCreateGroupForProcess} from '../../public/standard_groups';
 import {getTrackName} from '../../public/utils';
+import {TrackNode} from '../../public/workspace';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../../trace_processor/query_result';
-
 import {ActualFramesTrack} from './actual_frames_track';
 import {ExpectedFramesTrack} from './expected_frames_track';
 
-class FramesPlugin implements Plugin {
+class FramesPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     this.addExpectedFrames(ctx);
     this.addActualFrames(ctx);
@@ -70,18 +75,21 @@ class FramesPlugin implements Plugin {
         kind: 'ExpectedFrames',
       });
 
+      const uri = `/process_${upid}/expected_frames`;
       ctx.registerTrack({
-        uri: `/process_${upid}/expected_frames`,
+        uri,
         title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new ExpectedFramesTrack(engine, maxDepth, trackKey, trackIds);
-        },
+        track: new ExpectedFramesTrack(engine, maxDepth, uri, trackIds),
         tags: {
           trackIds,
           upid,
           kind: EXPECTED_FRAMES_SLICE_TRACK_KIND,
         },
       });
+      const group = getOrCreateGroupForProcess(ctx.timeline.workspace, upid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = -50;
+      group.insertChildInOrder(track);
     }
   }
 
@@ -131,18 +139,21 @@ class FramesPlugin implements Plugin {
         kind,
       });
 
+      const uri = `/process_${upid}/actual_frames`;
       ctx.registerTrack({
-        uri: `/process_${upid}/actual_frames`,
+        uri,
         title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new ActualFramesTrack(engine, maxDepth, trackKey, trackIds);
-        },
+        track: new ActualFramesTrack(engine, maxDepth, uri, trackIds),
         tags: {
           upid,
           trackIds,
           kind: ACTUAL_FRAMES_SLICE_TRACK_KIND,
         },
       });
+      const group = getOrCreateGroupForProcess(ctx.timeline.workspace, upid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = -50;
+      group.insertChildInOrder(track);
     }
   }
 }

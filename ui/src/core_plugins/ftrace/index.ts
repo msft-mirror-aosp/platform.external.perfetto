@@ -13,19 +13,19 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {FtraceExplorer, FtraceExplorerCache} from './ftrace_explorer';
 import {
   Engine,
-  Plugin,
+  PerfettoPlugin,
   PluginContextTrace,
   PluginDescriptor,
 } from '../../public';
 import {NUM} from '../../trace_processor/query_result';
-
 import {FtraceFilter, FtracePluginState} from './common';
 import {FtraceRawTrack} from './ftrace_track';
 import {DisposableStack} from '../../base/disposable_stack';
+import {GroupNode, TrackNode} from '../../public/workspace';
+import {globals} from '../../frontend/globals';
 
 const VERSION = 1;
 
@@ -36,7 +36,7 @@ const DEFAULT_STATE: FtracePluginState = {
   },
 };
 
-class FtraceRawPlugin implements Plugin {
+class FtraceRawPlugin implements PerfettoPlugin {
   private trash = new DisposableStack();
 
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
@@ -61,20 +61,28 @@ class FtraceRawPlugin implements Plugin {
     this.trash.use(filterStore);
 
     const cpus = await this.lookupCpuCores(ctx.engine);
+    const group = new GroupNode('Ftrace Events');
+    group.sortOrder = -5;
+
     for (const cpuNum of cpus) {
       const uri = `/ftrace/cpu${cpuNum}`;
+      const displayName = `Ftrace Track for CPU ${cpuNum}`;
 
-      ctx.registerStaticTrack({
+      ctx.registerTrack({
         uri,
-        groupName: 'Ftrace Events',
-        title: `Ftrace Track for CPU ${cpuNum}`,
+        title: displayName,
         tags: {
           cpu: cpuNum,
+          groupName: 'Ftrace Events',
         },
-        trackFactory: () => {
-          return new FtraceRawTrack(ctx.engine, cpuNum, filterStore);
-        },
+        track: new FtraceRawTrack(ctx.engine, cpuNum, filterStore),
       });
+
+      group.insertChildInOrder(new TrackNode(uri, displayName));
+    }
+
+    if (group.children.length) {
+      globals.workspace.insertChildInOrder(group);
     }
 
     const cache: FtraceExplorerCache = {

@@ -17,21 +17,16 @@ import {Area, Sorting} from '../../common/state';
 import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../../core/track_kinds';
 import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
-
 import {AggregationController} from './aggregation_controller';
 
 export class FrameAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     const selectedSqlTrackIds: number[] = [];
-    for (const trackKey of area.tracks) {
-      const track = globals.state.tracks[trackKey];
-      // Track will be undefined for track groups.
-      if (track?.uri !== undefined) {
-        const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.tags?.kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
-          trackInfo.tags.trackIds &&
-            selectedSqlTrackIds.push(...trackInfo.tags.trackIds);
-        }
+    for (const trackUri of area.trackUris) {
+      const trackInfo = globals.trackManager.getTrack(trackUri);
+      if (trackInfo?.tags?.kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
+        trackInfo.tags.trackIds &&
+          selectedSqlTrackIds.push(...trackInfo.tags.trackIds);
       }
     }
     if (selectedSqlTrackIds.length === 0) return false;

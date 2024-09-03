@@ -13,10 +13,8 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Time, time, toISODateOnly} from '../base/time';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
-
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {
@@ -28,11 +26,12 @@ import {
 import {Size} from '../base/geom';
 import {Panel} from './panel_container';
 import {PxSpan, TimeScale} from './time_scale';
-import {canvasClip} from '../common/canvas_utils';
+import {canvasClip} from '../base/canvas_utils';
 
 export class TimeAxisPanel implements Panel {
   readonly kind = 'panel';
   readonly selectable = false;
+  readonly id = 'time-axis-panel';
 
   render(): m.Children {
     return m('.time-axis-panel');

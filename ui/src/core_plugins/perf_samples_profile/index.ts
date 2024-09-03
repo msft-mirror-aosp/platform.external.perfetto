@@ -13,19 +13,17 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {TrackData} from '../../common/track_data';
 import {
   Engine,
   LegacyDetailsPanel,
   PERF_SAMPLES_PROFILE_TRACK_KIND,
 } from '../../public';
-import {LegacyFlamegraphCache} from '../../core/legacy_flamegraph_cache';
 import {
-  LegacyFlamegraphDetailsPanel,
-  profileType,
-} from '../../frontend/legacy_flamegraph_panel';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+  PerfettoPlugin,
+  PluginContextTrace,
+  PluginDescriptor,
+} from '../../public';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {
   LegacySelection,
@@ -34,7 +32,6 @@ import {
 import {
   QueryFlamegraph,
   QueryFlamegraphAttrs,
-  USE_NEW_FLAMEGRAPH_IMPL,
   metricsFromTableOrSubquery,
 } from '../../core/query_flamegraph';
 import {Monitor} from '../../base/monitor';
@@ -46,12 +43,17 @@ import {
   ThreadPerfSamplesProfileTrack,
 } from './perf_samples_profile_track';
 import {getThreadUriPrefix} from '../../public/utils';
+import {
+  getOrCreateGroupForProcess,
+  getOrCreateGroupForThread,
+} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
 }
 
-class PerfSamplesProfilePlugin implements Plugin {
+class PerfSamplesProfilePlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const pResult = await ctx.engine.query(`
       select distinct upid
@@ -61,22 +63,27 @@ class PerfSamplesProfilePlugin implements Plugin {
     `);
     for (const it = pResult.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
+      const uri = `/process_${upid}/perf_samples_profile`;
+      const title = `Process Callstacks`;
       ctx.registerTrack({
-        uri: `/process_${upid}/perf_samples_profile`,
-        title: `Process Callstacks`,
+        uri,
+        title,
         tags: {
           kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
           upid,
         },
-        trackFactory: ({trackKey}) =>
-          new ProcessPerfSamplesProfileTrack(
-            {
-              engine: ctx.engine,
-              trackKey,
-            },
-            upid,
-          ),
+        track: new ProcessPerfSamplesProfileTrack(
+          {
+            engine: ctx.engine,
+            uri,
+          },
+          upid,
+        ),
       });
+      const group = getOrCreateGroupForProcess(ctx.timeline.workspace, upid);
+      const track = new TrackNode(uri, title);
+      track.sortOrder = -40;
+      group.insertChildInOrder(track);
     }
     const tResult = await ctx.engine.query(`
       select distinct
@@ -103,22 +110,27 @@ class PerfSamplesProfilePlugin implements Plugin {
         threadName === null
           ? `Thread Callstacks ${tid}`
           : `${threadName} Callstacks ${tid}`;
+      const uri = `${getThreadUriPrefix(upid, utid)}_perf_samples_profile`;
       ctx.registerTrack({
-        uri: `${getThreadUriPrefix(upid, utid)}_perf_samples_profile`,
+        uri,
         title: displayName,
         tags: {
           kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
           utid,
+          upid: upid ?? undefined,
         },
-        trackFactory: ({trackKey}) =>
-          new ThreadPerfSamplesProfileTrack(
-            {
-              engine: ctx.engine,
-              trackKey,
-            },
-            utid,
-          ),
+        track: new ThreadPerfSamplesProfileTrack(
+          {
+            engine: ctx.engine,
+            uri,
+          },
+          utid,
+        ),
       });
+      const group = getOrCreateGroupForThread(ctx.timeline.workspace, utid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = -50;
+      group.insertChildInOrder(track);
     }
     ctx.registerDetailsPanel(new PerfSamplesFlamegraphDetailsPanel(ctx.engine));
   }
@@ -130,10 +142,10 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
     () => this.sel?.leftTs,
     () => this.sel?.rightTs,
     () => this.sel?.upid,
+    () => this.sel?.utid,
     () => this.sel?.type,
   ]);
   private flamegraphAttrs?: QueryFlamegraphAttrs;
-  private cache = new LegacyFlamegraphCache('perf_samples');
 
   constructor(private engine: Engine) {}
 
@@ -141,18 +153,6 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
     if (sel.kind !== 'PERF_SAMPLES') {
       this.sel = undefined;
       return undefined;
-    }
-    if (!USE_NEW_FLAMEGRAPH_IMPL.get() && sel.upid !== undefined) {
-      this.sel = undefined;
-      return m(LegacyFlamegraphDetailsPanel, {
-        cache: this.cache,
-        selection: {
-          profileType: profileType(sel.type),
-          start: sel.leftTs,
-          end: sel.rightTs,
-          upids: [sel.upid],
-        },
-      });
     }
 
     const {leftTs, rightTs, upid, utid} = sel;
@@ -162,7 +162,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
         engine: this.engine,
         metrics: [
           ...metricsFromTableOrSubquery(
-            upid === undefined
+            utid !== undefined
               ? `
                 (
                   select
@@ -198,7 +198,7 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
                       join thread t using (utid)
                       where p.ts >= ${leftTs}
                         and p.ts <= ${rightTs}
-                        and t.upid = ${upid}
+                        and t.upid = ${assertExists(upid)}
                     ))
                   )
                 `,
