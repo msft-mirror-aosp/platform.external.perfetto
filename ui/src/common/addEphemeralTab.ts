@@ -14,9 +14,8 @@
 import {uuidv4} from '../base/uuid';
 import {BottomTab} from '../frontend/bottom_tab';
 import {globals} from '../frontend/globals';
-import {Tab} from '../public';
+import {Tab} from '../public/tab';
 import {BottomTabToTabAdapter} from '../public/utils';
-
 import {Actions} from './actions';
 
 export function addEphemeralTab(uriPrefix: string, tab: Tab): void {
