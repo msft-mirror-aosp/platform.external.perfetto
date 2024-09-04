@@ -14,12 +14,11 @@
 
 import {assertExists} from '../base/logging';
 import {Duration} from '../base/time';
-import {PxSpan, TimeScale} from '../frontend/time_scale';
-import {TrackDescriptor} from '../public';
-import {TrackRenderContext} from '../public/tracks';
-import {HighPrecisionTime} from './high_precision_time';
-import {HighPrecisionTimeSpan} from './high_precision_time_span';
-import {TrackManager} from './track_manager';
+import {TimeScale} from '../base/time_scale';
+import {TrackDescriptor, TrackRenderContext} from '../public/track';
+import {HighPrecisionTime} from '../base/high_precision_time';
+import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
+import {TrackManagerImpl} from '../core/track_manager';
 
 function makeMockTrack() {
   return {
@@ -44,7 +43,7 @@ async function settle() {
 
 let mockTrack: ReturnType<typeof makeMockTrack>;
 let td: TrackDescriptor;
-let trackManager: TrackManager;
+let trackManager: TrackManagerImpl;
 const visibleWindow = new HighPrecisionTimeSpan(HighPrecisionTime.ZERO, 0);
 const dummyCtx: TrackRenderContext = {
   trackUri: 'foo',
@@ -52,7 +51,7 @@ const dummyCtx: TrackRenderContext = {
   size: {width: 123, height: 123},
   visibleWindow,
   resolution: Duration.ZERO,
-  timescale: new TimeScale(visibleWindow, new PxSpan(0, 0)),
+  timescale: new TimeScale(visibleWindow, {left: 0, right: 0}),
 };
 
 beforeEach(() => {
@@ -62,7 +61,7 @@ beforeEach(() => {
     title: 'foo',
     track: mockTrack,
   };
-  trackManager = new TrackManager();
+  trackManager = new TrackManagerImpl();
   trackManager.registerTrack(td);
 });
 

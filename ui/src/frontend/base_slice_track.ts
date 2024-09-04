@@ -19,7 +19,7 @@ import {exists, Optional} from '../base/utils';
 import {Actions} from '../common/actions';
 import {drawIncompleteSlice, drawTrackHoverTooltip} from '../base/canvas_utils';
 import {cropText} from '../base/string_utils';
-import {colorCompare} from '../core/color';
+import {colorCompare} from '../public/color';
 import {UNEXPECTED_PINK} from '../core/colorizer';
 import {
   LegacySelection,
@@ -28,7 +28,9 @@ import {
 } from '../common/state';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
-import {Engine, Slice, Track} from '../public';
+import {Engine} from '../trace_processor/engine';
+import {Track} from '../public/track';
+import {Slice} from '../public/track';
 import {LONG, NUM} from '../trace_processor/query_result';
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
@@ -37,8 +39,8 @@ import {NewTrackArgs} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey} from '../core/timeline_cache';
 import {uuidv4Sql} from '../base/uuid';
 import {AsyncDisposableStack} from '../base/disposable_stack';
-import {TrackMouseEvent, TrackRenderContext} from '../public/tracks';
-import {Vector, VerticalBounds} from '../base/geom';
+import {TrackMouseEvent, TrackRenderContext} from '../public/track';
+import {Point2D, VerticalBounds} from '../base/geom';
 
 // The common class that underpins all tracks drawing slices.
 
@@ -190,7 +192,7 @@ export abstract class BaseSliceTrack<
   private extraSqlColumns: string[];
 
   private charWidth = -1;
-  private hoverPos?: Vector;
+  private hoverPos?: Point2D;
   protected hoveredSlice?: SliceT;
   private hoverTooltip: string[] = [];
   private maxDataDepth = 0;

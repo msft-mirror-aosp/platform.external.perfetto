@@ -14,9 +14,9 @@
 
 import {Optional} from '../base/utils';
 import {Registry} from '../base/registry';
-import {Track, TrackDescriptor} from '../public';
+import {Track, TrackDescriptor} from '../public/track';
 import {AsyncLimiter} from '../base/async_limiter';
-import {TrackRenderContext} from '../public/tracks';
+import {TrackRenderContext} from '../public/track';
 
 export interface TrackRenderer {
   readonly track: Track;
@@ -48,7 +48,7 @@ export interface TrackRenderer {
  * Third cycle
  *   flushTracks() <-- 'foo' is destroyed.
  */
-export class TrackManager {
+export class TrackManagerImpl {
   private tracks = new Registry<TrackFSM>((x) => x.desc.uri);
 
   registerTrack(trackDesc: TrackDescriptor): Disposable {

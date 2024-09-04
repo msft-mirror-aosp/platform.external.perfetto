@@ -39,14 +39,14 @@ import {DISMISSED_PANNING_HINT_KEY} from './topbar';
 import {TrackGroupPanel} from './track_group_panel';
 import {TrackPanel, getTitleFontSize} from './track_panel';
 import {assertExists} from '../base/logging';
-import {PxSpan, TimeScale} from './time_scale';
+import {TimeScale} from '../base/time_scale';
 import {GroupNode, Node, TrackNode} from '../public/workspace';
 import {fuzzyMatch, FuzzySegment} from '../base/fuzzy';
 import {exists, Optional} from '../base/utils';
 import {EmptyState} from '../widgets/empty_state';
 import {removeFalsyValues} from '../base/array_utils';
 import {renderFlows} from './flow_events_renderer';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {canvasClip, canvasSave} from '../base/canvas_utils';
 
 const OVERVIEW_PANEL_FLAG = featureFlags.register({
@@ -113,10 +113,10 @@ class TraceViewer implements m.ClassComponent {
         if (this.timelineWidthPx === undefined) return;
 
         this.keepCurrentSelection = true;
-        const timescale = new TimeScale(
-          timeline.visibleWindow,
-          new PxSpan(0, this.timelineWidthPx),
-        );
+        const timescale = new TimeScale(timeline.visibleWindow, {
+          left: 0,
+          right: this.timelineWidthPx,
+        });
         const tDelta = timescale.pxToDuration(pannedPx);
         timeline.panVisibleWindow(tDelta);
 
@@ -136,10 +136,10 @@ class TraceViewer implements m.ClassComponent {
       },
       editSelection: (currentPx: number) => {
         if (this.timelineWidthPx === undefined) return false;
-        const timescale = new TimeScale(
-          globals.timeline.visibleWindow,
-          new PxSpan(0, this.timelineWidthPx),
-        );
+        const timescale = new TimeScale(globals.timeline.visibleWindow, {
+          left: 0,
+          right: this.timelineWidthPx,
+        });
         return onTimeRangeBoundary(timescale, currentPx) !== null;
       },
       onSelection: (
@@ -161,10 +161,10 @@ class TraceViewer implements m.ClassComponent {
         const timespan = visibleWindow.toTimeSpan();
         this.keepCurrentSelection = true;
 
-        const timescale = new TimeScale(
-          timeline.visibleWindow,
-          new PxSpan(0, this.timelineWidthPx),
-        );
+        const timescale = new TimeScale(timeline.visibleWindow, {
+          left: 0,
+          right: this.timelineWidthPx,
+        });
 
         if (editing) {
           const selection = globals.state.selection;
@@ -311,7 +311,7 @@ class TraceViewer implements m.ClassComponent {
 
 function renderOverlay(
   ctx: CanvasRenderingContext2D,
-  canvasSize: Size,
+  canvasSize: Size2D,
   panels: ReadonlyArray<RenderedPanelInfo>,
 ): void {
   const size = {

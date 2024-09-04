@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
-import {addDebugSliceTrack} from '../../public';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
 
 class AndroidNetwork implements PerfettoPlugin {
   // Adds a debug track using the provided query and given columns. The columns
   // must be start with ts, dur, and a name column. The name column and all
   // following columns are shown as arguments in slice details.
   async addSimpleTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     trackName: string,
     tableOrQuery: string,
     columns: string[],
@@ -41,7 +38,7 @@ class AndroidNetwork implements PerfettoPlugin {
     );
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerCommand({
       id: 'dev.perfetto.AndroidNetwork#batteryEvents',
       name: 'Add track: battery events',

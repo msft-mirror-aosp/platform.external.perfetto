@@ -32,10 +32,10 @@ import {
   generateTicks,
   TickType,
 } from './gridline_helper';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
-import {PxSpan, TimeScale} from './time_scale';
-import {HighPrecisionTimeSpan} from '../common/high_precision_time_span';
+import {TimeScale} from '../base/time_scale';
+import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
 
 export class OverviewTimelinePanel implements Panel {
   private static HANDLE_SIZE_PX = 5;
@@ -54,12 +54,12 @@ export class OverviewTimelinePanel implements Panel {
     this.width = dom.getBoundingClientRect().width;
     const traceTime = globals.traceContext;
     if (this.width > TRACK_SHELL_WIDTH) {
-      const pxSpan = new PxSpan(TRACK_SHELL_WIDTH, this.width);
+      const pxBounds = {left: TRACK_SHELL_WIDTH, right: this.width};
       const hpTraceTime = HighPrecisionTimeSpan.fromTime(
         traceTime.start,
         traceTime.end,
       );
-      this.timeScale = new TimeScale(hpTraceTime, pxSpan);
+      this.timeScale = new TimeScale(hpTraceTime, pxBounds);
       if (this.gesture === undefined) {
         this.gesture = new DragGestureHandler(
           dom as HTMLElement,
@@ -100,7 +100,7 @@ export class OverviewTimelinePanel implements Panel {
     });
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
     if (this.width === undefined) return;
     if (this.timeScale === undefined) return;
     const headerHeight = 20;

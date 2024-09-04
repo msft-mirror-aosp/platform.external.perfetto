@@ -17,17 +17,16 @@ import {uuidv4Sql} from '../../base/uuid';
 import {generateSqlWithInternalLayout} from '../../common/internal_layout_utils';
 import {featureFlags} from '../../core/feature_flags';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
+import {BottomTabToSCSAdapter} from '../../public/utils';
 import {
-  BottomTabToSCSAdapter,
   CHROME_EVENT_LATENCY_TRACK_KIND,
   CHROME_TOPLEVEL_SCROLLS_KIND,
-  NUM,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
   CHROME_SCROLL_JANK_TRACK_KIND,
   SCROLL_JANK_V3_TRACK_KIND,
-} from '../../public';
+} from '../../public/track_kinds';
+import {NUM} from '../../trace_processor/query_result';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {Engine} from '../../trace_processor/engine';
 import {ChromeTasksScrollJankTrack} from './chrome_tasks_scroll_jank_track';
 import {ENABLE_CHROME_SCROLL_JANK_PLUGIN} from './common';
@@ -49,7 +48,7 @@ const ENABLE_SCROLL_JANK_PLUGIN_V2 = featureFlags.register({
 });
 
 class ChromeScrollJankPlugin implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     if (ENABLE_CHROME_SCROLL_JANK_PLUGIN.get()) {
       await this.addChromeScrollJankTrack(ctx);
 
@@ -94,9 +93,7 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
     }
   }
 
-  private async addChromeScrollJankTrack(
-    ctx: PluginContextTrace,
-  ): Promise<void> {
+  private async addChromeScrollJankTrack(ctx: Trace): Promise<void> {
     const queryResult = await ctx.engine.query(`
       select
         utid,
@@ -136,7 +133,7 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
   }
 
   private async addTopLevelScrollTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     group: GroupNode,
   ): Promise<void> {
     await ctx.engine.query(`
@@ -182,7 +179,7 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
   }
 
   private async addEventLatencyTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     group: GroupNode,
   ): Promise<void> {
     const subTableSql = generateSqlWithInternalLayout({
@@ -317,7 +314,7 @@ class ChromeScrollJankPlugin implements PerfettoPlugin {
   }
 
   private async addScrollJankV3ScrollTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     group: GroupNode,
   ): Promise<void> {
     await ctx.engine.query(

@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {Engine} from '../../trace_processor/engine';
 import {
   SimpleSliceTrack,
@@ -1155,11 +1152,7 @@ const BT_ACTIVITY = `
 class AndroidLongBatteryTracing implements PerfettoPlugin {
   private readonly groups = new Map<string, GroupNode>();
 
-  private addTrack(
-    ctx: PluginContextTrace,
-    track: TrackNode,
-    groupName?: string,
-  ): void {
+  private addTrack(ctx: Trace, track: TrackNode, groupName?: string): void {
     if (groupName) {
       const existingGroup = this.groups.get(groupName);
       if (existingGroup) {
@@ -1176,7 +1169,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   addSliceTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     name: string,
     query: string,
     groupName?: string,
@@ -1202,7 +1195,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   addCounterTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     name: string,
     query: string,
     groupName: string,
@@ -1228,7 +1221,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   addBatteryStatsState(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     name: string,
     track: string,
     groupName: string,
@@ -1248,7 +1241,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   addBatteryStatsEvent(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     name: string,
     track: string,
     groupName: string | undefined,
@@ -1268,10 +1261,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     );
   }
 
-  async addDeviceState(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addDeviceState(ctx: Trace, features: Set<string>): Promise<void> {
     if (!features.has('track.battery_stats.*')) {
       return;
     }
@@ -1321,10 +1311,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     }
   }
 
-  async addNetworkSummary(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addNetworkSummary(ctx: Trace, features: Set<string>): Promise<void> {
     if (!features.has('net.modem') && !features.has('net.wifi')) {
       return;
     }
@@ -1429,10 +1416,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     );
   }
 
-  async addModemDetail(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addModemDetail(ctx: Trace, features: Set<string>): Promise<void> {
     if (!features.has('atom.modem_activity_info')) {
       return;
     }
@@ -1443,10 +1427,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     }
   }
 
-  async addModemActivityInfo(
-    ctx: PluginContextTrace,
-    groupName: string,
-  ): Promise<void> {
+  async addModemActivityInfo(ctx: Trace, groupName: string): Promise<void> {
     const query = (name: string, col: string): void =>
       this.addCounterTrack(
         ctx,
@@ -1467,7 +1448,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     query('Modem TX time power 4', 'controller_tx_time_pl4');
   }
 
-  async addModemRil(ctx: PluginContextTrace, groupName: string): Promise<void> {
+  async addModemRil(ctx: Trace, groupName: string): Promise<void> {
     const rilStrength = (band: string, value: string): void =>
       this.addSliceTrack(
         ctx,
@@ -1536,10 +1517,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     );
   }
 
-  async addKernelWakelocks(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addKernelWakelocks(ctx: Trace, features: Set<string>): Promise<void> {
     if (!features.has('atom.kernel_wakelock')) {
       return;
     }
@@ -1561,10 +1539,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     }
   }
 
-  async addWakeups(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addWakeups(ctx: Trace, features: Set<string>): Promise<void> {
     if (!features.has('track.suspend_backoff')) {
       return;
     }
@@ -1620,10 +1595,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     );
   }
 
-  async addHighCpu(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addHighCpu(ctx: Trace, features: Set<string>): Promise<void> {
     if (!features.has('atom.cpu_cycles_per_uid_cluster')) {
       return;
     }
@@ -1647,10 +1619,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     }
   }
 
-  async addBluetooth(
-    ctx: PluginContextTrace,
-    features: Set<string>,
-  ): Promise<void> {
+  async addBluetooth(ctx: Trace, features: Set<string>): Promise<void> {
     if (
       !Array.from(features.values()).some(
         (f) => f.startsWith('atom.bluetooth_') || f.startsWith('atom.ble_'),
@@ -1802,7 +1771,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   async addContainedTraces(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     containedTraces: ContainedTrace[],
   ): Promise<void> {
     const bySubscription = new Map<string, ContainedTrace[]>();
@@ -1869,7 +1838,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     return features;
   }
 
-  async addTracks(ctx: PluginContextTrace): Promise<void> {
+  async addTracks(ctx: Trace): Promise<void> {
     const features: Set<string> = await this.findFeatures(ctx.engine);
 
     const containedTraces = (ctx.openerPluginArgs?.containedTraces ??
@@ -1886,7 +1855,7 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     await this.addContainedTraces(ctx, containedTraces);
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     await this.addTracks(ctx);
   }
 }

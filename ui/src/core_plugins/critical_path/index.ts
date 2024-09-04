@@ -16,14 +16,11 @@ import {
   getThreadInfo,
   ThreadInfo,
 } from '../../trace_processor/sql_utils/thread';
-import {
-  addDebugSliceTrack,
-  Engine,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-  THREAD_STATE_TRACK_KIND,
-} from '../../public';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {Engine} from '../../trace_processor/engine';
+import {Trace} from '../../public/trace';
+import {THREAD_STATE_TRACK_KIND} from '../../public/track_kinds';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {
   getTimeSpanOfSelectionOrVisibleWindow,
   globals,
@@ -139,7 +136,7 @@ async function getThreadInfoForUtidOrSelection(
 }
 
 class CriticalPath implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     // The 3 commands below are used in two contextes:
     // 1. By clicking a slice and using the command palette. In this case the
     //    utid argument is undefined and we need to look at the selection.
