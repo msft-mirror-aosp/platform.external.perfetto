@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertTrue} from '../base/logging';
 import {Duration, time, Time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
@@ -56,7 +55,6 @@ import {
   WasmEngineProxy,
 } from '../trace_processor/wasm_engine_proxy';
 import {showModal} from '../widgets/modal';
-
 import {CounterAggregationController} from './aggregation/counter_aggregation_controller';
 import {CpuAggregationController} from './aggregation/cpu_aggregation_controller';
 import {CpuByProcessAggregationController} from './aggregation/cpu_by_process_aggregation_controller';
@@ -541,14 +539,7 @@ export class TraceController extends Controller<States> {
       this.updateStatus(`Running plugin: ${id}`);
     });
 
-    {
-      // When we reload from a permalink don't create extra tracks.
-      // TODO(stevegolton): This is a terrible way of telling whether we have
-      // loaded from a permalink or not.
-      if (globals.workspace.flatTracks.length === 0) {
-        await this.listTracks();
-      }
-    }
+    await this.listTracks();
 
     this.decideTabs();
 
@@ -730,14 +721,13 @@ export class TraceController extends Controller<States> {
 
   private async listTracks() {
     this.updateStatus('Loading tracks');
-    const engine = assertExists(this.engine);
-    await decideTracks(engine);
+    await decideTracks();
   }
 
   // Show the list of default tabs, but don't make them active!
   private decideTabs() {
     for (const tabUri of globals.tabManager.defaultTabs) {
-      globals.dispatch(Actions.showTab({uri: tabUri}));
+      globals.tabManager.showTab(tabUri);
     }
   }
 

@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Time} from '../base/time';
-import {HighPrecisionTime} from '../common/high_precision_time';
-import {HighPrecisionTimeSpan} from '../common/high_precision_time_span';
-import {PxSpan, TimeScale} from './time_scale';
+import {Time} from './time';
+import {HighPrecisionTime} from './high_precision_time';
+import {HighPrecisionTimeSpan} from './high_precision_time_span';
+import {TimeScale} from './time_scale';
 
 const t = Time.fromRaw;
 
 describe('TimeScale', () => {
   const ts = new TimeScale(
     new HighPrecisionTimeSpan(new HighPrecisionTime(t(40n)), 100),
-    new PxSpan(200, 1000),
+    {left: 200, right: 1000},
   );
 
   it('converts timescales to pixels', () => {

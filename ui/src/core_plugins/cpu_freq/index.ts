@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  CPU_FREQ_TRACK_KIND,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {TrackNode} from '../../public/workspace';
+import {CPU_FREQ_TRACK_KIND} from '../../public/track_kinds';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM, NUM_NULL} from '../../trace_processor/query_result';
 import {CpuFreqTrack} from './cpu_freq_track';
 
 class CpuFreq implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const {engine} = ctx;
 
     const cpus = ctx.trace.cpus;
@@ -70,15 +68,19 @@ class CpuFreq implements PerfettoPlugin {
         };
 
         const uri = `/cpu_freq_cpu${cpu}`;
+        const title = `Cpu ${cpu} Frequency`;
         ctx.registerTrack({
           uri,
-          title: `Cpu ${cpu} Frequency`,
+          title,
           tags: {
             kind: CPU_FREQ_TRACK_KIND,
             cpu,
           },
           track: new CpuFreqTrack(config, ctx.engine),
         });
+        const trackNode = new TrackNode(uri, title);
+        trackNode.sortOrder = -40;
+        ctx.timeline.workspace.insertChildInOrder(trackNode);
       }
     }
   }

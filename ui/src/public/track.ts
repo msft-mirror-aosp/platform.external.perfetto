@@ -17,9 +17,10 @@ import {duration, time} from '../base/time';
 import {Optional} from '../base/utils';
 import {UntypedEventSet} from '../core/event_set';
 import {LegacySelection, Selection} from '../core/selection_manager';
-import {Size, VerticalBounds} from '../base/geom';
-import {TimeScale} from '../frontend/time_scale';
-import {HighPrecisionTimeSpan} from '../common/high_precision_time_span';
+import {Size2D, VerticalBounds} from '../base/geom';
+import {TimeScale} from '../base/time_scale';
+import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
+import {ColorScheme} from './color_scheme';
 
 export interface TrackContext {
   // This track's URI, used for making selections et al.
@@ -39,7 +40,7 @@ export interface TrackRenderContext extends TrackContext {
   /**
    * The dimensions of the track on the canvas in pixels.
    */
-  readonly size: Size;
+  readonly size: Size2D;
 
   /**
    * Suggested data resolution.
@@ -229,4 +230,35 @@ interface WellKnownTrackTags {
 
   // Group name, used as a hint to ask track decider to put this in a group
   groupName: string;
+}
+
+export interface Slice {
+  // These properties are updated only once per query result when the Slice
+  // object is created and don't change afterwards.
+  readonly id: number;
+  readonly startNs: time;
+  readonly endNs: time;
+  readonly durNs: duration;
+  readonly ts: time;
+  readonly dur: duration;
+  readonly depth: number;
+  readonly flags: number;
+
+  // Each slice can represent some extra numerical information by rendering a
+  // portion of the slice with a lighter tint.
+  // |fillRatio\ describes the ratio of the normal area to the tinted area
+  // width of the slice, normalized between 0.0 -> 1.0.
+  // 0.0 means the whole slice is tinted.
+  // 1.0 means none of the slice is tinted.
+  // E.g. If |fillRatio| = 0.65 the slice will be rendered like this:
+  // [############|*******]
+  // ^------------^-------^
+  //     Normal     Light
+  readonly fillRatio: number;
+
+  // These can be changed by the Impl.
+  title: string;
+  subTitle: string;
+  colorScheme: ColorScheme;
+  isHighlighted: boolean;
 }

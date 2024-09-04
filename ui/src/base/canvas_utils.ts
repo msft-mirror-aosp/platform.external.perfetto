@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Size, Vector} from '../base/geom';
-import {isString} from '../base/object_utils';
+import {Size2D, Point2D} from './geom';
+import {isString} from './object_utils';
 
 export function drawDoubleHeadedArrow(
   ctx: CanvasRenderingContext2D,
@@ -94,8 +94,8 @@ export function drawIncompleteSlice(
 
 export function drawTrackHoverTooltip(
   ctx: CanvasRenderingContext2D,
-  pos: Vector,
-  trackSize: Size,
+  pos: Point2D,
+  trackSize: Size2D,
   text: string,
   text2?: string,
 ) {

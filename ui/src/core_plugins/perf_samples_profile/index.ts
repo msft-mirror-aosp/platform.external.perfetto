@@ -13,18 +13,12 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {TrackData} from '../../common/track_data';
-import {
-  Engine,
-  LegacyDetailsPanel,
-  PERF_SAMPLES_PROFILE_TRACK_KIND,
-} from '../../public';
-import {
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Engine} from '../../trace_processor/engine';
+import {LegacyDetailsPanel} from '../../public/track';
+import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../../public/track_kinds';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {
   LegacySelection,
@@ -44,13 +38,18 @@ import {
   ThreadPerfSamplesProfileTrack,
 } from './perf_samples_profile_track';
 import {getThreadUriPrefix} from '../../public/utils';
+import {
+  getOrCreateGroupForProcess,
+  getOrCreateGroupForThread,
+} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
 }
 
 class PerfSamplesProfilePlugin implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const pResult = await ctx.engine.query(`
       select distinct upid
       from perf_sample
@@ -60,9 +59,10 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
     for (const it = pResult.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
       const uri = `/process_${upid}/perf_samples_profile`;
+      const title = `Process Callstacks`;
       ctx.registerTrack({
         uri,
-        title: `Process Callstacks`,
+        title,
         tags: {
           kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
           upid,
@@ -75,6 +75,10 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
           upid,
         ),
       });
+      const group = getOrCreateGroupForProcess(ctx.timeline.workspace, upid);
+      const track = new TrackNode(uri, title);
+      track.sortOrder = -40;
+      group.insertChildInOrder(track);
     }
     const tResult = await ctx.engine.query(`
       select distinct
@@ -118,6 +122,10 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
           utid,
         ),
       });
+      const group = getOrCreateGroupForThread(ctx.timeline.workspace, utid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = -50;
+      group.insertChildInOrder(track);
     }
     ctx.registerDetailsPanel(new PerfSamplesFlamegraphDetailsPanel(ctx.engine));
   }

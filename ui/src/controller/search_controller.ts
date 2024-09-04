@@ -19,13 +19,12 @@ import {OmniboxState} from '../common/state';
 import {
   ANDROID_LOGS_TRACK_KIND,
   CPU_SLICE_TRACK_KIND,
-} from '../core/track_kinds';
+} from '../public/track_kinds';
 import {globals} from '../frontend/globals';
 import {publishSearchResult} from '../frontend/publish';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, STR} from '../trace_processor/query_result';
 import {escapeSearchQuery} from '../trace_processor/query_utils';
-
 import {Controller} from './controller';
 
 export interface SearchControllerArgs {
