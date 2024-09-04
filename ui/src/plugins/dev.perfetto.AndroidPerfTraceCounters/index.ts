@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
-import {addDebugSliceTrack} from '../../public';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
 
 const PERF_TRACE_COUNTERS_PRECONDITION = `
   SELECT
@@ -24,8 +25,8 @@ const PERF_TRACE_COUNTERS_PRECONDITION = `
     AND str_value GLOB '*ftrace_events: "perf_trace_counters/sched_switch_with_ctrs"*'
 `;
 
-class AndroidPerfTraceCounters implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class AndroidPerfTraceCounters implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const resp = await ctx.engine.query(PERF_TRACE_COUNTERS_PRECONDITION);
     if (resp.numRows() === 0) return;
     ctx.registerCommand({

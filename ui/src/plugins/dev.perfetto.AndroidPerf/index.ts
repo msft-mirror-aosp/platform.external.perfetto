@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  addDebugSliceTrack,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
-class AndroidPerf implements Plugin {
+class AndroidPerf implements PerfettoPlugin {
   async addAppProcessStartsDebugTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     reason: string,
     sliceName: string,
   ): Promise<void> {
@@ -46,7 +43,7 @@ class AndroidPerf implements Plugin {
                       process_name,
                       intent,
                       'slice' AS table_name
-                    FROM _android_app_process_starts
+                    FROM android_app_process_starts
                     WHERE reason = '${reason}'
                  `,
         columns: sliceColumns,
@@ -57,7 +54,7 @@ class AndroidPerf implements Plugin {
     );
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerCommand({
       id: 'dev.perfetto.AndroidPerf#BinderSystemServerIncoming',
       name: 'Run query: system_server incoming binder graph',

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Actions} from '../common/actions';
 import {
   AggregateData,
@@ -23,7 +22,6 @@ import {
 } from '../common/aggregation_data';
 import {colorForState} from '../core/colorizer';
 import {translateState} from '../common/thread_state';
-
 import {globals} from './globals';
 import {DurationWidget} from './widgets/duration';
 import {EmptyState} from '../widgets/empty_state';
@@ -51,7 +49,7 @@ export class AggregationPanel
           {
             icon: Icons.ChangeTab,
             onclick: () => {
-              globals.dispatch(Actions.showTab({uri: 'current_selection'}));
+              globals.tabManager.showCurrentSelectionTab();
             },
           },
           'Go to current selection tab',

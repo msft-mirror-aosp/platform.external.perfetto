@@ -13,11 +13,11 @@
 // limitations under the License.
 
 import {assertTrue} from '../base/logging';
+import {Store} from '../base/store';
 import {time, TimeSpan} from '../base/time';
-import {HighPrecisionTimeSpan} from '../common/high_precision_time_span';
+import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
 import {Area, State} from '../common/state';
 import {raf} from '../core/raf_scheduler';
-import {Store} from '../public';
 import {ratelimit} from './rate_limiters';
 
 interface Range {
@@ -83,13 +83,13 @@ export class Timeline {
   selectArea(
     start: time,
     end: time,
-    tracks = this._selectedArea ? this._selectedArea.tracks : [],
+    tracks = this._selectedArea ? this._selectedArea.trackUris : [],
   ) {
     assertTrue(
       end >= start,
       `Impossible select area: start [${start}] >= end [${end}]`,
     );
-    this._selectedArea = {start, end, tracks};
+    this._selectedArea = {start, end, trackUris: tracks};
     raf.scheduleFullRedraw();
   }
 

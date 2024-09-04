@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {BigintMath} from '../base/bigint_math';
 import {copyToClipboard} from '../base/clipboard';
 import {isString} from '../base/object_utils';
@@ -25,12 +24,11 @@ import {Anchor} from '../widgets/anchor';
 import {Button} from '../widgets/button';
 import {Callout} from '../widgets/callout';
 import {DetailsShell} from '../widgets/details_shell';
-
 import {queryResponseToClipboard} from './clipboard';
 import {downloadData} from './download_utils';
 import {globals} from './globals';
 import {Router} from './router';
-import {reveal} from './scroll_helper';
+import {scrollToTrackAndTimeSpan} from './scroll_helper';
 
 interface QueryTableRowAttrs {
   row: Row;
@@ -149,24 +147,31 @@ class QueryTableRow implements m.ClassComponent<QueryTableRowAttrs> {
     const sliceStart = Time.fromRaw(BigInt(row.ts));
     // row.dur can be negative. Clamp to 1ns.
     const sliceDur = BigintMath.max(BigInt(row.dur), 1n);
-    const trackKey = globals.trackManager.trackKeyByTrackId.get(trackId);
-    if (trackKey !== undefined) {
-      reveal(trackKey, sliceStart, Time.add(sliceStart, sliceDur), true);
+    const trackUri = globals.trackManager.findTrack((td) =>
+      td.tags?.trackIds?.includes(trackId),
+    )?.uri;
+    if (trackUri !== undefined) {
+      scrollToTrackAndTimeSpan(
+        trackUri,
+        sliceStart,
+        Time.add(sliceStart, sliceDur),
+        true,
+      );
       const sliceId = getSliceId(row);
       if (sliceId !== undefined) {
-        this.selectSlice(sliceId, trackKey, switchToCurrentSelectionTab);
+        this.selectSlice(sliceId, trackUri, switchToCurrentSelectionTab);
       }
     }
   }
 
   private selectSlice(
     sliceId: number,
-    trackKey: string,
+    trackUuid: string,
     switchToCurrentSelectionTab: boolean,
   ) {
     const action = Actions.selectSlice({
       id: sliceId,
-      trackKey,
+      trackUri: trackUuid,
       table: 'slice',
     });
     globals.makeSelection(action, {switchToCurrentSelectionTab});

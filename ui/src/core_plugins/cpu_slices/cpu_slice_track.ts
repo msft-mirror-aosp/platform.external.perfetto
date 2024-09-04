@@ -22,19 +22,20 @@ import {
   drawDoubleHeadedArrow,
   drawIncompleteSlice,
   drawTrackHoverTooltip,
-} from '../../common/canvas_utils';
+} from '../../base/canvas_utils';
 import {cropText} from '../../base/string_utils';
-import {Color} from '../../core/color';
+import {Color} from '../../public/color';
 import {colorForThread} from '../../core/colorizer';
 import {TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {Vector} from '../../base/geom';
-import {Engine, Track} from '../../public';
+import {Point2D} from '../../base/geom';
+import {Engine} from '../../trace_processor/engine';
+import {Track} from '../../public/track';
 import {LONG, NUM} from '../../trace_processor/query_result';
 import {uuidv4Sql} from '../../base/uuid';
-import {TrackMouseEvent, TrackRenderContext} from '../../public/tracks';
+import {TrackMouseEvent, TrackRenderContext} from '../../public/track';
 
 export interface Data extends TrackData {
   // Slices are stored in a columnar fashion. All fields have the same length.
@@ -54,19 +55,19 @@ const CPU_SLICE_FLAGS_INCOMPLETE = 1;
 const CPU_SLICE_FLAGS_REALTIME = 2;
 
 export class CpuSliceTrack implements Track {
-  private mousePos?: Vector;
+  private mousePos?: Point2D;
   private utidHoveredInThisTrack = -1;
   private fetcher = new TimelineFetcher<Data>(this.onBoundsChange.bind(this));
 
   private lastRowId = -1;
   private engine: Engine;
   private cpu: number;
-  private trackKey: string;
+  private uri: string;
   private trackUuid = uuidv4Sql();
 
-  constructor(engine: Engine, trackKey: string, cpu: number) {
+  constructor(engine: Engine, uri: string, cpu: number) {
     this.engine = engine;
-    this.trackKey = trackKey;
+    this.uri = uri;
     this.cpu = cpu;
   }
 
@@ -438,7 +439,7 @@ export class CpuSliceTrack implements Track {
       {
         kind: 'SCHED_SLICE',
         id,
-        trackKey: this.trackKey,
+        trackUri: this.uri,
       },
       {
         clearSearch: true,
