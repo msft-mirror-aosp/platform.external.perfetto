@@ -3173,6 +3173,10 @@ message SysStatsConfig {
   // Polls /sys/devices/system/cpu/cpu*/cpuidle/state* every X ms, if non-zero.
   // This is required to be > 10ms to avoid excessive CPU usage.
   optional uint32 cpuidle_period_ms = 13;
+
+  // Polls device-specific GPU frequency info every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  optional uint32 gpufreq_period_ms = 14;
 }
 
 // End of protos/perfetto/config/sys_stats/sys_stats_config.proto
@@ -9662,24 +9666,42 @@ message PanelWriteGenericFtraceEvent {
 message SchedSwitchWithCtrsFtraceEvent {
   optional int32 old_pid = 1;
   optional int32 new_pid = 2;
-  optional uint32 cctr = 3;
-  optional uint32 ctr0 = 4;
-  optional uint32 ctr1 = 5;
-  optional uint32 ctr2 = 6;
-  optional uint32 ctr3 = 7;
+  optional uint64 cctr = 3;
+  optional uint64 ctr0 = 4;
+  optional uint64 ctr1 = 5;
+  optional uint64 ctr2 = 6;
+  optional uint64 ctr3 = 7;
   optional uint32 lctr0 = 8;
   optional uint32 lctr1 = 9;
-  optional uint32 ctr4 = 10;
-  optional uint32 ctr5 = 11;
+  optional uint64 ctr4 = 10;
+  optional uint64 ctr5 = 11;
   optional string prev_comm = 12;
   optional int32 prev_pid = 13;
   optional uint32 cyc = 14;
   optional uint32 inst = 15;
   optional uint32 stallbm = 16;
   optional uint32 l3dm = 17;
+  optional int32 next_pid = 18;
+  optional string next_comm = 19;
+  optional int64 prev_state = 20;
+  optional uint64 amu0 = 21;
+  optional uint64 amu1 = 22;
+  optional uint64 amu2 = 23;
 }
 
 // End of protos/perfetto/trace/ftrace/perf_trace_counters.proto
+
+// Begin of protos/perfetto/trace/ftrace/pixel_mm.proto
+
+message PixelMmKswapdWakeFtraceEvent {
+  optional int32 whatever = 1;
+}
+message PixelMmKswapdDoneFtraceEvent {
+  optional uint64 delta_nr_scanned = 1;
+  optional uint64 delta_nr_reclaimed = 2;
+}
+
+// End of protos/perfetto/trace/ftrace/pixel_mm.proto
 
 // Begin of protos/perfetto/trace/ftrace/power.proto
 
@@ -9925,6 +9947,13 @@ message SchedMigrateTaskFtraceEvent {
   optional int32 dest_cpu = 5;
   optional int32 running = 6;
   optional uint32 load = 7;
+}
+message SchedWakeupTaskAttrFtraceEvent {
+  optional int32 pid = 1;
+  optional uint64 cpu_affinity = 2;
+  optional uint64 task_util = 3;
+  optional uint64 uclamp_min = 4;
+  optional uint64 vruntime = 5;
 }
 
 // End of protos/perfetto/trace/ftrace/sched.proto
@@ -11092,6 +11121,9 @@ message FtraceEvent {
     KgslAdrenoCmdbatchSubmittedFtraceEvent kgsl_adreno_cmdbatch_submitted = 535;
     KgslAdrenoCmdbatchSyncFtraceEvent kgsl_adreno_cmdbatch_sync = 536;
     KgslAdrenoCmdbatchRetiredFtraceEvent kgsl_adreno_cmdbatch_retired = 537;
+    PixelMmKswapdWakeFtraceEvent pixel_mm_kswapd_wake = 538;
+    PixelMmKswapdDoneFtraceEvent pixel_mm_kswapd_done = 539;
+    SchedWakeupTaskAttrFtraceEvent sched_wakeup_task_attr = 540;
   }
 }
 
@@ -11316,15 +11348,22 @@ message FtraceEventBundle {
   }
   repeated FtraceError error = 8;
 
-  // The timestamp (ftrace clock) of the last event consumed from this per-cpu
-  // kernel buffer prior to starting this bundle. In other words: the last
-  // event in the previous bundle.
+  // Superseded by |previous_bundle_end_timestamp| in perfetto v47+. The
+  // primary difference is that this field tracked the last timestamp read from
+  // the per-cpu buffer, while the newer field tracks events that get
+  // serialised into the trace.
+  // Added in: perfetto v44.
+  optional uint64 last_read_event_timestamp = 9;
+
+  // The timestamp (using ftrace clock) of the last event written into this
+  // data source on this cpu. In other words: the last event in the previous
+  // bundle.
   // Lets the trace processing find an initial timestamp after which ftrace
   // data is known to be valid across all cpus. Of particular importance when
   // the perfetto trace buffer is a ring buffer as well, as the overwriting of
   // oldest bundles can skew the first valid timestamp per cpu significantly.
-  // Added in: perfetto v44.
-  optional uint64 last_read_event_timestamp = 9;
+  // Added in: perfetto v47.
+  optional uint64 previous_bundle_end_timestamp = 10;
 }
 
 enum FtraceClock {
@@ -14466,7 +14505,11 @@ message SysStats {
     repeated CpuIdleStateEntry cpuidle_state_entry = 2;
   }
   repeated CpuIdleState cpuidle_state = 16;
+
+  // Read GPU frequency info on Intel/AMD devices.
+  repeated uint64 gpufreq_mhz = 17;
 }
+
 // End of protos/perfetto/trace/sys_stats/sys_stats.proto
 
 // Begin of protos/perfetto/trace/system_info.proto
@@ -14487,6 +14530,15 @@ message SystemInfo {
 
   // The hardware reversion from android device
   optional string android_hardware_revision = 10;
+
+  // The storage component from android_device. This field has been introduced
+  // after Android W in Aug 2024 and is not supported on older versions.
+  optional string android_storage_model = 11;
+
+  // The RAM component information from android device. This field has been
+  // introduced after Android W in Aug 2024 and is not supported on older
+  // versions.
+  optional string android_ram_model = 12;
 
   // The version of traced (the same returned by `traced --version`).
   // This is a human readable string with and its format varies depending on

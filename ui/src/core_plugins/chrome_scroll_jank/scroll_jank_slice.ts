@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../../base/semantic_icons';
 import {duration, time, Time} from '../../base/time';
 import {Actions} from '../../common/actions';
@@ -27,12 +26,11 @@ import {
   SQLConstraints,
 } from '../../trace_processor/sql_utils';
 import {Anchor} from '../../widgets/anchor';
-
 import {ScrollJankPluginState, ScrollJankTrackSpec} from './common';
 import {
   CHROME_EVENT_LATENCY_TRACK_KIND,
   SCROLL_JANK_V3_TRACK_KIND,
-} from '../../public';
+} from '../../public/track_kinds';
 
 interface BasicSlice {
   // ID of slice.
@@ -181,18 +179,20 @@ export class ScrollJankSliceRef
             throw new Error(`${vnode.attrs.kind} track is not registered.`);
           }
 
+          const trackUri = track.key;
+
           globals.makeSelection(
             Actions.selectGenericSlice({
               id: vnode.attrs.id,
               sqlTableName: track.sqlTableName,
               start: vnode.attrs.ts,
               duration: vnode.attrs.dur,
-              trackKey: track.key,
+              trackUri,
               detailsPanelConfig: track.detailsPanelConfig,
             }),
           );
 
-          scrollToTrackAndTs(track.key, vnode.attrs.ts, true);
+          scrollToTrackAndTs(trackUri, vnode.attrs.ts, true);
         },
       },
       vnode.attrs.name,

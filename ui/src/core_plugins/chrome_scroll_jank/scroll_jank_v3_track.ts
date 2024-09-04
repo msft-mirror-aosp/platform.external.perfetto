@@ -15,13 +15,13 @@
 import {globals} from '../../frontend/globals';
 import {NamedRow} from '../../frontend/named_slice_track';
 import {NewTrackArgs} from '../../frontend/track';
-import {SCROLL_JANK_V3_TRACK_KIND, Slice} from '../../public';
+import {SCROLL_JANK_V3_TRACK_KIND} from '../../public/track_kinds';
+import {Slice} from '../../public/track';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
 } from '../../frontend/tracks/custom_sql_table_slice_track';
-
 import {JANK_COLOR} from './jank_colors';
 import {ScrollJankV3DetailsPanel} from './scroll_jank_v3_details_panel';
 import {getColorForSlice} from '../../core/colorizer';
@@ -36,7 +36,7 @@ export class ScrollJankV3Track extends CustomSqlTableSliceTrack {
     super(args);
     ScrollJankPluginState.getInstance().registerTrack({
       kind: SCROLL_JANK_V3_TRACK_KIND,
-      trackKey: this.trackKey,
+      trackUri: this.uri,
       tableName: this.tableName,
       detailsPanelConfig: this.getDetailsPanel(),
     });

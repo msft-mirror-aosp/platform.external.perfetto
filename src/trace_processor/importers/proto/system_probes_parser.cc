@@ -379,7 +379,7 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     protos::pbzero::SysStats::InterruptCount::Decoder ic(*it);
 
     TrackId track = context_->track_tracker->InternIrqCounterTrack(
-        TrackTracker::IrqCounterTrackType::kIrqCount, ic.irq());
+        TrackTracker::IrqCounterTrackType::kCount, ic.irq());
     context_->event_tracker->PushCounter(ts, static_cast<double>(ic.count()),
                                          track);
   }
@@ -388,7 +388,7 @@ void SystemProbesParser::ParseSysStats(int64_t ts, ConstBytes blob) {
     protos::pbzero::SysStats::InterruptCount::Decoder ic(*it);
 
     TrackId track = context_->track_tracker->InternSoftirqCounterTrack(
-        TrackTracker::SoftIrqCounterTrackType::kSoftIrqCount, ic.irq());
+        TrackTracker::SoftIrqCounterTrackType::kCount, ic.irq());
     context_->event_tracker->PushCounter(ts, static_cast<double>(ic.count()),
                                          track);
   }
@@ -779,6 +779,20 @@ void SystemProbesParser::ParseSystemInfo(ConstBytes blob) {
         metadata::android_hardware_revision,
         Variadic::String(context_->storage->InternString(
             packet.android_hardware_revision())));
+  }
+
+  if (packet.has_android_storage_model()) {
+    context_->metadata_tracker->SetMetadata(
+        metadata::android_storage_model,
+        Variadic::String(context_->storage->InternString(
+            packet.android_storage_model())));
+  }
+
+  if (packet.has_android_ram_model()) {
+    context_->metadata_tracker->SetMetadata(
+        metadata::android_ram_model,
+        Variadic::String(context_->storage->InternString(
+            packet.android_ram_model())));
   }
 
   page_size_ = packet.page_size();

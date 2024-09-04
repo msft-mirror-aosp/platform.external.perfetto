@@ -13,9 +13,8 @@
 // limitations under the License.
 
 import {globals} from '../frontend/globals';
-import {Plugin} from '../public';
+import {PerfettoPlugin} from '../public/plugin';
 import {EngineBase} from '../trace_processor/engine';
-
 import {createEmptyState} from './empty_state';
 import {PluginManager, PluginRegistry} from './plugins';
 
@@ -25,7 +24,7 @@ class FakeEngine extends EngineBase {
   rpcSendRequestBytes(_data: Uint8Array) {}
 }
 
-function makeMockPlugin(): Plugin {
+function makeMockPlugin(): PerfettoPlugin {
   return {
     onActivate: jest.fn(),
     onDeactivate: jest.fn(),
@@ -37,7 +36,7 @@ function makeMockPlugin(): Plugin {
 const engine = new FakeEngine();
 globals.initStore(createEmptyState());
 
-let mockPlugin: Plugin;
+let mockPlugin: PerfettoPlugin;
 let manager: PluginManager;
 
 describe('PluginManger', () => {

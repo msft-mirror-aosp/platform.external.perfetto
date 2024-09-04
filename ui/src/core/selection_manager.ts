@@ -26,6 +26,19 @@ export enum ProfileType {
   PERF_SAMPLE = 'perf',
 }
 
+export function profileType(s: string): ProfileType {
+  if (s === 'heap_profile:libc.malloc,com.android.art') {
+    s = 'heap_profile:com.android.art,libc.malloc';
+  }
+  if (Object.values(ProfileType).includes(s as ProfileType)) {
+    return s as ProfileType;
+  }
+  if (s.startsWith('heap_profile')) {
+    return ProfileType.HEAP_PROFILE;
+  }
+  throw new Error('Unknown type ${s}');
+}
+
 // LEGACY Selection types:
 export interface SliceSelection {
   kind: 'SCHED_SLICE';
@@ -71,7 +84,7 @@ export interface ThreadStateSelection {
 export interface LogSelection {
   kind: 'LOG';
   id: number;
-  trackKey: string;
+  trackUri: string;
 }
 
 export interface GenericSliceSelection {
@@ -93,7 +106,7 @@ export type LegacySelection = (
   | PerfSamplesSelection
   | LogSelection
   | GenericSliceSelection
-) & {trackKey?: string};
+) & {trackUri?: string};
 export type SelectionKind = LegacySelection['kind']; // 'THREAD_STATE' | 'SLICE' ...
 
 // New Selection types:
@@ -104,13 +117,13 @@ export interface LegacySelectionWrapper {
 
 export interface SingleSelection {
   kind: 'single';
-  trackKey: string;
+  trackUri: string;
   eventId: number;
 }
 
 export interface AreaSelection {
   kind: 'area';
-  tracks: string[];
+  trackUris: string[];
   start: time;
   end: time;
 }
@@ -166,7 +179,7 @@ interface SelectionState {
   selection: Selection;
 }
 
-export class SelectionManager {
+export class SelectionManagerImpl {
   private store: Store<SelectionState>;
 
   constructor(store: Store<SelectionState>) {
@@ -217,22 +230,22 @@ export class SelectionManager {
   }
 
   setEvent(
-    trackKey: string,
+    trackUri: string,
     eventId: number,
     legacySelection?: LegacySelection,
   ) {
     this.clear();
-    this.addEvent(trackKey, eventId, legacySelection);
+    this.addEvent(trackUri, eventId, legacySelection);
   }
 
   addEvent(
-    trackKey: string,
+    trackUri: string,
     eventId: number,
     legacySelection?: LegacySelection,
   ) {
     this.addSelection({
       kind: 'single',
-      trackKey,
+      trackUri,
       eventId,
     });
     if (legacySelection) {
