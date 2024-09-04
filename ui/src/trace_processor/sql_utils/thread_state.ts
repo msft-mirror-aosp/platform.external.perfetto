@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {duration, Time, time} from '../../base/time';
-import {exists} from '../../base/utils';
 import {translateState} from '../../common/thread_state';
 import {Engine} from '../engine';
 import {LONG, NUM, NUM_NULL, STR_NULL} from '../query_result';
@@ -22,11 +21,10 @@ import {
   fromNumNull,
   SQLConstraints,
 } from '../sql_utils';
-
 import {globals} from '../../frontend/globals';
 import {scrollToTrackAndTs} from '../../frontend/scroll_helper';
 import {asUtid, SchedSqlId, ThreadStateSqlId} from './core_types';
-import {CPU_SLICE_TRACK_KIND} from '../../core/track_kinds';
+import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {getThreadInfo, ThreadInfo} from './thread';
 
 // Representation of a single thread state object, corresponding to
@@ -129,26 +127,17 @@ export async function getThreadState(
 }
 
 export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
-  let trackId: string | undefined;
-  for (const track of Object.values(globals.state.tracks)) {
-    if (exists(track?.uri)) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
-        if (trackInfo?.tags?.cpu === cpu) {
-          trackId = track.key;
-          break;
-        }
-      }
-    }
-  }
-  if (trackId === undefined) {
+  const track = globals.trackManager.findTrack(
+    (td) => td.tags?.kind === CPU_SLICE_TRACK_KIND && td.tags.cpu === cpu,
+  );
+  if (track === undefined) {
     return;
   }
   globals.setLegacySelection(
     {
       kind: 'SCHED_SLICE',
       id,
-      trackKey: trackId,
+      trackUri: track.uri,
     },
     {
       clearSearch: true,
@@ -157,5 +146,5 @@ export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
     },
   );
 
-  scrollToTrackAndTs(trackId, ts);
+  scrollToTrackAndTs(track.uri, ts);
 }

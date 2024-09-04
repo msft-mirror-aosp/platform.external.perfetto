@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertTrue} from '../base/logging';
 import {isString} from '../base/object_utils';
 import {Actions} from '../common/actions';
@@ -31,18 +30,24 @@ import {raf} from '../core/raf_scheduler';
 import {SCM_REVISION, VERSION} from '../gen/perfetto_version';
 import {EngineBase} from '../trace_processor/engine';
 import {showModal} from '../widgets/modal';
-
 import {Animation} from './animation';
 import {downloadData, downloadUrl} from './download_utils';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
 import {Router} from './router';
-import {createTraceLink, isDownloadable, shareTrace} from './trace_attrs';
+import {
+  createTraceLink,
+  isDownloadable,
+  isTraceLoaded,
+  shareTrace,
+} from './trace_attrs';
 import {
   convertTraceToJsonAndDownload,
   convertTraceToSystraceAndDownload,
 } from './trace_converter';
 import {openInOldUIWithSizeCheck} from './legacy_trace_viewer';
+import {formatHotkey} from '../base/hotkeys';
+import {SidebarMenuItem} from '../public/sidebar';
 
 const GITILES_URL =
   'https://android.googlesource.com/platform/external/perfetto';
@@ -94,16 +99,11 @@ function shouldShowHiringBanner(): boolean {
   return globals.isInternalUser && HIRING_BANNER_FLAG.get();
 }
 
-export const EXAMPLE_ANDROID_TRACE_URL =
-  'https://storage.googleapis.com/perfetto-misc/example_android_trace_15s';
-
-export const EXAMPLE_CHROME_TRACE_URL =
-  'https://storage.googleapis.com/perfetto-misc/chrome_example_wikipedia.perfetto_trace.gz';
-
 interface SectionItem {
   t: string;
   a: string | ((e: Event) => void);
   i: string;
+  title?: string;
   isPending?: () => boolean;
   isVisible?: () => boolean;
   internalUserOnly?: boolean;
@@ -121,6 +121,34 @@ interface Section {
   appendOpenedTraceTitle?: boolean;
 }
 
+function insertSidebarMenuitems(
+  groupSelector: SidebarMenuItem['group'],
+): ReadonlyArray<SectionItem> {
+  return globals.sidebarMenuItems
+    .valuesAsArray()
+    .filter(({group}) => group === groupSelector)
+    .sort((a, b) => {
+      const prioA = a.priority ?? 0;
+      const prioB = b.priority ?? 0;
+      return prioA - prioB;
+    })
+    .map((item) => {
+      const cmd = globals.commandManager.getCommand(item.commandId);
+      const title = cmd.defaultHotkey
+        ? `${cmd.name} [${formatHotkey(cmd.defaultHotkey)}]`
+        : cmd.name;
+      return {
+        t: cmd.name,
+        a: (e: Event) => {
+          e.preventDefault();
+          cmd.callback();
+        },
+        i: item.icon,
+        title,
+      };
+    });
+}
+
 function getSections(): Section[] {
   return [
     {
@@ -128,26 +156,7 @@ function getSections(): Section[] {
       summary: 'Open or record a new trace',
       expanded: true,
       items: [
-        {
-          t: 'Open trace file',
-          a: (e) => {
-            e.preventDefault();
-            globals.commandManager.runCommand(
-              'perfetto.CoreCommands#openTrace',
-            );
-          },
-          i: 'folder_open',
-        },
-        {
-          t: 'Open with legacy UI',
-          a: (e) => {
-            e.preventDefault();
-            globals.commandManager.runCommand(
-              'perfetto.CoreCommands#openTraceInLegacyUi',
-            );
-          },
-          i: 'filter_none',
-        },
+        ...insertSidebarMenuitems('navigation'),
         {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
         {
           t: 'Widgets',
@@ -246,18 +255,7 @@ function getSections(): Section[] {
       title: 'Example Traces',
       expanded: true,
       summary: 'Open an example trace',
-      items: [
-        {
-          t: 'Open Android example',
-          a: openTraceUrl(EXAMPLE_ANDROID_TRACE_URL),
-          i: 'description',
-        },
-        {
-          t: 'Open Chrome example',
-          a: openTraceUrl(EXAMPLE_CHROME_TRACE_URL),
-          i: 'description',
-        },
-      ],
+      items: [...insertSidebarMenuitems('example_traces')],
     },
 
     {
@@ -374,18 +372,6 @@ function convertTraceToJson(e: Event) {
     .catch((error) => {
       throw new Error(`Failed to get current trace ${error}`);
     });
-}
-
-export function isTraceLoaded(): boolean {
-  return globals.getCurrentEngine() !== undefined;
-}
-
-export function openTraceUrl(url: string): (e: Event) => void {
-  return (e) => {
-    globals.logging.logEvent('Trace Actions', 'Open example trace');
-    e.preventDefault();
-    globals.dispatch(Actions.openTraceFromUrl({url}));
-  };
 }
 
 function navigateRecord(e: Event) {
@@ -780,7 +766,15 @@ export class Sidebar implements m.ClassComponent {
           };
         }
         vdomItems.push(
-          m('li', m(`a${css}`, attrs, m('i.material-icons', item.i), item.t)),
+          m(
+            'li',
+            m(
+              `a${css}`,
+              {...attrs, title: item.title},
+              m('i.material-icons', item.i),
+              item.t,
+            ),
+          ),
         );
       }
       if (section.appendOpenedTraceTitle) {

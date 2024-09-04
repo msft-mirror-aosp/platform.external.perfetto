@@ -21,7 +21,7 @@ import {globals} from '../globals';
 import {NAMED_ROW, NamedRow, NamedSliceTrack} from '../named_slice_track';
 import {NewTrackArgs} from '../track';
 import {createView} from '../../trace_processor/sql_utils';
-import {Slice} from '../../public';
+import {Slice} from '../../public/track';
 import {uuidv4} from '../../base/uuid';
 import {AsyncDisposableStack} from '../../base/disposable_stack';
 
@@ -114,7 +114,7 @@ export abstract class CustomSqlTableSliceTrack extends NamedSliceTrack<
     if (selection.kind !== 'GENERIC_SLICE') {
       return false;
     }
-    return selection.trackKey === this.trackKey;
+    return selection.trackUri === this.uri;
   }
 
   onSliceClick(args: OnSliceClickArgs<Slice>) {
@@ -129,7 +129,7 @@ export abstract class CustomSqlTableSliceTrack extends NamedSliceTrack<
         sqlTableName: this.tableName,
         start: args.slice.ts,
         duration: args.slice.dur,
-        trackKey: this.trackKey,
+        trackUri: this.uri,
         detailsPanelConfig: {
           kind: detailsPanelConfig.kind,
           config: detailsPanelConfig.config,

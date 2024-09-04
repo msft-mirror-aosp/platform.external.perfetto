@@ -13,52 +13,39 @@
 // limitations under the License.
 
 import {v4 as uuidv4} from 'uuid';
-
-import {Actions} from '../../common/actions';
-import {SCROLLING_TRACK_GROUP} from '../../common/state';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {globals} from '../../frontend/globals';
-import {
-  BottomTabToSCSAdapter,
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-  PrimaryTrackSortKey,
-} from '../../public';
-
+import {BottomTabToSCSAdapter} from '../../public/utils';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {PageLoadDetailsPanel} from './page_load_details_panel';
 import {StartupDetailsPanel} from './startup_details_panel';
 import {WebContentInteractionPanel} from './web_content_interaction_details_panel';
 import {CriticalUserInteractionTrack} from './critical_user_interaction_track';
+import {TrackNode} from '../../public/workspace';
+import {globals} from '../../frontend/globals';
 
 function addCriticalUserInteractionTrack() {
-  const trackKey = uuidv4();
-  globals.dispatchMultiple([
-    Actions.addTrack({
-      key: trackKey,
-      uri: CriticalUserInteractionTrack.kind,
-      name: `Chrome Interactions`,
-      trackSortKey: PrimaryTrackSortKey.DEBUG_TRACK,
-      trackGroup: SCROLLING_TRACK_GROUP,
-    }),
-    Actions.toggleTrackPinned({trackKey}),
-  ]);
+  const track = new TrackNode(
+    CriticalUserInteractionTrack.kind,
+    'Chrome Interactions',
+  );
+  globals.workspace.insertChildInOrder(track);
+  track.pin();
 }
 
-class CriticalUserInteractionPlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class CriticalUserInteractionPlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerTrack({
       uri: CriticalUserInteractionTrack.kind,
       tags: {
         kind: CriticalUserInteractionTrack.kind,
       },
       title: 'Chrome Interactions',
-      trackFactory: (trackCtx) =>
-        new CriticalUserInteractionTrack({
-          engine: ctx.engine,
-          trackKey: trackCtx.trackKey,
-        }),
+      track: new CriticalUserInteractionTrack({
+        engine: ctx.engine,
+        uri: CriticalUserInteractionTrack.kind,
+      }),
     });
 
     ctx.registerDetailsPanel(
@@ -120,7 +107,7 @@ class CriticalUserInteractionPlugin implements Plugin {
     );
   }
 
-  onActivate(ctx: PluginContext): void {
+  onActivate(ctx: App): void {
     ctx.registerCommand({
       id: 'perfetto.CriticalUserInteraction.AddInteractionTrack',
       name: 'Add track: Chrome interactions',

@@ -13,15 +13,21 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Time, duration, time} from '../../base/time';
-import {SliceSqlId} from '../../trace_processor/sql_utils/core_types';
+import {
+  asSliceSqlId,
+  SliceSqlId,
+} from '../../trace_processor/sql_utils/core_types';
 import {Anchor} from '../../widgets/anchor';
 import {Icons} from '../../base/semantic_icons';
 import {globals} from '../globals';
 import {focusHorizontalRange, verticalScrollToTrack} from '../scroll_helper';
 import {BigintMath} from '../../base/bigint_math';
-import {SliceDetails} from '../../trace_processor/sql_utils/slice';
+import {getSlice, SliceDetails} from '../../trace_processor/sql_utils/slice';
+import {
+  createSqlIdRefRenderer,
+  sqlIdRegistry,
+} from './sql/details/sql_ref_renderer_registry';
 
 interface SliceRefAttrs {
   readonly id: SliceSqlId;
@@ -44,10 +50,11 @@ export class SliceRef implements m.ClassComponent<SliceRefAttrs> {
       {
         icon: Icons.UpdateSelection,
         onclick: () => {
-          const trackKeyByTrackId = globals.trackManager.trackKeyByTrackId;
-          const trackKey = trackKeyByTrackId.get(vnode.attrs.sqlTrackId);
-          if (trackKey === undefined) return;
-          verticalScrollToTrack(trackKey, true);
+          const track = globals.trackManager.findTrack((td) => {
+            return td.tags?.trackIds?.includes(vnode.attrs.sqlTrackId);
+          });
+          if (track === undefined) return;
+          verticalScrollToTrack(track.uri, true);
           // Clamp duration to 1 - i.e. for instant events
           const dur = BigintMath.max(1n, vnode.attrs.dur);
           focusHorizontalRange(
@@ -59,7 +66,7 @@ export class SliceRef implements m.ClassComponent<SliceRefAttrs> {
             {
               kind: 'SLICE',
               id: vnode.attrs.id,
-              trackKey,
+              trackUri: track.uri,
               table: 'slice',
             },
             {
@@ -84,3 +91,18 @@ export function sliceRef(slice: SliceDetails, name?: string): m.Child {
     sqlTrackId: slice.trackId,
   });
 }
+
+sqlIdRegistry['slice'] = createSqlIdRefRenderer<{
+  slice: SliceDetails | undefined;
+  id: bigint;
+}>(
+  async (engine, id) => {
+    return {
+      id,
+      slice: await getSlice(engine, asSliceSqlId(Number(id))),
+    };
+  },
+  ({id, slice}) => ({
+    value: slice !== undefined ? sliceRef(slice) : `Unknown slice ${id}`,
+  }),
+);

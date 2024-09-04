@@ -17,17 +17,20 @@ import {exists} from '../../base/utils';
 import {Actions} from '../../common/actions';
 import {globals} from '../../frontend/globals';
 import {openInOldUIWithSizeCheck} from '../../frontend/legacy_trace_viewer';
-import {
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {
   isLegacyTrace,
   openFileWithLegacyTraceViewer,
 } from '../../frontend/legacy_trace_viewer';
 import {DisposableStack} from '../../base/disposable_stack';
+import {ADD_SQL_TABLE_TAB_COMMAND_ID} from '../../frontend/sql_table_tab_command';
+import {
+  addSqlTableTabImpl,
+  SqlTableTabConfig,
+} from '../../frontend/sql_table_tab';
+import {Workspace} from '../../public/workspace';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -95,10 +98,10 @@ group by
 order by total_self_size desc
 limit 100;`;
 
-class CoreCommandsPlugin implements Plugin {
+class CoreCommandsPlugin implements PerfettoPlugin {
   private readonly disposable = new DisposableStack();
 
-  onActivate(ctx: PluginContext) {
+  onActivate(ctx: App) {
     ctx.registerCommand({
       id: 'perfetto.CoreCommands#ToggleLeftSidebar',
       name: 'Toggle left sidebar',
@@ -130,8 +133,9 @@ class CoreCommandsPlugin implements Plugin {
       document.body.removeChild(input);
     });
 
+    const OPEN_TRACE_COMMAND_ID = 'perfetto.CoreCommands#openTrace';
     ctx.registerCommand({
-      id: 'perfetto.CoreCommands#openTrace',
+      id: OPEN_TRACE_COMMAND_ID,
       name: 'Open trace file',
       callback: () => {
         delete input.dataset['useCatapultLegacyUi'];
@@ -139,17 +143,30 @@ class CoreCommandsPlugin implements Plugin {
       },
       defaultHotkey: '!Mod+O',
     });
+    ctx.addSidebarMenuItem({
+      commandId: OPEN_TRACE_COMMAND_ID,
+      group: 'navigation',
+      icon: 'folder_open',
+    });
+
+    const OPEN_LEGACY_TRACE_COMMAND_ID =
+      'perfetto.CoreCommands#openTraceInLegacyUi';
     ctx.registerCommand({
-      id: 'perfetto.CoreCommands#openTraceInLegacyUi',
+      id: OPEN_LEGACY_TRACE_COMMAND_ID,
       name: 'Open with legacy UI',
       callback: () => {
         input.dataset['useCatapultLegacyUi'] = '1';
         input.click();
       },
     });
+    ctx.addSidebarMenuItem({
+      commandId: OPEN_LEGACY_TRACE_COMMAND_ID,
+      group: 'navigation',
+      icon: 'filter_none',
+    });
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryAllProcesses',
       name: 'Run query: All processes',
@@ -211,9 +228,8 @@ class CoreCommandsPlugin implements Plugin {
       id: 'perfetto.CoreCommands#UnpinAllTracks',
       name: 'Unpin all pinned tracks',
       callback: () => {
-        ctx.timeline.unpinTracksByPredicate((_) => {
-          return true;
-        });
+        const workspace = ctx.timeline.workspace;
+        workspace.pinnedTracks.forEach((t) => workspace.unpinTrack(t));
       },
     });
 
@@ -221,9 +237,7 @@ class CoreCommandsPlugin implements Plugin {
       id: 'perfetto.CoreCommands#ExpandAllGroups',
       name: 'Expand all track groups',
       callback: () => {
-        ctx.timeline.expandGroupsByPredicate((_) => {
-          return true;
-        });
+        ctx.timeline.workspace.flatGroups.forEach((g) => g.expand());
       },
     });
 
@@ -231,9 +245,7 @@ class CoreCommandsPlugin implements Plugin {
       id: 'perfetto.CoreCommands#CollapseAllGroups',
       name: 'Collapse all track groups',
       callback: () => {
-        ctx.timeline.collapseGroupsByPredicate((_) => {
-          return true;
-        });
+        ctx.timeline.workspace.flatGroups.forEach((g) => g.collapse());
       },
     });
 
@@ -263,9 +275,62 @@ class CoreCommandsPlugin implements Plugin {
         ctx.tabs.showTab('current_selection');
       },
     });
+
+    ctx.registerCommand({
+      id: ADD_SQL_TABLE_TAB_COMMAND_ID,
+      name: 'Open SQL table viewer',
+      callback: (args: unknown) => {
+        if (args === undefined) {
+          // If we are being run from the command palette, args will be
+          // undefined, so there's not a lot we can do here...
+
+          // Perhaps in the future we could just open the table in a new tab and
+          // allow the user to browse the tables..?
+          return;
+        }
+        addSqlTableTabImpl(args as SqlTableTabConfig);
+      },
+    });
+
+    ctx.registerCommand({
+      id: 'createNewEmptyWorkspace',
+      name: 'Create new empty workspace',
+      callback: async () => {
+        try {
+          const name = await ctx.prompt('Give it a name...');
+          const newWorkspace = new Workspace(name);
+          globals.workspaces.push(newWorkspace);
+          globals.switchWorkspace(newWorkspace);
+        } finally {
+        }
+      },
+    });
+
+    ctx.registerCommand({
+      id: 'switchWorkspace',
+      name: 'Switch workspace',
+      callback: async () => {
+        try {
+          const options = globals.workspaces.map((ws) => {
+            return {key: ws.uuid, displayName: ws.displayName};
+          });
+          const workspaceUuid = await ctx.prompt(
+            'Choose a workspace...',
+            options,
+          );
+          const workspace = globals.workspaces.find(
+            (ws) => ws.uuid === workspaceUuid,
+          );
+          if (workspace) {
+            globals.switchWorkspace(workspace);
+          }
+        } finally {
+        }
+      },
+    });
   }
 
-  onDeactivate(_: PluginContext): void {
+  onDeactivate(_: App): void {
     this.disposable[Symbol.dispose]();
   }
 }
