@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {currentTargetOffset} from '../base/dom_utils';
 import {Icons} from '../base/semantic_icons';
 import {Time} from '../base/time';
@@ -23,19 +22,18 @@ import {SpanNote, Note, Selection} from '../common/state';
 import {raf} from '../core/raf_scheduler';
 import {Button, ButtonBar} from '../widgets/button';
 import {TextInput} from '../widgets/text_input';
-
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {getMaxMajorTicks, generateTicks, TickType} from './gridline_helper';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
-import {isTraceLoaded} from './sidebar';
 import {Timestamp} from './widgets/timestamp';
 import {uuidv4} from '../base/uuid';
 import {assertUnreachable} from '../base/logging';
-import {DetailsPanel} from '../public';
-import {PxSpan, TimeScale} from './time_scale';
-import {canvasClip} from '../common/canvas_utils';
+import {DetailsPanel} from '../public/track';
+import {TimeScale} from '../base/time_scale';
+import {canvasClip} from '../base/canvas_utils';
+import {isTraceLoaded} from './trace_attrs';
 
 const FLAG_WIDTH = 16;
 const AREA_TRIANGLE_WIDTH = 10;
@@ -65,9 +63,7 @@ export class NotesPanel implements Panel {
   private hoveredX: null | number = null;
 
   render(): m.Children {
-    const allCollapsed = Object.values(globals.state.trackGroups).every(
-      (group) => group.collapsed,
-    );
+    const allCollapsed = globals.workspace.flatGroups.every((n) => n.collapsed);
 
     return m(
       '.notes-panel',
@@ -114,7 +110,10 @@ export class NotesPanel implements Panel {
           m(Button, {
             onclick: (e: Event) => {
               e.preventDefault();
-              globals.dispatch(Actions.clearAllPinnedTracks({}));
+              globals.workspace.pinnedTracks.forEach((t) =>
+                globals.workspace.unpinTrack(t),
+              );
+              raf.scheduleFullRedraw();
             },
             title: 'Clear all pinned tracks',
             icon: 'clear_all',
@@ -144,7 +143,7 @@ export class NotesPanel implements Panel {
     );
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
     ctx.fillStyle = '#999';
     ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
 
@@ -157,11 +156,14 @@ export class NotesPanel implements Panel {
     ctx.restore();
   }
 
-  private renderPanel(ctx: CanvasRenderingContext2D, size: Size): void {
+  private renderPanel(ctx: CanvasRenderingContext2D, size: Size2D): void {
     let aNoteIsHovered = false;
 
     const visibleWindow = globals.timeline.visibleWindow;
-    const timescale = new TimeScale(visibleWindow, new PxSpan(0, size.width));
+    const timescale = new TimeScale(visibleWindow, {
+      left: 0,
+      right: size.width,
+    });
     const timespan = visibleWindow.toTimeSpan();
 
     this.timescale = timescale;

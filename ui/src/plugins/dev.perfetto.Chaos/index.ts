@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-  addDebugSliceTrack,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
-class Chaos implements Plugin {
-  onActivate(ctx: PluginContext): void {
+class Chaos implements PerfettoPlugin {
+  onActivate(ctx: App): void {
     ctx.registerCommand({
       id: 'dev.perfetto.Chaos#CrashNow',
       name: 'Chaos: crash now',
@@ -31,7 +28,7 @@ class Chaos implements Plugin {
     });
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerCommand({
       id: 'dev.perfetto.Chaos#CrashNowQuery',
       name: 'Chaos: run crashing query',
@@ -70,9 +67,9 @@ class Chaos implements Plugin {
     });
   }
 
-  async onTraceUnload(_: PluginContextTrace): Promise<void> {}
+  async onTraceUnload(_: Trace): Promise<void> {}
 
-  onDeactivate(_: PluginContext): void {}
+  onDeactivate(_: App): void {}
 }
 
 export const plugin: PluginDescriptor = {

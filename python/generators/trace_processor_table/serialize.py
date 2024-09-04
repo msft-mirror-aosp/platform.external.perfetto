@@ -80,7 +80,7 @@ class ColumnSerializer:
 
   def const_row_ref_getter(self) -> Optional[str]:
     return f'''ColumnType::{self.name}::type {self.name}() const {{
-      return table_->{self.name}()[row_number_];
+      return table()->{self.name}()[row_number_];
     }}'''
 
   def row_ref_getter(self) -> Optional[str]:
@@ -169,7 +169,7 @@ class ColumnSerializer:
     name = self.name
     return f'''
     ColumnType::{self.name}::type {name}() const {{
-      const auto& col = table_->{name}();
+      const auto& col = table()->{name}();
       return col.GetAtIdx(
         iterator_.StorageIndexForColumn(col.index_in_table()));
     }}
@@ -385,7 +385,7 @@ class TableSerializer(object):
 
    private:
     {self.table_name}* mutable_table() const {{
-      return const_cast<{self.table_name}*>(table_);
+      return const_cast<{self.table_name}*>(table());
     }}
   }};
   static_assert(std::is_trivially_destructible_v<RowReference>,
@@ -495,17 +495,14 @@ class TableSerializer(object):
   class Iterator : public ConstIterator {{
     public:
      RowReference row_reference() const {{
-       return RowReference(mutable_table_, CurrentRowNumber());
+       return {{const_cast<{self.table_name}*>(table()), CurrentRowNumber()}};
      }}
 
     private:
      friend class {self.table_name};
 
      explicit Iterator({self.table_name}* table, Table::Iterator iterator)
-        : ConstIterator(table, std::move(iterator)),
-          mutable_table_(table) {{}}
-
-     {self.table_name}* mutable_table_ = nullptr;
+        : ConstIterator(table, std::move(iterator)) {{}}
   }};
       '''
 
@@ -518,15 +515,15 @@ class TableSerializer(object):
         ColumnSerializer.extend_parent_param_arg, delimiter=', ')
     delim = ',' if params else ''
     return f'''
-  static std::unique_ptr<Table> ExtendParent(
+  static std::unique_ptr<{self.table_name}> ExtendParent(
       const {self.parent_class_name}& parent{delim}
       {params}) {{
-    return std::unique_ptr<Table>(new {self.table_name}(
+    return std::unique_ptr<{self.table_name}>(new {self.table_name}(
         parent.string_pool(), parent, RowMap(0, parent.row_count()){delim}
         {args}));
   }}
 
-  static std::unique_ptr<Table> SelectAndExtendParent(
+  static std::unique_ptr<{self.table_name}> SelectAndExtendParent(
       const {self.parent_class_name}& parent,
       std::vector<{self.parent_class_name}::RowNumber> parent_overlay{delim}
       {params}) {{
@@ -534,7 +531,7 @@ class TableSerializer(object):
     for (uint32_t i = 0; i < parent_overlay.size(); ++i) {{
       prs_untyped[i] = parent_overlay[i].row_number();
     }}
-    return std::unique_ptr<Table>(new {self.table_name}(
+    return std::unique_ptr<{self.table_name}>(new {self.table_name}(
         parent.string_pool(), parent, RowMap(std::move(prs_untyped)){delim}
         {args}));
   }}
@@ -660,16 +657,26 @@ class {self.table_name} : public macros_internal::MacroTable {{
   Iterator IterateRows() {{ return Iterator(this, Table::IterateRows()); }}
 
   ConstIterator FilterToIterator(const Query& q) const {{
-    return ConstIterator(
-      this, ApplyAndIterateRows(QueryToRowMap(q)));
+    return ConstIterator(this, QueryToIterator(q));
   }}
 
   Iterator FilterToIterator(const Query& q) {{
-    return Iterator(this, ApplyAndIterateRows(QueryToRowMap(q)));
+    return Iterator(this, QueryToIterator(q));
   }}
 
   void ShrinkToFit() {{
     {self.foreach_col(ColumnSerializer.shrink_to_fit)}
+  }}
+
+  ConstRowReference operator[](uint32_t r) const {{
+    return ConstRowReference(this, r);
+  }}
+  RowReference operator[](uint32_t r) {{ return RowReference(this, r); }}
+  ConstRowReference operator[](RowNumber r) const {{
+    return ConstRowReference(this, r.row_number());
+  }}
+  RowReference operator[](RowNumber r) {{
+    return RowReference(this, r.row_number());
   }}
 
   std::optional<ConstRowReference> FindById(Id find_id) const {{

@@ -13,14 +13,16 @@
 // limitations under the License.
 
 import m from 'mithril';
-
+import {Icons} from '../../base/semantic_icons';
 import {sqliteString} from '../../base/string_utils';
 import {
   BaseCounterTrack,
   CounterOptions,
 } from '../../frontend/base_counter_track';
-import {CloseTrackButton} from '../../frontend/close_track_button';
-import {Engine, TrackContext} from '../../public';
+import {globals} from '../../frontend/globals';
+import {Engine} from '../../trace_processor/engine';
+import {TrackContext} from '../../public/track';
+import {Button} from '../../widgets/button';
 
 export enum CPUType {
   Big = 'big',
@@ -34,14 +36,19 @@ export class ActiveCPUCountTrack extends BaseCounterTrack {
   constructor(ctx: TrackContext, engine: Engine, cpuType?: CPUType) {
     super({
       engine,
-      trackKey: ctx.trackKey,
+      uri: ctx.trackUri,
     });
     this.cpuType = cpuType;
   }
 
   getTrackShellButtons(): m.Children {
-    return m(CloseTrackButton, {
-      trackKey: this.trackKey,
+    return m(Button, {
+      onclick: () => {
+        globals.workspace.getTrackByUri(this.uri)?.remove();
+      },
+      icon: Icons.Close,
+      title: 'Close',
+      compact: true,
     });
   }
 

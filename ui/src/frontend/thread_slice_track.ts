@@ -20,7 +20,7 @@ import {NAMED_ROW, NamedSliceTrack} from './named_slice_track';
 import {SLICE_LAYOUT_FIT_CONTENT_DEFAULTS} from './slice_layout';
 import {NewTrackArgs} from './track';
 import {LONG_NULL} from '../trace_processor/query_result';
-import {Slice} from 'src/public';
+import {Slice} from '../public/track';
 
 export const THREAD_SLICE_ROW = {
   // Base columns (tsq, ts, dur, id, depth).
@@ -87,7 +87,7 @@ export class ThreadSliceTrack extends NamedSliceTrack<Slice, ThreadSliceRow> {
       {
         kind: 'SLICE',
         id: args.slice.id,
-        trackKey: this.trackKey,
+        trackUri: this.uri,
         table: this.tableName,
       },
       {
