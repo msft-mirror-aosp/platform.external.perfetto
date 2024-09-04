@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {createStore, Store} from '../../base/store';
 import {exists} from '../../base/utils';
-import {
-  createStore,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-  Store,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
 interface State {
   counter: number;
@@ -27,7 +23,7 @@ interface State {
 
 // This example plugin shows using state that is persisted in the
 // permalink.
-class ExampleState implements Plugin {
+class ExampleState implements PerfettoPlugin {
   private store: Store<State> = createStore({counter: 0});
 
   private migrate(initialState: unknown): State {
@@ -43,7 +39,7 @@ class ExampleState implements Plugin {
     }
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     this.store = ctx.mountStore((init: unknown) => this.migrate(init));
 
     ctx.registerCommand({
@@ -62,7 +58,7 @@ class ExampleState implements Plugin {
     });
   }
 
-  async onTraceUnload(_: PluginContextTrace): Promise<void> {
+  async onTraceUnload(_: Trace): Promise<void> {
     this.store[Symbol.dispose]();
   }
 }

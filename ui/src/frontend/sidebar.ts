@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertTrue} from '../base/logging';
 import {isString} from '../base/object_utils';
 import {Actions} from '../common/actions';
@@ -31,20 +30,24 @@ import {raf} from '../core/raf_scheduler';
 import {SCM_REVISION, VERSION} from '../gen/perfetto_version';
 import {EngineBase} from '../trace_processor/engine';
 import {showModal} from '../widgets/modal';
-
 import {Animation} from './animation';
 import {downloadData, downloadUrl} from './download_utils';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
 import {Router} from './router';
-import {createTraceLink, isDownloadable, shareTrace} from './trace_attrs';
+import {
+  createTraceLink,
+  isDownloadable,
+  isTraceLoaded,
+  shareTrace,
+} from './trace_attrs';
 import {
   convertTraceToJsonAndDownload,
   convertTraceToSystraceAndDownload,
 } from './trace_converter';
 import {openInOldUIWithSizeCheck} from './legacy_trace_viewer';
 import {formatHotkey} from '../base/hotkeys';
-import {SidebarMenuItem} from '../public';
+import {SidebarMenuItem} from '../public/sidebar';
 
 const GITILES_URL =
   'https://android.googlesource.com/platform/external/perfetto';
@@ -369,10 +372,6 @@ function convertTraceToJson(e: Event) {
     .catch((error) => {
       throw new Error(`Failed to get current trace ${error}`);
     });
-}
-
-export function isTraceLoaded(): boolean {
-  return globals.getCurrentEngine() !== undefined;
 }
 
 function navigateRecord(e: Event) {
