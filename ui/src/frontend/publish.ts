@@ -15,14 +15,11 @@
 import {Actions} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
 import {ConversionJobStatusUpdate} from '../common/conversion_jobs';
-import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults} from '../common/search_data';
 import {raf} from '../core/raf_scheduler';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {getLegacySelection} from '../common/state';
-
 import {
-  CpuProfileDetails,
   Flow,
   globals,
   QuantizedLoad,
@@ -58,11 +55,6 @@ export function publishTrackData(args: {id: string; data: {}}) {
   raf.scheduleRedraw();
 }
 
-export function publishMetricResult(metricResult: MetricResult) {
-  globals.setMetricResult(metricResult);
-  globals.publishRedraw();
-}
-
 export function publishSelectedFlows(selectedFlows: Flow[]) {
   globals.selectedFlows = selectedFlows;
   globals.publishRedraw();
@@ -71,11 +63,6 @@ export function publishSelectedFlows(selectedFlows: Flow[]) {
 export function publishHttpRpcState(httpRpcState: HttpRpcState) {
   globals.httpRpcState = httpRpcState;
   raf.scheduleFullRedraw();
-}
-
-export function publishCpuProfileDetails(details: CpuProfileDetails) {
-  globals.cpuProfileDetails = details;
-  globals.publishRedraw();
 }
 
 export function publishHasFtrace(value: boolean): void {
@@ -130,11 +117,6 @@ export function publishAggregateData(args: {
   globals.publishRedraw();
 }
 
-export function publishQueryResult(args: {id: string; data?: {}}) {
-  globals.queryResults.set(args.id, args.data);
-  globals.publishRedraw();
-}
-
 export function publishThreads(data: ThreadDesc[]) {
   globals.threads.clear();
   data.forEach((thread) => {
@@ -143,9 +125,9 @@ export function publishThreads(data: ThreadDesc[]) {
   globals.publishRedraw();
 }
 
-export function publishSliceDetails(click: SliceDetails) {
-  globals.sliceDetails = click;
-  const id = click.id;
+export function publishSliceDetails(sliceDetails: SliceDetails) {
+  globals.sliceDetails = sliceDetails;
+  const id = sliceDetails.id;
   if (id !== undefined && id === globals.state.pendingScrollId) {
     findCurrentSelection();
     globals.dispatch(Actions.clearPendingScrollId({id: undefined}));

@@ -13,13 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {
-  Plugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {Time, TimeSpan} from '../../base/time';
 import {redrawModal, showModal} from '../../widgets/modal';
 import {assertExists} from '../../base/logging';
@@ -44,9 +40,9 @@ type SessionId = number;
  * their durations don't match. The initial viewport bound for each trace is
  * selected when the enable command is called.
  */
-class TimelineSync implements Plugin {
+class TimelineSync implements PerfettoPlugin {
   private _chan?: BroadcastChannel;
-  private _ctx?: PluginContextTrace;
+  private _ctx?: Trace;
   private _traceLoadTime = 0;
   // Attached to broadcast messages to allow other windows to remap viewports.
   private readonly _clientId: ClientId = Math.floor(Math.random() * 1_000_000);
@@ -68,7 +64,7 @@ class TimelineSync implements Plugin {
     ViewportBoundsSnapshot
   >();
 
-  onActivate(ctx: PluginContext): void {
+  onActivate(ctx: App): void {
     ctx.registerCommand({
       id: `dev.perfetto.SplitScreen#enableTimelineSync`,
       name: 'Enable timeline sync with other Perfetto UI tabs',
@@ -104,11 +100,11 @@ class TimelineSync implements Plugin {
     }
   }
 
-  onDeactivate(_: PluginContext) {
+  onDeactivate(_: App) {
     this.disableTimelineSync(this._sessionId);
   }
 
-  async onTraceLoad(ctx: PluginContextTrace) {
+  async onTraceLoad(ctx: Trace) {
     this._ctx = ctx;
     this._traceLoadTime = Date.now();
     this.advertise();
@@ -117,7 +113,7 @@ class TimelineSync implements Plugin {
     }
   }
 
-  async onTraceUnload(_: PluginContextTrace) {
+  async onTraceUnload(_: Trace) {
     this.disableTimelineSync(this._sessionId);
     this._ctx = undefined;
   }
