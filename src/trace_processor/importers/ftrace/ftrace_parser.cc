@@ -20,6 +20,7 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/protozero/proto_decoder.h"
 
 #include "perfetto/trace_processor/basic_types.h"
@@ -40,6 +41,7 @@
 #include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/importers/syscalls/syscall_tracker.h"
 #include "src/trace_processor/importers/systrace/systrace_parser.h"
+#include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/softirq_action.h"
@@ -318,6 +320,7 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       pkvm_hyp_cpu_tracker_(context),
       gpu_work_period_tracker_(context),
       thermal_tracker_(context),
+      pixel_mm_kswapd_event_tracker_(context),
       sched_wakeup_name_id_(context->storage->InternString("sched_wakeup")),
       sched_waking_name_id_(context->storage->InternString("sched_waking")),
       cpu_id_(context->storage->InternString("cpu")),
@@ -1295,6 +1298,14 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         ParseBclIrq(ts, fld_bytes);
         break;
       }
+      case FtraceEvent::kPixelMmKswapdWakeFieldNumber: {
+        pixel_mm_kswapd_event_tracker_.ParsePixelMmKswapdWake(ts, pid);
+        break;
+      }
+      case FtraceEvent::kPixelMmKswapdDoneFieldNumber: {
+        pixel_mm_kswapd_event_tracker_.ParsePixelMmKswapdDone(ts, pid, fld_bytes);
+        break;
+      }
       default:
         break;
     }
@@ -1382,9 +1393,23 @@ void FtraceParser::MaybeOnFirstFtraceEvent() {
     }
   }
 
-  // Calculate the timestamp used to skip events since, while still populating
+  // Calculate the timestamp used to skip early events, while still populating
   // the |ftrace_events| table.
-  switch (context_->config.soft_drop_ftrace_data_before) {
+  SoftDropFtraceDataBefore soft_drop_before =
+      context_->config.soft_drop_ftrace_data_before;
+
+  // TODO(b/344969928): Workaround, can be removed when perfetto v47+ traces are
+  // the norm in Android.
+  base::StringView unique_session_name =
+      context_->metadata_tracker->GetMetadata(metadata::unique_session_name)
+          .value_or(SqlValue::String(""))
+          .AsString();
+  if (unique_session_name ==
+      base::StringView("session_with_lightweight_battery_tracing")) {
+    soft_drop_before = SoftDropFtraceDataBefore::kNoDrop;
+  }
+
+  switch (soft_drop_before) {
     case SoftDropFtraceDataBefore::kNoDrop: {
       soft_drop_ftrace_data_before_ts_ = 0;
       break;
@@ -1602,7 +1627,7 @@ void FtraceParser::ParseGpuFreq(int64_t timestamp, ConstBytes blob) {
   uint32_t gpu = freq.gpu_id();
   uint32_t new_freq = freq.state();
   TrackId track = context_->track_tracker->InternGpuCounterTrack(
-      TrackTracker::GpuCounterTrackType::kFreqency, gpu);
+      TrackTracker::GpuCounterTrackType::kFrequency, gpu);
   context_->event_tracker->PushCounter(timestamp, new_freq, track);
 }
 
@@ -1613,7 +1638,7 @@ void FtraceParser::ParseKgslGpuFreq(int64_t timestamp, ConstBytes blob) {
   // Source data is frequency / 1000, so we correct that here:
   double new_freq = static_cast<double>(freq.gpu_freq()) * 1000.0;
   TrackId track = context_->track_tracker->InternGpuCounterTrack(
-      TrackTracker::GpuCounterTrackType::kFreqency, gpu);
+      TrackTracker::GpuCounterTrackType::kFrequency, gpu);
   context_->event_tracker->PushCounter(timestamp, new_freq, track);
 }
 
@@ -1776,8 +1801,8 @@ void FtraceParser::ParseLwisTracingMarkWrite(int64_t timestamp,
 
 void FtraceParser::ParseGoogleIccEvent(int64_t timestamp, ConstBytes blob) {
   protos::pbzero::GoogleIccEventFtraceEvent::Decoder evt(blob.data, blob.size);
-  TrackId track_id = context_->track_tracker->InternUniqueTrack(
-      TrackTracker::UniqueTrackType::kInterconnect);
+  TrackId track_id = context_->track_tracker->InternGlobalTrack(
+      TrackTracker::GlobalTrackType::kInterconnect);
   StringId slice_name_id =
       context_->storage->InternString(base::StringView(evt.event()));
   context_->slice_tracker->Scoped(timestamp, track_id, google_icc_event_id_,
@@ -1786,8 +1811,8 @@ void FtraceParser::ParseGoogleIccEvent(int64_t timestamp, ConstBytes blob) {
 
 void FtraceParser::ParseGoogleIrmEvent(int64_t timestamp, ConstBytes blob) {
   protos::pbzero::GoogleIrmEventFtraceEvent::Decoder evt(blob.data, blob.size);
-  TrackId track_id = context_->track_tracker->InternUniqueTrack(
-      TrackTracker::UniqueTrackType::kInterconnect);
+  TrackId track_id = context_->track_tracker->InternGlobalTrack(
+      TrackTracker::GlobalTrackType::kInterconnect);
   StringId slice_name_id =
       context_->storage->InternString(base::StringView(evt.event()));
   context_->slice_tracker->Scoped(timestamp, track_id, google_irm_event_id_,

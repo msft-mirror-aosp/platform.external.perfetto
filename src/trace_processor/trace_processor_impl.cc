@@ -123,6 +123,11 @@
 #include "src/trace_processor/util/status_macros.h"
 #include "src/trace_processor/util/trace_type.h"
 
+#if PERFETTO_BUILDFLAG(PERFETTO_TP_INSTRUMENTS)
+#include "src/trace_processor/importers/instruments/instruments_xml_tokenizer.h"
+#include "src/trace_processor/importers/instruments/row_parser.h"
+#endif
+
 #include "protos/perfetto/common/builtin_clock.pbzero.h"
 #include "protos/perfetto/trace/clock_snapshot.pbzero.h"
 #include "protos/perfetto/trace/perfetto/perfetto_metatrace.pbzero.h"
@@ -144,20 +149,33 @@ void RegisterFunction(PerfettoSqlEngine* engine,
     PERFETTO_ELOG("%s", status.c_message());
 }
 
-void RegisterAllProtoBuilderFunctions(DescriptorPool* pool,
-                                      PerfettoSqlEngine* engine,
-                                      TraceProcessor* tp) {
+base::Status RegisterAllProtoBuilderFunctions(
+    DescriptorPool* pool,
+    std::unordered_map<std::string, std::string>* proto_fn_name_to_path,
+    PerfettoSqlEngine* engine,
+    TraceProcessor* tp) {
   for (uint32_t i = 0; i < pool->descriptors().size(); ++i) {
     // Convert the full name (e.g. .perfetto.protos.TraceMetrics.SubMetric)
     // into a function name of the form (TraceMetrics_SubMetric).
     const auto& desc = pool->descriptors()[i];
     auto fn_name = desc.full_name().substr(desc.package_name().size() + 1);
     std::replace(fn_name.begin(), fn_name.end(), '.', '_');
+    auto registered_fn = proto_fn_name_to_path->find(fn_name);
+    if (registered_fn != proto_fn_name_to_path->end() &&
+        registered_fn->second != desc.full_name()) {
+      return base::ErrStatus(
+          "Attempt to create new metric function '%s' for different descriptor "
+          "'%s' that conflicts with '%s'",
+          fn_name.c_str(), desc.full_name().c_str(),
+          registered_fn->second.c_str());
+    }
     RegisterFunction<metrics::BuildProto>(
         engine, fn_name.c_str(), -1,
         std::make_unique<metrics::BuildProto::Context>(
             metrics::BuildProto::Context{tp, pool, i}));
+    proto_fn_name_to_path->emplace(fn_name, desc.full_name());
   }
+  return base::OkStatus();
 }
 
 void BuildBoundsTable(sqlite3* db, std::pair<int64_t, int64_t> bounds) {
@@ -342,6 +360,10 @@ std::pair<int64_t, int64_t> GetTraceTimestampBoundsNs(
     start_ns = std::min(it.ts(), start_ns);
     end_ns = std::max(it.ts(), end_ns);
   }
+  for (auto it = storage.instruments_sample_table().IterateRows(); it; ++it) {
+    start_ns = std::min(it.ts(), start_ns);
+    end_ns = std::max(it.ts(), end_ns);
+  }
   for (auto it = storage.cpu_profile_stack_sample_table().IterateRows(); it;
        ++it) {
     start_ns = std::min(it.ts(), start_ns);
@@ -380,6 +402,14 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
           kPerfDataTraceType);
   context_.perf_record_parser =
       std::make_unique<perf_importer::RecordParser>(&context_);
+
+#if PERFETTO_BUILDFLAG(PERFETTO_TP_INSTRUMENTS)
+  context_.reader_registry
+      ->RegisterTraceReader<instruments_importer::InstrumentsXmlTokenizer>(
+          kInstrumentsXmlTraceType);
+  context_.instruments_row_parser =
+      std::make_unique<instruments_importer::RowParser>(&context_);
+#endif
 
   if (util::IsGzipSupported()) {
     context_.reader_registry->RegisterTraceReader<GzipTraceParser>(
@@ -633,7 +663,8 @@ base::Status TraceProcessorImpl::ExtendMetricsProto(
     size_t size,
     const std::vector<std::string>& skip_prefixes) {
   RETURN_IF_ERROR(pool_.AddFromFileDescriptorSet(data, size, skip_prefixes));
-  RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
+  RETURN_IF_ERROR(RegisterAllProtoBuilderFunctions(
+      &pool_, &proto_fn_name_to_path_, engine_.get(), this));
   return base::OkStatus();
 }
 
@@ -893,6 +924,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->mutable_cpu_profile_stack_sample_table());
   RegisterStaticTable(storage->mutable_perf_session_table());
   RegisterStaticTable(storage->mutable_perf_sample_table());
+  RegisterStaticTable(storage->mutable_instruments_sample_table());
   RegisterStaticTable(storage->mutable_stack_profile_callsite_table());
   RegisterStaticTable(storage->mutable_stack_profile_mapping_table());
   RegisterStaticTable(storage->mutable_stack_profile_frame_table());
@@ -1004,7 +1036,13 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       context_.storage->mutable_string_pool());
 
   // Metrics.
-  RegisterAllProtoBuilderFunctions(&pool_, engine_.get(), this);
+  {
+    auto status = RegisterAllProtoBuilderFunctions(
+        &pool_, &proto_fn_name_to_path_, engine_.get(), this);
+    if (!status.ok()) {
+      PERFETTO_FATAL("%s", status.c_message());
+    }
+  }
 
   // Import prelude module.
   {

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../base/semantic_icons';
 import {Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
@@ -26,7 +25,6 @@ import {GridLayout, GridLayoutColumn} from '../widgets/grid_layout';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 import {Section} from '../widgets/section';
 import {Tree} from '../widgets/tree';
-
 import {BottomTab, NewBottomTabArgs} from './bottom_tab';
 import {addDebugSliceTrack} from './debug_tracks/debug_tracks';
 import {Flow, FlowPoint, globals} from './globals';
@@ -40,10 +38,11 @@ import {
 } from './sql/thread_state';
 import {asSliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {DurationWidget} from './widgets/duration';
-import {addSqlTableTab} from './sql_table_tab';
+import {addSqlTableTab} from './sql_table_tab_command';
 import {SliceRef} from './widgets/slice';
 import {BasicTable} from '../widgets/basic_table';
-import {SqlTables} from './widgets/sql/table/well_known_sql_tables';
+import {getSqlTableDescription} from './widgets/sql/table/sql_table_registry';
+import {assertExists} from '../base/logging';
 
 interface ContextMenuItem {
   name: string;
@@ -93,7 +92,7 @@ const ITEMS: ContextMenuItem[] = [
     shouldDisplay: (slice: SliceDetails) => slice.parentId !== undefined,
     run: (slice: SliceDetails) =>
       addSqlTableTab({
-        table: SqlTables.slice,
+        table: assertExists(getSqlTableDescription('slice')),
         filters: [
           {
             op: (cols) =>
@@ -109,7 +108,7 @@ const ITEMS: ContextMenuItem[] = [
     shouldDisplay: () => true,
     run: (slice: SliceDetails) =>
       addSqlTableTab({
-        table: SqlTables.slice,
+        table: assertExists(getSqlTableDescription('slice')),
         filters: [
           {
             op: (cols) =>

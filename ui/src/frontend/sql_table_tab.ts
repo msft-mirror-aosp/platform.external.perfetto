@@ -13,16 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../base/clipboard';
 import {Icons} from '../base/semantic_icons';
 import {exists} from '../base/utils';
 import {uuidv4} from '../base/uuid';
-import {addBottomTab} from '../common/addEphemeralTab';
+import {addBottomTab} from '../common/add_ephemeral_tab';
 import {Button} from '../widgets/button';
 import {DetailsShell} from '../widgets/details_shell';
 import {Popup, PopupPosition} from '../widgets/popup';
-
 import {BottomTab, NewBottomTabArgs} from './bottom_tab';
 import {AddDebugTrackMenu} from './debug_tracks/add_debug_track_menu';
 import {getEngine} from './get_engine';
@@ -31,13 +29,13 @@ import {SqlTableState} from './widgets/sql/table/state';
 import {SqlTable} from './widgets/sql/table/table';
 import {SqlTableDescription} from './widgets/sql/table/table_description';
 
-interface SqlTableTabConfig {
+export interface SqlTableTabConfig {
   table: SqlTableDescription;
   filters?: Filter[];
   imports?: string[];
 }
 
-export function addSqlTableTab(config: SqlTableTabConfig): void {
+export function addSqlTableTabImpl(config: SqlTableTabConfig): void {
   const queryResultsTab = new SqlTableTab({
     config,
     engine: getEngine('QueryResult'),
@@ -84,6 +82,9 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
       }),
     ];
     const {selectStatement, columns} = this.state.getCurrentRequest();
+    const debugTrackColumns = Object.values(columns).filter(
+      (c) => !c.startsWith('__'),
+    );
     const addDebugTrack = m(
       Popup,
       {
@@ -92,8 +93,8 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
       },
       m(AddDebugTrackMenu, {
         dataSource: {
-          sqlSource: selectStatement,
-          columns: Object.values(columns).filter((c) => !c.startsWith('__')),
+          sqlSource: `SELECT ${debugTrackColumns.join(', ')} FROM (${selectStatement})`,
+          columns: debugTrackColumns,
         },
         engine: this.engine,
       }),
