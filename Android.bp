@@ -1021,6 +1021,9 @@ cc_library_static {
     shared_libs: [
         "liblog",
     ],
+    export_shared_lib_headers: [
+        "liblog",
+    ],
     host_supported: true,
     vendor_available: true,
     product_available: true,
@@ -17668,6 +17671,22 @@ gensrcs {
         ":libprotobuf-internal-protos",
     ],
     output_extension: "srcjar",
+}
+
+java_library {
+    name: "perfetto_winscope-lite",
+    proto: {
+        type: "lite",
+        include_dirs: ["external/protobuf/src"],
+        canonical_path_from_root: false,
+    },
+    srcs: [
+        ":libprotobuf-internal-descriptor-proto",
+        ":perfetto_winscope_filegroup_proto",
+    ],
+    static_libs: [
+        "libprotobuf-java-lite",
+    ],
 }
 
 java_library {
