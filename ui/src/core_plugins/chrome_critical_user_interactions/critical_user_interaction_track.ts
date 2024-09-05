@@ -17,14 +17,14 @@ import {OnSliceClickArgs} from '../../frontend/base_slice_track';
 import {GenericSliceDetailsTab} from '../../frontend/generic_slice_details_tab';
 import {globals} from '../../frontend/globals';
 import {NAMED_ROW} from '../../frontend/named_slice_track';
-import {NUM, Slice, STR} from '../../public';
+import {NUM, STR} from '../../trace_processor/query_result';
+import {Slice} from '../../public/track';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlImportConfig,
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
 } from '../../frontend/tracks/custom_sql_table_slice_track';
-
 import {PageLoadDetailsPanel} from './page_load_details_panel';
 import {StartupDetailsPanel} from './startup_details_panel';
 import {WebContentInteractionPanel} from './web_content_interaction_details_panel';

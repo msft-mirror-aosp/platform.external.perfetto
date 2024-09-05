@@ -13,9 +13,7 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../base/clipboard';
-
 import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
 import {assertExists, assertUnreachable} from '../base/logging';
@@ -28,11 +26,10 @@ import {
   TimestampFormat,
 } from '../core/timestamp_format';
 import {raf} from '../core/raf_scheduler';
-import {Command} from '../public';
+import {Command} from '../public/command';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 import {maybeRenderFullscreenModalDialog} from '../widgets/modal';
-
 import {onClickCopy} from './clipboard';
 import {CookieConsent} from './cookie_consent';
 import {getTimeSpanOfSelectionOrVisibleWindow, globals} from './globals';
@@ -51,7 +48,8 @@ import {
   moveByFocusedFlow,
 } from './keyboard_event_handler';
 import {publishPermalinkHash} from './publish';
-import {OmniboxMode, PromptOption} from './omnibox_manager';
+import {OmniboxMode} from '../core/omnibox_manager';
+import {PromptOption} from '../public/omnibox';
 import {DisposableStack} from '../base/disposable_stack';
 
 function renderPermalink(): m.Children {
