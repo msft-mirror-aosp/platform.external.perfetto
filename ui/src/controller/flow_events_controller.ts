@@ -20,14 +20,13 @@ import {publishConnectedFlows, publishSelectedFlows} from '../frontend/publish';
 import {asSliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {Engine} from '../trace_processor/engine';
 import {LONG, NUM, STR_NULL} from '../trace_processor/query_result';
-
 import {Controller} from './controller';
 import {Monitor} from '../base/monitor';
 import {
   ACTUAL_FRAMES_SLICE_TRACK_KIND,
   THREAD_SLICE_TRACK_KIND,
-} from '../core/track_kinds';
-import {TrackDescriptor} from '../public';
+} from '../public/track_kinds';
+import {TrackDescriptor} from '../public/track';
 
 export interface FlowEventsControllerArgs {
   engine: Engine;

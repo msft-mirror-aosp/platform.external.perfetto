@@ -20,7 +20,6 @@ import {
   autosaveConfigStore,
   recordTargetStore,
 } from '../frontend/record_config';
-
 import {NonSerializableState, State, STATE_VERSION} from './state';
 
 const AUTOLOAD_STARTED_CONFIG_FLAG = featureFlags.register({
@@ -125,11 +124,6 @@ export function createEmptyState(): State {
     focusedFlowIdLeft: -1,
     focusedFlowIdRight: -1,
     searchIndex: -1,
-
-    tabs: {
-      currentTab: 'current_selection',
-      openTabs: [],
-    },
 
     recordingInProgress: false,
     recordingCancelled: false,
