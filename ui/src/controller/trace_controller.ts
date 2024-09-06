@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertTrue} from '../base/logging';
 import {Duration, time, Time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
@@ -56,7 +55,6 @@ import {
   WasmEngineProxy,
 } from '../trace_processor/wasm_engine_proxy';
 import {showModal} from '../widgets/modal';
-
 import {CounterAggregationController} from './aggregation/counter_aggregation_controller';
 import {CpuAggregationController} from './aggregation/cpu_aggregation_controller';
 import {CpuByProcessAggregationController} from './aggregation/cpu_by_process_aggregation_controller';
@@ -73,10 +71,7 @@ import {
   FlowEventsControllerArgs,
 } from './flow_events_controller';
 import {LoadingManager} from './loading_manager';
-import {
-  PIVOT_TABLE_REDUX_FLAG,
-  PivotTableController,
-} from './pivot_table_controller';
+import {PivotTableController} from './pivot_table_controller';
 import {SearchController} from './search_controller';
 import {
   SelectionController,
@@ -288,17 +283,15 @@ export class TraceController extends Controller<States> {
             kind: 'cpu_by_process_aggregation',
           }),
         );
-        if (!PIVOT_TABLE_REDUX_FLAG.get()) {
-          // Pivot table is supposed to handle the use cases the slice
-          // aggregation panel is used right now. When a flag to use pivot
-          // tables is enabled, do not add slice aggregation controller.
-          childControllers.push(
-            Child('slice_aggregation', SliceAggregationController, {
-              engine,
-              kind: 'slice_aggregation',
-            }),
-          );
-        }
+        // Pivot table is supposed to handle the use cases the slice
+        // aggregation panel is used right now. When a flag to use pivot
+        // tables is enabled, do not add slice aggregation controller.
+        childControllers.push(
+          Child('slice_aggregation', SliceAggregationController, {
+            engine,
+            kind: 'slice_aggregation',
+          }),
+        );
         childControllers.push(
           Child('counter_aggregation', CounterAggregationController, {
             engine,
@@ -546,14 +539,7 @@ export class TraceController extends Controller<States> {
       this.updateStatus(`Running plugin: ${id}`);
     });
 
-    {
-      // When we reload from a permalink don't create extra tracks.
-      // TODO(stevegolton): This is a terrible way of telling whether we have
-      // loaded from a permalink or not.
-      if (globals.workspace.flatTracks.length === 0) {
-        await this.listTracks();
-      }
-    }
+    await this.listTracks();
 
     this.decideTabs();
 
@@ -735,14 +721,13 @@ export class TraceController extends Controller<States> {
 
   private async listTracks() {
     this.updateStatus('Loading tracks');
-    const engine = assertExists(this.engine);
-    await decideTracks(engine);
+    await decideTracks();
   }
 
   // Show the list of default tabs, but don't make them active!
   private decideTabs() {
     for (const tabUri of globals.tabManager.defaultTabs) {
-      globals.dispatch(Actions.showTab({uri: tabUri}));
+      globals.tabManager.showTab(tabUri);
     }
   }
 
