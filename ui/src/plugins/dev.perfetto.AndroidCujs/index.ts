@@ -13,19 +13,20 @@
 // limitations under the License.
 
 import {SimpleSliceTrackConfig} from '../../frontend/simple_slice_track';
-import {addDebugSliceTrack} from '../../public';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {addAndPinSliceTrack} from './trackUtils';
 
 /**
  * Adds the Debug Slice Track for given Jank CUJ name
  *
- * @param {PluginContextTrace} ctx For properties and methods of trace viewer
+ * @param {Trace} ctx For properties and methods of trace viewer
  * @param {string} trackName Display Name of the track
  * @param {string | string[]} cujNames List of Jank CUJs to pin
  */
 export function addJankCUJDebugTrack(
-  ctx: PluginContextTrace,
+  ctx: Trace,
   trackName: string,
   cujNames?: string | string[],
 ) {
@@ -106,7 +107,7 @@ const JANK_CUJ_QUERY = `
                   )
             )
           THEN ' ✅ '
-        ELSE NULL
+        ELSE ' ❓ '
         END || cuj.name AS name,
       total_frames,
       missed_app_frames,
@@ -158,7 +159,7 @@ const LATENCY_CUJ_QUERY = `
                 cuj_state_marker.ts >= cuj.ts
                 AND cuj_state_marker.ts + cuj_state_marker.dur <= cuj.ts + cuj.dur
                 AND marker_track.name = cuj.name AND (
-                    cuj_state_marker.name GLOB 'cancel' 
+                    cuj_state_marker.name GLOB 'cancel'
                     OR cuj_state_marker.name GLOB 'timeout')
             )
           THEN ' ❌ '
@@ -213,8 +214,8 @@ const BLOCKING_CALLS_DURING_CUJS_COLUMNS = [
   'table_name',
 ];
 
-class AndroidCujs implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class AndroidCujs implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinJankCUJs',
       name: 'Add track: Android jank CUJs',

@@ -13,14 +13,13 @@
 // limitations under the License.
 
 import {NewTrackArgs} from '../../frontend/track';
-import {CHROME_TOPLEVEL_SCROLLS_KIND} from '../../public';
+import {CHROME_TOPLEVEL_SCROLLS_KIND} from '../../public/track_kinds';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
 } from '../../frontend/tracks/custom_sql_table_slice_track';
 import {ScrollJankPluginState} from './common';
-
 import {ScrollDetailsPanel} from './scroll_details_panel';
 
 export class TopLevelScrollTrack extends CustomSqlTableSliceTrack {
@@ -48,7 +47,7 @@ export class TopLevelScrollTrack extends CustomSqlTableSliceTrack {
 
     ScrollJankPluginState.getInstance().registerTrack({
       kind: TopLevelScrollTrack.kind,
-      trackKey: this.trackKey,
+      trackUri: this.uri,
       tableName: this.tableName,
       detailsPanelConfig: this.getDetailsPanel(),
     });

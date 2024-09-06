@@ -21,8 +21,7 @@ import {duration, time} from '../../base/time';
 import {Anchor} from '../../widgets/anchor';
 import {Icons} from '../../base/semantic_icons';
 import {globals} from '../globals';
-import {THREAD_STATE_TRACK_KIND} from '../../core/track_kinds';
-import {Actions} from '../../common/actions';
+import {THREAD_STATE_TRACK_KIND} from '../../public/track_kinds';
 import {scrollToTrackAndTs} from '../scroll_helper';
 import {ThreadState} from '../../trace_processor/sql_utils/thread_state';
 
@@ -33,6 +32,11 @@ interface ThreadStateRefAttrs {
   utid: Utid;
   // If not present, a placeholder name will be used.
   name?: string;
+
+  // Whether clicking on the reference should change the current tab
+  // to "current selection" tab in addition to updating the selection
+  // and changing the viewport. True by default.
+  readonly switchToCurrentSelectionTab?: boolean;
 }
 
 export class ThreadStateRef implements m.ClassComponent<ThreadStateRefAttrs> {
@@ -42,28 +46,31 @@ export class ThreadStateRef implements m.ClassComponent<ThreadStateRefAttrs> {
       {
         icon: Icons.UpdateSelection,
         onclick: () => {
-          let trackKey: string | undefined;
-          for (const track of Object.values(globals.state.tracks)) {
-            const trackDesc = globals.trackManager.resolveTrackInfo(track.uri);
-            if (
-              trackDesc &&
-              trackDesc.tags?.kind === THREAD_STATE_TRACK_KIND &&
-              trackDesc.tags?.utid === vnode.attrs.utid
-            ) {
-              trackKey = track.key;
-            }
-          }
-
-          if (trackKey) {
-            globals.makeSelection(
-              Actions.selectThreadState({
-                id: vnode.attrs.id,
-                trackKey: trackKey.toString(),
-              }),
+          const trackDescriptor = globals.trackManager
+            .getAllTracks()
+            .find(
+              (td) =>
+                td.tags?.kind === THREAD_STATE_TRACK_KIND &&
+                td.tags?.utid === vnode.attrs.utid,
             );
 
-            scrollToTrackAndTs(trackKey, vnode.attrs.ts, true);
-          }
+          if (trackDescriptor === undefined) return;
+
+          globals.setLegacySelection(
+            {
+              kind: 'THREAD_STATE',
+              id: vnode.attrs.id,
+              trackUri: trackDescriptor.uri,
+            },
+            {
+              clearSearch: true,
+              pendingScrollId: undefined,
+              switchToCurrentSelectionTab:
+                vnode.attrs.switchToCurrentSelectionTab ?? true,
+            },
+          );
+
+          scrollToTrackAndTs(trackDescriptor.uri, vnode.attrs.ts, true);
         },
       },
       vnode.attrs.name ?? `Thread State ${vnode.attrs.id}`,

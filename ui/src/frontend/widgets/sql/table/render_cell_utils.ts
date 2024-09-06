@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {TableManager, SqlColumn} from './column';
 import {MenuItem, PopupMenu2} from '../../../../widgets/menu';
 import {SqlValue} from '../../../../trace_processor/query_result';
@@ -39,7 +38,7 @@ function filterOptionMenuItem(
 }
 
 // Return a list of "standard" menu items, adding corresponding filters to the given cell.
-function getStandardFilters(
+export function getStandardFilters(
   value: SqlValue,
   c: SqlColumn,
   tableManager: TableManager,

@@ -13,26 +13,26 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Brand} from '../../../../base/brand';
 import {Time} from '../../../../base/time';
 import {exists} from '../../../../base/utils';
 import {raf} from '../../../../core/raf_scheduler';
-import {Engine} from '../../../../public';
+import {Engine} from '../../../../trace_processor/engine';
 import {Row} from '../../../../trace_processor/query_result';
 import {
   SqlValue,
   sqlValueToReadableString,
 } from '../../../../trace_processor/sql_utils';
+import {Arg, getArgs} from '../../../../trace_processor/sql_utils/args';
+import {asArgSetId} from '../../../../trace_processor/sql_utils/core_types';
 import {Anchor} from '../../../../widgets/anchor';
 import {renderError} from '../../../../widgets/error';
 import {SqlRef} from '../../../../widgets/sql_ref';
 import {Tree, TreeNode} from '../../../../widgets/tree';
 import {hasArgs, renderArguments} from '../../../slice_args';
-import {asArgSetId} from '../../../../trace_processor/sql_utils/core_types';
 import {DurationWidget} from '../../../widgets/duration';
 import {Timestamp as TimestampWidget} from '../../../widgets/timestamp';
-import {Arg, getArgs} from '../../../../trace_processor/sql_utils/args';
+import {sqlIdRegistry} from './sql_ref_renderer_registry';
 
 // This file contains the helper to render the details tree (based on Tree
 // widget) for an object represented by a SQL row in some table. The user passes
@@ -216,13 +216,12 @@ export class Details {
     private sqlTable: string,
     private id: number,
     schema: {[key: string]: ValueDesc},
-    sqlIdTypesRenderers: {[key: string]: SqlIdRefRenderer} = {},
   ) {
     this.dataController = new DataController(
       engine,
       sqlTable,
       id,
-      sqlIdTypesRenderers,
+      sqlIdRegistry,
     );
 
     this.resolvedSchema = {
@@ -291,15 +290,6 @@ export type SqlIdRefRenderer = {
   fetch: (engine: Engine, id: bigint) => Promise<{} | undefined>;
   render: (data: {}) => RenderedValue;
 };
-
-// Type-safe helper to create a SqlIdRefRenderer, which ensures that the
-// type returned from the fetch is the same type that renderer takes.
-export function createSqlIdRefRenderer<Data extends {}>(
-  fetch: (engine: Engine, id: bigint) => Promise<Data>,
-  render: (data: Data) => RenderedValue,
-): SqlIdRefRenderer {
-  return {fetch, render: render as (data: {}) => RenderedValue};
-}
 
 // === Impl details ===
 
