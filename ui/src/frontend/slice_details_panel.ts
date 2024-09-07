@@ -13,8 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {Actions} from '../common/actions';
 import {translateState} from '../common/thread_state';
 import {Anchor} from '../widgets/anchor';
 import {DetailsShell} from '../widgets/details_shell';
@@ -22,13 +20,12 @@ import {GridLayout} from '../widgets/grid_layout';
 import {Section} from '../widgets/section';
 import {SqlRef} from '../widgets/sql_ref';
 import {Tree, TreeNode} from '../widgets/tree';
-
 import {globals, SliceDetails, ThreadDesc} from './globals';
 import {scrollToTrackAndTs} from './scroll_helper';
 import {SlicePanel} from './slice_panel';
 import {DurationWidget} from './widgets/duration';
 import {Timestamp} from './widgets/timestamp';
-import {THREAD_STATE_TRACK_KIND} from '../core/track_kinds';
+import {THREAD_STATE_TRACK_KIND} from '../public/track_kinds';
 
 const MIN_NORMAL_SCHED_PRIORITY = 100;
 
@@ -226,22 +223,18 @@ export class SliceDetailsPanel extends SlicePanel {
       return;
     }
 
-    const trackDescriptor = globals.trackManager
-      .getAllTracks()
-      .find(
-        (td) =>
-          td.tags?.kind === THREAD_STATE_TRACK_KIND &&
-          td.tags?.utid === threadInfo.utid,
-      );
+    const trackDescriptor = globals.trackManager.findTrack(
+      (td) =>
+        td.tags?.kind === THREAD_STATE_TRACK_KIND &&
+        td.tags?.utid === threadInfo.utid,
+    );
 
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (trackDescriptor && sliceInfo.threadStateId) {
-      globals.makeSelection(
-        Actions.selectThreadState({
-          id: sliceInfo.threadStateId,
-          trackUri: trackDescriptor.uri,
-        }),
-      );
+      globals.selectionManager.setThreadState({
+        id: sliceInfo.threadStateId,
+        trackUri: trackDescriptor.uri,
+      });
 
       scrollToTrackAndTs(trackDescriptor.uri, sliceInfo.ts, true);
     }

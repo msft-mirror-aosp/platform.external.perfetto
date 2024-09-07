@@ -15,64 +15,63 @@
 import {Registry} from '../base/registry';
 import {TimeSpan, time} from '../base/time';
 import {globals} from '../frontend/globals';
-import {
-  Command,
-  LegacyDetailsPanel,
-  MetricVisualisation,
-  Migrate,
-  PerfettoPlugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-  Store,
-  TabDescriptor,
-  TrackDescriptor,
-  TrackRef,
-  SidebarMenuItem,
-} from '../public';
+import {TrackDescriptor} from '../public/track';
+import {Trace} from '../public/trace';
+import {App} from '../public/app';
+import {SidebarMenuItem} from '../public/sidebar';
+import {TabDescriptor} from '../public/tab';
+import {MetricVisualisation} from '../public/plugin';
+import {PerfettoPlugin, PluginDescriptor} from '../public/plugin';
+import {Command} from '../public/command';
 import {EngineBase, Engine} from '../trace_processor/engine';
-import {Actions} from './actions';
 import {addQueryResultsTab} from '../frontend/query_result_tab';
 import {Flag, featureFlags} from '../core/feature_flags';
 import {assertExists} from '../base/logging';
 import {raf} from '../core/raf_scheduler';
 import {defaultPlugins} from '../core/default_plugins';
-import {PromptOption} from '../frontend/omnibox_manager';
-import {horizontalScrollToTs} from '../frontend/scroll_helper';
+import {PromptOption} from '../public/omnibox';
 import {DisposableStack} from '../base/disposable_stack';
-import {TraceContext} from '../frontend/trace_context';
-import {Workspace} from '../frontend/workspace';
+import {TraceInfo} from '../public/trace_info';
+import {Workspace} from '../public/workspace';
+import {Migrate, Store} from '../base/store';
+import {LegacyDetailsPanel} from '../public/details_panel';
 
 // Every plugin gets its own PluginContext. This is how we keep track
 // what each plugin is doing and how we can blame issues on particular
 // plugins.
 // The PluginContext exists for the whole duration a plugin is active.
-export class PluginContextImpl implements PluginContext, Disposable {
+export class PluginContextImpl implements App, Disposable {
   private trash = new DisposableStack();
   private alive = true;
+  readonly commands;
+  readonly sidebar;
 
-  registerCommand(cmd: Command): void {
-    // Silently ignore if context is dead.
-    if (!this.alive) return;
+  constructor(readonly pluginId: string) {
+    const thiz = this;
+    this.commands = {
+      registerCommand(cmd: Command): void {
+        // Silently ignore if context is dead.
+        if (!thiz.alive) return;
 
-    const disposable = globals.commandManager.registerCommand(cmd);
-    this.trash.use(disposable);
+        const disposable = globals.commandManager.registerCommand(cmd);
+        thiz.trash.use(disposable);
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      runCommand(id: string, ...args: any[]): any {
+        return globals.commandManager.runCommand(id, ...args);
+      },
+    };
+
+    this.sidebar = {
+      addSidebarMenuItem(menuItem: SidebarMenuItem): void {
+        thiz.trash.use(globals.sidebarMenuItems.register(menuItem));
+      },
+    };
   }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  runCommand(id: string, ...args: any[]): any {
-    return globals.commandManager.runCommand(id, ...args);
-  }
-
-  constructor(readonly pluginId: string) {}
 
   [Symbol.dispose]() {
     this.trash.dispose();
     this.alive = false;
-  }
-
-  addSidebarMenuItem(menuItem: SidebarMenuItem): void {
-    this.trash.use(globals.sidebarMenuItems.register(menuItem));
   }
 }
 
@@ -80,74 +79,86 @@ export class PluginContextImpl implements PluginContext, Disposable {
 // related resources, such as the engine and the store.
 // The PluginContextTrace exists for the whole duration a plugin is active AND a
 // trace is loaded.
-class PluginContextTraceImpl implements PluginContextTrace, Disposable {
+class PluginContextTraceImpl implements Trace, Disposable {
   private trash = new DisposableStack();
   private alive = true;
   readonly engine: Engine;
+  readonly commands;
+  readonly tracks;
+  readonly tabs;
+  readonly sidebar;
 
   constructor(
-    private ctx: PluginContext,
+    private ctx: App,
     engine: EngineBase,
   ) {
     const engineProxy = engine.getProxy(ctx.pluginId);
     this.trash.use(engineProxy);
     this.engine = engineProxy;
-  }
+    const thiz = this;
 
-  registerCommand(cmd: Command): void {
-    // Silently ignore if context is dead.
-    if (!this.alive) return;
+    this.commands = {
+      registerCommand(cmd: Command): void {
+        // Silently ignore if context is dead.
+        if (!thiz.alive) return;
 
-    const dispose = globals.commandManager.registerCommand(cmd);
-    this.trash.use(dispose);
-  }
+        const dispose = globals.commandManager.registerCommand(cmd);
+        thiz.trash.use(dispose);
+      },
 
-  addSidebarMenuItem(menuItem: SidebarMenuItem): void {
-    // Silently ignore if context is dead.
-    if (!this.alive) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      runCommand(id: string, ...args: any[]): any {
+        return ctx.commands.runCommand(id, ...args);
+      },
+    };
 
-    this.trash.use(globals.sidebarMenuItems.register(menuItem));
-  }
+    this.tracks = {
+      registerTrack(trackDesc: TrackDescriptor): void {
+        // Silently ignore if context is dead.
+        if (!thiz.alive) return;
 
-  registerTrack(trackDesc: TrackDescriptor): void {
-    // Silently ignore if context is dead.
-    if (!this.alive) return;
+        const dispose = globals.trackManager.registerTrack({
+          ...trackDesc,
+          pluginId: thiz.pluginId,
+        });
+        thiz.trash.use(dispose);
+      },
+    };
 
-    const dispose = globals.trackManager.registerTrack({
-      ...trackDesc,
-      pluginId: this.pluginId,
-    });
-    this.trash.use(dispose);
-  }
+    this.tabs = {
+      registerTab(desc: TabDescriptor): void {
+        if (!thiz.alive) return;
 
-  addDefaultTrack(track: TrackRef): void {
-    // Silently ignore if context is dead.
-    if (!this.alive) return;
+        const unregister = globals.tabManager.registerTab(desc);
+        thiz.trash.use(unregister);
+      },
 
-    const dispose = globals.trackManager.addPotentialTrack(track);
-    this.trash.use(dispose);
-  }
+      addDefaultTab(uri: string): void {
+        const remove = globals.tabManager.addDefaultTab(uri);
+        thiz.trash.use(remove);
+      },
 
-  registerStaticTrack(track: TrackDescriptor & TrackRef): void {
-    this.registerTrack(track);
-    this.addDefaultTrack(track);
-  }
+      openQuery: (query: string, title: string) => {
+        addQueryResultsTab({query, title});
+      },
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  runCommand(id: string, ...args: any[]): any {
-    return this.ctx.runCommand(id, ...args);
-  }
+      showTab(uri: string): void {
+        globals.tabManager.showTab(uri);
+      },
 
-  registerTab(desc: TabDescriptor): void {
-    if (!this.alive) return;
+      hideTab(uri: string): void {
+        globals.tabManager.hideTab(uri);
+      },
+    };
 
-    const unregister = globals.tabManager.registerTab(desc);
-    this.trash.use(unregister);
-  }
+    this.sidebar = {
+      addSidebarMenuItem(menuItem: SidebarMenuItem): void {
+        // Silently ignore if context is dead.
+        if (!thiz.alive) return;
 
-  addDefaultTab(uri: string): void {
-    const remove = globals.tabManager.addDefaultTab(uri);
-    this.trash.use(remove);
+        thiz.trash.use(globals.sidebarMenuItems.register(menuItem));
+      },
+    };
   }
 
   registerDetailsPanel(detailsPanel: LegacyDetailsPanel): void {
@@ -158,27 +169,13 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     this.trash.use(unregister);
   }
 
-  readonly tabs = {
-    openQuery: (query: string, title: string) => {
-      addQueryResultsTab({query, title});
-    },
-
-    showTab(uri: string): void {
-      globals.dispatch(Actions.showTab({uri}));
-    },
-
-    hideTab(uri: string): void {
-      globals.dispatch(Actions.hideTab({uri}));
-    },
-  };
-
   get pluginId(): string {
     return this.ctx.pluginId;
   }
 
   readonly timeline = {
     panToTimestamp(ts: time): void {
-      horizontalScrollToTs(ts);
+      globals.timeline.panToTimestamp(ts);
     },
 
     setViewportTime(start: time, end: time): void {
@@ -188,11 +185,11 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     get viewport(): TimeSpan {
       return globals.timeline.visibleWindow.toTimeSpan();
     },
-
-    get workspace(): Workspace {
-      return globals.workspace;
-    },
   };
+
+  get workspace(): Workspace {
+    return globals.workspace;
+  }
 
   [Symbol.dispose]() {
     this.trash.dispose();
@@ -203,7 +200,7 @@ class PluginContextTraceImpl implements PluginContextTrace, Disposable {
     return globals.store.createSubStore(['plugins', this.pluginId], migrate);
   }
 
-  get trace(): TraceContext {
+  get trace(): TraceInfo {
     return globals.traceContext;
   }
 
@@ -232,7 +229,7 @@ export class PluginRegistry extends Registry<PluginDescriptor> {
 
 export interface PluginDetails {
   plugin: PerfettoPlugin;
-  context: PluginContext & Disposable;
+  context: App & Disposable;
   traceContext?: PluginContextTraceImpl;
   previousOnTraceLoadTimeMillis?: number;
 }

@@ -13,15 +13,11 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {
-  CPU_PROFILE_TRACK_KIND,
-  Engine,
-  LegacyDetailsPanel,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {CPU_PROFILE_TRACK_KIND} from '../../public/track_kinds';
+import {Engine} from '../../trace_processor/engine';
+import {LegacyDetailsPanel} from '../../public/details_panel';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {CpuProfileTrack} from './cpu_profile_track';
 import {getThreadUriPrefix} from '../../public/utils';
@@ -35,10 +31,15 @@ import {
 import {Timestamp} from '../../frontend/widgets/timestamp';
 import {assertExists} from '../../base/logging';
 import {DetailsShell} from '../../widgets/details_shell';
-import {CpuProfileSampleSelection, LegacySelection} from '../../common/state';
+import {
+  CpuProfileSampleSelection,
+  LegacySelection,
+} from '../../public/selection';
+import {getOrCreateGroupForThread} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
 
 class CpuProfile implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const result = await ctx.engine.query(`
       with thread_cpu_sample as (
         select distinct utid
@@ -64,23 +65,28 @@ class CpuProfile implements PerfettoPlugin {
       const utid = it.utid;
       const upid = it.upid;
       const threadName = it.threadName;
-      ctx.registerTrack({
-        uri: `${getThreadUriPrefix(upid, utid)}_cpu_samples`,
-        title: `${threadName} (CPU Stack Samples)`,
+      const uri = `${getThreadUriPrefix(upid, utid)}_cpu_samples`;
+      const displayName = `${threadName} (CPU Stack Samples)`;
+      ctx.tracks.registerTrack({
+        uri,
+        title: displayName,
         tags: {
           kind: CPU_PROFILE_TRACK_KIND,
           utid,
           ...(exists(upid) && {upid}),
         },
-        trackFactory: ({trackUri}) =>
-          new CpuProfileTrack(
-            {
-              engine: ctx.engine,
-              uri: trackUri,
-            },
-            utid,
-          ),
+        track: new CpuProfileTrack(
+          {
+            engine: ctx.engine,
+            uri,
+          },
+          utid,
+        ),
       });
+      const group = getOrCreateGroupForThread(ctx.workspace, utid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = -40;
+      group.insertChildInOrder(track);
     }
     ctx.registerDetailsPanel(
       new CpuProfileSampleFlamegraphDetailsPanel(ctx.engine),

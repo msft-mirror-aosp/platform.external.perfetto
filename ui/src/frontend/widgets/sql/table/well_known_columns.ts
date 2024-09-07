@@ -13,26 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {
-  TableColumn,
-  TableColumnSet,
-  TableManager,
-  SqlColumn,
-  sqlColumnId,
-  TableColumnParams,
-  SourceTable,
-} from './column';
-import {
-  getStandardContextMenuItems,
-  getStandardFilters,
-  renderStandardCell,
-} from './render_cell_utils';
-import {Timestamp} from '../../timestamp';
+import {Icons} from '../../../../base/semantic_icons';
+import {sqliteString} from '../../../../base/string_utils';
 import {Duration, Time} from '../../../../base/time';
-import {DurationWidget} from '../../duration';
-import {renderError} from '../../../../widgets/error';
-import {SliceRef} from '../../slice';
+import {SqlValue, STR} from '../../../../trace_processor/query_result';
 import {
   asSchedSqlId,
   asSliceSqlId,
@@ -40,32 +24,68 @@ import {
   asUpid,
   asUtid,
 } from '../../../../trace_processor/sql_utils/core_types';
-import {sqliteString} from '../../../../base/string_utils';
-import {ThreadStateRef} from '../../thread_state';
-import {MenuDivider, MenuItem, PopupMenu2} from '../../../../widgets/menu';
+import {getProcessName} from '../../../../trace_processor/sql_utils/process';
 import {getThreadName} from '../../../../trace_processor/sql_utils/thread';
 import {Anchor} from '../../../../widgets/anchor';
-import {threadRefMenuItems} from '../../thread';
-import {Icons} from '../../../../base/semantic_icons';
-import {SqlValue, STR} from '../../../../trace_processor/query_result';
-import {getProcessName} from '../../../../trace_processor/sql_utils/process';
-import {processRefMenuItems} from '../../process';
+import {renderError} from '../../../../widgets/error';
+import {MenuDivider, MenuItem, PopupMenu2} from '../../../../widgets/menu';
+import {DurationWidget} from '../../duration';
+import {processRefMenuItems, showProcessDetailsMenuItem} from '../../process';
 import {SchedRef} from '../../sched';
+import {SliceRef} from '../../slice';
+import {showThreadDetailsMenuItem, threadRefMenuItems} from '../../thread';
+import {ThreadStateRef} from '../../thread_state';
+import {Timestamp} from '../../timestamp';
+import {
+  AggregationConfig,
+  SourceTable,
+  SqlColumn,
+  sqlColumnId,
+  TableColumn,
+  TableColumnSet,
+  TableManager,
+} from './column';
+import {
+  getStandardContextMenuItems,
+  getStandardFilters,
+  renderStandardCell,
+} from './render_cell_utils';
 
-type ColumnParams = TableColumnParams & {
+export type ColumnParams = {
+  alias?: string;
+  startsHidden?: boolean;
   title?: string;
+};
+
+export type StandardColumnParams = ColumnParams & {
+  aggregationType?: 'nominal' | 'quantitative';
+};
+
+export interface IdColumnParams {
+  // Whether the column is guaranteed not to have null values.
+  // (this will allow us to upgrage the joins on this column to more performant INNER JOINs).
+  notNull?: boolean;
+}
+
+type ColumnSetParams = {
+  title: string;
+  startsHidden?: boolean;
 };
 
 export class StandardColumn extends TableColumn {
   constructor(
     private column: SqlColumn,
-    private params?: ColumnParams,
+    private params?: StandardColumnParams,
   ) {
     super(params);
   }
 
   primaryColumn(): SqlColumn {
     return this.column;
+  }
+
+  aggregation(): AggregationConfig {
+    return {dataType: this.params?.aggregationType};
   }
 
   getTitle() {
@@ -151,13 +171,15 @@ export class SliceIdColumn extends TableColumn {
 
   constructor(
     private id: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const sliceTable: SourceTable = {
       table: 'slice',
       joinOn: {id: this.id},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -226,18 +248,79 @@ export class SliceIdColumn extends TableColumn {
   }
 }
 
+export class SliceColumnSet extends TableColumnSet {
+  constructor(
+    private id: SqlColumn,
+    private params?: ColumnSetParams,
+  ) {
+    super();
+  }
+
+  getTitle(): string {
+    return this.params?.title ?? `${sqlColumnId(this.id)} (slice)`;
+  }
+
+  async discover(): Promise<
+    {key: string; column: TableColumn | TableColumnSet}[]
+  > {
+    const column: (name: string) => SqlColumn = (name) => {
+      return {
+        column: name,
+        source: {
+          table: 'slice',
+          joinOn: {id: this.id},
+        },
+      };
+    };
+
+    return [
+      {
+        key: 'id',
+        column: new SliceIdColumn(this.id),
+      },
+      {
+        key: 'ts',
+        column: new TimestampColumn(column('ts')),
+      },
+      {
+        key: 'dur',
+        column: new DurationColumn(column('dur')),
+      },
+      {
+        key: 'name',
+        column: new StandardColumn(column('name')),
+      },
+      {
+        key: 'thread_dur',
+        column: new StandardColumn(column('thread_dur')),
+      },
+      {
+        key: 'parent_id',
+        column: new SliceColumnSet(column('parent_id')),
+      },
+    ];
+  }
+
+  initialColumns(): TableColumn[] {
+    if (this.params?.startsHidden) return [];
+    return [new SliceIdColumn(this.id)];
+  }
+}
+
 export class SchedIdColumn extends TableColumn {
   private columns: {ts: SqlColumn; dur: SqlColumn; cpu: SqlColumn};
 
   constructor(
     private id: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const schedTable: SourceTable = {
       table: 'sched',
       joinOn: {id: this.id},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -315,13 +398,15 @@ export class ThreadStateIdColumn extends TableColumn {
 
   constructor(
     private id: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
     super(params);
 
     const threadStateTable: SourceTable = {
       table: 'thread_state',
       joinOn: {id: this.id},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -399,13 +484,17 @@ export class ThreadColumn extends TableColumn {
 
   constructor(
     private utid: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
-    super(params);
+    // Both ThreadColumn and ThreadIdColumn are referencing the same underlying SQL column as primary,
+    // so we have to use tag to distinguish them.
+    super({tag: 'thread', ...params});
 
     const threadTable: SourceTable = {
       table: 'thread',
       joinOn: {id: this.utid},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -425,7 +514,8 @@ export class ThreadColumn extends TableColumn {
   }
 
   getTitle() {
-    return this.params?.title;
+    if (this.params?.title !== undefined) return this.params.title;
+    return `${sqlColumnId(this.utid)} (thread)`;
   }
 
   dependentColumns() {
@@ -504,6 +594,151 @@ export class ThreadColumn extends TableColumn {
       ),
     );
   }
+
+  aggregation(): AggregationConfig {
+    return {dataType: 'nominal'};
+  }
+}
+
+// ThreadIdColumn is a column type for displaying primary key of the `thread` table.
+// All other references (foreign keys) should use `ThreadColumn` instead.
+export class ThreadIdColumn extends TableColumn {
+  private columns: {tid: SqlColumn};
+
+  constructor(private utid: SqlColumn) {
+    super({});
+
+    const threadTable: SourceTable = {
+      table: 'thread',
+      joinOn: {id: this.utid},
+      innerJoin: true,
+    };
+
+    this.columns = {
+      tid: {
+        column: 'tid',
+        source: threadTable,
+      },
+    };
+  }
+
+  primaryColumn(): SqlColumn {
+    return this.utid;
+  }
+
+  getTitle() {
+    return 'utid';
+  }
+
+  dependentColumns() {
+    return {
+      tid: this.columns.tid,
+    };
+  }
+
+  renderCell(
+    value: SqlValue,
+    manager: TableManager,
+    data: {[key: string]: SqlValue},
+  ): m.Children {
+    const utid = value;
+    const rawTid = data['tid'];
+
+    if (utid === null) {
+      return renderStandardCell(utid, this.utid, manager);
+    }
+
+    if (typeof utid !== 'bigint') {
+      throw new Error(
+        `thread.utid is expected to be bigint, got ${typeof utid}`,
+      );
+    }
+
+    return m(
+      PopupMenu2,
+      {
+        trigger: m(Anchor, `${utid}`),
+      },
+
+      showThreadDetailsMenuItem(
+        asUtid(Number(utid)),
+        rawTid === null ? undefined : Number(rawTid),
+      ),
+      getStandardContextMenuItems(utid, this.utid, manager),
+    );
+  }
+
+  aggregation(): AggregationConfig {
+    return {dataType: 'nominal'};
+  }
+}
+
+export class ThreadColumnSet extends TableColumnSet {
+  constructor(
+    private id: SqlColumn,
+    private params: ColumnSetParams & {
+      notNull?: boolean;
+    },
+  ) {
+    super();
+  }
+
+  getTitle(): string {
+    return `${this.params.title} (thread)`;
+  }
+
+  initialColumns(): TableColumn[] {
+    if (this.params.startsHidden === true) return [];
+    return [new ThreadColumn(this.id)];
+  }
+
+  async discover() {
+    const column: (name: string) => SqlColumn = (name) => ({
+      column: name,
+      source: {
+        table: 'thread',
+        joinOn: {id: this.id},
+      },
+      innerJoin: this.params.notNull === true,
+    });
+
+    return [
+      {
+        key: 'thread',
+        column: new ThreadColumn(this.id),
+      },
+      {
+        key: 'utid',
+        column: new ThreadIdColumn(this.id),
+      },
+      {
+        key: 'tid',
+        column: new StandardColumn(column('tid'), {aggregationType: 'nominal'}),
+      },
+      {
+        key: 'name',
+        column: new StandardColumn(column('name')),
+      },
+      {
+        key: 'start_ts',
+        column: new TimestampColumn(column('start_ts')),
+      },
+      {
+        key: 'end_ts',
+        column: new TimestampColumn(column('end_ts')),
+      },
+      {
+        key: 'upid',
+        column: new ProcessColumnSet(column('upid'), {title: 'upid'}),
+      },
+      {
+        key: 'is_main_thread',
+        column: new StandardColumn(column('is_main_thread'), {
+          aggregationType: 'nominal',
+        }),
+      },
+    ];
+  }
 }
 
 export class ProcessColumn extends TableColumn {
@@ -511,13 +746,17 @@ export class ProcessColumn extends TableColumn {
 
   constructor(
     private upid: SqlColumn,
-    private params?: ColumnParams,
+    private params?: ColumnParams & IdColumnParams,
   ) {
-    super(params);
+    // Both ProcessColumn and ProcessIdColumn are referencing the same underlying SQL column as primary,
+    // so we have to use tag to distinguish them.
+    super({tag: 'process', ...params});
 
     const processTable: SourceTable = {
       table: 'process',
       joinOn: {id: this.upid},
+      // If the column is guaranteed not to have null values, we can use an INNER JOIN.
+      innerJoin: this.params?.notNull === true,
     };
 
     this.columns = {
@@ -537,7 +776,8 @@ export class ProcessColumn extends TableColumn {
   }
 
   getTitle() {
-    return this.params?.title;
+    if (this.params?.title !== undefined) return this.params.title;
+    return `${sqlColumnId(this.upid)} (process)`;
   }
 
   dependentColumns() {
@@ -612,6 +852,164 @@ export class ProcessColumn extends TableColumn {
         ),
       ),
     );
+  }
+
+  aggregation(): AggregationConfig {
+    return {dataType: 'nominal'};
+  }
+}
+// ProcessIdColumn is a column type for displaying primary key of the `process` table.
+// All other references (foreign keys) should use `ProcessColumn` instead.
+export class ProcessIdColumn extends TableColumn {
+  private columns: {pid: SqlColumn};
+
+  constructor(private upid: SqlColumn) {
+    super({});
+
+    const processTable: SourceTable = {
+      table: 'process',
+      joinOn: {id: this.upid},
+      innerJoin: true,
+    };
+
+    this.columns = {
+      pid: {
+        column: 'pid',
+        source: processTable,
+      },
+    };
+  }
+
+  primaryColumn(): SqlColumn {
+    return this.upid;
+  }
+
+  getTitle() {
+    return 'upid';
+  }
+
+  dependentColumns() {
+    return {
+      pid: this.columns.pid,
+    };
+  }
+
+  renderCell(
+    value: SqlValue,
+    manager: TableManager,
+    data: {[key: string]: SqlValue},
+  ): m.Children {
+    const upid = value;
+    const rawPid = data['pid'];
+
+    if (upid === null) {
+      return renderStandardCell(upid, this.upid, manager);
+    }
+
+    if (typeof upid !== 'bigint') {
+      throw new Error(
+        `process.upid is expected to be bigint, got ${typeof upid}`,
+      );
+    }
+
+    return m(
+      PopupMenu2,
+      {
+        trigger: m(Anchor, `${upid}`),
+      },
+
+      showProcessDetailsMenuItem(
+        asUpid(Number(upid)),
+        rawPid === null ? undefined : Number(rawPid),
+      ),
+      getStandardContextMenuItems(upid, this.upid, manager),
+    );
+  }
+
+  aggregation(): AggregationConfig {
+    return {dataType: 'nominal'};
+  }
+}
+
+export class ProcessColumnSet extends TableColumnSet {
+  constructor(
+    private id: SqlColumn,
+    private params: ColumnSetParams & {
+      notNull?: boolean;
+    },
+  ) {
+    super();
+  }
+
+  getTitle(): string {
+    return `${this.params.title} (process)`;
+  }
+
+  initialColumns(): TableColumn[] {
+    if (this.params.startsHidden === true) return [];
+    return [new ProcessColumn(this.id)];
+  }
+
+  async discover() {
+    const column: (name: string) => SqlColumn = (name) => ({
+      column: name,
+      source: {
+        table: 'process',
+        joinOn: {id: this.id},
+      },
+      innerJoin: this.params.notNull === true,
+    });
+
+    return [
+      {
+        key: 'process',
+        column: new ProcessColumn(this.id),
+      },
+      {
+        key: 'upid',
+        column: new ProcessIdColumn(this.id),
+      },
+      {
+        key: 'pid',
+        column: new StandardColumn(column('pid'), {aggregationType: 'nominal'}),
+      },
+      {
+        key: 'name',
+        column: new StandardColumn(column('name')),
+      },
+      {
+        key: 'start_ts',
+        column: new TimestampColumn(column('start_ts')),
+      },
+      {
+        key: 'end_ts',
+        column: new TimestampColumn(column('end_ts')),
+      },
+      {
+        key: 'parent_upid',
+        column: new ProcessColumnSet(column('parent_upid'), {
+          title: 'parent_upid',
+        }),
+      },
+      {
+        key: 'uid',
+        column: new StandardColumn(column('uid'), {aggregationType: 'nominal'}),
+      },
+      {
+        key: 'android_appid',
+        column: new StandardColumn(column('android_appid'), {
+          aggregationType: 'nominal',
+        }),
+      },
+      {
+        key: 'cmdline',
+        column: new StandardColumn(column('cmdline')),
+      },
+      {
+        key: 'arg_set_id (args)',
+        column: new ArgSetColumnSet(column('arg_set_id')),
+      },
+    ];
   }
 }
 

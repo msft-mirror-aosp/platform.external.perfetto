@@ -14,12 +14,12 @@
 
 import {uuidv4} from '../base/uuid';
 // import {THREAD_SLICE_TRACK_KIND} from '../public';
-import {TrackDescriptor} from '../public/tracks';
+import {TrackDescriptor} from '../public/track';
 import {Engine} from '../trace_processor/engine';
 import {NUM} from '../trace_processor/query_result';
 import {globals} from './globals';
 import {VisualisedArgsTrack} from './visualized_args_track';
-import {TrackNode} from './workspace';
+import {TrackNode} from '../public/workspace';
 
 const VISUALISED_ARGS_SLICE_TRACK_URI_PREFIX = 'perfetto.VisualisedArgs';
 
@@ -34,7 +34,7 @@ const VISUALISED_ARGS_SLICE_TRACK_URI_PREFIX = 'perfetto.VisualisedArgs';
 // work.
 interface Context {
   engine: Engine;
-  registerTrack(track: TrackDescriptor): unknown;
+  tracks: {registerTrack(track: TrackDescriptor): unknown};
 }
 
 export async function addVisualisedArgTracks(ctx: Context, argName: string) {
@@ -80,27 +80,23 @@ export async function addVisualisedArgTracks(ctx: Context, argName: string) {
     const maxDepth = it.maxDepth;
 
     const uri = `${VISUALISED_ARGS_SLICE_TRACK_URI_PREFIX}#${uuidv4()}`;
-    ctx.registerTrack({
+    ctx.tracks.registerTrack({
       uri,
       title: argName,
       chips: ['metric'],
-      trackFactory: (trackCtx) => {
-        return new VisualisedArgsTrack({
-          engine: ctx.engine,
-          uri: trackCtx.trackUri,
-          trackId,
-          maxDepth,
-          argName,
-        });
-      },
+      track: new VisualisedArgsTrack({
+        engine: ctx.engine,
+        uri,
+        trackId,
+        maxDepth,
+        argName,
+      }),
     });
 
     // Find the thread slice track that corresponds with this trackID and insert
     // this track before it.
     const threadSliceTrack = globals.workspace.flatTracks.find((trackNode) => {
-      const trackDescriptor = globals.trackManager.resolveTrackInfo(
-        trackNode.uri,
-      );
+      const trackDescriptor = globals.trackManager.getTrack(trackNode.uri);
       return (
         trackDescriptor &&
         trackDescriptor.tags?.kind === 'ThreadSliceTrack' &&

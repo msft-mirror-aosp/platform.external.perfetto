@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  addDebugSliceTrack,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
 class AndroidPerf implements PerfettoPlugin {
   async addAppProcessStartsDebugTrack(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     reason: string,
     sliceName: string,
   ): Promise<void> {
@@ -46,7 +43,7 @@ class AndroidPerf implements PerfettoPlugin {
                       process_name,
                       intent,
                       'slice' AS table_name
-                    FROM _android_app_process_starts
+                    FROM android_app_process_starts
                     WHERE reason = '${reason}'
                  `,
         columns: sliceColumns,
@@ -57,8 +54,8 @@ class AndroidPerf implements PerfettoPlugin {
     );
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.registerCommand({
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#BinderSystemServerIncoming',
       name: 'Run query: system_server incoming binder graph',
       callback: () =>
@@ -69,7 +66,7 @@ class AndroidPerf implements PerfettoPlugin {
         ),
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#BinderSystemServerOutgoing',
       name: 'Run query: system_server outgoing binder graph',
       callback: () =>
@@ -80,7 +77,7 @@ class AndroidPerf implements PerfettoPlugin {
         ),
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#MonitorContentionSystemServer',
       name: 'Run query: system_server monitor_contention graph',
       callback: () =>
@@ -91,7 +88,7 @@ class AndroidPerf implements PerfettoPlugin {
         ),
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#BinderAll',
       name: 'Run query: all process binder graph',
       callback: () =>
@@ -102,7 +99,7 @@ class AndroidPerf implements PerfettoPlugin {
         ),
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#ThreadClusterDistribution',
       name: 'Run query: runtime cluster distribution for a thread',
       callback: async (tid) => {
@@ -137,7 +134,7 @@ class AndroidPerf implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#SchedLatency',
       name: 'Run query: top 50 sched latency for a thread',
       callback: async (tid) => {
@@ -161,7 +158,7 @@ class AndroidPerf implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#AppProcessStarts',
       name: 'Add tracks: app process starts',
       callback: async () => {
@@ -176,7 +173,7 @@ class AndroidPerf implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerf#AppIntentStarts',
       name: 'Add tracks: app intent starts',
       callback: async () => {

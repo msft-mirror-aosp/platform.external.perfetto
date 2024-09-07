@@ -21,11 +21,10 @@ import {
   fromNumNull,
   SQLConstraints,
 } from '../sql_utils';
-
 import {globals} from '../../frontend/globals';
 import {scrollToTrackAndTs} from '../../frontend/scroll_helper';
 import {asUtid, SchedSqlId, ThreadStateSqlId} from './core_types';
-import {CPU_SLICE_TRACK_KIND} from '../../core/track_kinds';
+import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {getThreadInfo, ThreadInfo} from './thread';
 
 // Representation of a single thread state object, corresponding to
@@ -128,26 +127,17 @@ export async function getThreadState(
 }
 
 export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
-  const track = globals.trackManager
-    .getAllTracks()
-    .find(
-      (td) => td.tags?.kind === CPU_SLICE_TRACK_KIND && td.tags.cpu === cpu,
-    );
+  const track = globals.trackManager.findTrack(
+    (td) => td.tags?.kind === CPU_SLICE_TRACK_KIND && td.tags.cpu === cpu,
+  );
   if (track === undefined) {
     return;
   }
-  globals.setLegacySelection(
-    {
-      kind: 'SCHED_SLICE',
-      id,
-      trackUri: track.uri,
-    },
-    {
-      clearSearch: true,
-      pendingScrollId: undefined,
-      switchToCurrentSelectionTab: true,
-    },
-  );
+  globals.selectionManager.setLegacy({
+    kind: 'SCHED_SLICE',
+    id,
+    trackUri: track.uri,
+  });
 
   scrollToTrackAndTs(track.uri, ts);
 }

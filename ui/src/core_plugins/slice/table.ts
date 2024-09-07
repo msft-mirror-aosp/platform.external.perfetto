@@ -16,10 +16,10 @@ import {SqlTableDescription} from '../../frontend/widgets/sql/table/table_descri
 import {
   ArgSetColumnSet,
   DurationColumn,
-  ProcessColumn,
+  ProcessColumnSet,
   SliceIdColumn,
   StandardColumn,
-  ThreadColumn,
+  ThreadColumnSet,
   TimestampColumn,
 } from '../../frontend/widgets/sql/table/well_known_columns';
 
@@ -29,18 +29,21 @@ export function getSliceTable(): SqlTableDescription {
     name: '_slice_with_thread_and_process_info',
     displayName: 'slice',
     columns: [
-      new SliceIdColumn('id'),
+      new SliceIdColumn('id', {notNull: true}),
       new TimestampColumn('ts', {title: 'Timestamp'}),
       new DurationColumn('dur', {title: 'Duration'}),
       new DurationColumn('thread_dur', {title: 'Thread duration'}),
       new StandardColumn('category', {title: 'Category'}),
       new StandardColumn('name', {title: 'Name'}),
-      new StandardColumn('track_id', {title: 'Track ID', startsHidden: true}),
-      new ThreadColumn('utid', {title: 'Thread'}),
-      new ProcessColumn('upid', {title: 'Process'}),
+      new StandardColumn('track_id', {
+        title: 'Track ID',
+        aggregationType: 'nominal',
+        startsHidden: true,
+      }),
+      new ThreadColumnSet('utid', {title: 'utid'}),
+      new ProcessColumnSet('upid', {title: 'upid'}),
       new StandardColumn('depth', {title: 'Depth', startsHidden: true}),
       new SliceIdColumn('parent_id', {
-        title: 'Parent slice ID',
         startsHidden: true,
       }),
       new ArgSetColumnSet('arg_set_id'),

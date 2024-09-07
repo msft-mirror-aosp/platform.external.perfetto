@@ -13,11 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
-import {addEphemeralTab} from '../../common/addEphemeralTab';
+import {addEphemeralTab} from '../../common/add_ephemeral_tab';
 import {Upid} from '../../trace_processor/sql_utils/core_types';
 import {
   getProcessInfo,
@@ -33,6 +32,25 @@ import {
   sqlIdRegistry,
 } from './sql/details/sql_ref_renderer_registry';
 import {asUpid} from '../../trace_processor/sql_utils/core_types';
+
+export function showProcessDetailsMenuItem(
+  upid: Upid,
+  pid?: number,
+): m.Children {
+  return m(MenuItem, {
+    icon: Icons.ExternalLink,
+    label: 'Show process details',
+    onclick: () =>
+      addEphemeralTab(
+        'processDetails',
+        new ProcessDetailsTab({
+          engine: getEngine('ProcessDetails'),
+          upid,
+          pid,
+        }),
+      ),
+  });
+}
 
 export function processRefMenuItems(info: {
   upid: Upid;
@@ -59,19 +77,7 @@ export function processRefMenuItems(info: {
       label: 'Copy upid',
       onclick: () => copyToClipboard(`${info.upid}`),
     }),
-    m(MenuItem, {
-      icon: Icons.ExternalLink,
-      label: 'Show process details',
-      onclick: () =>
-        addEphemeralTab(
-          'processDetails',
-          new ProcessDetailsTab({
-            engine: getEngine('ProcessDetails'),
-            upid: info.upid,
-            pid: info.pid,
-          }),
-        ),
-    }),
+    showProcessDetailsMenuItem(info.upid, info.pid),
   ];
 }
 

@@ -13,21 +13,20 @@
 // limitations under the License.
 
 import {uuidv4} from '../../base/uuid';
-import {THREAD_SLICE_TRACK_KIND} from '../../public';
+import {THREAD_SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {ThreadSliceDetailsTab} from '../../frontend/thread_slice_details_tab';
-import {
-  BottomTabToSCSAdapter,
-  PerfettoPlugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {BottomTabToSCSAdapter} from '../../public/utils';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {ThreadSliceTrack} from '../../frontend/thread_slice_track';
 import {removeFalsyValues} from '../../base/array_utils';
+import {getOrCreateGroupForThread} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
 
 class ThreadSlicesPlugin implements PerfettoPlugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const {engine} = ctx;
 
     const result = await engine.query(`
@@ -36,22 +35,24 @@ class ThreadSlicesPlugin implements PerfettoPlugin {
       include perfetto module viz.threads;
 
       select
-        thread_track.utid as utid,
-        thread_track.id as trackId,
-        thread_track.name as trackName,
-        EXTRACT_ARG(thread_track.source_arg_set_id,
-                    'is_root_in_scope') as isDefaultTrackForScope,
-        tid,
+        tt.utid as utid,
+        tt.id as trackId,
+        tt.name as trackName,
+        extract_arg(
+          tt.source_arg_set_id,
+          'is_root_in_scope'
+        ) as isDefaultTrackForScope,
+        t.tid,
         t.name as threadName,
-        max_depth as maxDepth,
+        s.max_depth as maxDepth,
         t.upid as upid,
-        is_main_thread as isMainThread,
-        is_kernel_thread AS isKernelThread
-      from thread_track
+        t.is_main_thread as isMainThread,
+        t.is_kernel_thread AS isKernelThread
+      from _thread_track_summary_by_utid_and_name s
       join _threads_with_kernel_flag t using(utid)
-      join _slice_track_summary sts on sts.id = thread_track.id
+      join thread_track tt on s.track_id = tt.id
+      where s.track_count = 1
   `);
-
     const it = result.iter({
       utid: NUM,
       trackId: NUM,
@@ -64,7 +65,6 @@ class ThreadSlicesPlugin implements PerfettoPlugin {
       isMainThread: NUM_NULL,
       isKernelThread: NUM,
     });
-
     for (; it.valid(); it.next()) {
       const {
         upid,
@@ -86,8 +86,9 @@ class ThreadSlicesPlugin implements PerfettoPlugin {
         kind: 'Slices',
       });
 
-      ctx.registerTrack({
-        uri: `${getThreadUriPrefix(upid, utid)}_slice_${trackId}`,
+      const uri = `${getThreadUriPrefix(upid, utid)}_slice_${trackId}`;
+      ctx.tracks.registerTrack({
+        uri,
         title: displayName,
         tags: {
           trackIds: [trackId],
@@ -95,18 +96,24 @@ class ThreadSlicesPlugin implements PerfettoPlugin {
           utid,
           upid: upid ?? undefined,
           ...(isDefaultTrackForScope === 1 && {isDefaultTrackForScope: true}),
+          ...(isKernelThread === 1 && {kernelThread: true}),
         },
         chips: removeFalsyValues([
           isKernelThread === 0 && isMainThread === 1 && 'main thread',
         ]),
-        trackFactory: ({trackUri}) => {
-          const newTrackArgs = {
+        track: new ThreadSliceTrack(
+          {
             engine: ctx.engine,
-            uri: trackUri,
-          };
-          return new ThreadSliceTrack(newTrackArgs, trackId, maxDepth);
-        },
+            uri,
+          },
+          trackId,
+          maxDepth,
+        ),
       });
+      const group = getOrCreateGroupForThread(ctx.workspace, utid);
+      const track = new TrackNode(uri, displayName);
+      track.sortOrder = 20;
+      group.insertChildInOrder(track);
     }
 
     ctx.registerDetailsPanel(
