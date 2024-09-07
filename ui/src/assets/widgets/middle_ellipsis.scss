@@ -12,20 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Store} from '../base/store';
-import {CurrentSearchResults} from '../common/search_data';
-import {State} from '../common/state';
-import {Timeline} from './timeline';
-import {TraceContext} from './trace_context';
+.pf-middle-ellipsis {
+  display: flex;
+  flex-direction: row;
 
-export interface AppContext {
-  readonly store: Store<State>;
-  readonly state: State;
-  readonly traceContext: TraceContext;
+  .pf-middle-ellipsis-left {
+    overflow: hidden;
+    white-space: pre;
+    text-overflow: ellipsis;
+  }
 
-  // TODO(stevegolton): This could probably be moved into TraceContext.
-  readonly timeline: Timeline;
+  .pf-middle-ellipsis-right {
+    overflow: hidden;
+    white-space: pre;
+    flex-shrink: 0;
+  }
 
-  // TODO(stevegolton): Move this into the search subsystem when it exists.
-  readonly currentSearchResults: CurrentSearchResults;
+  .pf-middle-ellipsis-extras {
+    overflow: hidden;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
 }
