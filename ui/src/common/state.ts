@@ -19,25 +19,7 @@ import {
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-import {
-  selectionToLegacySelection,
-  Selection,
-  LegacySelection,
-} from '../core/selection_manager';
-
-export {
-  Selection,
-  SelectionKind,
-  NoteSelection,
-  SliceSelection,
-  HeapProfileSelection,
-  PerfSamplesSelection,
-  LegacySelection,
-  AreaSelection,
-  ProfileType,
-  ThreadSliceSelection,
-  CpuProfileSampleSelection,
-} from '../core/selection_manager';
+import {Area} from '../public/selection';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -51,20 +33,6 @@ export interface ObjectById<Class extends {id: string}> {
 // Same as ObjectById but the key parameter is called `key` rather than `id`.
 export interface ObjectByKey<Class extends {key: string}> {
   [key: string]: Class;
-}
-
-export type OmniboxMode = 'SEARCH' | 'COMMAND';
-
-export interface OmniboxState {
-  omnibox: string;
-  mode: OmniboxMode;
-  force?: boolean;
-}
-
-export interface Area {
-  start: time;
-  end: time;
-  trackUris: string[];
 }
 
 export const MAX_TIME = 180;
@@ -205,23 +173,6 @@ export interface Status {
   timestamp: number; // Epoch in seconds (Date.now() / 1000).
 }
 
-export interface Note {
-  noteType: 'DEFAULT';
-  id: string;
-  timestamp: time;
-  color: string;
-  text: string;
-}
-
-export interface SpanNote {
-  noteType: 'SPAN';
-  id: string;
-  start: time;
-  end: time;
-  color: string;
-  text: string;
-}
-
 export interface Pagination {
   offset: number;
   count: number;
@@ -352,9 +303,7 @@ export interface State {
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
   queries: ObjectById<QueryConfig>;
-  notes: ObjectById<Note | SpanNote>;
   status: Status;
-  selection: Selection;
   traceConversionInProgress: boolean;
   flamegraphModalDismissed: boolean;
 
@@ -374,8 +323,6 @@ export interface State {
   focusedFlowIdRight: number;
   pendingScrollId?: number;
 
-  searchIndex: number;
-
   /**
    * Trace recording
    */
@@ -394,9 +341,6 @@ export interface State {
   // using permalink. Can be used to store those parts of the state that can't
   // be serialized at the moment, such as ES6 Set and Map.
   nonSerializableState: NonSerializableState;
-
-  // Omnibox info.
-  omniboxState: OmniboxState;
 
   // Pending deeplink which will happen when we first finish opening a
   // trace.
@@ -769,8 +713,4 @@ export function getBuiltinChromeCategoryList(): string[] {
     'disabled-by-default-worker.scheduler',
     'disabled-by-default-xr.debug',
   ];
-}
-
-export function getLegacySelection(state: State): LegacySelection | null {
-  return selectionToLegacySelection(state.selection);
 }
