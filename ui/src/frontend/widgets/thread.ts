@@ -13,11 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
-import {addEphemeralTab} from '../../common/addEphemeralTab';
+import {addEphemeralTab} from '../../common/add_ephemeral_tab';
 import {
   getThreadInfo,
   getThreadName,
@@ -33,6 +32,25 @@ import {
 } from './sql/details/sql_ref_renderer_registry';
 import {asUtid} from '../../trace_processor/sql_utils/core_types';
 import {Utid} from '../../trace_processor/sql_utils/core_types';
+
+export function showThreadDetailsMenuItem(
+  utid: Utid,
+  tid?: number,
+): m.Children {
+  return m(MenuItem, {
+    icon: Icons.ExternalLink,
+    label: 'Show thread details',
+    onclick: () =>
+      addEphemeralTab(
+        'threadDetails',
+        new ThreadDetailsTab({
+          engine: getEngine('ThreadDetails'),
+          utid,
+          tid,
+        }),
+      ),
+  });
+}
 
 export function threadRefMenuItems(info: {
   utid: Utid;
@@ -59,19 +77,7 @@ export function threadRefMenuItems(info: {
       label: 'Copy utid',
       onclick: () => copyToClipboard(`${info.utid}`),
     }),
-    m(MenuItem, {
-      icon: Icons.ExternalLink,
-      label: 'Show thread details',
-      onclick: () =>
-        addEphemeralTab(
-          'threadDetails',
-          new ThreadDetailsTab({
-            engine: getEngine('ThreadDetails'),
-            utid: info.utid,
-            tid: info.tid,
-          }),
-        ),
-    }),
+    showThreadDetailsMenuItem(info.utid, info.tid),
   ];
 }
 

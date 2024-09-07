@@ -30,6 +30,7 @@
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
+#include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/sorter/trace_token_buffer.h"
@@ -202,6 +203,10 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
       context.perf_record_parser->ParsePerfRecord(
           event.ts, token_buffer_.Extract<perf_importer::Record>(id));
       return;
+    case TimestampedEvent::Type::kInstrumentsRow:
+      context.instruments_row_parser->ParseInstrumentsRow(
+          event.ts, token_buffer_.Extract<instruments_importer::Row>(id));
+      return;
     case TimestampedEvent::Type::kTracePacket:
       context.proto_trace_parser->ParseTracePacket(
           event.ts, token_buffer_.Extract<TracePacketData>(id));
@@ -225,6 +230,10 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kAndroidLogEvent:
       context.android_log_event_parser->ParseAndroidLogEvent(
           event.ts, token_buffer_.Extract<AndroidLogEvent>(id));
+      return;
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+      context.proto_trace_parser->ParseLegacyV8ProfileEvent(
+          event.ts, token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
       return;
     case TimestampedEvent::Type::kInlineSchedSwitch:
     case TimestampedEvent::Type::kInlineSchedWaking:
@@ -251,9 +260,11 @@ void TraceSorter::ParseEtwPacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
     case TimestampedEvent::Type::kPerfRecord:
+    case TimestampedEvent::Type::kInstrumentsRow:
     case TimestampedEvent::Type::kJsonValue:
     case TimestampedEvent::Type::kFuchsiaRecord:
     case TimestampedEvent::Type::kAndroidLogEvent:
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -281,9 +292,11 @@ void TraceSorter::ParseFtracePacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
     case TimestampedEvent::Type::kPerfRecord:
+    case TimestampedEvent::Type::kInstrumentsRow:
     case TimestampedEvent::Type::kJsonValue:
     case TimestampedEvent::Type::kFuchsiaRecord:
     case TimestampedEvent::Type::kAndroidLogEvent:
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -319,8 +332,14 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
     case TimestampedEvent::Type::kPerfRecord:
       base::ignore_result(token_buffer_.Extract<perf_importer::Record>(id));
       return;
+    case TimestampedEvent::Type::kInstrumentsRow:
+      base::ignore_result(token_buffer_.Extract<instruments_importer::Row>(id));
+      return;
     case TimestampedEvent::Type::kAndroidLogEvent:
       base::ignore_result(token_buffer_.Extract<AndroidLogEvent>(id));
+      return;
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+      base::ignore_result(token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
       return;
   }
   PERFETTO_FATAL("For GCC");

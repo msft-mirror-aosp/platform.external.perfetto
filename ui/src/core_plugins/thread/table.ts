@@ -14,8 +14,9 @@
 
 import {SqlTableDescription} from '../../frontend/widgets/sql/table/table_description';
 import {
-  ProcessColumn,
+  ProcessColumnSet,
   StandardColumn,
+  ThreadIdColumn,
   TimestampColumn,
 } from '../../frontend/widgets/sql/table/well_known_columns';
 
@@ -23,13 +24,15 @@ export function getThreadTable(): SqlTableDescription {
   return {
     name: 'thread',
     columns: [
-      new StandardColumn('utid'),
-      new StandardColumn('tid'),
+      new ThreadIdColumn('utid'),
+      new StandardColumn('tid', {aggregationType: 'nominal'}),
       new StandardColumn('name'),
       new TimestampColumn('start_ts'),
       new TimestampColumn('end_ts'),
-      new ProcessColumn('upid'),
-      new StandardColumn('is_main_thread'),
+      new ProcessColumnSet('upid', {title: 'upid', notNull: true}),
+      new StandardColumn('is_main_thread', {
+        aggregationType: 'nominal',
+      }),
     ],
   };
 }

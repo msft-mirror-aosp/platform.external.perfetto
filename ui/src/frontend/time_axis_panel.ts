@@ -13,10 +13,8 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Time, time, toISODateOnly} from '../base/time';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
-
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {
@@ -25,10 +23,10 @@ import {
   generateTicks,
   TickType,
 } from './gridline_helper';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
-import {PxSpan, TimeScale} from './time_scale';
-import {canvasClip} from '../common/canvas_utils';
+import {TimeScale} from '../base/time_scale';
+import {canvasClip} from '../base/canvas_utils';
 
 export class TimeAxisPanel implements Panel {
   readonly kind = 'panel';
@@ -39,7 +37,7 @@ export class TimeAxisPanel implements Panel {
     return m('.time-axis-panel');
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
     ctx.fillStyle = '#999';
     ctx.textAlign = 'left';
     ctx.font = '11px Roboto Condensed';
@@ -86,9 +84,12 @@ export class TimeAxisPanel implements Panel {
     }
   }
 
-  private renderPanel(ctx: CanvasRenderingContext2D, size: Size): void {
+  private renderPanel(ctx: CanvasRenderingContext2D, size: Size2D): void {
     const visibleWindow = globals.timeline.visibleWindow;
-    const timescale = new TimeScale(visibleWindow, new PxSpan(0, size.width));
+    const timescale = new TimeScale(visibleWindow, {
+      left: 0,
+      right: size.width,
+    });
     const timespan = visibleWindow.toTimeSpan();
     const offset = globals.timestampOffset();
 

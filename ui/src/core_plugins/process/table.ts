@@ -16,6 +16,7 @@ import {SqlTableDescription} from '../../frontend/widgets/sql/table/table_descri
 import {
   ArgSetColumnSet,
   ProcessColumn,
+  ProcessIdColumn,
   StandardColumn,
   TimestampColumn,
 } from '../../frontend/widgets/sql/table/well_known_columns';
@@ -24,16 +25,16 @@ export function getProcessTable(): SqlTableDescription {
   return {
     name: 'process',
     columns: [
-      new StandardColumn('upid'),
-      new StandardColumn('pid'),
+      new ProcessIdColumn('upid'),
+      new StandardColumn('pid', {aggregationType: 'nominal'}),
       new StandardColumn('name'),
       new TimestampColumn('start_ts'),
       new TimestampColumn('end_ts'),
       new ProcessColumn('parent_upid'),
-      new StandardColumn('uid'),
-      new StandardColumn('android_appid'),
+      new StandardColumn('uid', {aggregationType: 'nominal'}),
+      new StandardColumn('android_appid', {aggregationType: 'nominal'}),
       new StandardColumn('cmdline', {startsHidden: true}),
-      new StandardColumn('machine_id'),
+      new StandardColumn('machine_id', {aggregationType: 'nominal'}),
       new ArgSetColumnSet('arg_set_id'),
     ],
   };

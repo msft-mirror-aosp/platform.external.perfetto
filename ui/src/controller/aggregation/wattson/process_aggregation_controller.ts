@@ -14,10 +14,11 @@
 
 import {exists} from '../../../base/utils';
 import {ColumnDef} from '../../../common/aggregation_data';
-import {Area, Sorting} from '../../../common/state';
+import {Sorting} from '../../../common/state';
+import {Area} from '../../../public/selection';
 import {globals} from '../../../frontend/globals';
 import {Engine} from '../../../trace_processor/engine';
-import {CPU_SLICE_TRACK_KIND} from '../../../core/track_kinds';
+import {CPU_SLICE_TRACK_KIND} from '../../../public/track_kinds';
 import {AggregationController} from '../aggregation_controller';
 import {hasWattsonSupport} from '../../../core/trace_config_utils';
 
@@ -30,7 +31,7 @@ export class WattsonProcessAggregationController extends AggregationController {
 
     const selectedCpus: number[] = [];
     for (const trackUri of area.trackUris) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
+      const trackInfo = globals.trackManager.getTrack(trackUri);
       trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND &&
         exists(trackInfo.tags.cpu) &&
         selectedCpus.push(trackInfo.tags.cpu);

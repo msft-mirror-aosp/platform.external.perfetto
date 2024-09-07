@@ -15,10 +15,10 @@
 import {SqlTableDescription} from '../../frontend/widgets/sql/table/table_description';
 import {
   DurationColumn,
-  ProcessColumn,
+  ProcessColumnSet,
   SchedIdColumn,
   StandardColumn,
-  ThreadColumn,
+  ThreadColumnSet,
   TimestampColumn,
 } from '../../frontend/widgets/sql/table/well_known_columns';
 
@@ -29,10 +29,10 @@ export function getSchedTable(): SqlTableDescription {
       new SchedIdColumn('id'),
       new TimestampColumn('ts'),
       new DurationColumn('dur'),
-      new StandardColumn('cpu'),
-      new StandardColumn('priority'),
-      new ThreadColumn('utid', {title: 'Thread'}),
-      new ProcessColumn(
+      new StandardColumn('cpu', {aggregationType: 'nominal'}),
+      new StandardColumn('priority', {aggregationType: 'nominal'}),
+      new ThreadColumnSet('utid', {title: 'utid', notNull: true}),
+      new ProcessColumnSet(
         {
           column: 'upid',
           source: {
@@ -40,12 +40,16 @@ export function getSchedTable(): SqlTableDescription {
             joinOn: {
               utid: 'utid',
             },
+            innerJoin: true,
           },
         },
-        {title: 'Process'},
+        {title: 'upid', notNull: true},
       ),
       new StandardColumn('end_state'),
-      new StandardColumn('ucpu'),
+      new StandardColumn('ucpu', {
+        aggregationType: 'nominal',
+        startsHidden: true,
+      }),
     ],
   };
 }

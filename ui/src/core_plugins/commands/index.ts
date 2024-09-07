@@ -17,12 +17,9 @@ import {exists} from '../../base/utils';
 import {Actions} from '../../common/actions';
 import {globals} from '../../frontend/globals';
 import {openInOldUIWithSizeCheck} from '../../frontend/legacy_trace_viewer';
-import {
-  PerfettoPlugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {
   isLegacyTrace,
   openFileWithLegacyTraceViewer,
@@ -33,6 +30,7 @@ import {
   addSqlTableTabImpl,
   SqlTableTabConfig,
 } from '../../frontend/sql_table_tab';
+import {Workspace} from '../../public/workspace';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -103,8 +101,8 @@ limit 100;`;
 class CoreCommandsPlugin implements PerfettoPlugin {
   private readonly disposable = new DisposableStack();
 
-  onActivate(ctx: PluginContext) {
-    ctx.registerCommand({
+  onActivate(ctx: App) {
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#ToggleLeftSidebar',
       name: 'Toggle left sidebar',
       callback: () => {
@@ -136,7 +134,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
     });
 
     const OPEN_TRACE_COMMAND_ID = 'perfetto.CoreCommands#openTrace';
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: OPEN_TRACE_COMMAND_ID,
       name: 'Open trace file',
       callback: () => {
@@ -145,7 +143,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
       defaultHotkey: '!Mod+O',
     });
-    ctx.addSidebarMenuItem({
+    ctx.sidebar.addSidebarMenuItem({
       commandId: OPEN_TRACE_COMMAND_ID,
       group: 'navigation',
       icon: 'folder_open',
@@ -153,7 +151,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
 
     const OPEN_LEGACY_TRACE_COMMAND_ID =
       'perfetto.CoreCommands#openTraceInLegacyUi';
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: OPEN_LEGACY_TRACE_COMMAND_ID,
       name: 'Open with legacy UI',
       callback: () => {
@@ -161,15 +159,15 @@ class CoreCommandsPlugin implements PerfettoPlugin {
         input.click();
       },
     });
-    ctx.addSidebarMenuItem({
+    ctx.sidebar.addSidebarMenuItem({
       commandId: OPEN_LEGACY_TRACE_COMMAND_ID,
       group: 'navigation',
       icon: 'filter_none',
     });
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.registerCommand({
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryAllProcesses',
       name: 'Run query: All processes',
       callback: () => {
@@ -177,7 +175,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryCpuTimeByProcess',
       name: 'Run query: CPU time by process',
       callback: () => {
@@ -185,7 +183,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryCyclesByStateByCpu',
       name: 'Run query: cycles by p-state by CPU',
       callback: () => {
@@ -196,7 +194,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryCyclesByCpuByProcess',
       name: 'Run query: CPU Time by CPU by process',
       callback: () => {
@@ -207,7 +205,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryHeapGraphBytesPerType',
       name: 'Run query: heap graph bytes per type',
       callback: () => {
@@ -218,7 +216,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#DebugSqlPerformance',
       name: 'Debug SQL performance',
       callback: () => {
@@ -226,32 +224,32 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#UnpinAllTracks',
       name: 'Unpin all pinned tracks',
       callback: () => {
-        const workspace = ctx.timeline.workspace;
+        const workspace = ctx.workspace;
         workspace.pinnedTracks.forEach((t) => workspace.unpinTrack(t));
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#ExpandAllGroups',
       name: 'Expand all track groups',
       callback: () => {
-        ctx.timeline.workspace.flatGroups.forEach((g) => g.expand());
+        ctx.workspace.flatGroups.forEach((g) => g.expand());
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#CollapseAllGroups',
       name: 'Collapse all track groups',
       callback: () => {
-        ctx.timeline.workspace.flatGroups.forEach((g) => g.collapse());
+        ctx.workspace.flatGroups.forEach((g) => g.collapse());
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#PanToTimestamp',
       name: 'Pan to timestamp',
       callback: (tsRaw: unknown) => {
@@ -270,7 +268,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.CoreCommands#ShowCurrentSelectionTab',
       name: 'Show current selection tab',
       callback: () => {
@@ -278,7 +276,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: ADD_SQL_TABLE_TAB_COMMAND_ID,
       name: 'Open SQL table viewer',
       callback: (args: unknown) => {
@@ -293,9 +291,46 @@ class CoreCommandsPlugin implements PerfettoPlugin {
         addSqlTableTabImpl(args as SqlTableTabConfig);
       },
     });
+
+    ctx.commands.registerCommand({
+      id: 'createNewEmptyWorkspace',
+      name: 'Create new empty workspace',
+      callback: async () => {
+        try {
+          const name = await ctx.prompt('Give it a name...');
+          const newWorkspace = new Workspace(name);
+          globals.workspaces.push(newWorkspace);
+          globals.switchWorkspace(newWorkspace);
+        } finally {
+        }
+      },
+    });
+
+    ctx.commands.registerCommand({
+      id: 'switchWorkspace',
+      name: 'Switch workspace',
+      callback: async () => {
+        try {
+          const options = globals.workspaces.map((ws) => {
+            return {key: ws.uuid, displayName: ws.displayName};
+          });
+          const workspaceUuid = await ctx.prompt(
+            'Choose a workspace...',
+            options,
+          );
+          const workspace = globals.workspaces.find(
+            (ws) => ws.uuid === workspaceUuid,
+          );
+          if (workspace) {
+            globals.switchWorkspace(workspace);
+          }
+        } finally {
+        }
+      },
+    });
   }
 
-  onDeactivate(_: PluginContext): void {
+  onDeactivate(_: App): void {
     this.disposable[Symbol.dispose]();
   }
 }

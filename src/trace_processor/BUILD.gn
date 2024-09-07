@@ -204,6 +204,9 @@ if (enable_perfetto_trace_processor_sqlite) {
       "../../gn:sqlite",  # iterator_impl.h includes sqlite3.h.
       "../../include/perfetto/trace_processor",
     ]
+    if (enable_perfetto_trace_processor_mac_instruments) {
+      deps += [ "importers/instruments" ]
+    }
   }
 
   executable("trace_processor_shell") {
