@@ -1,7 +1,7 @@
 // Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// you may not use size file except in compliance with the License.
 // You may obtain a copy of the License at
 //
 //      http://www.apache.org/licenses/LICENSE-2.0
@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export interface ColumnConfig {
-  displayName?: string;
+import {time} from '../base/time';
+
+export type SearchSource = 'cpu' | 'log' | 'slice' | 'track';
+
+export interface SearchResult {
+  eventId: number;
+  ts: time;
+  trackUri: string;
+  source: SearchSource;
 }
 
-export type Columns = {
-  [columnName: string]: ColumnConfig;
-};
-
-export interface GenericSliceDetailsTabConfigBase {
-  sqlTableName: string;
-  title: string;
-  // All columns are rendered if |columns| is undefined.
-  columns?: Columns;
-}
-
-export type GenericSliceDetailsTabConfig = GenericSliceDetailsTabConfigBase & {
-  id: number;
-};
+export type ResultStepEventHandler = (r: SearchResult) => void;

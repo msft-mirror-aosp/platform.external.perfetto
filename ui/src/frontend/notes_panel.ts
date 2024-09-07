@@ -18,7 +18,7 @@ import {Icons} from '../base/semantic_icons';
 import {Time} from '../base/time';
 import {Actions} from '../common/actions';
 import {randomColor} from '../core/colorizer';
-import {SpanNote, Note, Selection} from '../common/state';
+import {SpanNote, Note} from '../public/note';
 import {raf} from '../core/raf_scheduler';
 import {Button, ButtonBar} from '../widgets/button';
 import {TextInput} from '../widgets/text_input';
@@ -30,10 +30,11 @@ import {Panel} from './panel_container';
 import {Timestamp} from './widgets/timestamp';
 import {uuidv4} from '../base/uuid';
 import {assertUnreachable} from '../base/logging';
-import {DetailsPanel} from '../public/track';
+import {DetailsPanel} from '../public/details_panel';
 import {TimeScale} from '../base/time_scale';
 import {canvasClip} from '../base/canvas_utils';
 import {isTraceLoaded} from './trace_attrs';
+import {Selection} from '../public/selection';
 
 const FLAG_WIDTH = 16;
 const AREA_TRIANGLE_WIDTH = 10;
@@ -61,6 +62,7 @@ export class NotesPanel implements Panel {
   readonly selectable = false;
   private timescale?: TimeScale; // The timescale from the last render()
   private hoveredX: null | number = null;
+  private mouseDragging = false;
 
   render(): m.Children {
     const allCollapsed = globals.workspace.flatGroups.every((n) => n.collapsed);
@@ -68,12 +70,22 @@ export class NotesPanel implements Panel {
     return m(
       '.notes-panel',
       {
+        onmousedown: () => {
+          // If the user clicks & drags, very likely they just want to measure
+          // the time horizontally, not set a flag. This debouncing is done to
+          // avoid setting accidental flags like measuring the time on the brush
+          // timeline.
+          this.mouseDragging = false;
+        },
         onclick: (e: MouseEvent) => {
-          const {x, y} = currentTargetOffset(e);
-          this.onClick(x - TRACK_SHELL_WIDTH, y);
-          e.stopPropagation();
+          if (!this.mouseDragging) {
+            const x = currentTargetOffset(e).x - TRACK_SHELL_WIDTH;
+            this.onClick(x);
+            e.stopPropagation();
+          }
         },
         onmousemove: (e: MouseEvent) => {
+          this.mouseDragging = true;
           this.hoveredX = currentTargetOffset(e).x - TRACK_SHELL_WIDTH;
           raf.scheduleRedraw();
         },
@@ -183,7 +195,7 @@ export class NotesPanel implements Panel {
     ctx.textBaseline = 'bottom';
     ctx.font = '10px Helvetica';
 
-    for (const note of Object.values(globals.state.notes)) {
+    for (const note of globals.noteManager.notes.values()) {
       const timestamp = getStartTimestamp(note);
       // TODO(hjd): We should still render area selection marks in viewport is
       // *within* the area (e.g. both lhs and rhs are out of bounds).
@@ -199,7 +211,7 @@ export class NotesPanel implements Panel {
         this.hoveredX !== null && this.hitTestNote(this.hoveredX, note);
       if (currentIsHovered) aNoteIsHovered = true;
 
-      const selection = globals.state.selection;
+      const selection = globals.selectionManager.selection;
       const isSelected = selection.kind === 'note' && selection.id === note.id;
       const x = timescale.timeToPx(timestamp);
       const left = Math.floor(x);
@@ -317,26 +329,24 @@ export class NotesPanel implements Panel {
     ctx.textBaseline = prevBaseline;
   }
 
-  private onClick(x: number, _: number) {
+  private onClick(x: number) {
     if (!this.timescale) {
       return;
     }
 
     // Select the hovered note, or create a new single note & select it
     if (x < 0) return;
-    for (const note of Object.values(globals.state.notes)) {
+    for (const note of globals.noteManager.notes.values()) {
       if (this.hoveredX !== null && this.hitTestNote(this.hoveredX, note)) {
-        globals.makeSelection(Actions.selectNote({id: note.id}));
+        globals.selectionManager.setNote({id: note.id});
         return;
       }
     }
     const timestamp = this.timescale.pxToHpTime(x).toTime();
     const id = uuidv4();
     const color = randomColor();
-    globals.dispatchMultiple([
-      Actions.addNote({id, timestamp, color}),
-      Actions.selectNote({id}),
-    ]);
+    const noteId = globals.noteManager.addNote({id, timestamp, color});
+    globals.selectionManager.setNote({id: noteId});
   }
 
   private hitTestNote(x: number, note: SpanNote | Note): boolean {
@@ -367,13 +377,16 @@ export class NotesEditorTab implements DetailsPanel {
 
     const id = selection.id;
 
-    const note = globals.state.notes[id];
+    const note = globals.noteManager.getNote(id);
     if (note === undefined) {
       return m('.', `No Note with id ${id}`);
     }
     const startTime = getStartTimestamp(note);
     return m(
       '.notes-editor-panel',
+      {
+        key: id, // Every note shoul get its own brand new DOM.
+      },
       m(
         '.notes-editor-panel-heading-bar',
         m(
@@ -382,15 +395,18 @@ export class NotesEditorTab implements DetailsPanel {
           m(Timestamp, {ts: startTime}),
         ),
         m('input[type=text]', {
-          value: note.text,
+          oncreate: (v: m.VnodeDOM) => {
+            // NOTE: due to bad design decisions elsewhere this component is
+            // rendered every time the mouse moves on the canvas. We cannot set
+            // `value: note.text` as an input as that will clobber the input
+            // value as we move the mouse.
+            const inputElement = v.dom as HTMLInputElement;
+            inputElement.value = note.text;
+            inputElement.focus();
+          },
           onchange: (e: InputEvent) => {
             const newText = (e.target as HTMLInputElement).value;
-            globals.dispatch(
-              Actions.changeNoteText({
-                id,
-                newText,
-              }),
-            );
+            globals.noteManager.changeNote(id, {text: newText});
           },
         }),
         m(
@@ -400,22 +416,14 @@ export class NotesEditorTab implements DetailsPanel {
             value: note.color,
             onchange: (e: Event) => {
               const newColor = (e.target as HTMLInputElement).value;
-              globals.dispatch(
-                Actions.changeNoteColor({
-                  id,
-                  newColor,
-                }),
-              );
+              globals.noteManager.changeNote(id, {color: newColor});
             },
           }),
         ),
         m(Button, {
           label: 'Remove',
           icon: Icons.Delete,
-          onclick: () => {
-            globals.dispatch(Actions.removeNote({id}));
-            raf.scheduleFullRedraw();
-          },
+          onclick: () => globals.noteManager.removeNote(id),
         }),
       ),
     );
