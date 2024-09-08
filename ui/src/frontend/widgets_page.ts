@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {Hotkey, Platform} from '../base/hotkeys';
 import {isString} from '../base/object_utils';
@@ -44,7 +43,6 @@ import {TextInput} from '../widgets/text_input';
 import {MultiParagraphText, TextParagraph} from '../widgets/text_paragraph';
 import {LazyTreeNode, Tree, TreeNode} from '../widgets/tree';
 import {VegaView} from '../widgets/vega_view';
-
 import {createPage} from './pages';
 import {PopupMenuButton} from './popup_menu';
 import {TableShowcase} from './tables/table_showcase';
@@ -57,6 +55,7 @@ import {
 } from '../widgets/virtual_table';
 import {TagInput} from '../widgets/tag_input';
 import {SegmentedButtons} from '../widgets/segmented_buttons';
+import {MiddleEllipsis} from '../widgets/middle_ellipsis';
 
 const DATA_ENGLISH_LETTER_FREQUENCY = {
   table: [
@@ -1272,6 +1271,24 @@ export const WidgetsPage = createPage({
           TextInput, but the actual editable element appears after the last tag.
           Clicking anywhere on the container will focus the text input.`,
         renderWidget: () => m(TagInputDemo),
+      }),
+      m(WidgetShowcase, {
+        label: 'Middle Ellipsis',
+        description: `
+          Sometimes the start and end of a bit of text are more important than
+          the middle. This element puts the ellipsis in the midde if the content
+          is too wide for its container.`,
+        renderWidget: (opts) =>
+          m(
+            'div',
+            {style: {width: Boolean(opts.squeeze) ? '150px' : '450px'}},
+            m(MiddleEllipsis, {
+              text: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit',
+            }),
+          ),
+        initialOpts: {
+          squeeze: false,
+        },
       }),
     );
   },
