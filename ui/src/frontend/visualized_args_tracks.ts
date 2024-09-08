@@ -14,7 +14,7 @@
 
 import {uuidv4} from '../base/uuid';
 // import {THREAD_SLICE_TRACK_KIND} from '../public';
-import {TrackDescriptor} from '../public/tracks';
+import {TrackDescriptor} from '../public/track';
 import {Engine} from '../trace_processor/engine';
 import {NUM} from '../trace_processor/query_result';
 import {globals} from './globals';
@@ -34,7 +34,7 @@ const VISUALISED_ARGS_SLICE_TRACK_URI_PREFIX = 'perfetto.VisualisedArgs';
 // work.
 interface Context {
   engine: Engine;
-  registerTrack(track: TrackDescriptor): unknown;
+  tracks: {registerTrack(track: TrackDescriptor): unknown};
 }
 
 export async function addVisualisedArgTracks(ctx: Context, argName: string) {
@@ -80,7 +80,7 @@ export async function addVisualisedArgTracks(ctx: Context, argName: string) {
     const maxDepth = it.maxDepth;
 
     const uri = `${VISUALISED_ARGS_SLICE_TRACK_URI_PREFIX}#${uuidv4()}`;
-    ctx.registerTrack({
+    ctx.tracks.registerTrack({
       uri,
       title: argName,
       chips: ['metric'],
