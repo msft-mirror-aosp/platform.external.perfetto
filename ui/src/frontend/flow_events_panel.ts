@@ -13,12 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../base/semantic_icons';
 import {Actions} from '../common/actions';
 import {getLegacySelection} from '../common/state';
 import {raf} from '../core/raf_scheduler';
-
 import {Flow, globals} from './globals';
 import {DurationWidget} from './widgets/duration';
 import {EmptyState} from '../widgets/empty_state';
@@ -65,9 +63,9 @@ export class FlowEventsPanel implements m.ClassComponent {
     }
 
     const flowClickHandler = (sliceId: number, trackId: number) => {
-      const track = globals.trackManager
-        .getAllTracks()
-        .find((td) => td.tags?.trackIds?.includes(trackId));
+      const track = globals.trackManager.findTrack((td) =>
+        td.tags?.trackIds?.includes(trackId),
+      );
       if (track) {
         globals.setLegacySelection(
           {

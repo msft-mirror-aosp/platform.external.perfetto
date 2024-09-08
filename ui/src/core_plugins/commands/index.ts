@@ -17,12 +17,9 @@ import {exists} from '../../base/utils';
 import {Actions} from '../../common/actions';
 import {globals} from '../../frontend/globals';
 import {openInOldUIWithSizeCheck} from '../../frontend/legacy_trace_viewer';
-import {
-  PerfettoPlugin,
-  PluginContext,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {Trace} from '../../public/trace';
+import {App} from '../../public/app';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {
   isLegacyTrace,
   openFileWithLegacyTraceViewer,
@@ -33,7 +30,7 @@ import {
   addSqlTableTabImpl,
   SqlTableTabConfig,
 } from '../../frontend/sql_table_tab';
-import {Workspace} from '../../frontend/workspace';
+import {Workspace} from '../../public/workspace';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -104,7 +101,7 @@ limit 100;`;
 class CoreCommandsPlugin implements PerfettoPlugin {
   private readonly disposable = new DisposableStack();
 
-  onActivate(ctx: PluginContext) {
+  onActivate(ctx: App) {
     ctx.registerCommand({
       id: 'perfetto.CoreCommands#ToggleLeftSidebar',
       name: 'Toggle left sidebar',
@@ -169,7 +166,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
     });
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.registerCommand({
       id: 'perfetto.CoreCommands#RunQueryAllProcesses',
       name: 'Run query: All processes',
@@ -333,7 +330,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
     });
   }
 
-  onDeactivate(_: PluginContext): void {
+  onDeactivate(_: App): void {
     this.disposable[Symbol.dispose]();
   }
 }

@@ -17,7 +17,6 @@
 import {arrayEquals} from '../base/array_utils';
 import {Actions} from '../common/actions';
 import {
-  Area,
   AreaSelection,
   PivotTableAreaState,
   PivotTableQuery,
@@ -25,6 +24,7 @@ import {
   PivotTableResult,
   PivotTableState,
 } from '../common/state';
+import {Area} from 'src/core/selection_manager';
 import {featureFlags} from '../core/feature_flags';
 import {globals} from '../frontend/globals';
 import {
@@ -34,7 +34,6 @@ import {
 import {Aggregation, PivotTree} from '../frontend/pivot_table_types';
 import {Engine} from '../trace_processor/engine';
 import {ColumnType} from '../trace_processor/query_result';
-
 import {Controller} from './controller';
 
 export const PIVOT_TABLE_REDUX_FLAG = featureFlags.register({

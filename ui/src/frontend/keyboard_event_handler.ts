@@ -15,7 +15,6 @@
 import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
 import {getLegacySelection} from '../common/state';
-
 import {Flow, globals} from './globals';
 import {focusHorizontalRange, verticalScrollToTrack} from './scroll_helper';
 
@@ -98,7 +97,7 @@ export function moveByFocusedFlow(direction: Direction): void {
       const flowPoint = direction === 'Backward' ? flow.begin : flow.end;
       const track = globals.workspace.flatTracks.find((t) => {
         return globals.trackManager
-          .resolveTrackInfo(t.uri)
+          .getTrack(t.uri)
           ?.tags?.trackIds?.includes(flowPoint.trackId);
       });
       if (track) {

@@ -18,31 +18,28 @@ import {duration, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
 import {Args} from '../common/arg_types';
-import {CommandManager} from '../common/commands';
+import {CommandManagerImpl} from '../core/command_manager';
 import {
   ConversionJobName,
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {MetricResult} from '../common/metric_data';
 import {CurrentSearchResults} from '../common/search_data';
 import {EngineConfig, State, getLegacySelection} from '../common/state';
-import {TabManager} from '../common/tab_registry';
+import {TabManagerImpl} from '../core/tab_manager';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
-import {TrackManager} from '../common/track_cache';
+import {TrackManagerImpl} from '../core/track_manager';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
 import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import type {Analytics} from './analytics';
-import {Timeline} from './timeline';
+import {TimelineImpl} from '../core/timeline';
 import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
-import {SelectionManager, LegacySelection} from '../core/selection_manager';
+import {SelectionManagerImpl, LegacySelection} from '../core/selection_manager';
 import {Optional, exists} from '../base/utils';
-import {OmniboxManager} from './omnibox_manager';
-import {CallsiteInfo} from '../common/legacy_flamegraph_util';
-import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
+import {OmniboxManagerImpl} from '../core/omnibox_manager';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {
@@ -52,15 +49,15 @@ import {
 import {AppContext} from './app_context';
 import {TraceContext} from './trace_context';
 import {Registry} from '../base/registry';
-import {SidebarMenuItem} from '../public';
-import {Workspace} from './workspace';
+import {SidebarMenuItem} from '../public/sidebar';
+import {Workspace} from '../public/workspace';
+import {ratelimit} from './rate_limiters';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
-type QueryResultsStore = Map<string, {} | undefined>;
 type AggregateDataStore = Map<string, AggregateData>;
 type Description = Map<string, string>;
 
@@ -134,13 +131,6 @@ export interface ThreadStateDetails {
   dur?: duration;
 }
 
-export interface CpuProfileDetails {
-  id?: number;
-  ts?: time;
-  utid?: number;
-  stack?: CallsiteInfo[];
-}
-
 export interface QuantizedLoad {
   start: time;
   end: time;
@@ -208,14 +198,13 @@ class Globals implements AppContext {
   private _testing = false;
   private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
-  private _timeline?: Timeline = undefined;
+  private _timeline?: TimelineImpl = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
   private _isInternalUser: boolean | undefined = undefined;
 
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;
-  private _queryResults?: QueryResultsStore = undefined;
   private _overviewStore?: OverviewStore = undefined;
   private _aggregateDataStore?: AggregateDataStore = undefined;
   private _threadMap?: ThreadMap = undefined;
@@ -224,27 +213,24 @@ class Globals implements AppContext {
   private _connectedFlows?: Flow[] = undefined;
   private _selectedFlows?: Flow[] = undefined;
   private _visibleFlowCategories?: Map<string, boolean> = undefined;
-  private _cpuProfileDetails?: CpuProfileDetails = undefined;
   private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
   private _traceErrors?: number = undefined;
   private _metricError?: string = undefined;
-  private _metricResult?: MetricResult = undefined;
   private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
-  private _cmdManager = new CommandManager();
-  private _tabManager = new TabManager();
-  private _trackManager = new TrackManager();
-  private _selectionManager = new SelectionManager(this._store);
+  private _cmdManager = new CommandManagerImpl();
+  private _tabManager = new TabManagerImpl();
+  private _trackManager = new TrackManagerImpl();
+  private _selectionManager = new SelectionManagerImpl(this._store);
   private _hasFtrace: boolean = false;
   private _searchOverviewTrack?: SearchOverviewTrack;
   readonly workspaces: Workspace[] = [];
   private _currentWorkspace: Workspace;
 
-  omnibox = new OmniboxManager();
-  areaFlamegraphCache = new LegacyFlamegraphCache('area');
+  omnibox = new OmniboxManagerImpl();
 
   scrollToTrackUri?: string;
   httpRpcState: HttpRpcState = {connected: false};
@@ -280,8 +266,9 @@ class Globals implements AppContext {
     this.traceContext = traceCtx;
 
     const {start, end} = traceCtx;
-    const traceSpan = new TimeSpan(start, end);
-    this._timeline = new Timeline(this._store, traceSpan);
+    this._timeline = new TimelineImpl(new TimeSpan(start, end));
+    this._timeline.retriggerControllersOnChange = () =>
+      ratelimit(() => this.store.edit(() => {}), 50);
 
     // TODO(stevegolton): Even though createSearchOverviewTrack() returns a
     // disposable, we completely ignore it as we assume the dispose action
@@ -305,7 +292,7 @@ class Globals implements AppContext {
 
     // Reset the trackManager - this clears out the cache and any registered
     // tracks
-    this._trackManager = new TrackManager();
+    this._trackManager = new TrackManagerImpl();
   }
 
   // Used for permalink load by trace_controller.ts.
@@ -327,8 +314,7 @@ class Globals implements AppContext {
 
   constructor() {
     const {start, end} = defaultTraceContext;
-    this._timeline = new Timeline(this._store, new TimeSpan(start, end));
-
+    this._timeline = new TimelineImpl(new TimeSpan(start, end));
     const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
     this.workspaces.push(defaultWorkspace);
     this._currentWorkspace = defaultWorkspace;
@@ -362,7 +348,6 @@ class Globals implements AppContext {
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
     this._trackDataStore = new Map<string, {}>();
-    this._queryResults = new Map<string, {}>();
     this._overviewStore = new Map<string, QuantizedLoad[]>();
     this._aggregateDataStore = new Map<string, AggregateData>();
     this._threadMap = new Map<number, ThreadDesc>();
@@ -371,7 +356,6 @@ class Globals implements AppContext {
     this._selectedFlows = [];
     this._visibleFlowCategories = new Map<string, boolean>();
     this._threadStateDetails = {};
-    this._cpuProfileDetails = {};
     this.engines.clear();
     this._selectionManager.clear();
   }
@@ -424,10 +408,6 @@ class Globals implements AppContext {
 
   get trackDataStore(): TrackDataStore {
     return assertExists(this._trackDataStore);
-  }
-
-  get queryResults(): QueryResultsStore {
-    return assertExists(this._queryResults);
   }
 
   get threads() {
@@ -492,22 +472,6 @@ class Globals implements AppContext {
 
   setMetricError(arg: string) {
     this._metricError = arg;
-  }
-
-  get metricResult() {
-    return this._metricResult;
-  }
-
-  setMetricResult(result: MetricResult) {
-    this._metricResult = result;
-  }
-
-  get cpuProfileDetails() {
-    return assertExists(this._cpuProfileDetails);
-  }
-
-  set cpuProfileDetails(click: CpuProfileDetails) {
-    this._cpuProfileDetails = assertExists(click);
   }
 
   set numQueuedQueries(value: number) {
@@ -604,13 +568,11 @@ class Globals implements AppContext {
 
   makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
     const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
-    const currentSelectionTabUri = 'current_selection';
 
     // A new selection should cancel the current search selection.
     clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
-
     if (switchToCurrentSelectionTab) {
-      globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
+      globals.tabManager.showCurrentSelectionTab();
     }
     globals.dispatch(action);
   }
@@ -649,7 +611,7 @@ class Globals implements AppContext {
       );
     }
     if (switchToCurrentSelectionTab) {
-      globals.dispatch(Actions.showTab({uri: 'current_selection'}));
+      globals.tabManager.showCurrentSelectionTab();
     }
   }
 
@@ -665,14 +627,12 @@ class Globals implements AppContext {
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
     this._trackDataStore = undefined;
-    this._queryResults = undefined;
     this._overviewStore = undefined;
     this._threadMap = undefined;
     this._sliceDetails = undefined;
     this._threadStateDetails = undefined;
     this._aggregateDataStore = undefined;
     this._numQueriesQueued = 0;
-    this._metricResult = undefined;
     this._currentSearchResults = {
       eventIds: new Float64Array(0),
       tses: new BigInt64Array(0),
@@ -714,7 +674,7 @@ class Globals implements AppContext {
     raf.shutdown();
   }
 
-  get commandManager(): CommandManager {
+  get commandManager(): CommandManagerImpl {
     return assertExists(this._cmdManager);
   }
 
@@ -780,7 +740,7 @@ class Globals implements AppContext {
     } else if (sel.kind === 'single') {
       const uri = sel.trackUri;
       const bounds = await globals.trackManager
-        .resolveTrackInfo(uri)
+        .getTrack(uri)
         ?.getEventBounds?.(sel.eventId);
       if (bounds) {
         return {

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Time, duration, time} from '../../base/time';
 import {
   asSliceSqlId,
@@ -51,7 +50,7 @@ export class SliceRef implements m.ClassComponent<SliceRefAttrs> {
       {
         icon: Icons.UpdateSelection,
         onclick: () => {
-          const track = globals.trackManager.getAllTracks().find((td) => {
+          const track = globals.trackManager.findTrack((td) => {
             return td.tags?.trackIds?.includes(vnode.attrs.sqlTrackId);
           });
           if (track === undefined) return;

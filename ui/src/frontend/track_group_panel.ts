@@ -13,14 +13,12 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../base/semantic_icons';
-import {TrackCacheEntry} from '../common/track_cache';
-import {TrackTags} from '../public';
-
+import {TrackRenderer} from '../core/track_manager';
+import {TrackTags} from '../public/track';
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
 import {
   CrashButton,
@@ -32,14 +30,14 @@ import {
   renderWakeupVertical,
   TrackContent,
 } from './track_panel';
-import {canvasClip} from '../common/canvas_utils';
+import {canvasClip} from '../base/canvas_utils';
 import {Button} from '../widgets/button';
-import {TrackRenderContext} from '../public/tracks';
+import {TrackRenderContext} from '../public/track';
 import {calculateResolution} from '../common/resolution';
-import {PxSpan, TimeScale} from './time_scale';
+import {TimeScale} from '../base/time_scale';
 import {exists} from '../base/utils';
 import {classNames} from '../base/classnames';
-import {GroupNode} from './workspace';
+import {GroupNode} from '../public/workspace';
 import {raf} from '../core/raf_scheduler';
 import {Actions} from '../common/actions';
 
@@ -49,7 +47,7 @@ interface Attrs {
   readonly tooltip: string;
   readonly collapsed: boolean;
   readonly collapsable: boolean;
-  readonly trackFSM?: TrackCacheEntry;
+  readonly trackRenderer?: TrackRenderer;
   readonly tags?: TrackTags;
   readonly subtitle?: string;
   readonly chips?: ReadonlyArray<string>;
@@ -65,7 +63,8 @@ export class TrackGroupPanel implements Panel {
   }
 
   render(): m.Children {
-    const {title, subtitle, chips, collapsed, trackFSM, tooltip} = this.attrs;
+    const {title, subtitle, chips, collapsed, trackRenderer, tooltip} =
+      this.attrs;
 
     // The shell should be highlighted if the current search result is inside
     // this track group.
@@ -98,7 +97,7 @@ export class TrackGroupPanel implements Panel {
       }
     }
 
-    const error = trackFSM?.getError();
+    const error = trackRenderer?.getError();
 
     return m(
       `.track-group-panel[collapsed=${collapsed}]`,
@@ -162,13 +161,13 @@ export class TrackGroupPanel implements Panel {
             }),
         ),
       ),
-      trackFSM
+      trackRenderer
         ? m(
             TrackContent,
             {
-              track: trackFSM.track,
-              hasError: Boolean(trackFSM.getError()),
-              height: this.attrs.trackFSM?.track.getHeight(),
+              track: trackRenderer.track,
+              hasError: Boolean(trackRenderer.getError()),
+              height: this.attrs.trackRenderer?.track.getHeight(),
             },
             !collapsed && subtitle !== null ? m('span', subtitle) : null,
           )
@@ -177,15 +176,15 @@ export class TrackGroupPanel implements Panel {
   }
 
   private onupdate() {
-    if (this.attrs.trackFSM !== undefined) {
-      this.attrs.trackFSM.track.onFullRedraw?.();
+    if (this.attrs.trackRenderer !== undefined) {
+      this.attrs.trackRenderer.track.onFullRedraw?.();
     }
   }
 
   highlightIfTrackSelected(
     ctx: CanvasRenderingContext2D,
     timescale: TimeScale,
-    size: Size,
+    size: Size2D,
   ) {
     const selection = globals.state.selection;
     if (selection.kind !== 'area') return;
@@ -204,8 +203,8 @@ export class TrackGroupPanel implements Panel {
     }
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
-    const {collapsed, trackFSM: track} = this.attrs;
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
+    const {collapsed, trackRenderer: track} = this.attrs;
 
     if (!collapsed) return;
 
@@ -220,10 +219,10 @@ export class TrackGroupPanel implements Panel {
 
     const visibleWindow = globals.timeline.visibleWindow;
     const timespan = visibleWindow.toTimeSpan();
-    const timescale = new TimeScale(
-      visibleWindow,
-      new PxSpan(0, trackSize.width),
-    );
+    const timescale = new TimeScale(visibleWindow, {
+      left: 0,
+      right: trackSize.width,
+    });
 
     drawGridLines(ctx, timespan, timescale, trackSize);
 
@@ -233,7 +232,7 @@ export class TrackGroupPanel implements Panel {
           visibleWindow,
           size: trackSize,
           ctx,
-          trackUri: track.trackUri,
+          trackUri: track.desc.uri,
           resolution: calculateResolution(visibleWindow, trackSize.width),
           timescale,
         };

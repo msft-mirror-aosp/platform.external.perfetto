@@ -19,11 +19,11 @@ import {
   PivotTree,
   TableColumn,
 } from '../frontend/pivot_table_types';
-
 import {
   selectionToLegacySelection,
   Selection,
   LegacySelection,
+  Area,
 } from '../core/selection_manager';
 
 export {
@@ -60,12 +60,6 @@ export interface OmniboxState {
   omnibox: string;
   mode: OmniboxMode;
   force?: boolean;
-}
-
-export interface Area {
-  start: time;
-  end: time;
-  trackUris: string[];
 }
 
 export const MAX_TIME = 180;
@@ -331,11 +325,6 @@ export interface PendingDeeplinkState {
   visEnd?: string;
 }
 
-export interface TabsV2State {
-  openTabs: string[];
-  currentTab: string;
-}
-
 export interface State {
   version: number;
   nextId: string;
@@ -381,8 +370,6 @@ export interface State {
   pendingScrollId?: number;
 
   searchIndex: number;
-
-  tabs: TabsV2State;
 
   /**
    * Trace recording

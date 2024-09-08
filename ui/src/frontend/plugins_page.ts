@@ -13,13 +13,11 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {pluginManager, pluginRegistry} from '../common/plugins';
 import {raf} from '../core/raf_scheduler';
 import {Button} from '../widgets/button';
-
 import {exists} from '../base/utils';
-import {PluginDescriptor} from '../public';
+import {PluginDescriptor} from '../public/plugin';
 import {createPage} from './pages';
 import {defaultPlugins} from '../core/default_plugins';
 import {Intent} from '../widgets/common';

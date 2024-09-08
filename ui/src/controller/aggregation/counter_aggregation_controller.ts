@@ -14,18 +14,18 @@
 
 import {Duration} from '../../base/time';
 import {ColumnDef} from '../../common/aggregation_data';
-import {Area, Sorting} from '../../common/state';
+import {Sorting} from '../../common/state';
+import {Area} from 'src/core/selection_manager';
 import {globals} from '../../frontend/globals';
-import {COUNTER_TRACK_KIND} from '../../public';
+import {COUNTER_TRACK_KIND} from '../../public/track_kinds';
 import {Engine} from '../../trace_processor/engine';
-
 import {AggregationController} from './aggregation_controller';
 
 export class CounterAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     const trackIds: (string | number)[] = [];
     for (const trackUri of area.trackUris) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(trackUri);
+      const trackInfo = globals.trackManager.getTrack(trackUri);
       if (trackInfo?.tags?.kind === COUNTER_TRACK_KIND) {
         trackInfo.tags?.trackIds && trackIds.push(...trackInfo.tags.trackIds);
       }
