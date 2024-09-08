@@ -13,14 +13,12 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../base/semantic_icons';
-import {TrackRenderer} from '../common/track_manager';
-import {TrackTags} from '../public';
-
+import {TrackRenderer} from '../core/track_manager';
+import {TrackTags} from '../public/track';
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
 import {
   CrashButton,
@@ -32,21 +30,20 @@ import {
   renderWakeupVertical,
   TrackContent,
 } from './track_panel';
-import {canvasClip} from '../common/canvas_utils';
+import {canvasClip} from '../base/canvas_utils';
 import {Button} from '../widgets/button';
-import {TrackRenderContext} from '../public/tracks';
+import {TrackRenderContext} from '../public/track';
 import {calculateResolution} from '../common/resolution';
-import {PxSpan, TimeScale} from './time_scale';
+import {TimeScale} from '../base/time_scale';
 import {exists} from '../base/utils';
 import {classNames} from '../base/classnames';
 import {GroupNode} from '../public/workspace';
 import {raf} from '../core/raf_scheduler';
-import {Actions} from '../common/actions';
+import {MiddleEllipsis} from '../widgets/middle_ellipsis';
 
 interface Attrs {
   readonly groupNode: GroupNode;
-  readonly title: m.Children;
-  readonly tooltip: string;
+  readonly title: string;
   readonly collapsed: boolean;
   readonly collapsable: boolean;
   readonly trackRenderer?: TrackRenderer;
@@ -65,21 +62,21 @@ export class TrackGroupPanel implements Panel {
   }
 
   render(): m.Children {
-    const {title, subtitle, chips, collapsed, trackRenderer, tooltip} =
-      this.attrs;
+    const {title, subtitle, collapsed, trackRenderer} = this.attrs;
 
     // The shell should be highlighted if the current search result is inside
     // this track group.
     let highlightClass = '';
-    const searchIndex = globals.state.searchIndex;
-    if (searchIndex !== -1) {
-      const uri = globals.currentSearchResults.trackUris[searchIndex];
+    const searchIndex = globals.searchManager.resultIndex;
+    const searchResults = globals.searchManager.searchResults;
+    if (searchIndex !== -1 && searchResults !== undefined) {
+      const uri = searchResults.trackUris[searchIndex];
       if (this.attrs.groupNode.flatTracks.find((t) => t.uri === uri)) {
         highlightClass = 'flash';
       }
     }
 
-    const selection = globals.state.selection;
+    const selection = globals.selectionManager.selection;
 
     // const trackGroup = globals.state.trackGroups[groupKey];
     let checkBox = Icons.BlankCheckbox;
@@ -100,13 +97,14 @@ export class TrackGroupPanel implements Panel {
     }
 
     const error = trackRenderer?.getError();
+    const chips = this.attrs.chips && renderChips(this.attrs.chips);
 
     return m(
       `.track-group-panel[collapsed=${collapsed}]`,
       {
         id: 'track_' + this.groupUri,
-        oncreate: () => this.onupdate(),
-        onupdate: () => this.onupdate(),
+        oncreate: (vnode) => this.onupdate(vnode),
+        onupdate: (vnode) => this.onupdate(vnode),
       },
       m(
         `.shell`,
@@ -136,9 +134,11 @@ export class TrackGroupPanel implements Panel {
           '.title-wrapper',
           m(
             'h1.track-title',
-            {title: tooltip},
-            title,
-            chips && renderChips(chips),
+            {
+              ref: this.attrs.title,
+            },
+            m('.popup', title, chips),
+            m(MiddleEllipsis, {text: title}, chips),
           ),
           collapsed && exists(subtitle) && m('h2.track-subtitle', subtitle),
         ),
@@ -148,13 +148,11 @@ export class TrackGroupPanel implements Panel {
           selection.kind === 'area' &&
             m(Button, {
               onclick: (e: MouseEvent) => {
-                globals.dispatch(
-                  Actions.toggleGroupAreaSelection({
-                    // Dump URIs of all contained tracks & nodes, including this group
-                    trackUris: this.attrs.groupNode.flatNodes
-                      .map((t) => t.uri)
-                      .concat(this.attrs.groupNode.uri),
-                  }),
+                globals.selectionManager.toggleGroupAreaSelection(
+                  // Dump URIs of all contained tracks & nodes, including this group
+                  this.attrs.groupNode.flatNodes
+                    .map((t) => t.uri)
+                    .concat(this.attrs.groupNode.uri),
                 );
                 e.stopPropagation();
               },
@@ -177,18 +175,35 @@ export class TrackGroupPanel implements Panel {
     );
   }
 
-  private onupdate() {
+  private onupdate({dom}: m.VnodeDOM) {
+    this.decidePopupRequired(dom);
+
     if (this.attrs.trackRenderer !== undefined) {
       this.attrs.trackRenderer.track.onFullRedraw?.();
+    }
+  }
+
+  // Works out whether to display a title popup on hover, based on whether the
+  // current title is truncated.
+  private decidePopupRequired(dom: Element) {
+    const popupElement = dom.querySelector('.popup') as HTMLElement;
+    const titleElement = dom.querySelector(
+      '.pf-middle-ellipsis',
+    ) as HTMLElement;
+
+    if (popupElement.clientWidth >= titleElement.clientWidth) {
+      popupElement.classList.add('show-popup');
+    } else {
+      popupElement.classList.remove('show-popup');
     }
   }
 
   highlightIfTrackSelected(
     ctx: CanvasRenderingContext2D,
     timescale: TimeScale,
-    size: Size,
+    size: Size2D,
   ) {
-    const selection = globals.state.selection;
+    const selection = globals.selectionManager.selection;
     if (selection.kind !== 'area') return;
     const someSelected = this.attrs.groupNode.flatTracks.some((track) =>
       selection.trackUris.includes(track.uri),
@@ -205,7 +220,7 @@ export class TrackGroupPanel implements Panel {
     }
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
     const {collapsed, trackRenderer: track} = this.attrs;
 
     if (!collapsed) return;
@@ -221,10 +236,10 @@ export class TrackGroupPanel implements Panel {
 
     const visibleWindow = globals.timeline.visibleWindow;
     const timespan = visibleWindow.toTimeSpan();
-    const timescale = new TimeScale(
-      visibleWindow,
-      new PxSpan(0, trackSize.width),
-    );
+    const timescale = new TimeScale(visibleWindow, {
+      left: 0,
+      right: trackSize.width,
+    });
 
     drawGridLines(ctx, timespan, timescale, trackSize);
 
