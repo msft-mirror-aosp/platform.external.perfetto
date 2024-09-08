@@ -14,8 +14,7 @@
 
 import {assertExists} from '../../base/logging';
 import {Time} from '../../base/time';
-import {Actions} from '../../common/actions';
-import {LegacySelection} from '../../common/state';
+import {LegacySelection} from '../../public/selection';
 import {getColorForSample} from '../../core/colorizer';
 import {
   BaseSliceTrack,
@@ -24,7 +23,8 @@ import {
 import {globals} from '../../frontend/globals';
 import {NAMED_ROW, NamedRow} from '../../frontend/named_slice_track';
 import {NewTrackArgs} from '../../frontend/track';
-import {NUM, Slice} from '../../public';
+import {NUM} from '../../trace_processor/query_result';
+import {Slice} from '../../public/track';
 
 interface CpuProfileRow extends NamedRow {
   callsiteId: number;
@@ -75,12 +75,10 @@ export class CpuProfileTrack extends BaseSliceTrack<Slice, CpuProfileRow> {
   }
 
   onSliceClick({slice}: OnSliceClickArgs<Slice>) {
-    globals.makeSelection(
-      Actions.selectCpuProfileSample({
-        id: slice.id,
-        utid: this.utid,
-        ts: Time.fromRaw(slice.ts),
-      }),
-    );
+    globals.selectionManager.setCpuProfileSample({
+      id: slice.id,
+      utid: this.utid,
+      ts: Time.fromRaw(slice.ts),
+    });
   }
 }
