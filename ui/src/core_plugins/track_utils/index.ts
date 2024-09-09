@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Actions} from '../../common/actions';
 import {
   getTimeSpanOfSelectionOrVisibleWindow,
   globals,
@@ -25,7 +24,7 @@ import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
 class TrackUtilsPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.RunQueryInSelectedTimeWindow',
       name: `Run query in selected time window`,
       callback: async () => {
@@ -34,11 +33,11 @@ class TrackUtilsPlugin implements PerfettoPlugin {
         globals.omnibox.setText(
           `select  where ts >= ${window.start} and ts < ${window.end}`,
         );
-        globals.omnibox.focusOmnibox(7);
+        globals.omnibox.focus(7);
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       // Selects & reveals the first track on the timeline with a given URI.
       id: 'perfetto.FindTrack',
       name: 'Find track by URI',
@@ -65,13 +64,11 @@ class TrackUtilsPlugin implements PerfettoPlugin {
 
           verticalScrollToTrack(selectedUri, true);
           const traceTime = globals.traceContext;
-          globals.makeSelection(
-            Actions.selectArea({
-              start: traceTime.start,
-              end: traceTime.end,
-              trackUris: [selectedUri],
-            }),
-          );
+          globals.selectionManager.setArea({
+            start: traceTime.start,
+            end: traceTime.end,
+            trackUris: [selectedUri],
+          });
         } catch {
           // Prompt was probably cancelled - do nothing.
         }
