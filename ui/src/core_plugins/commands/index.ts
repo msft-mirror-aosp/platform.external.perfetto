@@ -30,7 +30,6 @@ import {
   addSqlTableTabImpl,
   SqlTableTabConfig,
 } from '../../frontend/sql_table_tab';
-import {Workspace} from '../../public/workspace';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -143,7 +142,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
       defaultHotkey: '!Mod+O',
     });
-    ctx.sidebar.addSidebarMenuItem({
+    ctx.sidebar.addMenuItem({
       commandId: OPEN_TRACE_COMMAND_ID,
       group: 'navigation',
       icon: 'folder_open',
@@ -159,7 +158,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
         input.click();
       },
     });
-    ctx.sidebar.addSidebarMenuItem({
+    ctx.sidebar.addMenuItem({
       commandId: OPEN_LEGACY_TRACE_COMMAND_ID,
       group: 'navigation',
       icon: 'filter_none',
@@ -171,7 +170,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#RunQueryAllProcesses',
       name: 'Run query: All processes',
       callback: () => {
-        ctx.tabs.openQuery(ALL_PROCESSES_QUERY, 'All Processes');
+        ctx.addQueryResultsTab(ALL_PROCESSES_QUERY, 'All Processes');
       },
     });
 
@@ -179,7 +178,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#RunQueryCpuTimeByProcess',
       name: 'Run query: CPU time by process',
       callback: () => {
-        ctx.tabs.openQuery(CPU_TIME_FOR_PROCESSES, 'CPU time by process');
+        ctx.addQueryResultsTab(CPU_TIME_FOR_PROCESSES, 'CPU time by process');
       },
     });
 
@@ -187,7 +186,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#RunQueryCyclesByStateByCpu',
       name: 'Run query: cycles by p-state by CPU',
       callback: () => {
-        ctx.tabs.openQuery(
+        ctx.addQueryResultsTab(
           CYCLES_PER_P_STATE_PER_CPU,
           'Cycles by p-state by CPU',
         );
@@ -198,7 +197,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#RunQueryCyclesByCpuByProcess',
       name: 'Run query: CPU Time by CPU by process',
       callback: () => {
-        ctx.tabs.openQuery(
+        ctx.addQueryResultsTab(
           CPU_TIME_BY_CPU_BY_PROCESS,
           'CPU time by CPU by process',
         );
@@ -209,7 +208,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#RunQueryHeapGraphBytesPerType',
       name: 'Run query: heap graph bytes per type',
       callback: () => {
-        ctx.tabs.openQuery(
+        ctx.addQueryResultsTab(
           HEAP_GRAPH_BYTES_PER_TYPE,
           'Heap graph bytes per type',
         );
@@ -220,7 +219,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#DebugSqlPerformance',
       name: 'Debug SQL performance',
       callback: () => {
-        ctx.tabs.openQuery(SQL_STATS, 'Recent SQL queries');
+        ctx.addQueryResultsTab(SQL_STATS, 'Recent SQL queries');
       },
     });
 
@@ -296,13 +295,11 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'createNewEmptyWorkspace',
       name: 'Create new empty workspace',
       callback: async () => {
-        try {
-          const name = await ctx.prompt('Give it a name...');
-          const newWorkspace = new Workspace(name);
-          globals.workspaces.push(newWorkspace);
-          globals.switchWorkspace(newWorkspace);
-        } finally {
-        }
+        const name = await ctx.omnibox.prompt('Give it a name...');
+        if (name === undefined || name === '') return;
+        globals.workspaceManager.switchWorkspace(
+          globals.workspaceManager.createEmptyWorkspace(name),
+        );
       },
     });
 
@@ -310,21 +307,20 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'switchWorkspace',
       name: 'Switch workspace',
       callback: async () => {
-        try {
-          const options = globals.workspaces.map((ws) => {
-            return {key: ws.uuid, displayName: ws.displayName};
-          });
-          const workspaceUuid = await ctx.prompt(
-            'Choose a workspace...',
-            options,
-          );
-          const workspace = globals.workspaces.find(
-            (ws) => ws.uuid === workspaceUuid,
-          );
-          if (workspace) {
-            globals.switchWorkspace(workspace);
-          }
-        } finally {
+        const workspaceManager = globals.workspaceManager;
+        const options = workspaceManager.all.map((ws) => {
+          return {key: ws.uuid, displayName: ws.displayName};
+        });
+        const workspaceUuid = await ctx.omnibox.prompt(
+          'Choose a workspace...',
+          options,
+        );
+        if (workspaceUuid === undefined) return;
+        const workspace = workspaceManager.all.find(
+          (ws) => ws.uuid === workspaceUuid,
+        );
+        if (workspace) {
+          workspaceManager.switchWorkspace(workspace);
         }
       },
     });
