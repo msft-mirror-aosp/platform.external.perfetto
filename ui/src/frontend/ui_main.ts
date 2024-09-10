@@ -100,21 +100,20 @@ export class UiMain implements m.ClassComponent {
             displayName: 'Realtime (Trace TZ)',
           },
           {key: TimestampFormat.Seconds, displayName: 'Seconds'},
-          {key: TimestampFormat.Raw, displayName: 'Raw'},
+          {key: TimestampFormat.Milliseoncds, displayName: 'Milliseconds'},
+          {key: TimestampFormat.Microseconds, displayName: 'Microseconds'},
+          {key: TimestampFormat.TraceNs, displayName: 'Trace nanoseconds'},
           {
-            key: TimestampFormat.RawLocale,
-            displayName: 'Raw (with locale-specific formatting)',
+            key: TimestampFormat.TraceNsLocale,
+            displayName: 'Trace nanoseconds (with locale-specific formatting)',
           },
         ];
         const promptText = 'Select format...';
 
-        try {
-          const result = await globals.omnibox.prompt(promptText, options);
-          setTimestampFormat(result as TimestampFormat);
-          raf.scheduleFullRedraw();
-        } catch {
-          // Prompt was probably cancelled - do nothing.
-        }
+        const result = await globals.omnibox.prompt(promptText, options);
+        if (result === undefined) return;
+        setTimestampFormat(result as TimestampFormat);
+        raf.scheduleFullRedraw();
       },
     },
     {
@@ -130,13 +129,10 @@ export class UiMain implements m.ClassComponent {
         ];
         const promptText = 'Select duration precision mode...';
 
-        try {
-          const result = await globals.omnibox.prompt(promptText, options);
-          setDurationPrecision(result as DurationPrecision);
-          raf.scheduleFullRedraw();
-        } catch {
-          // Prompt was probably cancelled - do nothing.
-        }
+        const result = await globals.omnibox.prompt(promptText, options);
+        if (result === undefined) return;
+        setDurationPrecision(result as DurationPrecision);
+        raf.scheduleFullRedraw();
       },
     },
     {

@@ -15,6 +15,12 @@
 import {time, duration} from '../base/time';
 import {GenericSliceDetailsTabConfigBase} from './details_panel';
 
+export interface SelectionManager {
+  readonly selection: Selection;
+  setLegacy(args: LegacySelection, opts?: SelectionOpts): void;
+  clear(): void;
+}
+
 export type Selection =
   | SingleSelection
   | AreaSelection
