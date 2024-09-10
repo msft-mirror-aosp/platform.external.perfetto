@@ -173,7 +173,7 @@ export class TimeSelectionPanel implements Panel {
     }
 
     const localArea = globals.timeline.selectedArea;
-    const selection = globals.state.selection;
+    const selection = globals.selectionManager.selection;
     if (localArea !== undefined) {
       const start = Time.min(localArea.start, localArea.end);
       const end = Time.max(localArea.start, localArea.end);
@@ -193,7 +193,7 @@ export class TimeSelectionPanel implements Panel {
       );
     }
 
-    for (const note of Object.values(globals.state.notes)) {
+    for (const note of globals.noteManager.notes.values()) {
       const noteIsSelected =
         selection.kind === 'note' && selection.id === note.id;
       if (note.noteType === 'SPAN' && !noteIsSelected) {
@@ -257,12 +257,16 @@ function stringifyTimestamp(time: time): string {
     case TimestampFormat.Timecode:
       const THIN_SPACE = '\u2009';
       return Time.toTimecode(time).toString(THIN_SPACE);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return time.toString();
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return time.toLocaleString();
     case TimestampFormat.Seconds:
       return Time.formatSeconds(time);
+    case TimestampFormat.Milliseoncds:
+      return Time.formatMilliseconds(time);
+    case TimestampFormat.Microseconds:
+      return Time.formatMicroseconds(time);
     default:
       const z: never = fmt;
       throw new Error(`Invalid timestamp ${z}`);

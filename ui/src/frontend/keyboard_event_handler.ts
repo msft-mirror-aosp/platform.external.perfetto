@@ -14,9 +14,8 @@
 
 import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
-import {getLegacySelection} from '../common/state';
+import {scrollTo} from '../public/scroll_helper';
 import {Flow, globals} from './globals';
-import {focusHorizontalRange, verticalScrollToTrack} from './scroll_helper';
 
 type Direction = 'Forward' | 'Backward';
 
@@ -44,7 +43,7 @@ function findAnotherFlowExcept(boundFlows: Flow[], flowId: number): number {
 
 // Change focus to the next flow event (matching the direction)
 export function focusOtherFlow(direction: Direction) {
-  const currentSelection = getLegacySelection(globals.state);
+  const currentSelection = globals.selectionManager.legacySelection;
   if (!currentSelection || currentSelection.kind !== 'SLICE') {
     return;
   }
@@ -76,7 +75,7 @@ export function focusOtherFlow(direction: Direction) {
 
 // Select the slice connected to the flow in focus
 export function moveByFocusedFlow(direction: Direction): void {
-  const currentSelection = getLegacySelection(globals.state);
+  const currentSelection = globals.selectionManager.legacySelection;
   if (!currentSelection || currentSelection.kind !== 'SLICE') {
     return;
   }
@@ -101,7 +100,7 @@ export function moveByFocusedFlow(direction: Direction): void {
           ?.tags?.trackIds?.includes(flowPoint.trackId);
       });
       if (track) {
-        globals.setLegacySelection(
+        globals.selectionManager.setLegacy(
           {
             kind: 'SLICE',
             id: flowPoint.sliceId,
@@ -109,9 +108,7 @@ export function moveByFocusedFlow(direction: Direction): void {
             table: 'slice',
           },
           {
-            clearSearch: true,
             pendingScrollId: flowPoint.sliceId,
-            switchToCurrentSelectionTab: true,
           },
         );
       }
@@ -119,16 +116,16 @@ export function moveByFocusedFlow(direction: Direction): void {
   }
 }
 
+// TODO(primiano): this will be moved to SelectionManager but I need first to
+// disentangle some dependencies.
 export async function findCurrentSelection() {
-  const selection = getLegacySelection(globals.state);
-  if (selection === null) return;
+  const selection = globals.selectionManager.legacySelection;
+  if (!exists(selection)) return;
 
   const range = await globals.findTimeRangeOfSelection();
-  if (exists(range)) {
-    focusHorizontalRange(range.start, range.end);
-  }
-
-  if (selection.trackUri) {
-    verticalScrollToTrack(selection.trackUri, true);
-  }
+  const trackUri = selection.trackUri;
+  scrollTo({
+    time: exists(range) ? {start: range.start, end: range.end} : undefined,
+    track: exists(trackUri) ? {uri: trackUri, expandGroup: true} : undefined,
+  });
 }

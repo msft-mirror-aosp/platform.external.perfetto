@@ -273,14 +273,20 @@ function renderTimestamp(
     case TimestampFormat.Timecode:
       renderTimecode(ctx, time, x, y, minWidth);
       break;
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       ctx.fillText(time.toString(), x, y, minWidth);
       break;
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       ctx.fillText(time.toLocaleString(), x, y, minWidth);
       break;
     case TimestampFormat.Seconds:
       ctx.fillText(Time.formatSeconds(time), x, y, minWidth);
+      break;
+    case TimestampFormat.Milliseoncds:
+      ctx.fillText(Time.formatMilliseconds(time), x, y, minWidth);
+      break;
+    case TimestampFormat.Microseconds:
+      ctx.fillText(Time.formatMicroseconds(time), x, y, minWidth);
       break;
     default:
       const z: never = fmt;

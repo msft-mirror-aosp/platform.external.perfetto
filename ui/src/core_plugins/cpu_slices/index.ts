@@ -24,7 +24,7 @@ import {TrackNode} from '../../public/workspace';
 
 class CpuSlices implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
-    const cpus = ctx.trace.cpus;
+    const cpus = ctx.traceInfo.cpus;
     const cpuToClusterType = await this.getAndroidCpuClusterTypes(ctx.engine);
 
     for (const cpu of cpus) {
@@ -32,7 +32,7 @@ class CpuSlices implements PerfettoPlugin {
       const uri = `/sched_cpu${cpu}`;
 
       const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
-      ctx.registerTrack({
+      ctx.tracks.registerTrack({
         uri,
         title: name,
         tags: {
@@ -43,7 +43,7 @@ class CpuSlices implements PerfettoPlugin {
       });
       const trackNode = new TrackNode(uri, name);
       trackNode.sortOrder = -50;
-      ctx.timeline.workspace.insertChildInOrder(trackNode);
+      ctx.workspace.insertChildInOrder(trackNode);
     }
 
     ctx.registerDetailsPanel({

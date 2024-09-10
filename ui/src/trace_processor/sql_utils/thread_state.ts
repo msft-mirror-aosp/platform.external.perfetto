@@ -22,10 +22,10 @@ import {
   SQLConstraints,
 } from '../sql_utils';
 import {globals} from '../../frontend/globals';
-import {scrollToTrackAndTs} from '../../frontend/scroll_helper';
 import {asUtid, SchedSqlId, ThreadStateSqlId} from './core_types';
 import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {getThreadInfo, ThreadInfo} from './thread';
+import {scrollTo} from '../../public/scroll_helper';
 
 // Representation of a single thread state object, corresponding to
 // a row for the |thread_slice| table.
@@ -133,18 +133,13 @@ export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
   if (track === undefined) {
     return;
   }
-  globals.setLegacySelection(
-    {
-      kind: 'SCHED_SLICE',
-      id,
-      trackUri: track.uri,
-    },
-    {
-      clearSearch: true,
-      pendingScrollId: undefined,
-      switchToCurrentSelectionTab: true,
-    },
-  );
-
-  scrollToTrackAndTs(track.uri, ts);
+  globals.selectionManager.setLegacy({
+    kind: 'SCHED_SLICE',
+    id,
+    trackUri: track.uri,
+  });
+  scrollTo({
+    track: {uri: track.uri, expandGroup: true},
+    time: {start: ts},
+  });
 }

@@ -42,12 +42,12 @@ class ExampleState implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
     this.store = ctx.mountStore((init: unknown) => this.migrate(init));
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.ExampleState#ShowCounter',
       name: 'Show ExampleState counter',
       callback: () => {
         const counter = this.store.state.counter;
-        ctx.tabs.openQuery(
+        ctx.addQueryResultsTab(
           `SELECT ${counter} as counter;`,
           `Show counter ${counter}`,
         );
