@@ -13,11 +13,11 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {LegacySelection} from '../common/state';
+import {LegacySelection} from '../public/selection';
 import {BottomTab} from '../frontend/bottom_tab';
-
-import {LegacyDetailsPanel, Tab} from '.';
+import {Tab} from './tab';
+import {exists} from '../base/utils';
+import {LegacyDetailsPanel} from './details_panel';
 
 export function getTrackName(
   args: Partial<{
@@ -165,5 +165,26 @@ export class BottomTabToTabAdapter implements Tab {
 
   render(): m.Children {
     return this.bottomTab.viewTab();
+  }
+}
+
+export function getThreadOrProcUri(
+  upid: number | null,
+  utid: number | null,
+): string {
+  if (exists(upid)) {
+    return `/process_${upid}`;
+  } else if (exists(utid)) {
+    return `/thread_${utid}`;
+  } else {
+    throw new Error('No upid or utid defined...');
+  }
+}
+
+export function getThreadUriPrefix(upid: number | null, utid: number): string {
+  if (exists(upid)) {
+    return `/process_${upid}/thread_${utid}`;
+  } else {
+    return `/thread_${utid}`;
   }
 }

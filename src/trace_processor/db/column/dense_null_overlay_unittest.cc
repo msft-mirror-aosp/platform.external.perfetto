@@ -17,6 +17,7 @@
 #include "src/trace_processor/db/column/dense_null_overlay.h"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>

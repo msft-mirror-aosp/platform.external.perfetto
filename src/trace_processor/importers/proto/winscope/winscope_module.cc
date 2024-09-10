@@ -49,6 +49,23 @@ WinscopeModule::WinscopeModule(TraceProcessorContext* context)
                                  kWinscopeDescriptor.size());
 }
 
+ModuleResult WinscopeModule::TokenizePacket(
+    const protos::pbzero::TracePacket::Decoder& decoder,
+    TraceBlobView* /*packet*/,
+    int64_t /*packet_timestamp*/,
+    RefPtr<PacketSequenceStateGeneration> /*state*/,
+    uint32_t field_id) {
+
+  switch (field_id) {
+    case TracePacket::kProtologViewerConfigFieldNumber:
+      protolog_parser_.ParseAndAddViewerConfigToMessageDecoder(
+          decoder.protolog_viewer_config());
+      return ModuleResult::Handled();
+  }
+
+  return ModuleResult::Ignored();
+}
+
 void WinscopeModule::ParseTracePacketData(const TracePacket::Decoder& decoder,
                                           int64_t timestamp,
                                           const TracePacketData& data,
@@ -72,10 +89,6 @@ void WinscopeModule::ParseTracePacketData(const TracePacket::Decoder& decoder,
     case TracePacket::kProtologMessageFieldNumber:
       protolog_parser_.ParseProtoLogMessage(
           data.sequence_state.get(), decoder.protolog_message(), timestamp);
-      return;
-    case TracePacket::kProtologViewerConfigFieldNumber:
-      protolog_parser_.ParseProtoLogViewerConfig(
-          decoder.protolog_viewer_config());
       return;
     case TracePacket::kWinscopeExtensionsFieldNumber:
       ParseWinscopeExtensionsData(decoder.winscope_extensions(), timestamp,
@@ -111,6 +124,10 @@ void WinscopeModule::ParseWinscopeExtensionsData(protozero::ConstBytes blob,
              field.valid()) {
     android_input_event_parser_.ParseAndroidInputEvent(timestamp,
                                                        field.as_bytes());
+  } else if (field =
+                 decoder.Get(WinscopeExtensionsImpl::kWindowmanagerFieldNumber);
+             field.valid()) {
+    ParseWindowManagerData(timestamp, field.as_bytes());
   }
 }
 
@@ -189,6 +206,23 @@ void WinscopeModule::ParseViewCaptureData(
       blob, kViewCaptureProtoName, nullptr /* parse all fields */, writer);
   if (!status.ok()) {
     context_->storage->IncrementStats(stats::winscope_viewcapture_parse_errors);
+  }
+}
+
+void WinscopeModule::ParseWindowManagerData(int64_t timestamp,
+                                            protozero::ConstBytes blob) {
+  tables::WindowManagerTable::Row row;
+  row.ts = timestamp;
+  auto rowId = context_->storage->mutable_windowmanager_table()->Insert(row).id;
+
+  ArgsTracker tracker(context_);
+  auto inserter = tracker.AddArgsTo(rowId);
+  ArgsParser writer(timestamp, inserter, *context_->storage.get());
+  base::Status status = args_parser_.ParseMessage(
+      blob, kWindowManagerProtoName, nullptr /* parse all fields */, writer);
+  if (!status.ok()) {
+    context_->storage->IncrementStats(
+        stats::winscope_windowmanager_parse_errors);
   }
 }
 

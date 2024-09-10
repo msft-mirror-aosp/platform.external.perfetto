@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -131,11 +132,6 @@ void FakeStorageChain::StableSort(Token*, Token*, SortDirection) const {
 }
 
 SqlValue FakeStorageChain::Get_AvoidUsingBecauseSlow(uint32_t) const {
-  PERFETTO_FATAL("Not implemented");
-}
-
-void FakeStorageChain::Serialize(StorageProto*) const {
-  // FakeStorage doesn't really make sense to serialize.
   PERFETTO_FATAL("Not implemented");
 }
 

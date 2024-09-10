@@ -16,12 +16,7 @@ import {assertTrue} from '../base/logging';
 import {Time, time} from '../base/time';
 import {Optional} from '../base/utils';
 import {Args, ArgValue} from '../common/arg_types';
-import {
-  SelectionKind,
-  ThreadSliceSelection,
-  getLegacySelection,
-} from '../common/state';
-import {THREAD_SLICE_TRACK_KIND} from '../core/track_kinds';
+import {THREAD_SLICE_TRACK_KIND} from '../public/track_kinds';
 import {globals, SliceDetails, ThreadStateDetails} from '../frontend/globals';
 import {
   publishSliceDetails,
@@ -39,6 +34,7 @@ import {
 } from '../trace_processor/query_result';
 import {fromNumNull} from '../trace_processor/sql_utils';
 import {Controller} from './controller';
+import {SelectionKind, ThreadSliceSelection} from '../public/selection';
 
 export interface SelectionControllerArgs {
   engine: Engine;
@@ -67,7 +63,7 @@ export class SelectionController extends Controller<'main'> {
   }
 
   run() {
-    const selection = getLegacySelection(globals.state);
+    const selection = globals.selectionManager.legacySelection;
     if (!selection) return;
 
     const selectWithId: SelectionKind[] = [
@@ -265,7 +261,7 @@ export class SelectionController extends Controller<'main'> {
     }
 
     // Check selection is still the same on completion of query.
-    if (selection === getLegacySelection(globals.state)) {
+    if (selection === globals.selectionManager.legacySelection) {
       publishSliceDetails(selected);
     }
   }
@@ -288,10 +284,10 @@ export class SelectionController extends Controller<'main'> {
       const name = it.name;
       const value = it.value ?? 'NULL';
       if (name === 'destination slice id' && !isNaN(Number(value))) {
-        const destTrackId = await this.getDestTrackId(value);
+        const destTrackUri = await this.getDestTrackUri(value);
         args.set('Destination Slice', {
           kind: 'SCHED_SLICE',
-          trackId: destTrackId,
+          trackUri: destTrackUri,
           sliceId: Number(value),
           rawValue: value,
         });
@@ -302,25 +298,23 @@ export class SelectionController extends Controller<'main'> {
     return args;
   }
 
-  async getDestTrackId(sliceId: string): Promise<string> {
+  async getDestTrackUri(sliceId: string): Promise<string> {
     const trackIdQuery = `select track_id as trackId from slice
     where slice_id = ${sliceId}`;
     const result = await this.args.engine.query(trackIdQuery);
     const trackId = result.firstRow({trackId: NUM}).trackId;
     // TODO(hjd): If we had a consistent mapping from TP track_id
     // UI track id for slice tracks this would be unnecessary.
-    let trackKey = '';
-    for (const track of Object.values(globals.state.tracks)) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      if (trackInfo?.kind === THREAD_SLICE_TRACK_KIND) {
-        const trackIds = trackInfo?.trackIds;
+    for (const track of globals.workspace.flatTracks) {
+      const trackInfo = globals.trackManager.getTrack(track.uri);
+      if (trackInfo?.tags?.kind === THREAD_SLICE_TRACK_KIND) {
+        const trackIds = trackInfo?.tags?.trackIds;
         if (trackIds && trackIds.length > 0 && trackIds[0] === trackId) {
-          trackKey = track.key;
-          break;
+          return track.uri;
         }
       }
     }
-    return trackKey;
+    return '';
   }
 
   // TODO(altimin): We currently rely on the ThreadStateDetails for supporting
@@ -336,7 +330,7 @@ export class SelectionController extends Controller<'main'> {
     `;
     const result = await this.args.engine.query(query);
 
-    const selection = getLegacySelection(globals.state);
+    const selection = globals.selectionManager.legacySelection;
     if (result.numRows() > 0 && selection) {
       const row = result.firstRow({
         ts: LONG,
@@ -364,7 +358,7 @@ export class SelectionController extends Controller<'main'> {
     `;
     const result = await this.args.engine.query(sqlQuery);
     // Check selection is still the same on completion of query.
-    const selection = getLegacySelection(globals.state);
+    const selection = globals.selectionManager.legacySelection;
     if (result.numRows() > 0 && selection) {
       const row = result.firstRow({
         ts: LONG,

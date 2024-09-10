@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -32,7 +33,6 @@
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
@@ -61,6 +61,16 @@ std::optional<Token> RemoveAllNullsAndReturnTheFirstOne(
   return null_tok;
 }
 }  // namespace
+
+void DenseNullOverlay::Flatten(uint32_t* start,
+                               const uint32_t* end,
+                               uint32_t stride) {
+  for (uint32_t* it = start; it < end; it += stride) {
+    if (!non_null_->IsSet(*it)) {
+      *it = std::numeric_limits<uint32_t>::max();
+    }
+  }
+}
 
 DenseNullOverlay::ChainImpl::ChainImpl(std::unique_ptr<DataLayerChain> inner,
                                        const BitVector* non_null)
@@ -277,12 +287,6 @@ SqlValue DenseNullOverlay::ChainImpl::Get_AvoidUsingBecauseSlow(
     uint32_t index) const {
   return non_null_->IsSet(index) ? inner_->Get_AvoidUsingBecauseSlow(index)
                                  : SqlValue();
-}
-
-void DenseNullOverlay::ChainImpl::Serialize(StorageProto* storage) const {
-  auto* null_overlay = storage->set_dense_null_overlay();
-  non_null_->Serialize(null_overlay->set_bit_vector());
-  inner_->Serialize(null_overlay->set_storage());
 }
 
 }  // namespace perfetto::trace_processor::column

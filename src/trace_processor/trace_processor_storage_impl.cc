@@ -15,48 +15,52 @@
  */
 
 #include "src/trace_processor/trace_processor_storage_impl.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <utility>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/base/status.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/uuid.h"
+#include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/forwarding_trace_parser.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
-#include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/async_track_set_tracker.h"
-#include "src/trace_processor/importers/common/clock_converter.h"
+#include "src/trace_processor/importers/common/clock_converter.h"  // IWYU pragma: keep
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
-#include "src/trace_processor/importers/common/flow_tracker.h"
-#include "src/trace_processor/importers/common/machine_tracker.h"
-#include "src/trace_processor/importers/common/mapping_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
-#include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
-#include "src/trace_processor/importers/common/sched_event_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
-#include "src/trace_processor/importers/common/slice_translation_table.h"
 #include "src/trace_processor/importers/common/stack_profile_tracker.h"
-#include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/common/trace_file_tracker.h"
 #include "src/trace_processor/importers/perf/dso_tracker.h"
-#include "src/trace_processor/importers/proto/chrome_track_event.descriptor.h"
 #include "src/trace_processor/importers/proto/default_modules.h"
 #include "src/trace_processor/importers/proto/packet_analyzer.h"
 #include "src/trace_processor/importers/proto/perf_sample_tracker.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
 #include "src/trace_processor/importers/proto/proto_trace_parser_impl.h"
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
-#include "src/trace_processor/importers/proto/track_event.descriptor.h"
-#include "src/trace_processor/sorter/trace_sorter.h"
+#include "src/trace_processor/storage/metadata.h"
+#include "src/trace_processor/storage/stats.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/trace_reader_registry.h"
-#include "src/trace_processor/util/descriptors.h"
+#include "src/trace_processor/types/variadic.h"
+#include "src/trace_processor/util/status_macros.h"
+#include "src/trace_processor/util/trace_type.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 TraceProcessorStorageImpl::TraceProcessorStorageImpl(const Config& cfg)
     : context_({cfg, std::make_shared<TraceStorage>(cfg)}) {
   context_.reader_registry->RegisterTraceReader<ProtoTraceReader>(
       kProtoTraceType);
+  context_.reader_registry->RegisterTraceReader<ProtoTraceReader>(
+      kSymbolsTraceType);
   context_.proto_trace_parser =
       std::make_unique<ProtoTraceParserImpl>(&context_);
   RegisterDefaultModules(&context_);
@@ -64,14 +68,18 @@ TraceProcessorStorageImpl::TraceProcessorStorageImpl(const Config& cfg)
 
 TraceProcessorStorageImpl::~TraceProcessorStorageImpl() {}
 
-util::Status TraceProcessorStorageImpl::Parse(TraceBlobView blob) {
+base::Status TraceProcessorStorageImpl::Parse(TraceBlobView blob) {
   if (blob.size() == 0)
-    return util::OkStatus();
+    return base::OkStatus();
   if (unrecoverable_parse_error_)
-    return util::ErrStatus(
+    return base::ErrStatus(
         "Failed unrecoverably while parsing in a previous Parse call");
-  if (!context_.chunk_reader)
-    context_.chunk_reader.reset(new ForwardingTraceParser(&context_));
+  if (!parser_) {
+    active_file_ = context_.trace_file_tracker->StartNewFile();
+    auto parser = std::make_unique<ForwardingTraceParser>(&context_);
+    parser_ = parser.get();
+    context_.chunk_readers.push_back(std::move(parser));
+  }
 
   auto scoped_trace = context_.storage->TraceExecutionTimeIntoStats(
       stats::parse_trace_duration_ns);
@@ -88,7 +96,8 @@ util::Status TraceProcessorStorageImpl::Parse(TraceBlobView blob) {
                                            Variadic::String(id_for_uuid));
   }
 
-  util::Status status = context_.chunk_reader->Parse(std::move(blob));
+  active_file_->AddSize(blob.size());
+  base::Status status = parser_->Parse(std::move(blob));
   unrecoverable_parse_error_ |= !status.ok();
   return status;
 }
@@ -102,11 +111,18 @@ void TraceProcessorStorageImpl::Flush() {
   context_.args_tracker->Flush();
 }
 
-void TraceProcessorStorageImpl::NotifyEndOfFile() {
-  if (unrecoverable_parse_error_ || !context_.chunk_reader)
-    return;
+base::Status TraceProcessorStorageImpl::NotifyEndOfFile() {
+  if (!parser_) {
+    return base::OkStatus();
+  }
+  if (unrecoverable_parse_error_) {
+    return base::ErrStatus("Unrecoverable parsing error already occurred");
+  }
   Flush();
-  context_.chunk_reader->NotifyEndOfFile();
+  RETURN_IF_ERROR(parser_->NotifyEndOfFile());
+  PERFETTO_CHECK(active_file_.has_value());
+  active_file_->SetTraceType(parser_->trace_type());
+  active_file_.reset();
   // NotifyEndOfFile might have pushed packets to the sorter.
   Flush();
   for (std::unique_ptr<ProtoImporterModule>& module : context_.modules) {
@@ -115,6 +131,7 @@ void TraceProcessorStorageImpl::NotifyEndOfFile() {
   if (context_.content_analyzer) {
     PacketAnalyzer::Get(&context_)->NotifyEndOfFile();
   }
+
   context_.event_tracker->FlushPendingEvents();
   context_.slice_tracker->FlushPendingSlices();
   context_.args_tracker->Flush();
@@ -122,9 +139,12 @@ void TraceProcessorStorageImpl::NotifyEndOfFile() {
   if (context_.perf_dso_tracker) {
     perf_importer::DsoTracker::GetOrCreate(&context_).SymbolizeFrames();
   }
+  return base::OkStatus();
 }
 
 void TraceProcessorStorageImpl::DestroyContext() {
+  // End any active files. Eg. when NotifyEndOfFile is not called.
+  active_file_.reset();
   TraceProcessorContext context;
   context.storage = std::move(context_.storage);
 
@@ -139,8 +159,10 @@ void TraceProcessorStorageImpl::DestroyContext() {
 
   context_ = std::move(context);
 
+  // This is now a dangling pointer, reset it.
+  parser_ = nullptr;
+
   // TODO(chinglinyu): also need to destroy secondary contextes.
 }
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

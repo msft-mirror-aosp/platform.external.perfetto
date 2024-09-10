@@ -15,11 +15,13 @@
  */
 
 #include "src/trace_processor/importers/proto/profile_module.h"
+#include <optional>
 #include <string>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/deobfuscation_mapping_table.h"
@@ -454,13 +456,17 @@ void ProfileModule::ParseModuleSymbols(ConstBytes blob) {
     ArgsTranslationTable::SourceLocation last_location;
     for (auto line_it = address_symbols.lines(); line_it; ++line_it) {
       protos::pbzero::Line::Decoder line(*line_it);
+      auto file_name = line.source_file_name();
       context_->storage->mutable_symbol_table()->Insert(
           {symbol_set_id, context_->storage->InternString(line.function_name()),
-           context_->storage->InternString(line.source_file_name()),
-           line.line_number()});
+           file_name.size == 0 ? kNullStringId
+                               : context_->storage->InternString(file_name),
+           line.has_line_number() && file_name.size != 0
+               ? std::make_optional(line.line_number())
+               : std::nullopt});
       last_location = ArgsTranslationTable::SourceLocation{
-          line.source_file_name().ToStdString(),
-          line.function_name().ToStdString(), line.line_number()};
+          file_name.ToStdString(), line.function_name().ToStdString(),
+          line.line_number()};
       has_lines = true;
     }
     if (!has_lines) {
@@ -475,8 +481,8 @@ void ProfileModule::ParseModuleSymbols(ConstBytes blob) {
 
       for (const FrameId frame_id : frame_ids) {
         auto* frames = context_->storage->mutable_stack_profile_frame_table();
-        uint32_t frame_row = *frames->id().IndexOf(frame_id);
-        frames->mutable_symbol_set_id()->Set(frame_row, symbol_set_id);
+        auto rr = *frames->FindById(frame_id);
+        rr.set_symbol_set_id(symbol_set_id);
         frame_found = true;
       }
     }
@@ -537,10 +543,9 @@ void ProfileModule::ParseDeobfuscationMapping(int64_t,
       for (tables::StackProfileFrameTable::Id frame_id : frames) {
         auto* frames_tbl =
             context_->storage->mutable_stack_profile_frame_table();
-        frames_tbl->mutable_deobfuscated_name()->Set(
-            *frames_tbl->id().IndexOf(frame_id),
-            context_->storage->InternString(
-                base::StringView(merged_deobfuscated)));
+        auto rr = *frames_tbl->FindById(frame_id);
+        rr.set_deobfuscated_name(context_->storage->InternString(
+            base::StringView(merged_deobfuscated)));
       }
       obfuscated_to_deobfuscated_members[context_->storage->InternString(
           member.obfuscated_name())] =

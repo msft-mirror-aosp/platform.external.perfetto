@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {duration, Time, time} from '../../base/time';
 import {exists} from '../../base/utils';
 import {raf} from '../../core/raf_scheduler';
@@ -35,12 +34,11 @@ import {Section} from '../../widgets/section';
 import {SqlRef} from '../../widgets/sql_ref';
 import {MultiParagraphText, TextParagraph} from '../../widgets/text_paragraph';
 import {dictToTreeNodes, Tree} from '../../widgets/tree';
-
-import {ScrollJankV3TrackKind} from './common';
 import {
   buildScrollOffsetsGraph,
   getInputScrollDeltas,
   getJankIntervals,
+  getPredictorJankDeltas,
   getPresentedScrollDeltas,
 } from './scroll_delta_graph';
 import {
@@ -48,6 +46,7 @@ import {
   getSliceForTrack,
   ScrollJankSlice,
 } from './scroll_jank_slice';
+import {SCROLL_JANK_V3_TRACK_KIND} from '../../public/track_kinds';
 
 interface Data {
   // Scroll ID.
@@ -104,7 +103,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
           IFNULL(gesture_scroll_begin_ts, ts) AS start_ts,
           CASE
             WHEN gesture_scroll_end_ts IS NOT NULL THEN gesture_scroll_end_ts
-            WHEN gesture_scroll_begin_ts IS NOT NULL 
+            WHEN gesture_scroll_begin_ts IS NOT NULL
               THEN gesture_scroll_begin_ts + dur
             ELSE ts + dur
           END AS end_ts
@@ -236,6 +235,10 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
         this.engine,
         this.data.id,
       );
+      const predictorDeltas = await getPredictorJankDeltas(
+        this.engine,
+        this.data.id,
+      );
       const jankIntervals = await getJankIntervals(
         this.engine,
         this.data.ts,
@@ -244,6 +247,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
       this.scrollDeltas = buildScrollOffsetsGraph(
         inputDeltas,
         presentedDeltas,
+        predictorDeltas,
         jankIntervals,
       );
 
@@ -322,7 +326,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
         data.push({
           jankLink: getSliceForTrack(
             jankSlice.jankSlice,
-            ScrollJankV3TrackKind,
+            SCROLL_JANK_V3_TRACK_KIND,
             jankSlice.cause,
           ),
           dur: m(DurationWidget, {dur: jankSlice.delayDur}),
@@ -354,7 +358,7 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
                  and not moving and no active scrolling is occurring.`,
       }),
       m(TextParagraph, {
-        text: `Note: Sometimes if a user touches the screen quickly after 
+        text: `Note: Sometimes if a user touches the screen quickly after
                  letting go or Chrome was hung and got into a bad state. A new
                  scroll will start which will result in a slightly overlapping
                  scroll. This can occur due to the last scroll still outputting
@@ -378,6 +382,11 @@ export class ScrollDetailsPanel extends BottomTab<GenericSliceDetailsTabConfig> 
       m(TextParagraph, {
         text: `Grey blocks in the graph represent intervals of jank
                  corresponding with the Chrome Scroll Janks track.`,
+      }),
+      m(TextParagraph, {
+        text: `Yellow dots represent frames that were presented (sae as the red
+                 dots), but that we suspect are visible to users as unsmooth
+                 velocity/stutter (predictor jank).`,
       }),
     );
   }

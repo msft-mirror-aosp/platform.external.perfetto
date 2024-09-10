@@ -15,33 +15,28 @@
 import {assertExists} from '../base/logging';
 import {clamp, floatEqual} from '../base/math_utils';
 import {Time, time} from '../base/time';
-import {exists} from '../base/utils';
+import {exists, Optional} from '../base/utils';
 import {Actions} from '../common/actions';
-import {
-  drawIncompleteSlice,
-  drawTrackHoverTooltip,
-} from '../common/canvas_utils';
+import {drawIncompleteSlice, drawTrackHoverTooltip} from '../base/canvas_utils';
 import {cropText} from '../base/string_utils';
-import {colorCompare} from '../core/color';
+import {colorCompare} from '../public/color';
 import {UNEXPECTED_PINK} from '../core/colorizer';
-import {
-  LegacySelection,
-  SelectionKind,
-  getLegacySelection,
-} from '../common/state';
+import {LegacySelection, SelectionKind} from '../public/selection';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
-import {Engine, Slice, SliceRect, Track} from '../public';
+import {Engine} from '../trace_processor/engine';
+import {Track} from '../public/track';
+import {Slice} from '../public/track';
 import {LONG, NUM} from '../trace_processor/query_result';
-
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
-import {Size} from '../base/geom';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
 import {NewTrackArgs} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey} from '../core/timeline_cache';
 import {uuidv4Sql} from '../base/uuid';
 import {AsyncDisposableStack} from '../base/disposable_stack';
+import {TrackMouseEvent, TrackRenderContext} from '../public/track';
+import {Point2D, VerticalBounds} from '../base/geom';
 
 // The common class that underpins all tracks drawing slices.
 
@@ -170,7 +165,7 @@ export abstract class BaseSliceTrack<
 {
   protected sliceLayout: SliceLayout = {...DEFAULT_SLICE_LAYOUT};
   protected engine: Engine;
-  protected trackKey: string;
+  protected uri: string;
   protected trackUuid = uuidv4Sql();
 
   // This is the over-skirted cached bounds:
@@ -193,7 +188,7 @@ export abstract class BaseSliceTrack<
   private extraSqlColumns: string[];
 
   private charWidth = -1;
-  private hoverPos?: {x: number; y: number};
+  private hoverPos?: Point2D;
   protected hoveredSlice?: SliceT;
   private hoverTooltip: string[] = [];
   private maxDataDepth = 0;
@@ -248,7 +243,7 @@ export abstract class BaseSliceTrack<
 
   constructor(args: NewTrackArgs) {
     this.engine = args.engine;
-    this.trackKey = args.trackKey;
+    this.uri = args.uri;
     // Work out the extra columns.
     // This is the union of the embedder-defined columns and the base columns
     // we know about (ts, dur, ...).
@@ -374,25 +369,23 @@ export abstract class BaseSliceTrack<
     });
   }
 
-  async onUpdate(): Promise<void> {
-    const {visibleTimeScale: timeScale, visibleWindowTime: vizTime} =
-      globals.timeline;
-
-    const windowSizePx = Math.max(1, timeScale.pxSpan.delta);
-    const rawStartNs = vizTime.start.toTime();
-    const rawEndNs = vizTime.end.toTime();
-    const rawSlicesKey = CacheKey.create(rawStartNs, rawEndNs, windowSizePx);
+  async onUpdate({visibleWindow, size}: TrackRenderContext): Promise<void> {
+    const windowSizePx = Math.max(1, size.width);
+    const timespan = visibleWindow.toTimeSpan();
+    const rawSlicesKey = CacheKey.create(
+      timespan.start,
+      timespan.end,
+      windowSizePx,
+    );
 
     // If the visible time range is outside the cached area, requests
     // asynchronously new data from the SQL engine.
     await this.maybeRequestData(rawSlicesKey);
   }
 
-  render(ctx: CanvasRenderingContext2D, size: Size): void {
+  render({ctx, size, visibleWindow, timescale}: TrackRenderContext): void {
     // TODO(hjd): fonts and colors should come from the CSS and not hardcoded
     // here.
-    const {visibleTimeScale: timeScale, visibleWindowTime: vizTime} =
-      globals.timeline;
 
     // In any case, draw whatever we have (which might be stale/incomplete).
     let charWidth = this.charWidth;
@@ -406,11 +399,11 @@ export abstract class BaseSliceTrack<
     // needed because maybeRequestData() over-fetches to handle small pan/zooms.
     // We don't want to waste time drawing slices that are off screen.
     const vizSlices = this.getVisibleSlicesInternal(
-      vizTime.start.toTime('floor'),
-      vizTime.end.toTime('ceil'),
+      visibleWindow.start.toTime('floor'),
+      visibleWindow.end.toTime('ceil'),
     );
 
-    let selection = getLegacySelection(globals.state);
+    let selection = globals.selectionManager.legacySelection;
     if (!selection || !this.isSelectionHandled(selection)) {
       selection = null;
     }
@@ -433,15 +426,15 @@ export abstract class BaseSliceTrack<
     // pxEnd is the last visible pixel in the visible viewport. Drawing
     // anything < 0 or > pxEnd doesn't produce any visible effect as it goes
     // beyond the visible portion of the canvas.
-    const pxEnd = Math.floor(timeScale.hpTimeToPx(vizTime.end));
+    const pxEnd = size.width;
 
     for (const slice of vizSlices) {
       // Compute the basic geometry for any visible slice, even if only
       // partially visible. This might end up with a negative x if the
       // slice starts before the visible time or with a width that overflows
       // pxEnd.
-      slice.x = timeScale.timeToPx(slice.startNs);
-      slice.w = timeScale.durationToPx(slice.durNs);
+      slice.x = timescale.timeToPx(slice.startNs);
+      slice.w = timescale.durationToPx(slice.durNs);
 
       if (slice.flags & SLICE_FLAGS_INSTANT) {
         // In the case of an instant slice, set the slice geometry on the
@@ -625,8 +618,8 @@ export abstract class BaseSliceTrack<
       this.getHeight(),
       0,
       size.width,
-      timeScale.timeToPx(this.slicesKey.start),
-      timeScale.timeToPx(this.slicesKey.end),
+      timescale.timeToPx(this.slicesKey.start),
+      timescale.timeToPx(this.slicesKey.end),
     );
 
     // TODO(hjd): Remove this.
@@ -675,7 +668,7 @@ export abstract class BaseSliceTrack<
     const queryRes = await this.engine.query(`
       SELECT
         (z.ts / ${resolution}) * ${resolution} as tsQ,
-        ((z.dur / ${resolution}) + 1) * ${resolution} as durQ,
+        ((z.dur + ${resolution - 1n}) / ${resolution}) * ${resolution} as durQ,
         s.ts as ts,
         s.dur as dur,
         s.id,
@@ -762,7 +755,7 @@ export abstract class BaseSliceTrack<
     };
   }
 
-  private findSlice({x, y}: {x: number; y: number}): undefined | SliceT {
+  private findSlice({x, y, timescale}: TrackMouseEvent): undefined | SliceT {
     const trackHeight = this.computedTrackHeight;
     const sliceHeight = this.computedSliceHeight;
     const padding = this.sliceLayout.padding;
@@ -784,9 +777,8 @@ export abstract class BaseSliceTrack<
     }
 
     for (const slice of this.incomplete) {
-      const visibleTimeScale = globals.timeline.visibleTimeScale;
       const startPx = CROP_INCOMPLETE_SLICE_FLAG.get()
-        ? visibleTimeScale.timeToPx(slice.startNs)
+        ? timescale.timeToPx(slice.startNs)
         : slice.x;
       const cropUnfinishedSlicesCondition = CROP_INCOMPLETE_SLICE_FLAG.get()
         ? startPx + INCOMPLETE_SLICE_WIDTH_PX >= x
@@ -812,9 +804,10 @@ export abstract class BaseSliceTrack<
     return this.isFlat() ? '0 as depth' : 'depth';
   }
 
-  onMouseMove(position: {x: number; y: number}): void {
-    this.hoverPos = position;
-    this.updateHoveredSlice(this.findSlice(position));
+  onMouseMove(event: TrackMouseEvent): void {
+    const {x, y} = event;
+    this.hoverPos = {x, y};
+    this.updateHoveredSlice(this.findSlice(event));
   }
 
   onMouseOut(): void {
@@ -843,8 +836,8 @@ export abstract class BaseSliceTrack<
     }
   }
 
-  onMouseClick(position: {x: number; y: number}): boolean {
-    const slice = this.findSlice(position);
+  onMouseClick(event: TrackMouseEvent): boolean {
+    const slice = this.findSlice(event);
     if (slice === undefined) {
       return false;
     }
@@ -955,25 +948,15 @@ export abstract class BaseSliceTrack<
     return this.computedTrackHeight;
   }
 
-  getSliceRect(tStart: time, tEnd: time, depth: number): SliceRect | undefined {
+  getSliceVerticalBounds(depth: number): Optional<VerticalBounds> {
     this.updateSliceAndTrackHeight();
 
-    const {windowSpan, visibleTimeScale, visibleTimeSpan} = globals.timeline;
-
-    const pxEnd = windowSpan.end;
-    const left = Math.max(visibleTimeScale.timeToPx(tStart), 0);
-    const right = Math.min(visibleTimeScale.timeToPx(tEnd), pxEnd);
-
-    const visible = visibleTimeSpan.intersects(tStart, tEnd);
-
     const totalSliceHeight = this.computedRowSpacing + this.computedSliceHeight;
+    const top = this.sliceLayout.padding + depth * totalSliceHeight;
 
     return {
-      left,
-      width: Math.max(right - left, 1),
-      top: this.sliceLayout.padding + depth * totalSliceHeight,
-      height: this.computedSliceHeight,
-      visible,
+      top,
+      bottom: top + this.computedSliceHeight,
     };
   }
 }

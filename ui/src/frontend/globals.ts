@@ -12,57 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {BigintMath} from '../base/bigint_math';
 import {assertExists, assertUnreachable} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {duration, Span, Time, time, TimeSpan} from '../base/time';
+import {duration, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {AggregateData} from '../common/aggregation_data';
 import {Args} from '../common/arg_types';
-import {CommandManager} from '../common/commands';
+import {CommandManagerImpl} from '../core/command_manager';
 import {
   ConversionJobName,
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {
-  HighPrecisionTime,
-  HighPrecisionTimeSpan,
-} from '../common/high_precision_time';
-import {MetricResult} from '../common/metric_data';
-import {CurrentSearchResults, SearchSummary} from '../common/search_data';
-import {
-  EngineConfig,
-  RESOLUTION_DEFAULT,
-  State,
-  getLegacySelection,
-} from '../common/state';
-import {TabManager} from '../common/tab_registry';
+import {EngineConfig, State} from '../common/state';
+import {TabManagerImpl} from '../core/tab_manager';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
-import {TrackManager} from '../common/track_cache';
+import {TrackManagerImpl} from '../core/track_manager';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
-import {EngineBase} from '../trace_processor/engine';
+import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
-import {Analytics, initAnalytics} from './analytics';
-import {Timeline} from './timeline';
-import {SliceSqlId} from './sql_types';
-import {PxSpan, TimeScale} from './time_scale';
-import {SelectionManager, LegacySelection} from '../core/selection_manager';
+import type {Analytics} from './analytics';
+import {TimelineImpl} from '../core/timeline';
+import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
+import {SelectionManagerImpl} from '../core/selection_manager';
+import {Selection, SelectionOpts} from '../public/selection';
 import {Optional, exists} from '../base/utils';
-import {OmniboxManager} from './omnibox_manager';
-import {CallsiteInfo} from '../common/legacy_flamegraph_util';
-import {LegacyFlamegraphCache} from '../core/legacy_flamegraph_cache';
+import {OmniboxManagerImpl} from '../core/omnibox_manager';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
+import {
+  createSearchOverviewTrack,
+  SearchOverviewTrack,
+} from './search_overview_track';
+import {TraceInfo} from '../public/trace_info';
+import {Registry} from '../base/registry';
+import {SidebarMenuItem} from '../public/sidebar';
+import {Workspace, WorkspaceManager} from '../public/workspace';
+import {ratelimit} from './rate_limiters';
+import {NoteManagerImpl} from '../core/note_manager';
+import {SearchManagerImpl} from '../core/search_manager';
+import {SearchResult} from '../public/search';
+import {selectCurrentSearchResult} from './search_handler';
+import {WorkspaceManagerImpl} from '../core/workspace_manager';
+import {ScrollHelper} from '../core/scroll_helper';
+import {setScrollToFunction} from '../public/scroll_helper';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
-type QueryResultsStore = Map<string, {} | undefined>;
 type AggregateDataStore = Map<string, AggregateData>;
 type Description = Map<string, string>;
 
@@ -136,13 +137,6 @@ export interface ThreadStateDetails {
   dur?: duration;
 }
 
-export interface CpuProfileDetails {
-  id?: number;
-  ts?: time;
-  utid?: number;
-  stack?: CallsiteInfo[];
-}
-
 export interface QuantizedLoad {
   start: time;
   end: time;
@@ -160,50 +154,7 @@ export interface ThreadDesc {
 }
 type ThreadMap = Map<number, ThreadDesc>;
 
-// Options for globals.makeSelection().
-export interface MakeSelectionOpts {
-  // Whether to switch to the current selection tab or not. Default = true.
-  switchToCurrentSelectionTab?: boolean;
-
-  // Whether to cancel the current search selection. Default = true.
-  clearSearch?: boolean;
-}
-
-// All of these control additional things we can do when doing a
-// selection.
-export interface LegacySelectionArgs {
-  clearSearch: boolean;
-  switchToCurrentSelectionTab: boolean;
-  pendingScrollId: number | undefined;
-}
-
-export interface TraceContext {
-  traceTitle: string; // File name and size of the current trace.
-  traceUrl: string; // URL of the Trace.
-  readonly start: time;
-  readonly end: time;
-
-  // This is the ts value at the time of the Unix epoch.
-  // Normally some large negative value, because the unix epoch is normally in
-  // the past compared to ts=0.
-  readonly realtimeOffset: time;
-
-  // This is the timestamp that we should use for our offset when in UTC mode.
-  // Usually the most recent UTC midnight compared to the trace start time.
-  readonly utcOffset: time;
-
-  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
-  // recorded into the trace, to show timestamps in the device local time.
-  readonly traceTzOffset: time;
-
-  // The list of CPUs in the trace
-  readonly cpus: number[];
-
-  // The number of gpus in the trace
-  readonly gpuCount: number;
-}
-
-export const defaultTraceContext: TraceContext = {
+export const defaultTraceContext: TraceInfo = {
   traceTitle: '',
   traceUrl: '',
   start: Time.ZERO,
@@ -213,7 +164,18 @@ export const defaultTraceContext: TraceContext = {
   traceTzOffset: Time.ZERO,
   cpus: [],
   gpuCount: 0,
+  source: {type: 'URL', url: ''},
 };
+
+interface SqlModule {
+  readonly name: string;
+  readonly sql: string;
+}
+
+interface SqlPackage {
+  readonly name: string;
+  readonly modules: SqlModule[];
+}
 
 /**
  * Global accessors for state/dispatch in the frontend.
@@ -224,14 +186,14 @@ class Globals {
   private _testing = false;
   private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
-  private _timeline?: Timeline = undefined;
+  private _timeline: TimelineImpl;
+  private _searchManager = new SearchManagerImpl();
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
   private _isInternalUser: boolean | undefined = undefined;
 
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;
-  private _queryResults?: QueryResultsStore = undefined;
   private _overviewStore?: OverviewStore = undefined;
   private _aggregateDataStore?: AggregateDataStore = undefined;
   private _threadMap?: ThreadMap = undefined;
@@ -240,37 +202,102 @@ class Globals {
   private _connectedFlows?: Flow[] = undefined;
   private _selectedFlows?: Flow[] = undefined;
   private _visibleFlowCategories?: Map<string, boolean> = undefined;
-  private _cpuProfileDetails?: CpuProfileDetails = undefined;
   private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
   private _traceErrors?: number = undefined;
   private _metricError?: string = undefined;
-  private _metricResult?: MetricResult = undefined;
   private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
   private _embeddedMode?: boolean = undefined;
   private _hideSidebar?: boolean = undefined;
-  private _cmdManager = new CommandManager();
-  private _tabManager = new TabManager();
-  private _trackManager = new TrackManager(this._store);
-  private _selectionManager = new SelectionManager(this._store);
+  private _cmdManager = new CommandManagerImpl();
+  private _tabManager = new TabManagerImpl();
+  private _trackManager = new TrackManagerImpl();
+  private _selectionManager = new SelectionManagerImpl();
+  private _noteManager = new NoteManagerImpl(this._selectionManager);
   private _hasFtrace: boolean = false;
+  private _searchOverviewTrack?: SearchOverviewTrack;
+  private _workspaceManager = new WorkspaceManagerImpl();
+  readonly omnibox = new OmniboxManagerImpl();
 
-  omnibox = new OmniboxManager();
-  areaFlamegraphCache = new LegacyFlamegraphCache('area');
-
-  scrollToTrackKey?: string | number;
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
+  showTraceErrorPopup = true;
+  extraSqlPackages: SqlPackage[] = [];
 
   traceContext = defaultTraceContext;
 
-  setTraceContext(traceCtx: TraceContext): void {
+  readonly sidebarMenuItems = new Registry<SidebarMenuItem>((m) => m.commandId);
+
+  get workspace(): Workspace {
+    return this._workspaceManager.currentWorkspace;
+  }
+
+  get workspaceManager(): WorkspaceManager {
+    return this._workspaceManager;
+  }
+
+  // This is the app's equivalent of a plugin's onTraceLoad() function.
+  // TODO(stevegolton): Eventually initialization that should be done on trace
+  // load should be moved into here, and then we can remove TraceController
+  // entirely
+  async onTraceLoad(engine: Engine, traceCtx: TraceInfo): Promise<void> {
     this.traceContext = traceCtx;
-    const {start, end} = this.traceContext;
-    const traceSpan = new TimeSpan(start, end);
-    this._timeline = new Timeline(this._store, traceSpan);
+
+    // Reset workspaces
+    this._workspaceManager = new WorkspaceManagerImpl();
+
+    const {start, end} = traceCtx;
+    this._timeline = new TimelineImpl(new TimeSpan(start, end));
+    this._timeline.retriggerControllersOnChange = () =>
+      ratelimit(() => this.store.edit(() => {}), 50);
+
+    // Reset the trackManager - this clears out the cache and any registered
+    // tracks
+    this._trackManager = new TrackManagerImpl();
+
+    const scrollHelper = new ScrollHelper(
+      traceCtx,
+      this._timeline,
+      this._workspaceManager.currentWorkspace,
+      this._trackManager,
+    );
+    setScrollToFunction((args) => scrollHelper.scrollTo(args));
+
+    this._searchManager = new SearchManagerImpl({
+      timeline: this._timeline,
+      trackManager: this._trackManager,
+      workspace: this._workspaceManager.currentWorkspace,
+      engine,
+      onResultStep: (step: SearchResult) => {
+        selectCurrentSearchResult(step, this._selectionManager, scrollHelper);
+      },
+    });
+
+    // TODO(stevegolton): Even though createSearchOverviewTrack() returns a
+    // disposable, we completely ignore it as we assume the dispose action
+    // includes just dropping some tables, and seeing as this object will live
+    // for the duration of the trace/engine, there's no need to drop anything as
+    // the tables will be dropped along with the trace anyway.
+    //
+    // Note that this is no worse than a lot of the rest of the app where tables
+    // are created with no way to drop them.
+    //
+    // Once we fix the story around loading new traces, we should tidy this up.
+    // We could for example have a matching globals.onTraceUnload() that
+    // performs any tear-down before the old engine is dropped. This might seem
+    // pointless, but it could at least block until any currently running update
+    // cycles complete, to avoid leaving promises open on old engines that will
+    // never resolve.
+    //
+    // Alternatively we could decide that we don't want to support switching
+    // traces at all, in which case we can ignore tear down entirely.
+    this._searchOverviewTrack = await createSearchOverviewTrack(
+      engine,
+      this.searchManager,
+      this.timeline,
+    );
   }
 
   // Used for permalink load by trace_controller.ts.
@@ -279,28 +306,22 @@ class Globals {
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
 
-  private _currentSearchResults: CurrentSearchResults = {
-    eventIds: new Float64Array(0),
-    tses: new BigInt64Array(0),
-    utids: new Float64Array(0),
-    trackKeys: [],
-    sources: [],
-    totalResults: 0,
-  };
-  searchSummary: SearchSummary = {
-    tsStarts: new BigInt64Array(0),
-    tsEnds: new BigInt64Array(0),
-    count: new Uint8Array(0),
-  };
-
   engines = new Map<string, EngineBase>();
 
   constructor() {
     const {start, end} = defaultTraceContext;
-    this._timeline = new Timeline(this._store, new TimeSpan(start, end));
+    this._timeline = new TimelineImpl(new TimeSpan(start, end));
+
+    this._selectionManager.onSelectionChange = (
+      _s: Selection,
+      opts: SelectionOpts,
+    ) => this.handleSelectionOpts(opts);
   }
 
-  initialize(dispatchMultiple: DispatchMultiple) {
+  initialize(
+    dispatchMultiple: DispatchMultiple,
+    initAnalytics: () => Analytics,
+  ) {
     this._dispatchMultiple = dispatchMultiple;
 
     setPerfHooks(
@@ -308,16 +329,23 @@ class Globals {
       () => this.dispatch(Actions.togglePerfDebug({})),
     );
 
-    this._serviceWorkerController = new ServiceWorkerController();
+    this._serviceWorkerController = new ServiceWorkerController(
+      getServingRoot(),
+    );
     this._testing =
       /* eslint-disable @typescript-eslint/strict-boolean-expressions */
       self.location && self.location.search.indexOf('testing=1') >= 0;
     /* eslint-enable */
+
+    // TODO(stevegolton): This is a mess. We should just inject this object in,
+    // instead of passing in a function. The only reason this is done like this
+    // is because the current implementation of initAnalytics depends on the
+    // state of globals.testing, so this needs to be set before we run the
+    // function.
     this._logging = initAnalytics();
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
     this._trackDataStore = new Map<string, {}>();
-    this._queryResults = new Map<string, {}>();
     this._overviewStore = new Map<string, QuantizedLoad[]>();
     this._aggregateDataStore = new Map<string, AggregateData>();
     this._threadMap = new Map<number, ThreadDesc>();
@@ -326,7 +354,6 @@ class Globals {
     this._selectedFlows = [];
     this._visibleFlowCategories = new Map<string, boolean>();
     this._threadStateDetails = {};
-    this._cpuProfileDetails = {};
     this.engines.clear();
     this._selectionManager.clear();
   }
@@ -364,6 +391,10 @@ class Globals {
     return assertExists(this._timeline);
   }
 
+  get searchManager() {
+    return this._searchManager;
+  }
+
   get logging() {
     return assertExists(this._logging);
   }
@@ -379,10 +410,6 @@ class Globals {
 
   get trackDataStore(): TrackDataStore {
     return assertExists(this._trackDataStore);
-  }
-
-  get queryResults(): QueryResultsStore {
-    return assertExists(this._queryResults);
   }
 
   get threads() {
@@ -449,22 +476,6 @@ class Globals {
     this._metricError = arg;
   }
 
-  get metricResult() {
-    return this._metricResult;
-  }
-
-  setMetricResult(result: MetricResult) {
-    this._metricResult = result;
-  }
-
-  get cpuProfileDetails() {
-    return assertExists(this._cpuProfileDetails);
-  }
-
-  set cpuProfileDetails(click: CpuProfileDetails) {
-    this._cpuProfileDetails = assertExists(click);
-  }
-
   set numQueuedQueries(value: number) {
     this._numQueriesQueued = value;
   }
@@ -481,20 +492,16 @@ class Globals {
     return this._recordingLog;
   }
 
-  get currentSearchResults() {
-    return this._currentSearchResults;
-  }
-
-  set currentSearchResults(results: CurrentSearchResults) {
-    this._currentSearchResults = results;
-  }
-
   set hasFtrace(value: boolean) {
     this._hasFtrace = value;
   }
 
   get hasFtrace(): boolean {
     return this._hasFtrace;
+  }
+
+  get searchOverviewTrack() {
+    return this._searchOverviewTrack;
   }
 
   getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
@@ -549,71 +556,18 @@ class Globals {
     this.aggregateDataStore.set(kind, data);
   }
 
-  getCurResolution(): duration {
-    // Truncate the resolution to the closest power of 2 (in nanosecond space).
-    // We choose to work in ns space because resolution is consumed be track
-    // controllers for quantization and they rely on resolution to be a power
-    // of 2 in nanosecond form. This is property does not hold if we work in
-    // second space.
-    //
-    // This effectively means the resolution changes approximately every 6 zoom
-    // levels. Logic: each zoom level represents a delta of 0.1 * (visible
-    // window span). Therefore, zooming out by six levels is 1.1^6 ~= 2.
-    // Similarily, zooming in six levels is 0.9^6 ~= 0.5.
-    const timeScale = this.timeline.visibleTimeScale;
-    // TODO(b/186265930): Remove once fixed:
-    if (timeScale.pxSpan.delta === 0) {
-      console.error(`b/186265930: Bad pxToSec suppressed`);
-      return RESOLUTION_DEFAULT;
-    }
-
-    const timePerPx = timeScale.pxDeltaToDuration(this.quantPx);
-
-    return BigintMath.bitFloor(timePerPx.toTime('floor'));
-  }
-
   getCurrentEngine(): EngineConfig | undefined {
     return this.state.engine;
   }
 
-  makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
-    const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
-    const currentSelectionTabUri = 'current_selection';
-
-    // A new selection should cancel the current search selection.
-    clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
-
-    if (switchToCurrentSelectionTab) {
-      globals.dispatch(Actions.showTab({uri: currentSelectionTabUri}));
-    }
-    globals.dispatch(action);
-  }
-
-  setLegacySelection(
-    legacySelection: LegacySelection,
-    args: Partial<LegacySelectionArgs> = {},
-  ): void {
-    this._selectionManager.setLegacy(legacySelection);
-    this.handleSelectionArgs(args);
-  }
-
-  selectSingleEvent(
-    trackKey: string,
-    eventId: number,
-    args: Partial<LegacySelectionArgs> = {},
-  ): void {
-    this._selectionManager.setEvent(trackKey, eventId);
-    this.handleSelectionArgs(args);
-  }
-
-  private handleSelectionArgs(args: Partial<LegacySelectionArgs> = {}): void {
+  private handleSelectionOpts(opts: SelectionOpts = {}): void {
     const {
       clearSearch = true,
       switchToCurrentSelectionTab = true,
       pendingScrollId = undefined,
-    } = args;
+    } = opts;
     if (clearSearch) {
-      globals.dispatch(Actions.setSearchIndex({index: -1}));
+      this.searchManager.reset();
     }
     if (pendingScrollId !== undefined) {
       globals.dispatch(
@@ -623,38 +577,8 @@ class Globals {
       );
     }
     if (switchToCurrentSelectionTab) {
-      globals.dispatch(Actions.showTab({uri: 'current_selection'}));
+      globals.tabManager.showCurrentSelectionTab();
     }
-  }
-
-  clearSelection(): void {
-    globals.dispatch(Actions.setSearchIndex({index: -1}));
-    this._selectionManager.clear();
-  }
-
-  resetForTesting() {
-    this._dispatchMultiple = undefined;
-    this._timeline = undefined;
-    this._serviceWorkerController = undefined;
-
-    // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
-    this._trackDataStore = undefined;
-    this._queryResults = undefined;
-    this._overviewStore = undefined;
-    this._threadMap = undefined;
-    this._sliceDetails = undefined;
-    this._threadStateDetails = undefined;
-    this._aggregateDataStore = undefined;
-    this._numQueriesQueued = 0;
-    this._metricResult = undefined;
-    this._currentSearchResults = {
-      eventIds: new Float64Array(0),
-      tses: new BigInt64Array(0),
-      utids: new Float64Array(0),
-      trackKeys: [],
-      sources: [],
-      totalResults: 0,
-    };
   }
 
   // This variable is set by the is_internal_user.js script if the user is a
@@ -688,31 +612,7 @@ class Globals {
     raf.shutdown();
   }
 
-  // Get a timescale that covers the entire trace
-  getTraceTimeScale(pxSpan: PxSpan): TimeScale {
-    const {start, end} = this.traceContext;
-    const traceTime = HighPrecisionTimeSpan.fromTime(start, end);
-    return TimeScale.fromHPTimeSpan(traceTime, pxSpan);
-  }
-
-  // Get the trace time bounds
-  stateTraceTime(): Span<HighPrecisionTime> {
-    const {start, end} = this.traceContext;
-    return HighPrecisionTimeSpan.fromTime(start, end);
-  }
-
-  stateTraceTimeTP(): Span<time, duration> {
-    const {start, end} = this.traceContext;
-    return new TimeSpan(start, end);
-  }
-
-  // How many pixels to use for one quanta of horizontal resolution
-  get quantPx(): number {
-    const quantPx = (self as {} as {quantPx: number | undefined}).quantPx;
-    return quantPx ?? 1;
-  }
-
-  get commandManager(): CommandManager {
+  get commandManager(): CommandManagerImpl {
     return assertExists(this._cmdManager);
   }
 
@@ -724,15 +624,25 @@ class Globals {
     return this._trackManager;
   }
 
+  get selectionManager() {
+    return this._selectionManager;
+  }
+
+  get noteManager() {
+    return this._noteManager;
+  }
+
   // Offset between t=0 and the configured time domain.
   timestampOffset(): time {
     const fmt = timestampFormat();
     switch (fmt) {
       case TimestampFormat.Timecode:
       case TimestampFormat.Seconds:
+      case TimestampFormat.Milliseoncds:
+      case TimestampFormat.Microseconds:
         return this.traceContext.start;
-      case TimestampFormat.Raw:
-      case TimestampFormat.RawLocale:
+      case TimestampFormat.TraceNs:
+      case TimestampFormat.TraceNsLocale:
         return Time.ZERO;
       case TimestampFormat.UTC:
         return this.traceContext.utcOffset;
@@ -752,13 +662,12 @@ class Globals {
   async findTimeRangeOfSelection(): Promise<
     Optional<{start: time; end: time}>
   > {
-    const sel = globals.state.selection;
+    const sel = globals.selectionManager.selection;
     if (sel.kind === 'area') {
       return sel;
     } else if (sel.kind === 'note') {
-      const selectedNote = this.state.notes[sel.id];
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-      if (selectedNote) {
+      const selectedNote = this.noteManager.getNote(sel.id);
+      if (selectedNote !== undefined) {
         const kind = selectedNote.noteType;
         switch (kind) {
           case 'SPAN':
@@ -776,22 +685,20 @@ class Globals {
         }
       }
     } else if (sel.kind === 'single') {
-      const uri = globals.state.tracks[sel.trackKey]?.uri;
-      if (uri) {
-        const bounds = await globals.trackManager
-          .resolveTrackInfo(uri)
-          ?.getEventBounds?.(sel.eventId);
-        if (bounds) {
-          return {
-            start: bounds.ts,
-            end: Time.add(bounds.ts, bounds.dur),
-          };
-        }
+      const uri = sel.trackUri;
+      const bounds = await globals.trackManager
+        .getTrack(uri)
+        ?.getEventBounds?.(sel.eventId);
+      if (bounds) {
+        return {
+          start: bounds.ts,
+          end: Time.add(bounds.ts, bounds.dur),
+        };
       }
       return undefined;
     }
 
-    const selection = getLegacySelection(this.state);
+    const selection = globals.selectionManager.legacySelection;
     if (selection === null) {
       return undefined;
     }
@@ -847,14 +754,12 @@ function findTimeRangeOfSlice(slice: Partial<SliceLike>): {
 
 // Returns the time span of the current selection, or the visible window if
 // there is no current selection.
-export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<
-  Span<time, duration>
-> {
+export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<TimeSpan> {
   const range = await globals.findTimeRangeOfSelection();
   if (exists(range)) {
     return new TimeSpan(range.start, range.end);
   } else {
-    return globals.timeline.visibleTimeSpan;
+    return globals.timeline.visibleWindow.toTimeSpan();
   }
 }
 

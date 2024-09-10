@@ -13,12 +13,13 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {raf} from '../core/raf_scheduler';
-
 import {globals} from './globals';
 import {taskTracker} from './task_tracker';
+import {Popup, PopupPosition} from '../widgets/popup';
+import {assertFalse} from '../base/logging';
+import {OmniboxMode} from '../core/omnibox_manager';
 
 export const DISMISSED_PANNING_HINT_KEY = 'dismissedPanningHint';
 
@@ -77,24 +78,42 @@ class TraceErrorIcon implements m.ClassComponent {
   view() {
     if (globals.embeddedMode) return;
 
-    const mode = globals.state.omniboxState.mode;
-
+    const mode = globals.omnibox.mode;
     const errors = globals.traceErrors;
-    if ((!Boolean(errors) && !globals.metricError) || mode === 'COMMAND') {
+    if (
+      (!Boolean(errors) && !globals.metricError) ||
+      mode === OmniboxMode.Command
+    ) {
       return;
     }
     const message = Boolean(errors)
       ? `${errors} import or data loss errors detected.`
       : `Metric error detected.`;
     return m(
-      'a.error',
-      {href: '#!/info'},
+      '.error-box',
       m(
-        'i.material-icons',
+        Popup,
         {
-          title: message + ` Click for more info.`,
+          trigger: m('.popup-trigger'),
+          isOpen: globals.showTraceErrorPopup,
+          position: PopupPosition.Left,
+          onChange: (shouldOpen: boolean) => {
+            assertFalse(shouldOpen);
+            globals.showTraceErrorPopup = false;
+          },
         },
-        'announcement',
+        m('.error-popup', 'Data-loss/import error. Click for more info.'),
+      ),
+      m(
+        'a.error',
+        {href: '#!/info'},
+        m(
+          'i.material-icons',
+          {
+            title: message + ` Click for more info.`,
+          },
+          'announcement',
+        ),
       ),
     );
   }

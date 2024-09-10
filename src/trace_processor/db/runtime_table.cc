@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -30,6 +31,7 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/status_or.h"
+#include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/ref_counted.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/string_pool.h"
@@ -38,7 +40,9 @@
 #include "src/trace_processor/db/column/id_storage.h"
 #include "src/trace_processor/db/column/null_overlay.h"
 #include "src/trace_processor/db/column/numeric_storage.h"
+#include "src/trace_processor/db/column/overlay_layer.h"
 #include "src/trace_processor/db/column/selector_overlay.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/string_storage.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column_storage.h"
@@ -65,8 +69,8 @@ void CreateNonNullableIntsColumn(
     uint32_t col_idx,
     const char* col_name,
     ColumnStorage<int64_t>* ints_storage,
-    std::vector<RefPtr<column::DataLayer>>& storage_layers,
-    std::vector<RefPtr<column::DataLayer>>& overlay_layers,
+    std::vector<RefPtr<column::StorageLayer>>& storage_layers,
+    std::vector<RefPtr<column::OverlayLayer>>& overlay_layers,
     std::vector<ColumnLegacy>& legacy_columns,
     std::vector<ColumnStorageOverlay>& legacy_overlays) {
   const std::vector<int64_t>& values = ints_storage->vector();
@@ -137,9 +141,9 @@ RuntimeTable::RuntimeTable(
     uint32_t row_count,
     std::vector<ColumnLegacy> columns,
     std::vector<ColumnStorageOverlay> overlays,
-    std::vector<RefPtr<column::DataLayer>> storage_layers,
-    std::vector<RefPtr<column::DataLayer>> null_layers,
-    std::vector<RefPtr<column::DataLayer>> overlay_layers)
+    std::vector<RefPtr<column::StorageLayer>> storage_layers,
+    std::vector<RefPtr<column::OverlayLayer>> null_layers,
+    std::vector<RefPtr<column::OverlayLayer>> overlay_layers)
     : Table(pool, row_count, std::move(columns), std::move(overlays)) {
   OnConstructionCompleted(std::move(storage_layers), std::move(null_layers),
                           std::move(overlay_layers));
@@ -269,10 +273,106 @@ base::Status RuntimeTable::Builder::AddText(uint32_t idx, const char* ptr) {
   return base::OkStatus();
 }
 
+base::Status RuntimeTable::Builder::AddIntegers(uint32_t idx,
+                                                int64_t res,
+                                                uint32_t count) {
+  auto* col = storage_[idx].get();
+  if (auto* leading_nulls_ptr = std::get_if<uint32_t>(col)) {
+    *col = Fill<NullIntStorage>(*leading_nulls_ptr, std::nullopt);
+  }
+  if (auto* doubles = std::get_if<NullDoubleStorage>(col)) {
+    if (!IsPerfectlyRepresentableAsDouble(res)) {
+      return base::ErrStatus("Column %s contains %" PRId64
+                             " which cannot be represented as a double",
+                             col_names_[idx].c_str(), res);
+    }
+    doubles->AppendMultiple(static_cast<double>(res), count);
+    return base::OkStatus();
+  }
+  auto* ints = std::get_if<NullIntStorage>(col);
+  if (!ints) {
+    return base::ErrStatus("Column %s does not have consistent types",
+                           col_names_[idx].c_str());
+  }
+  ints->AppendMultiple(res, count);
+  return base::OkStatus();
+}
+
+base::Status RuntimeTable::Builder::AddFloats(uint32_t idx,
+                                              double res,
+                                              uint32_t count) {
+  auto* col = storage_[idx].get();
+  if (auto* leading_nulls_ptr = std::get_if<uint32_t>(col)) {
+    *col = Fill<NullDoubleStorage>(*leading_nulls_ptr, std::nullopt);
+  }
+  if (auto* ints = std::get_if<NullIntStorage>(col)) {
+    NullDoubleStorage storage;
+    for (uint32_t i = 0; i < ints->size(); ++i) {
+      std::optional<int64_t> int_val = ints->Get(i);
+      if (!int_val) {
+        storage.AppendMultipleNulls(count);
+        continue;
+      }
+      if (int_val && !IsPerfectlyRepresentableAsDouble(*int_val)) {
+        return base::ErrStatus("Column %s contains %" PRId64
+                               " which cannot be represented as a double",
+                               col_names_[idx].c_str(), *int_val);
+      }
+      storage.AppendMultiple(static_cast<double>(*int_val), count);
+    }
+    *col = std::move(storage);
+  }
+  auto* doubles = std::get_if<NullDoubleStorage>(col);
+  if (!doubles) {
+    return base::ErrStatus("Column %s does not have consistent types",
+                           col_names_[idx].c_str());
+  }
+  doubles->AppendMultiple(res, count);
+  return base::OkStatus();
+}
+
+base::Status RuntimeTable::Builder::AddTexts(uint32_t idx,
+                                             const char* ptr,
+                                             uint32_t count) {
+  auto* col = storage_[idx].get();
+  if (auto* leading_nulls_ptr = std::get_if<uint32_t>(col)) {
+    *col = Fill<StringStorage>(*leading_nulls_ptr, StringPool::Id::Null());
+  }
+  auto* strings = std::get_if<StringStorage>(col);
+  if (!strings) {
+    return base::ErrStatus("Column %s does not have consistent types",
+                           col_names_[idx].c_str());
+  }
+  strings->AppendMultiple(string_pool_->InternString(ptr), count);
+  return base::OkStatus();
+}
+
+base::Status RuntimeTable::Builder::AddNulls(uint32_t idx, uint32_t count) {
+  auto* col = storage_[idx].get();
+  if (auto* leading_nulls = std::get_if<uint32_t>(col)) {
+    (*leading_nulls)++;
+  } else if (auto* ints = std::get_if<NullIntStorage>(col)) {
+    ints->AppendMultipleNulls(count);
+  } else if (auto* strings = std::get_if<StringStorage>(col)) {
+    strings->AppendMultiple(StringPool::Id::Null(), count);
+  } else if (auto* doubles = std::get_if<NullDoubleStorage>(col)) {
+    doubles->AppendMultipleNulls(count);
+  } else {
+    PERFETTO_FATAL("Unexpected column type");
+  }
+  return base::OkStatus();
+}
+
+void RuntimeTable::Builder::AddNonNullIntegersUnchecked(
+    uint32_t idx,
+    const std::vector<int64_t>& res) {
+  std::get<IntStorage>(*storage_[idx]).Append(res);
+}
+
 base::StatusOr<std::unique_ptr<RuntimeTable>> RuntimeTable::Builder::Build(
     uint32_t rows) && {
-  std::vector<RefPtr<column::DataLayer>> storage_layers(col_names_.size() + 1);
-  std::vector<RefPtr<column::DataLayer>> null_layers(col_names_.size() + 1);
+  std::vector<RefPtr<column::StorageLayer>> storage_layers(col_names_.size() + 1);
+  std::vector<RefPtr<column::OverlayLayer>> null_layers(col_names_.size() + 1);
 
   std::vector<ColumnLegacy> legacy_columns;
   std::vector<ColumnStorageOverlay> legacy_overlays;
@@ -284,7 +384,7 @@ base::StatusOr<std::unique_ptr<RuntimeTable>> RuntimeTable::Builder::Build(
   // one overlay per column.
   legacy_overlays.reserve(col_names_.size() + 1);
   legacy_overlays.emplace_back(rows);
-  std::vector<RefPtr<column::DataLayer>> overlay_layers(1);
+  std::vector<RefPtr<column::OverlayLayer>> overlay_layers(1);
 
   for (uint32_t i = 0; i < col_names_.size(); ++i) {
     auto* col = storage_[i].get();
@@ -360,6 +460,7 @@ base::StatusOr<std::unique_ptr<RuntimeTable>> RuntimeTable::Builder::Build(
       PERFETTO_FATAL("Unexpected column type");
     }
   }
+
   legacy_columns.push_back(ColumnLegacy::IdColumn(
       static_cast<uint32_t>(legacy_columns.size()), 0, "_auto_id",
       ColumnLegacy::kIdFlags | ColumnLegacy::Flag::kHidden));
@@ -373,9 +474,15 @@ base::StatusOr<std::unique_ptr<RuntimeTable>> RuntimeTable::Builder::Build(
   table->col_names_ = std::move(col_names_);
 
   table->schema_.columns.reserve(table->columns().size());
-  for (const auto& col : table->columns()) {
+  for (size_t i = 0; i < table->columns().size(); ++i) {
+    const auto& col = table->columns()[i];
+    SqlValue::Type column_type =
+        col.col_type() != ColumnType::kId &&
+                col.storage_base().non_null_size() == 0
+            ? SqlValue::kNull
+            : ColumnLegacy::ToSqlValueType(col.col_type());
     table->schema_.columns.emplace_back(
-        Schema::Column{col.name(), col.type(), col.IsId(), col.IsSorted(),
+        Schema::Column{col.name(), column_type, col.IsId(), col.IsSorted(),
                        col.IsHidden(), col.IsSetId()});
   }
   return {std::move(table)};

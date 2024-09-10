@@ -68,7 +68,7 @@ SELECT
   -- significant fraction of the runtime on big traces.
   IFNULL(
     DEMANGLE(COALESCE(s.name, f.deobfuscated_name, f.name)),
-    COALESCE(s.name, f.deobfuscated_name, f.name)
+    COALESCE(s.name, f.deobfuscated_name, f.name, '[Unknown]')
   ) AS name,
   f.mapping AS mapping_id,
   s.source_file,
@@ -83,6 +83,9 @@ LEFT JOIN _callstack_spc_raw_forest p ON
   AND p.symbol_id IS c.parent_symbol_id
 ORDER BY c._auto_id;
 
+CREATE PERFETTO INDEX _callstack_spc_index
+ON _callstack_spc_forest(callsite_id);
+
 CREATE PERFETTO MACRO _callstacks_for_stack_profile_samples(
   spc_samples TableOrSubquery
 )
@@ -92,12 +95,45 @@ AS
   SELECT
     f.id,
     f.parent_id,
-    f.name,
     f.callsite_id,
-    f.is_leaf_function_in_callsite_frame
+    f.name,
+    m.name AS mapping_name,
+    f.source_file,
+    f.line_number
   FROM _tree_reachable_ancestors_or_self!(
     _callstack_spc_forest,
-    (SELECT callsite_id AS id FROM $spc_samples)
+    (
+      SELECT f.id
+      FROM $spc_samples s
+      JOIN _callstack_spc_forest f USING (callsite_id)
+      WHERE f.is_leaf_function_in_callsite_frame
+    )
   ) g
   JOIN _callstack_spc_forest f USING (id)
+  JOIN stack_profile_mapping m ON f.mapping_id = m.id
+);
+
+CREATE PERFETTO MACRO _callstacks_for_cpu_profile_stack_samples(
+  samples TableOrSubquery
+)
+RETURNS TableOrSubquery
+AS
+(
+  WITH metrics AS MATERIALIZED (
+    SELECT
+      callsite_id,
+      COUNT() AS self_count
+    FROM $samples
+    GROUP BY callsite_id
+  )
+  SELECT
+    c.id,
+    c.parent_id,
+    c.name,
+    c.mapping_name,
+    c.source_file,
+    c.line_number,
+    IFNULL(m.self_count, 0) AS self_count
+  FROM _callstacks_for_stack_profile_samples!(metrics) c
+  LEFT JOIN metrics m USING (callsite_id)
 );

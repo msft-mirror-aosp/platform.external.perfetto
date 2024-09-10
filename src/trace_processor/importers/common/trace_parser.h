@@ -17,14 +17,18 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACE_PARSER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACE_PARSER_H_
 
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 
 namespace perfetto::trace_processor {
 namespace perf_importer {
 struct Record;
 }
+namespace instruments_importer {
+struct Row;
+}
 
+struct AndroidLogEvent;
 class PacketSequenceStateGeneration;
 class TraceBlobView;
 struct InlineSchedSwitch;
@@ -33,6 +37,7 @@ struct SystraceLine;
 struct InlineSchedWaking;
 struct TracePacketData;
 struct TrackEventData;
+struct LegacyV8CpuProfileEvent;
 
 class ProtoTraceParser {
  public:
@@ -43,6 +48,7 @@ class ProtoTraceParser {
   virtual void ParseFtraceEvent(uint32_t, int64_t, TracePacketData) = 0;
   virtual void ParseInlineSchedSwitch(uint32_t, int64_t, InlineSchedSwitch) = 0;
   virtual void ParseInlineSchedWaking(uint32_t, int64_t, InlineSchedWaking) = 0;
+  virtual void ParseLegacyV8ProfileEvent(int64_t, LegacyV8CpuProfileEvent) = 0;
 };
 
 class JsonTraceParser {
@@ -62,6 +68,18 @@ class PerfRecordParser {
  public:
   virtual ~PerfRecordParser();
   virtual void ParsePerfRecord(int64_t, perf_importer::Record) = 0;
+};
+
+class InstrumentsRowParser {
+ public:
+  virtual ~InstrumentsRowParser();
+  virtual void ParseInstrumentsRow(int64_t, instruments_importer::Row) = 0;
+};
+
+class AndroidLogEventParser {
+ public:
+  virtual ~AndroidLogEventParser();
+  virtual void ParseAndroidLogEvent(int64_t, AndroidLogEvent) = 0;
 };
 
 }  // namespace perfetto::trace_processor

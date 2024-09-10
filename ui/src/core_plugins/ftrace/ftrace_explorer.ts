@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {time, Time} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {colorForFtrace} from '../../core/colorizer';
@@ -24,16 +23,17 @@ import {
   PopupMultiSelect,
 } from '../../widgets/multiselect';
 import {PopupPosition} from '../../widgets/popup';
-
 import {globals} from '../../frontend/globals';
 import {Timestamp} from '../../frontend/widgets/timestamp';
 import {FtraceFilter, FtraceStat} from './common';
-import {Engine, LONG, NUM, Store, STR, STR_NULL} from '../../public';
+import {Engine} from '../../trace_processor/engine';
+import {LONG, NUM, STR, STR_NULL} from '../../trace_processor/query_result';
 import {raf} from '../../core/raf_scheduler';
 import {AsyncLimiter} from '../../base/async_limiter';
 import {Monitor} from '../../base/monitor';
 import {Button} from '../../widgets/button';
 import {VirtualTable, VirtualTableRow} from '../../widgets/virtual_table';
+import {Store} from '../../base/store';
 
 const ROW_H = 20;
 
@@ -107,8 +107,8 @@ export class FtraceExplorer implements m.ClassComponent<FtraceExplorerAttrs> {
 
   constructor({attrs}: m.CVnode<FtraceExplorerAttrs>) {
     this.monitor = new Monitor([
-      () => globals.timeline.visibleTimeSpan.start,
-      () => globals.timeline.visibleTimeSpan.end,
+      () => globals.timeline.visibleWindow.toTimeSpan().start,
+      () => globals.timeline.visibleWindow.toTimeSpan().end,
       () => attrs.filterStore.state,
     ]);
 
@@ -269,7 +269,7 @@ async function lookupFtraceEvents(
   count: number,
   filter: FtraceFilter,
 ): Promise<FtracePanelData> {
-  const {start, end} = globals.timeline.visibleTimeSpan;
+  const {start, end} = globals.timeline.visibleWindow.toTimeSpan();
 
   const excludeList = filter.excludeList;
   const excludeListSql = excludeList.map((s) => `'${s}'`).join(',');

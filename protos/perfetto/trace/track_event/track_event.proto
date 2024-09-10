@@ -33,7 +33,6 @@ import "protos/perfetto/trace/track_event/chrome_mojo_event_info.proto";
 import "protos/perfetto/trace/track_event/chrome_renderer_scheduler_state.proto";
 import "protos/perfetto/trace/track_event/chrome_user_event.proto";
 import "protos/perfetto/trace/track_event/chrome_window_handle_event_info.proto";
-import "protos/perfetto/trace/track_event/pixel_modem.proto";
 import "protos/perfetto/trace/track_event/screenshot.proto";
 import "protos/perfetto/trace/track_event/source_location.proto";
 
@@ -258,7 +257,6 @@ message TrackEvent {
       43;
   optional ChromeActiveProcesses chrome_active_processes = 49;
   optional Screenshot screenshot = 50;
-  optional PixelModemEventInsight pixel_modem_event_insight = 51;
 
   // This field is used only if the source location represents the function that
   // executes during this event.
@@ -289,8 +287,11 @@ message TrackEvent {
   extensions 1000 to 1999;
   // Extension range reserved for https://b.corp.google.com/issues/301227627.
   extensions 2000 to 2000;
+  // Extension range reserved for android:
+  // protos/perfetto/trace/android/android_track_event.proto
+  extensions 2001 to 2999;
   // Extension range for future use.
-  extensions 2001 to 9899;
+  extensions 3000 to 9899;
   // Reserved for Perfetto unit and integration tests.
   extensions 9900 to 10000;
 
@@ -406,6 +407,8 @@ message TrackEvent {
   }
 
   optional LegacyEvent legacy_event = 6;
+
+  reserved 51;
 }
 
 // Default values for fields of all TrackEvents on the same packet sequence.

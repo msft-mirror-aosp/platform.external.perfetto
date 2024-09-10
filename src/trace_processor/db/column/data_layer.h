@@ -24,15 +24,11 @@
 #include <utility>
 #include <vector>
 
-#include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/ref_counted.h"
 #include "src/trace_processor/db/column/types.h"
-
-namespace perfetto::protos::pbzero {
-class SerializedColumn_Storage;
-}
 
 namespace perfetto::trace_processor::column {
 class DataLayerChain;
@@ -92,8 +88,6 @@ class DataLayer : public RefCounted {
 // functionality for querying the transformed data of the entire chain.
 class DataLayerChain {
  public:
-  using StorageProto = protos::pbzero::SerializedColumn_Storage;
-
   // Index vector related data required to Filter using IndexSearch.
   struct Indices {
     enum class State {
@@ -266,9 +260,6 @@ class DataLayerChain {
   // present it will point to the first index with the smallest value in the
   // chain.
   virtual std::optional<Token> MinElement(Indices&) const = 0;
-
-  // Serializes storage data to proto format.
-  virtual void Serialize(StorageProto*) const = 0;
 
   // Returns a string which represents the column for debugging purposes.
   //

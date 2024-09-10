@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/trace_processor/basic_types.h"
@@ -71,10 +72,6 @@ std::optional<Token> DummyStorage::ChainImpl::MinElement(Indices&) const {
 }
 
 SqlValue DummyStorage::ChainImpl::Get_AvoidUsingBecauseSlow(uint32_t) const {
-  PERFETTO_FATAL("Shouldn't be called");
-}
-
-void DummyStorage::ChainImpl::Serialize(StorageProto*) const {
   PERFETTO_FATAL("Shouldn't be called");
 }
 

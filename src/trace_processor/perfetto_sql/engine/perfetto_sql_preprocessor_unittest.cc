@@ -26,6 +26,8 @@
 namespace perfetto::trace_processor {
 namespace {
 
+using ::testing::HasSubstr;
+
 using Macro = PerfettoSqlPreprocessor::Macro;
 
 class PerfettoSqlPreprocessorUnittest : public ::testing::Test {
@@ -45,7 +47,7 @@ TEST_F(PerfettoSqlPreprocessorUnittest, SemiColonTerminatedStatement) {
   PerfettoSqlPreprocessor preprocessor(source, macros_);
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement(),
-            FindSubstr(source, "SELECT * FROM slice"));
+            FindSubstr(source, "SELECT * FROM slice;"));
   ASSERT_FALSE(preprocessor.NextStatement());
   ASSERT_TRUE(preprocessor.status().ok());
 }
@@ -54,7 +56,7 @@ TEST_F(PerfettoSqlPreprocessorUnittest, IgnoreOnlySpace) {
   auto source = SqlSource::FromExecuteQuery(" ; SELECT * FROM s; ; ;");
   PerfettoSqlPreprocessor preprocessor(source, macros_);
   ASSERT_TRUE(preprocessor.NextStatement());
-  ASSERT_EQ(preprocessor.statement(), FindSubstr(source, "SELECT * FROM s"));
+  ASSERT_EQ(preprocessor.statement(), FindSubstr(source, "SELECT * FROM s;"));
   ASSERT_FALSE(preprocessor.NextStatement());
   ASSERT_TRUE(preprocessor.status().ok());
 }
@@ -65,7 +67,7 @@ TEST_F(PerfettoSqlPreprocessorUnittest, MultipleStmts) {
   PerfettoSqlPreprocessor preprocessor(source, macros_);
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement(),
-            FindSubstr(source, "SELECT * FROM slice"));
+            FindSubstr(source, "SELECT * FROM slice;"));
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement(), FindSubstr(source, "SELECT * FROM s"));
   ASSERT_FALSE(preprocessor.NextStatement());
@@ -98,22 +100,22 @@ TEST_F(PerfettoSqlPreprocessorUnittest, SingleMacro) {
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement().AsTraceback(0),
             "Fully expanded statement\n"
-            "  SELECT (select s.ts + r.dur from s, r) + 1234\n"
+            "  SELECT (select s.ts + r.dur from s, r) + 1234;\n"
             "  ^\n"
             "Traceback (most recent call last):\n"
             "  File \"stdin\" line 1 col 1\n"
-            "    foo!((select s.ts + r.dur from s, r), 1234)\n"
+            "    foo!((select s.ts + r.dur from s, r), 1234);\n"
             "    ^\n"
             "  File \"stdin\" line 1 col 59\n"
             "    SELECT $a + $b\n"
             "    ^\n");
   ASSERT_EQ(preprocessor.statement().AsTraceback(7),
             "Fully expanded statement\n"
-            "  SELECT (select s.ts + r.dur from s, r) + 1234\n"
+            "  SELECT (select s.ts + r.dur from s, r) + 1234;\n"
             "         ^\n"
             "Traceback (most recent call last):\n"
             "  File \"stdin\" line 1 col 1\n"
-            "    foo!((select s.ts + r.dur from s, r), 1234)\n"
+            "    foo!((select s.ts + r.dur from s, r), 1234);\n"
             "    ^\n"
             "  File \"stdin\" line 1 col 66\n"
             "    SELECT $a + $b\n"
@@ -122,7 +124,7 @@ TEST_F(PerfettoSqlPreprocessorUnittest, SingleMacro) {
             "    (select s.ts + r.dur from s, r)\n"
             "    ^\n");
   ASSERT_EQ(preprocessor.statement().sql(),
-            "SELECT (select s.ts + r.dur from s, r) + 1234");
+            "SELECT (select s.ts + r.dur from s, r) + 1234;");
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement(), FindSubstr(source, "SELECT 1"));
   ASSERT_FALSE(preprocessor.NextStatement());
@@ -155,7 +157,7 @@ TEST_F(PerfettoSqlPreprocessorUnittest, NestedMacro) {
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement().sql(),
             "SELECT (select s.ts + r.dur from s, r) + 1234 + 1234 + "
-            "(select s.ts + r.dur from s, r)");
+            "(select s.ts + r.dur from s, r);");
   ASSERT_TRUE(preprocessor.NextStatement());
   ASSERT_EQ(preprocessor.statement().sql(), "SELECT 1");
 }
@@ -286,6 +288,136 @@ TEST_F(PerfettoSqlPreprocessorUnittest, ZipJoin) {
     ASSERT_TRUE(preprocessor.NextStatement())
         << preprocessor.status().message();
     ASSERT_EQ(preprocessor.statement().sql(), "foo AS baz , bar AS bat");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+}
+
+TEST_F(PerfettoSqlPreprocessorUnittest, TokenApply) {
+  auto foo = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO G(a Expr, b Expr) Returns Expr AS $a AS $b");
+  macros_.Insert("G", Macro{
+                          false,
+                          "G",
+                          {"a", "b"},
+                          FindSubstr(foo, "$a AS $b"),
+                      });
+
+  auto tp = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO TokApply(a Expr, b Expr, c Expr) Returns Expr "
+      "AS __intrinsic_token_apply!($a, $b, $c)");
+  macros_.Insert("TokApply",
+                 Macro{
+                     false,
+                     "TokApply",
+                     {"a", "b", "c"},
+                     FindSubstr(tp, "__intrinsic_token_apply!($a, $b, $c)"),
+                 });
+  {
+    auto source =
+        SqlSource::FromExecuteQuery("__intrinsic_token_apply!((), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "foo AS bar");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar), (baz, bat)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "foo AS bar AND baz AS bat");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar), (baz, bat, bada)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_FALSE(preprocessor.NextStatement());
+    ASSERT_THAT(preprocessor.status().message(), HasSubstr("too many args"));
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_apply!(((foo, bar), (baz)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_FALSE(preprocessor.NextStatement());
+    ASSERT_THAT(preprocessor.status().message(), HasSubstr("too few args"));
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "TokApply!(((foo, bar), (baz, bat)), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "foo AS bar AND baz AS bat");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+}
+
+TEST_F(PerfettoSqlPreprocessorUnittest, TokenMapJoin) {
+  auto foo = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO G(a Expr) Returns Expr AS baza.$a");
+  macros_.Insert("G", Macro{
+                          false,
+                          "G",
+                          {"a"},
+                          FindSubstr(foo, "baza.$a"),
+                      });
+
+  auto tp = SqlSource::FromExecuteQuery(
+      "CREATE PERFETTO MACRO TokMapJoin(a Expr, b Expr, c Expr) Returns Expr "
+      "AS __intrinsic_token_map_join!($a, $b, $c)");
+  macros_.Insert("TokMapJoin",
+                 Macro{
+                     false,
+                     "TokMapJoin",
+                     {"a", "b", "c"},
+                     FindSubstr(tp, "__intrinsic_token_map_join!($a, $b, $c)"),
+                 });
+  {
+    auto source =
+        SqlSource::FromExecuteQuery("__intrinsic_token_map_join!((), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_map_join!((foo), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "baza.foo");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source = SqlSource::FromExecuteQuery(
+        "__intrinsic_token_map_join!((foo, baz), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "baza.foo AND baza.baz");
+    ASSERT_FALSE(preprocessor.NextStatement());
+  }
+  {
+    auto source =
+        SqlSource::FromExecuteQuery("TokMapJoin!((foo, bar), G, AND)");
+    PerfettoSqlPreprocessor preprocessor(source, macros_);
+    ASSERT_TRUE(preprocessor.NextStatement())
+        << preprocessor.status().message();
+    ASSERT_EQ(preprocessor.statement().sql(), "baza.foo AND baza.bar");
     ASSERT_FALSE(preprocessor.NextStatement());
   }
 }

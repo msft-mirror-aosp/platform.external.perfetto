@@ -13,11 +13,12 @@
 // limitations under the License.
 
 import {globals} from '../../frontend/globals';
-import {LONG, LONG_NULL, NUM} from '../../public';
+import {LONG, LONG_NULL, NUM} from '../../trace_processor/query_result';
 import {
   BaseCounterTrack,
   BaseCounterTrackArgs,
 } from '../../frontend/base_counter_track';
+import {TrackMouseEvent} from '../../public/track';
 
 interface TraceProcessorCounterTrackArgs extends BaseCounterTrackArgs {
   trackId: number;
@@ -44,9 +45,8 @@ export class TraceProcessorCounterTrack extends BaseCounterTrack {
     `;
   }
 
-  onMouseClick({x}: {x: number}): boolean {
-    const {visibleTimeScale} = globals.timeline;
-    const time = visibleTimeScale.pxToHpTime(x).toTime('floor');
+  onMouseClick({x, timescale}: TrackMouseEvent): boolean {
+    const time = timescale.pxToHpTime(x).toTime('floor');
 
     const query = `
       select
@@ -79,7 +79,7 @@ export class TraceProcessorCounterTrack extends BaseCounterTrack {
         return;
       }
       const id = it.id;
-      globals.selectSingleEvent(this.trackKey, id);
+      globals.selectionManager.setEvent(this.uri, id);
     });
 
     return true;

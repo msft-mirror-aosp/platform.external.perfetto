@@ -13,15 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {duration, Span, time, Time, TimeSpan} from '../../base/time';
+import {time, Time, TimeSpan} from '../../base/time';
 import {Actions} from '../../common/actions';
 import {raf} from '../../core/raf_scheduler';
 import {DetailsShell} from '../../widgets/details_shell';
-
 import {globals} from '../../frontend/globals';
 import {Timestamp} from '../../frontend/widgets/timestamp';
-import {Engine, LONG, NUM, NUM_NULL, Store, STR} from '../../public';
+import {Engine} from '../../trace_processor/engine';
+import {LONG, NUM, NUM_NULL, STR} from '../../trace_processor/query_result';
 import {Monitor} from '../../base/monitor';
 import {AsyncLimiter} from '../../base/async_limiter';
 import {escapeGlob, escapeQuery} from '../../trace_processor/query_utils';
@@ -31,6 +30,7 @@ import {TextInput} from '../../widgets/text_input';
 import {VirtualTable, VirtualTableRow} from '../../widgets/virtual_table';
 import {classNames} from '../../base/classnames';
 import {TagInput} from '../../widgets/tag_input';
+import {Store} from '../../base/store';
 
 const ROW_H = 20;
 
@@ -76,8 +76,8 @@ export class LogPanel implements m.ClassComponent<LogPanelAttrs> {
   constructor({attrs}: m.CVnode<LogPanelAttrs>) {
     this.rowsMonitor = new Monitor([
       () => attrs.filterStore.state,
-      () => globals.timeline.visibleTimeSpan.start,
-      () => globals.timeline.visibleTimeSpan.end,
+      () => globals.timeline.visibleWindow.toTimeSpan().start,
+      () => globals.timeline.visibleWindow.toTimeSpan().end,
     ]);
 
     this.filterMonitor = new Monitor([() => attrs.filterStore.state]);
@@ -135,8 +135,7 @@ export class LogPanel implements m.ClassComponent<LogPanelAttrs> {
 
   private reloadData(attrs: LogPanelAttrs) {
     this.queryLimiter.schedule(async () => {
-      const visibleState = globals.timeline.visibleTimeSpan;
-      const visibleSpan = new TimeSpan(visibleState.start, visibleState.end);
+      const visibleSpan = globals.timeline.visibleWindow.toTimeSpan();
 
       if (this.filterMonitor.ifStateChanged()) {
         await updateLogView(attrs.engine, attrs.filterStore.state);
@@ -322,7 +321,7 @@ export class LogsFilters implements m.ClassComponent<LogsFiltersAttrs> {
 
 async function updateLogEntries(
   engine: Engine,
-  span: Span<time, duration>,
+  span: TimeSpan,
   pagination: Pagination,
 ): Promise<LogEntries> {
   const rowsResult = await engine.query(`

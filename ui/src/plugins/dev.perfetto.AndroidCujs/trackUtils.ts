@@ -12,27 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  SimpleSliceTrack,
-  SimpleSliceTrackConfig,
-} from '../../frontend/simple_slice_track';
-import {addDebugSliceTrack, PluginContextTrace} from '../../public';
-
-// Common TrackType for tracks when using registerStatic or addDebug
-// TODO: b/349502258 - to be removed after single refactoring to single API
-export type TrackType = 'static' | 'debug';
+import {findCurrentSelection} from '../../frontend/keyboard_event_handler';
+import {SimpleSliceTrackConfig} from '../../frontend/simple_slice_track';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {Trace} from '../../public/trace';
 
 /**
  * Adds debug tracks from SimpleSliceTrackConfig
  * Static tracks cannot be added on command
  * TODO: b/349502258 - To be removed later
  *
- * @param {PluginContextTrace} ctx Context for trace methods and properties
+ * @param {Trace} ctx Context for trace methods and properties
  * @param {SimpleSliceTrackConfig} config Track config to add
  * @param {string} trackName Track name to display
  */
 export function addDebugTrackOnCommand(
-  ctx: PluginContextTrace,
+  ctx: Trace,
   config: SimpleSliceTrackConfig,
   trackName: string,
 ) {
@@ -46,54 +41,46 @@ export function addDebugTrackOnCommand(
 }
 
 /**
- * Registers and pins tracks on traceload, given params
- * TODO: b/349502258 - Refactor to single API
+ * Registers and pins tracks on traceload or command
  *
- * @param {PluginContextTrace} ctx Context for trace methods and properties
+ * @param {Trace} ctx Context for trace methods and properties
  * @param {SimpleSliceTrackConfig} config Track config to add
  * @param {string} trackName Track name to display
- * @param {string} uri Unique identifier for the track
+ * type 'static' expects caller to pass uri string
  */
-export function addDebugTrackOnTraceLoad(
-  ctx: PluginContextTrace,
+export function addAndPinSliceTrack(
+  ctx: Trace,
   config: SimpleSliceTrackConfig,
   trackName: string,
-  uri: string,
 ) {
-  ctx.registerStaticTrack({
-    uri: uri,
-    displayName: trackName,
-    isPinned: true,
-    trackFactory: (trackCtx) => {
-      return new SimpleSliceTrack(ctx.engine, trackCtx, config);
-    },
-  });
+  addDebugTrackOnCommand(ctx, config, trackName);
 }
 
 /**
- * Registers and pins tracks on traceload or command
- * Every enabled plugins' onTraceload is executed when the trace is first loaded
- * To add and pin tracks on traceload, need to use registerStaticTrack
- * After traceload, if plugin registered command invocated, then addDebugSliceTrack
- * TODO: b/349502258 - Refactor to single API
+ * Sets focus on a specific slice within the trace data.
  *
- * @param {PluginContextTrace} ctx Context for trace methods and properties
- * @param {SimpleSliceTrackConfig} config Track config to add
- * @param {string} trackName Track name to display
- * @param {TrackType} type Whether to registerStaticTrack or addDebugSliceTrack
- * type 'static' expects caller to pass uri string
- * @param {string} uri Unique track identifier expected when type is 'static'
+ * Takes and adds desired slice to current selection
+ * Retrieves the track key and scrolls to the desired slice
  */
-export function addAndPinSliceTrack(
-  ctx: PluginContextTrace,
-  config: SimpleSliceTrackConfig,
-  trackName: string,
-  type: TrackType,
-  uri?: string,
+export function focusOnSlice(
+  ctx: Trace,
+  sqlSliceId: number,
+  sqlTrackId: number,
 ) {
-  if (type == 'static') {
-    addDebugTrackOnTraceLoad(ctx, config, trackName, uri ?? '');
-  } else if (type == 'debug') {
-    addDebugTrackOnCommand(ctx, config, trackName);
-  }
+  // Finds the TrackDescriptor associated to the given SQL `tracks(table).id`.
+  const track = ctx.tracks.findTrack((trackDescriptor) => {
+    return trackDescriptor?.tags?.trackIds?.includes(sqlTrackId);
+  });
+  ctx.selection.setLegacy(
+    {
+      kind: 'SLICE',
+      id: sqlSliceId,
+      trackUri: track?.uri,
+      table: 'slice',
+    },
+    {
+      pendingScrollId: sqlSliceId,
+    },
+  );
+  findCurrentSelection();
 }

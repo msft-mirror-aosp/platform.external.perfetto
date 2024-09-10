@@ -16,30 +16,37 @@
 
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 
+#include <algorithm>
+#include <cinttypes>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <numeric>
 #include <optional>
-#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
-#include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
+#include "perfetto/base/status.h"
 #include "perfetto/ext/base/flat_hash_map.h"
+#include "perfetto/ext/base/status_or.h"
 #include "perfetto/ext/base/string_view.h"
-#include "perfetto/ext/base/utils.h"
+#include "perfetto/protozero/field.h"
 #include "perfetto/protozero/proto_decoder.h"
-#include "perfetto/protozero/proto_utils.h"
 #include "perfetto/public/compiler.h"
-#include "perfetto/trace_processor/status.h"
 #include "src/trace_processor/importers/common/clock_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
-#include "src/trace_processor/importers/common/machine_tracker.h"
 #include "src/trace_processor/importers/common/metadata_tracker.h"
-#include "src/trace_processor/importers/common/track_tracker.h"
-#include "src/trace_processor/importers/ftrace/ftrace_module.h"
 #include "src/trace_processor/importers/proto/packet_analyzer.h"
+#include "src/trace_processor/importers/proto/proto_importer_module.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
+#include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/tables/metadata_tables_py.h"
+#include "src/trace_processor/types/variadic.h"
 #include "src/trace_processor/util/descriptors.h"
-#include "src/trace_processor/util/gzip_utils.h"
 
 #include "protos/perfetto/common/builtin_clock.pbzero.h"
 #include "protos/perfetto/common/trace_stats.pbzero.h"
@@ -47,12 +54,11 @@
 #include "protos/perfetto/trace/clock_snapshot.pbzero.h"
 #include "protos/perfetto/trace/extension_descriptor.pbzero.h"
 #include "protos/perfetto/trace/perfetto/tracing_service_event.pbzero.h"
-#include "protos/perfetto/trace/profiling/profile_common.pbzero.h"
+#include "protos/perfetto/trace/remote_clock_sync.pbzero.h"
 #include "protos/perfetto/trace/trace.pbzero.h"
 #include "protos/perfetto/trace/trace_packet.pbzero.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 ProtoTraceReader::ProtoTraceReader(TraceProcessorContext* ctx)
     : context_(ctx),
@@ -61,13 +67,13 @@ ProtoTraceReader::ProtoTraceReader(TraceProcessorContext* ctx)
           ctx->storage->InternString("invalid_incremental_state")) {}
 ProtoTraceReader::~ProtoTraceReader() = default;
 
-util::Status ProtoTraceReader::Parse(TraceBlobView blob) {
+base::Status ProtoTraceReader::Parse(TraceBlobView blob) {
   return tokenizer_.Tokenize(std::move(blob), [this](TraceBlobView packet) {
     return ParsePacket(std::move(packet));
   });
 }
 
-util::Status ProtoTraceReader::ParseExtensionDescriptor(ConstBytes descriptor) {
+base::Status ProtoTraceReader::ParseExtensionDescriptor(ConstBytes descriptor) {
   protos::pbzero::ExtensionDescriptor::Decoder decoder(descriptor.data,
                                                        descriptor.size);
 
@@ -78,10 +84,10 @@ util::Status ProtoTraceReader::ParseExtensionDescriptor(ConstBytes descriptor) {
       /*merge_existing_messages=*/true);
 }
 
-util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
+base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
   protos::pbzero::TracePacket::Decoder decoder(packet.data(), packet.length());
   if (PERFETTO_UNLIKELY(decoder.bytes_left())) {
-    return util::ErrStatus(
+    return base::ErrStatus(
         "Failed to parse proto packet fully; the trace is probably corrupt.");
   }
 
@@ -150,6 +156,11 @@ util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
     ParseTraceStats(decoder.trace_stats());
   }
 
+  if (decoder.has_remote_clock_sync()) {
+    PERFETTO_DCHECK(context_->machine_id());
+    return ParseRemoteClockSync(decoder.remote_clock_sync());
+  }
+
   if (decoder.has_service_event()) {
     PERFETTO_DCHECK(decoder.has_timestamp());
     int64_t ts = static_cast<int64_t>(decoder.timestamp());
@@ -163,7 +174,7 @@ util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
   if (decoder.sequence_flags() &
       protos::pbzero::TracePacket::SEQ_NEEDS_INCREMENTAL_STATE) {
     if (!seq_id) {
-      return util::ErrStatus(
+      return base::ErrStatus(
           "TracePacket specified SEQ_NEEDS_INCREMENTAL_STATE but the "
           "TraceWriter's sequence_id is zero (the service is "
           "probably too old)");
@@ -174,12 +185,12 @@ util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
         // Account for the skipped packet for trace proto content analysis,
         // with a special annotation.
         PacketAnalyzer::SampleAnnotation annotation;
-        annotation.push_back(
-            {skipped_packet_key_id_, invalid_incremental_state_key_id_});
+        annotation.emplace_back(skipped_packet_key_id_,
+                                invalid_incremental_state_key_id_);
         PacketAnalyzer::Get(context_)->ProcessPacket(packet, annotation);
       }
       context_->storage->IncrementStats(stats::tokenizer_skipped_packets);
-      return util::OkStatus();
+      return base::OkStatus();
     }
   }
 
@@ -214,7 +225,7 @@ util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
       ClockTracker::ClockId converted_clock_id = timestamp_clock_id;
       if (ClockTracker::IsSequenceClock(converted_clock_id)) {
         if (!seq_id) {
-          return util::ErrStatus(
+          return base::ErrStatus(
               "TracePacket specified a sequence-local clock id (%" PRIu32
               ") but the TraceWriter's sequence_id is zero (the service is "
               "probably too old)",
@@ -230,7 +241,7 @@ util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
         // We don't return an error here as it will cause the trace to stop
         // parsing. Instead, we rely on the stat increment in ToTraceTime() to
         // inform the user about the error.
-        return util::OkStatus();
+        return base::OkStatus();
       }
       timestamp = trace_ts.value();
     }
@@ -271,7 +282,7 @@ util::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
   context_->sorter->PushTracePacket(timestamp, state->current_generation(),
                                     std::move(packet), context_->machine_id());
 
-  return util::OkStatus();
+  return base::OkStatus();
 }
 
 void ProtoTraceReader::ParseTraceConfig(protozero::ConstBytes blob) {
@@ -364,7 +375,7 @@ void ProtoTraceReader::ParseInternedData(
   }
 }
 
-util::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
+base::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
                                                   uint32_t seq_id) {
   std::vector<ClockTracker::ClockTimestamp> clock_timestamps;
   protos::pbzero::ClockSnapshot::Decoder evt(blob.data, blob.size);
@@ -377,7 +388,7 @@ util::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
     ClockTracker::ClockId clock_id = clk.clock_id();
     if (ClockTracker::IsSequenceClock(clk.clock_id())) {
       if (!seq_id) {
-        return util::ErrStatus(
+        return base::ErrStatus(
             "ClockSnapshot packet is specifying a sequence-scoped clock id "
             "(%" PRIu64 ") but the TracePacket sequence_id is zero",
             clock_id);
@@ -441,7 +452,127 @@ util::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
 
     context_->storage->mutable_clock_snapshot_table()->Insert(row);
   }
-  return util::OkStatus();
+  return base::OkStatus();
+}
+
+base::Status ProtoTraceReader::ParseRemoteClockSync(ConstBytes blob) {
+  protos::pbzero::RemoteClockSync::Decoder evt(blob.data, blob.size);
+
+  std::vector<SyncClockSnapshots> sync_clock_snapshots;
+  // Decode the RemoteClockSync message into a struct for calculating offsets.
+  for (auto it = evt.synced_clocks(); it; ++it) {
+    sync_clock_snapshots.emplace_back();
+    auto& sync_clocks = sync_clock_snapshots.back();
+
+    protos::pbzero::RemoteClockSync::SyncedClocks::Decoder synced_clocks(*it);
+    protos::pbzero::ClockSnapshot::ClockSnapshot::Decoder host_clocks(
+        synced_clocks.host_clocks());
+    for (auto clock_it = host_clocks.clocks(); clock_it; clock_it++) {
+      protos::pbzero::ClockSnapshot::ClockSnapshot::Clock::Decoder clock(
+          *clock_it);
+      sync_clocks[clock.clock_id()].first = clock.timestamp();
+    }
+
+    std::vector<ClockTracker::ClockTimestamp> clock_timestamps;
+    protos::pbzero::ClockSnapshot::ClockSnapshot::Decoder client_clocks(
+        synced_clocks.client_clocks());
+    for (auto clock_it = client_clocks.clocks(); clock_it; clock_it++) {
+      protos::pbzero::ClockSnapshot::ClockSnapshot::Clock::Decoder clock(
+          *clock_it);
+      sync_clocks[clock.clock_id()].second = clock.timestamp();
+      clock_timestamps.emplace_back(clock.clock_id(), clock.timestamp(), 1,
+                                    false);
+    }
+
+    // In addition for calculating clock offsets, client clock snapshots are
+    // also added to clock tracker to emulate tracing service taking periodical
+    // clock snapshots. This builds a clock conversion path from a local trace
+    // time (e.g. Chrome trace time) to client builtin clock (CLOCK_MONOTONIC)
+    // which can be converted to host trace time (CLOCK_BOOTTIME).
+    context_->clock_tracker->AddSnapshot(clock_timestamps);
+  }
+
+  // Calculate clock offsets and report to the ClockTracker.
+  auto clock_offsets = CalculateClockOffsets(sync_clock_snapshots);
+  for (auto it = clock_offsets.GetIterator(); it; ++it) {
+    context_->clock_tracker->SetClockOffset(it.key(), it.value());
+  }
+
+  return base::OkStatus();
+}
+
+base::FlatHashMap<int64_t /*Clock Id*/, int64_t /*Offset*/>
+ProtoTraceReader::CalculateClockOffsets(
+    std::vector<SyncClockSnapshots>& sync_clock_snapshots) {
+  base::FlatHashMap<int64_t /*Clock Id*/, int64_t /*Offset*/> clock_offsets;
+
+  // The RemoteClockSync message contains a sequence of |synced_clocks|
+  // messages. Each |synced_clocks| message contains pairs of ClockSnapshots
+  // taken on both the client and host sides.
+  //
+  // The "synced_clocks" messages are emitted periodically. A single round of
+  // data collection involves four snapshots:
+  //   1. Client snapshot
+  //   2. Host snapshot (triggered by client's IPC message)
+  //   3. Client snapshot (triggered by host's IPC message)
+  //   4. Host snapshot
+  //
+  // These four snapshots are used to estimate the clock offset between the
+  // client and host for each default clock domain present in the ClockSnapshot.
+  std::map<int64_t, std::vector<int64_t>> raw_clock_offsets;
+  // Remote clock syncs happen in an interval of 30 sec. 2 adjacent clock
+  // snapshots belong to the same round if they happen within 30 secs.
+  constexpr uint64_t clock_sync_interval_ns = 30lu * 1000000000;
+  for (size_t i = 1; i < sync_clock_snapshots.size(); i++) {
+    // Synced clocks are taken by client snapshot -> host snapshot.
+    auto& ping_clocks = sync_clock_snapshots[i - 1];
+    auto& update_clocks = sync_clock_snapshots[i];
+
+    auto ping_client =
+        ping_clocks[protos::pbzero::BuiltinClock::BUILTIN_CLOCK_BOOTTIME]
+            .second;
+    auto update_client =
+        update_clocks[protos::pbzero::BuiltinClock::BUILTIN_CLOCK_BOOTTIME]
+            .second;
+    // |ping_clocks| and |update_clocks| belong to 2 different rounds of remote
+    // clock sync rounds.
+    if (update_client - ping_client >= clock_sync_interval_ns)
+      continue;
+
+    for (auto it = ping_clocks.GetIterator(); it; ++it) {
+      const auto clock_id = it.key();
+      const auto [t1h, t1c] = it.value();
+      const auto [t2h, t2c] = update_clocks[clock_id];
+
+      if (!t1h || !t1c || !t2h || !t2c)
+        continue;
+
+      int64_t offset1 =
+          static_cast<int64_t>(t1c + t2c) / 2 - static_cast<int64_t>(t1h);
+      int64_t offset2 =
+          static_cast<int64_t>(t2c) - static_cast<int64_t>(t1h + t2h) / 2;
+
+      // Clock values are taken in the order of t1c, t1h, t2c, t2h. Offset
+      // calculation requires at least 3 timestamps as a round trip. We have 4,
+      // which can be treated as 2 round trips:
+      //   1. t1c, t1h, t2c as the round trip initiated by the client. Offset 1
+      //      = (t1c + t2c) / 2 - t1h
+      //   2. t1h, t2c, t2h as the round trip initiated by the host. Offset 2 =
+      //      t2c - (t1h + t2h) / 2
+      raw_clock_offsets[clock_id].push_back(offset1);
+      raw_clock_offsets[clock_id].push_back(offset2);
+    }
+
+    // Use the average of estimated clock offsets in the clock tracker.
+    for (const auto& [clock_id, offsets] : raw_clock_offsets) {
+      int64_t avg_offset =
+          std::accumulate(offsets.begin(), offsets.end(), 0LL) /
+          static_cast<int64_t>(offsets.size());
+      clock_offsets[clock_id] = avg_offset;
+    }
+  }
+
+  return clock_offsets;
 }
 
 std::optional<StringId> ProtoTraceReader::GetBuiltinClockNameOrNull(
@@ -464,7 +595,7 @@ std::optional<StringId> ProtoTraceReader::GetBuiltinClockNameOrNull(
   }
 }
 
-util::Status ProtoTraceReader::ParseServiceEvent(int64_t ts, ConstBytes blob) {
+base::Status ProtoTraceReader::ParseServiceEvent(int64_t ts, ConstBytes blob) {
   protos::pbzero::TracingServiceEvent::Decoder tse(blob);
   if (tse.tracing_started()) {
     context_->metadata_tracker->SetMetadata(metadata::tracing_started_ns,
@@ -486,7 +617,7 @@ util::Status ProtoTraceReader::ParseServiceEvent(int64_t ts, ConstBytes blob) {
   if (tse.read_tracing_buffers_completed()) {
     context_->sorter->NotifyReadBufferEvent();
   }
-  return util::OkStatus();
+  return base::OkStatus();
 }
 
 void ProtoTraceReader::ParseTraceStats(ConstBytes blob) {
@@ -608,7 +739,8 @@ void ProtoTraceReader::ParseTraceStats(ConstBytes blob) {
   }
 }
 
-void ProtoTraceReader::NotifyEndOfFile() {}
+base::Status ProtoTraceReader::NotifyEndOfFile() {
+  return base::OkStatus();
+}
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor
