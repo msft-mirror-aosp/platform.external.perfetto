@@ -24,8 +24,7 @@ import {
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {CurrentSearchResults} from '../common/search_data';
-import {EngineConfig, State, getLegacySelection} from '../common/state';
+import {EngineConfig, State} from '../common/state';
 import {TabManagerImpl} from '../core/tab_manager';
 import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {TrackManagerImpl} from '../core/track_manager';
@@ -37,7 +36,8 @@ import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import type {Analytics} from './analytics';
 import {TimelineImpl} from '../core/timeline';
 import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
-import {SelectionManagerImpl, LegacySelection} from '../core/selection_manager';
+import {SelectionManagerImpl} from '../core/selection_manager';
+import {Selection, SelectionOpts} from '../public/selection';
 import {Optional, exists} from '../base/utils';
 import {OmniboxManagerImpl} from '../core/omnibox_manager';
 import {SerializedAppState} from '../common/state_serialization_schema';
@@ -46,12 +46,18 @@ import {
   createSearchOverviewTrack,
   SearchOverviewTrack,
 } from './search_overview_track';
-import {AppContext} from './app_context';
-import {TraceContext} from './trace_context';
+import {TraceInfo} from '../public/trace_info';
 import {Registry} from '../base/registry';
 import {SidebarMenuItem} from '../public/sidebar';
-import {Workspace} from '../public/workspace';
+import {Workspace, WorkspaceManager} from '../public/workspace';
 import {ratelimit} from './rate_limiters';
+import {NoteManagerImpl} from '../core/note_manager';
+import {SearchManagerImpl} from '../core/search_manager';
+import {SearchResult} from '../public/search';
+import {selectCurrentSearchResult} from './search_handler';
+import {WorkspaceManagerImpl} from '../core/workspace_manager';
+import {ScrollHelper} from '../core/scroll_helper';
+import {setScrollToFunction} from '../public/scroll_helper';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -148,24 +154,7 @@ export interface ThreadDesc {
 }
 type ThreadMap = Map<number, ThreadDesc>;
 
-// Options for globals.makeSelection().
-export interface MakeSelectionOpts {
-  // Whether to switch to the current selection tab or not. Default = true.
-  switchToCurrentSelectionTab?: boolean;
-
-  // Whether to cancel the current search selection. Default = true.
-  clearSearch?: boolean;
-}
-
-// All of these control additional things we can do when doing a
-// selection.
-export interface LegacySelectionArgs {
-  clearSearch: boolean;
-  switchToCurrentSelectionTab: boolean;
-  pendingScrollId: number | undefined;
-}
-
-export const defaultTraceContext: TraceContext = {
+export const defaultTraceContext: TraceInfo = {
   traceTitle: '',
   traceUrl: '',
   start: Time.ZERO,
@@ -175,6 +164,7 @@ export const defaultTraceContext: TraceContext = {
   traceTzOffset: Time.ZERO,
   cpus: [],
   gpuCount: 0,
+  source: {type: 'URL', url: ''},
 };
 
 interface SqlModule {
@@ -187,18 +177,17 @@ interface SqlPackage {
   readonly modules: SqlModule[];
 }
 
-const DEFAULT_WORKSPACE_NAME = 'Default Workspace';
-
 /**
  * Global accessors for state/dispatch in the frontend.
  */
-class Globals implements AppContext {
+class Globals {
   readonly root = getServingRoot();
 
   private _testing = false;
   private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
-  private _timeline?: TimelineImpl = undefined;
+  private _timeline: TimelineImpl;
+  private _searchManager = new SearchManagerImpl();
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
   private _isInternalUser: boolean | undefined = undefined;
@@ -224,15 +213,13 @@ class Globals implements AppContext {
   private _cmdManager = new CommandManagerImpl();
   private _tabManager = new TabManagerImpl();
   private _trackManager = new TrackManagerImpl();
-  private _selectionManager = new SelectionManagerImpl(this._store);
+  private _selectionManager = new SelectionManagerImpl();
+  private _noteManager = new NoteManagerImpl(this._selectionManager);
   private _hasFtrace: boolean = false;
   private _searchOverviewTrack?: SearchOverviewTrack;
-  readonly workspaces: Workspace[] = [];
-  private _currentWorkspace: Workspace;
+  private _workspaceManager = new WorkspaceManagerImpl();
+  readonly omnibox = new OmniboxManagerImpl();
 
-  omnibox = new OmniboxManagerImpl();
-
-  scrollToTrackUri?: string;
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
@@ -244,31 +231,49 @@ class Globals implements AppContext {
   readonly sidebarMenuItems = new Registry<SidebarMenuItem>((m) => m.commandId);
 
   get workspace(): Workspace {
-    return this._currentWorkspace;
+    return this._workspaceManager.currentWorkspace;
   }
 
-  resetWorkspaces(): void {
-    this.workspaces.length = 0;
-    const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
-    this.workspaces.push(defaultWorkspace);
-    this._currentWorkspace = defaultWorkspace;
-  }
-
-  switchWorkspace(workspace: Workspace): void {
-    this._currentWorkspace = workspace;
+  get workspaceManager(): WorkspaceManager {
+    return this._workspaceManager;
   }
 
   // This is the app's equivalent of a plugin's onTraceLoad() function.
   // TODO(stevegolton): Eventually initialization that should be done on trace
   // load should be moved into here, and then we can remove TraceController
   // entirely
-  async onTraceLoad(engine: Engine, traceCtx: TraceContext): Promise<void> {
+  async onTraceLoad(engine: Engine, traceCtx: TraceInfo): Promise<void> {
     this.traceContext = traceCtx;
+
+    // Reset workspaces
+    this._workspaceManager = new WorkspaceManagerImpl();
 
     const {start, end} = traceCtx;
     this._timeline = new TimelineImpl(new TimeSpan(start, end));
     this._timeline.retriggerControllersOnChange = () =>
       ratelimit(() => this.store.edit(() => {}), 50);
+
+    // Reset the trackManager - this clears out the cache and any registered
+    // tracks
+    this._trackManager = new TrackManagerImpl();
+
+    const scrollHelper = new ScrollHelper(
+      traceCtx,
+      this._timeline,
+      this._workspaceManager.currentWorkspace,
+      this._trackManager,
+    );
+    setScrollToFunction((args) => scrollHelper.scrollTo(args));
+
+    this._searchManager = new SearchManagerImpl({
+      timeline: this._timeline,
+      trackManager: this._trackManager,
+      workspace: this._workspaceManager.currentWorkspace,
+      engine,
+      onResultStep: (step: SearchResult) => {
+        selectCurrentSearchResult(step, this._selectionManager, scrollHelper);
+      },
+    });
 
     // TODO(stevegolton): Even though createSearchOverviewTrack() returns a
     // disposable, we completely ignore it as we assume the dispose action
@@ -288,11 +293,11 @@ class Globals implements AppContext {
     //
     // Alternatively we could decide that we don't want to support switching
     // traces at all, in which case we can ignore tear down entirely.
-    this._searchOverviewTrack = await createSearchOverviewTrack(engine, this);
-
-    // Reset the trackManager - this clears out the cache and any registered
-    // tracks
-    this._trackManager = new TrackManagerImpl();
+    this._searchOverviewTrack = await createSearchOverviewTrack(
+      engine,
+      this.searchManager,
+      this.timeline,
+    );
   }
 
   // Used for permalink load by trace_controller.ts.
@@ -301,23 +306,16 @@ class Globals implements AppContext {
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
 
-  private _currentSearchResults: CurrentSearchResults = {
-    eventIds: new Float64Array(0),
-    tses: new BigInt64Array(0),
-    utids: new Float64Array(0),
-    trackUris: [],
-    sources: [],
-    totalResults: 0,
-  };
-
   engines = new Map<string, EngineBase>();
 
   constructor() {
     const {start, end} = defaultTraceContext;
     this._timeline = new TimelineImpl(new TimeSpan(start, end));
-    const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
-    this.workspaces.push(defaultWorkspace);
-    this._currentWorkspace = defaultWorkspace;
+
+    this._selectionManager.onSelectionChange = (
+      _s: Selection,
+      opts: SelectionOpts,
+    ) => this.handleSelectionOpts(opts);
   }
 
   initialize(
@@ -391,6 +389,10 @@ class Globals implements AppContext {
 
   get timeline() {
     return assertExists(this._timeline);
+  }
+
+  get searchManager() {
+    return this._searchManager;
   }
 
   get logging() {
@@ -490,14 +492,6 @@ class Globals implements AppContext {
     return this._recordingLog;
   }
 
-  get currentSearchResults() {
-    return this._currentSearchResults;
-  }
-
-  set currentSearchResults(results: CurrentSearchResults) {
-    this._currentSearchResults = results;
-  }
-
   set hasFtrace(value: boolean) {
     this._hasFtrace = value;
   }
@@ -566,42 +560,14 @@ class Globals implements AppContext {
     return this.state.engine;
   }
 
-  makeSelection(action: DeferredAction<{}>, opts: MakeSelectionOpts = {}) {
-    const {switchToCurrentSelectionTab = true, clearSearch = true} = opts;
-
-    // A new selection should cancel the current search selection.
-    clearSearch && globals.dispatch(Actions.setSearchIndex({index: -1}));
-    if (switchToCurrentSelectionTab) {
-      globals.tabManager.showCurrentSelectionTab();
-    }
-    globals.dispatch(action);
-  }
-
-  setLegacySelection(
-    legacySelection: LegacySelection,
-    args: Partial<LegacySelectionArgs> = {},
-  ): void {
-    this._selectionManager.setLegacy(legacySelection);
-    this.handleSelectionArgs(args);
-  }
-
-  selectSingleEvent(
-    trackUri: string,
-    eventId: number,
-    args: Partial<LegacySelectionArgs> = {},
-  ): void {
-    this._selectionManager.setEvent(trackUri, eventId);
-    this.handleSelectionArgs(args);
-  }
-
-  private handleSelectionArgs(args: Partial<LegacySelectionArgs> = {}): void {
+  private handleSelectionOpts(opts: SelectionOpts = {}): void {
     const {
       clearSearch = true,
       switchToCurrentSelectionTab = true,
       pendingScrollId = undefined,
-    } = args;
+    } = opts;
     if (clearSearch) {
-      globals.dispatch(Actions.setSearchIndex({index: -1}));
+      this.searchManager.reset();
     }
     if (pendingScrollId !== undefined) {
       globals.dispatch(
@@ -613,34 +579,6 @@ class Globals implements AppContext {
     if (switchToCurrentSelectionTab) {
       globals.tabManager.showCurrentSelectionTab();
     }
-  }
-
-  clearSelection(): void {
-    globals.dispatch(Actions.setSearchIndex({index: -1}));
-    this._selectionManager.clear();
-  }
-
-  resetForTesting() {
-    this._dispatchMultiple = undefined;
-    this._timeline = undefined;
-    this._serviceWorkerController = undefined;
-
-    // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
-    this._trackDataStore = undefined;
-    this._overviewStore = undefined;
-    this._threadMap = undefined;
-    this._sliceDetails = undefined;
-    this._threadStateDetails = undefined;
-    this._aggregateDataStore = undefined;
-    this._numQueriesQueued = 0;
-    this._currentSearchResults = {
-      eventIds: new Float64Array(0),
-      tses: new BigInt64Array(0),
-      utids: new Float64Array(0),
-      trackUris: [],
-      sources: [],
-      totalResults: 0,
-    };
   }
 
   // This variable is set by the is_internal_user.js script if the user is a
@@ -686,15 +624,25 @@ class Globals implements AppContext {
     return this._trackManager;
   }
 
+  get selectionManager() {
+    return this._selectionManager;
+  }
+
+  get noteManager() {
+    return this._noteManager;
+  }
+
   // Offset between t=0 and the configured time domain.
   timestampOffset(): time {
     const fmt = timestampFormat();
     switch (fmt) {
       case TimestampFormat.Timecode:
       case TimestampFormat.Seconds:
+      case TimestampFormat.Milliseoncds:
+      case TimestampFormat.Microseconds:
         return this.traceContext.start;
-      case TimestampFormat.Raw:
-      case TimestampFormat.RawLocale:
+      case TimestampFormat.TraceNs:
+      case TimestampFormat.TraceNsLocale:
         return Time.ZERO;
       case TimestampFormat.UTC:
         return this.traceContext.utcOffset;
@@ -714,13 +662,12 @@ class Globals implements AppContext {
   async findTimeRangeOfSelection(): Promise<
     Optional<{start: time; end: time}>
   > {
-    const sel = globals.state.selection;
+    const sel = globals.selectionManager.selection;
     if (sel.kind === 'area') {
       return sel;
     } else if (sel.kind === 'note') {
-      const selectedNote = this.state.notes[sel.id];
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-      if (selectedNote) {
+      const selectedNote = this.noteManager.getNote(sel.id);
+      if (selectedNote !== undefined) {
         const kind = selectedNote.noteType;
         switch (kind) {
           case 'SPAN':
@@ -751,7 +698,7 @@ class Globals implements AppContext {
       return undefined;
     }
 
-    const selection = getLegacySelection(this.state);
+    const selection = globals.selectionManager.legacySelection;
     if (selection === null) {
       return undefined;
     }

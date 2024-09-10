@@ -29,7 +29,7 @@ class AndroidPerfTraceCounters implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
     const resp = await ctx.engine.query(PERF_TRACE_COUNTERS_PRECONDITION);
     if (resp.numRows() === 0) return;
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidPerfTraceCounters#ThreadRuntimeIPC',
       name: 'Add a track to show a thread runtime ipc',
       callback: async (tid) => {
@@ -95,7 +95,7 @@ class AndroidPerfTraceCounters implements PerfettoPlugin {
           {ts: 'ts', dur: 'dur', name: 'ipc'},
           ['instruction', 'cycle', 'stall_backend_mem', 'l3_cache_miss'],
         );
-        ctx.tabs.openQuery(
+        ctx.addQueryResultsTab(
           sqlPrefix +
             `
             SELECT
