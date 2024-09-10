@@ -14,23 +14,20 @@
 
 import {exists} from '../../base/utils';
 import {ColumnDef} from '../../common/aggregation_data';
-import {Area, Sorting} from '../../common/state';
-import {CPU_SLICE_TRACK_KIND} from '../../core/track_kinds';
+import {Sorting} from '../../common/state';
+import {Area} from '../../public/selection';
+import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
-
 import {AggregationController} from './aggregation_controller';
 
 export class CpuAggregationController extends AggregationController {
   async createAggregateView(engine: Engine, area: Area) {
     const selectedCpus: number[] = [];
-    for (const trackKey of area.tracks) {
-      const track = globals.state.tracks[trackKey];
-      if (track?.uri) {
-        const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
-          exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
-        }
+    for (const trackUri of area.trackUris) {
+      const trackInfo = globals.trackManager.getTrack(trackUri);
+      if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
+        exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
       }
     }
     if (selectedCpus.length === 0) return false;

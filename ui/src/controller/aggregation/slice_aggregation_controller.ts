@@ -13,31 +13,27 @@
 // limitations under the License.
 
 import {ColumnDef} from '../../common/aggregation_data';
-import {Area, Sorting} from '../../common/state';
+import {Sorting} from '../../common/state';
+import {Area} from '../../public/selection';
 import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
-
 import {AggregationController} from './aggregation_controller';
 import {
   ASYNC_SLICE_TRACK_KIND,
   THREAD_SLICE_TRACK_KIND,
-} from '../../core/track_kinds';
+} from '../../public/track_kinds';
 
 export function getSelectedTrackKeys(area: Area): number[] {
   const selectedTrackKeys: number[] = [];
-  for (const trackKey of area.tracks) {
-    const track = globals.state.tracks[trackKey];
-    // Track will be undefined for track groups.
-    if (track?.uri !== undefined) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      if (trackInfo?.tags?.kind === THREAD_SLICE_TRACK_KIND) {
-        trackInfo.tags.trackIds &&
-          selectedTrackKeys.push(...trackInfo.tags.trackIds);
-      }
-      if (trackInfo?.tags?.kind === ASYNC_SLICE_TRACK_KIND) {
-        trackInfo.tags.trackIds &&
-          selectedTrackKeys.push(...trackInfo.tags.trackIds);
-      }
+  for (const trackUri of area.trackUris) {
+    const trackInfo = globals.trackManager.getTrack(trackUri);
+    if (trackInfo?.tags?.kind === THREAD_SLICE_TRACK_KIND) {
+      trackInfo.tags.trackIds &&
+        selectedTrackKeys.push(...trackInfo.tags.trackIds);
+    }
+    if (trackInfo?.tags?.kind === ASYNC_SLICE_TRACK_KIND) {
+      trackInfo.tags.trackIds &&
+        selectedTrackKeys.push(...trackInfo.tags.trackIds);
     }
   }
   return selectedTrackKeys;

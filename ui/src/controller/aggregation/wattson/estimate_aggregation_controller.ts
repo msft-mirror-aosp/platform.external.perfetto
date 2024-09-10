@@ -13,10 +13,11 @@
 // limitations under the License.
 
 import {ColumnDef} from '../../../common/aggregation_data';
-import {Area, Sorting} from '../../../common/state';
+import {Sorting} from '../../../common/state';
+import {Area} from '../../../public/selection';
 import {globals} from '../../../frontend/globals';
 import {Engine} from '../../../trace_processor/engine';
-import {CPUSS_ESTIMATE_TRACK_KIND} from '../../../core/track_kinds';
+import {CPUSS_ESTIMATE_TRACK_KIND} from '../../../public/track_kinds';
 import {AggregationController} from '../aggregation_controller';
 import {hasWattsonSupport} from '../../../core/trace_config_utils';
 import {exists} from '../../../base/utils';
@@ -29,16 +30,13 @@ export class WattsonEstimateAggregationController extends AggregationController 
     if (!(await hasWattsonSupport(engine))) return false;
 
     const estimateTracks: string[] = [];
-    for (const trackKey of area.tracks) {
-      const track = globals.state.tracks[trackKey];
-      if (track?.uri) {
-        const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-        if (
-          trackInfo?.tags?.kind === CPUSS_ESTIMATE_TRACK_KIND &&
-          exists(trackInfo.tags?.wattson)
-        ) {
-          estimateTracks.push(`${trackInfo.tags.wattson}`);
-        }
+    for (const trackUri of area.trackUris) {
+      const trackInfo = globals.trackManager.getTrack(trackUri);
+      if (
+        trackInfo?.tags?.kind === CPUSS_ESTIMATE_TRACK_KIND &&
+        exists(trackInfo.tags?.wattson)
+      ) {
+        estimateTracks.push(`${trackInfo.tags.wattson}`);
       }
     }
     if (estimateTracks.length === 0) return false;
@@ -98,14 +96,14 @@ export class WattsonEstimateAggregationController extends AggregationController 
         columnId: 'name',
       },
       {
-        title: 'Average estimated power (mW)',
+        title: 'Average power (estimated mW)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'power',
         sum: true,
       },
       {
-        title: 'Total estimated energy (mWs)',
+        title: 'Total energy (estimated mWs)',
         kind: 'NUMBER',
         columnConstructor: Float64Array,
         columnId: 'energy',

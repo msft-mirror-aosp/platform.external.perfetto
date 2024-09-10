@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {duration, Time, time} from '../../base/time';
-import {exists} from '../../base/utils';
 import {translateState} from '../../common/thread_state';
 import {Engine} from '../engine';
 import {LONG, NUM, NUM_NULL, STR_NULL} from '../query_result';
@@ -22,12 +21,16 @@ import {
   fromNumNull,
   SQLConstraints,
 } from '../sql_utils';
-
 import {globals} from '../../frontend/globals';
-import {scrollToTrackAndTs} from '../../frontend/scroll_helper';
-import {asUtid, SchedSqlId, ThreadStateSqlId} from './core_types';
-import {CPU_SLICE_TRACK_KIND} from '../../core/track_kinds';
+import {
+  asThreadStateSqlId,
+  asUtid,
+  SchedSqlId,
+  ThreadStateSqlId,
+} from './core_types';
+import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {getThreadInfo, ThreadInfo} from './thread';
+import {scrollTo} from '../../public/scroll_helper';
 
 // Representation of a single thread state object, corresponding to
 // a row for the |thread_slice| table.
@@ -48,6 +51,7 @@ export interface ThreadState {
 
   thread?: ThreadInfo;
   wakerThread?: ThreadInfo;
+  wakerId?: ThreadStateSqlId;
 }
 
 // Gets a list of thread state objects from Trace Processor with given
@@ -71,7 +75,8 @@ export async function getThreadStateFromConstraints(
       thread_state.blocked_function as blockedFunction,
       io_wait as ioWait,
       thread_state.utid as utid,
-      waker_utid as wakerUtid
+      waker_utid as wakerUtid,
+      waker_id as wakerId
     FROM thread_state
     ${constraintsToQuerySuffix(constraints)}`);
   const it = query.iter({
@@ -85,6 +90,7 @@ export async function getThreadStateFromConstraints(
     ioWait: NUM_NULL,
     utid: NUM,
     wakerUtid: NUM_NULL,
+    wakerId: NUM_NULL,
   });
 
   const result: ThreadState[] = [];
@@ -107,6 +113,7 @@ export async function getThreadStateFromConstraints(
       wakerThread: wakerUtid
         ? await getThreadInfo(engine, wakerUtid)
         : undefined,
+      wakerId: asThreadStateSqlId(it.wakerId ?? undefined),
     });
   }
   return result;
@@ -129,33 +136,19 @@ export async function getThreadState(
 }
 
 export function goToSchedSlice(cpu: number, id: SchedSqlId, ts: time) {
-  let trackId: string | undefined;
-  for (const track of Object.values(globals.state.tracks)) {
-    if (exists(track?.uri)) {
-      const trackInfo = globals.trackManager.resolveTrackInfo(track.uri);
-      if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
-        if (trackInfo?.tags?.cpu === cpu) {
-          trackId = track.key;
-          break;
-        }
-      }
-    }
-  }
-  if (trackId === undefined) {
+  const track = globals.trackManager.findTrack(
+    (td) => td.tags?.kind === CPU_SLICE_TRACK_KIND && td.tags.cpu === cpu,
+  );
+  if (track === undefined) {
     return;
   }
-  globals.setLegacySelection(
-    {
-      kind: 'SCHED_SLICE',
-      id,
-      trackKey: trackId,
-    },
-    {
-      clearSearch: true,
-      pendingScrollId: undefined,
-      switchToCurrentSelectionTab: true,
-    },
-  );
-
-  scrollToTrackAndTs(trackId, ts);
+  globals.selectionManager.setLegacy({
+    kind: 'SCHED_SLICE',
+    id,
+    trackUri: track.uri,
+  });
+  scrollTo({
+    track: {uri: track.uri, expandGroup: true},
+    time: {start: ts},
+  });
 }

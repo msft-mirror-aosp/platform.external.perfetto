@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../base/semantic_icons';
 import {Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
@@ -26,7 +25,6 @@ import {GridLayout, GridLayoutColumn} from '../widgets/grid_layout';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 import {Section} from '../widgets/section';
 import {Tree} from '../widgets/tree';
-
 import {BottomTab, NewBottomTabArgs} from './bottom_tab';
 import {addDebugSliceTrack} from './debug_tracks/debug_tracks';
 import {Flow, FlowPoint, globals} from './globals';
@@ -40,10 +38,11 @@ import {
 } from './sql/thread_state';
 import {asSliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {DurationWidget} from './widgets/duration';
-import {addSqlTableTab} from './sql_table_tab';
-import {SqlTables} from './widgets/sql/table/well_known_sql_tables';
+import {addSqlTableTab} from './sql_table_tab_command';
 import {SliceRef} from './widgets/slice';
 import {BasicTable} from '../widgets/basic_table';
+import {getSqlTableDescription} from './widgets/sql/table/sql_table_registry';
+import {assertExists} from '../base/logging';
 
 interface ContextMenuItem {
   name: string;
@@ -93,9 +92,13 @@ const ITEMS: ContextMenuItem[] = [
     shouldDisplay: (slice: SliceDetails) => slice.parentId !== undefined,
     run: (slice: SliceDetails) =>
       addSqlTableTab({
-        table: SqlTables.slice,
+        table: assertExists(getSqlTableDescription('slice')),
         filters: [
-          `id IN (SELECT id FROM _slice_ancestor_and_self(${slice.id}))`,
+          {
+            op: (cols) =>
+              `${cols[0]} IN (SELECT id FROM _slice_ancestor_and_self(${slice.id}))`,
+            columns: ['id'],
+          },
         ],
         imports: ['slices.hierarchy'],
       }),
@@ -105,9 +108,13 @@ const ITEMS: ContextMenuItem[] = [
     shouldDisplay: () => true,
     run: (slice: SliceDetails) =>
       addSqlTableTab({
-        table: SqlTables.slice,
+        table: assertExists(getSqlTableDescription('slice')),
         filters: [
-          `id IN (SELECT id FROM _slice_descendant_and_self(${slice.id}))`,
+          {
+            op: (cols) =>
+              `${cols[0]} IN (SELECT id FROM _slice_descendant_and_self(${slice.id}))`,
+            columns: ['id'],
+          },
         ],
         imports: ['slices.hierarchy'],
       }),
@@ -147,7 +154,9 @@ const ITEMS: ContextMenuItem[] = [
             // plugin's context object.
             {
               engine,
-              registerTrack: (x) => globals.trackManager.registerTrack(x),
+              tracks: {
+                registerTrack: (x) => globals.trackManager.registerTrack(x),
+              },
             },
             {
               sqlSource: `
@@ -364,7 +373,7 @@ export class ThreadSliceDetailsTab extends BottomTab<ThreadSliceDetailsTabConfig
       return m(
         Section,
         {title: 'Preceding Flows'},
-        m(BasicTable, {
+        m(BasicTable<Flow>, {
           columns: [
             {
               title: 'Slice',
@@ -411,7 +420,7 @@ export class ThreadSliceDetailsTab extends BottomTab<ThreadSliceDetailsTabConfig
       return m(
         Section,
         {title: 'Following Flows'},
-        m(BasicTable, {
+        m(BasicTable<Flow>, {
           columns: [
             {
               title: 'Slice',
