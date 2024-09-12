@@ -13,7 +13,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-INCLUDE PERFETTO MODULE cpu.freq;
+INCLUDE PERFETTO MODULE linux.cpu.frequency;
 INCLUDE PERFETTO MODULE time.conversion;
 INCLUDE PERFETTO MODULE wattson.arm_dsu;
 INCLUDE PERFETTO MODULE wattson.cpu_idle;
@@ -28,7 +28,7 @@ SELECT
   freq,
   cf.cpu,
   d_map.policy
-FROM cpu_freq_counters as cf
+FROM cpu_frequency_counters as cf
 JOIN _dev_cpu_policy_map as d_map
 ON cf.cpu = d_map.cpu;
 
@@ -51,7 +51,7 @@ WITH window_start AS (
 ),
 window_end AS (
   SELECT ts + dur as end_ts
-  FROM cpu_freq_counters
+  FROM cpu_frequency_counters
   ORDER by ts DESC
   LIMIT 1
 )
@@ -73,8 +73,8 @@ FROM _idle_freq_filtered iff
 -- Left join since some CPUs may only match the 2D LUT
 LEFT JOIN _filtered_curves_1d lut ON
   iff.policy = lut.policy AND
-  iff.idle = lut.idle AND
-  iff.freq = lut.freq_khz;
+  iff.freq = lut.freq_khz AND
+  iff.idle = lut.idle;
 
 CREATE PERFETTO TABLE _stats_cpu0
 AS

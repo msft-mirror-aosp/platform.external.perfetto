@@ -24,15 +24,14 @@ import {
   STR,
   LONG,
   Engine,
+  COUNTER_TRACK_KIND,
 } from '../../public';
-import {getTrackName} from '../../public/utils';
+import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {CounterOptions} from '../../frontend/base_counter_track';
 import {TraceProcessorCounterTrack} from './trace_processor_counter_track';
 import {CounterDetailsPanel} from './counter_details_panel';
 import {Time, duration, time} from '../../base/time';
 import {Optional} from '../../base/utils';
-
-export const COUNTER_TRACK_KIND = 'CounterTrack';
 
 const NETWORK_TRACK_REGEX = new RegExp('^.* (Received|Transmitted)( KB)?$');
 const ENTITY_RESIDENCY_REGEX = new RegExp('^Entity residency:');
@@ -78,9 +77,13 @@ function getDefaultCounterOptions(name: string): Partial<CounterOptions> {
     options.yRangeSharingKey = 'power';
   }
 
-  if (name.startsWith('mem.')) {
-    options.yRangeSharingKey = 'mem';
-  }
+  // TODO(stevegolton): We need to rethink how this works for virtual memory.
+  // The problem is we can easily have > 10GB virtual memory which dwarfs
+  // physical memory making other memory tracks difficult to read.
+
+  // if (name.startsWith('mem.')) {
+  //   options.yRangeSharingKey = 'mem';
+  // }
 
   if (name.startsWith('battery_stats.')) {
     options.yRangeSharingKey = 'battery_stats';
@@ -174,10 +177,12 @@ class CounterPlugin implements Plugin {
       const displayName = it.name;
       const unit = it.unit ?? undefined;
       ctx.registerStaticTrack({
-        uri: `perfetto.Counter#${trackId}`,
-        displayName,
-        kind: COUNTER_TRACK_KIND,
-        trackIds: [trackId],
+        uri: `/counter_${trackId}`,
+        title: displayName,
+        tags: {
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [trackId],
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -241,10 +246,12 @@ class CounterPlugin implements Plugin {
       const name = it.name;
       const trackId = it.id;
       ctx.registerTrack({
-        uri: `perfetto.Counter#cpu${trackId}`,
-        displayName: name,
-        kind: COUNTER_TRACK_KIND,
-        trackIds: [trackId],
+        uri: `/cpu_counter_${trackId}`,
+        title: name,
+        tags: {
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [trackId],
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -290,6 +297,7 @@ class CounterPlugin implements Plugin {
     });
     for (; it.valid(); it.next()) {
       const utid = it.utid;
+      const upid = it.upid;
       const tid = it.tid;
       const trackId = it.trackId;
       const trackName = it.trackName;
@@ -304,10 +312,12 @@ class CounterPlugin implements Plugin {
         threadTrack: true,
       });
       ctx.registerTrack({
-        uri: `perfetto.Counter#thread${trackId}`,
-        displayName: name,
-        kind,
-        trackIds: [trackId],
+        uri: `${getThreadUriPrefix(upid, utid)}_counter_${trackId}`,
+        title: name,
+        tags: {
+          kind,
+          trackIds: [trackId],
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -358,10 +368,12 @@ class CounterPlugin implements Plugin {
         processName,
       });
       ctx.registerTrack({
-        uri: `perfetto.Counter#process${trackId}`,
-        displayName: name,
-        kind: COUNTER_TRACK_KIND,
-        trackIds: [trackId],
+        uri: `/process_${upid}/counter_${trackId}`,
+        title: name,
+        tags: {
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [trackId],
+        },
         trackFactory: (trackCtx) => {
           return new TraceProcessorCounterTrack({
             engine: ctx.engine,
@@ -394,13 +406,15 @@ class CounterPlugin implements Plugin {
       `);
       if (freqExistsResult.numRows() > 0) {
         const trackId = freqExistsResult.firstRow({id: NUM}).id;
-        const uri = `perfetto.Counter#gpu_freq${gpu}`;
+        const uri = `/gpu_frequency_${gpu}`;
         const name = `Gpu ${gpu} Frequency`;
         ctx.registerTrack({
           uri,
-          displayName: name,
-          kind: COUNTER_TRACK_KIND,
-          trackIds: [trackId],
+          title: name,
+          tags: {
+            kind: COUNTER_TRACK_KIND,
+            trackIds: [trackId],
+          },
           trackFactory: (trackCtx) => {
             return new TraceProcessorCounterTrack({
               engine: ctx.engine,
