@@ -73,14 +73,13 @@ CreateMappingParams BuildCreateMappingParams(
 
 bool IsInKernel(protos::pbzero::Profiling::CpuMode cpu_mode) {
   switch (cpu_mode) {
-    case protos::pbzero::Profiling::MODE_UNKNOWN:
-      PERFETTO_FATAL("Unknown CPU mode");
     case protos::pbzero::Profiling::MODE_GUEST_KERNEL:
     case protos::pbzero::Profiling::MODE_KERNEL:
       return true;
     case protos::pbzero::Profiling::MODE_USER:
     case protos::pbzero::Profiling::MODE_HYPERVISOR:
     case protos::pbzero::Profiling::MODE_GUEST_USER:
+    case protos::pbzero::Profiling::MODE_UNKNOWN:
       return false;
   }
   PERFETTO_FATAL("For GCC.");
@@ -98,9 +97,8 @@ RecordParser::~RecordParser() = default;
 
 void RecordParser::ParsePerfRecord(int64_t ts, Record record) {
   if (base::Status status = ParseRecord(ts, std::move(record)); !status.ok()) {
-    context_->storage->IncrementStats(record.header.type == PERF_RECORD_SAMPLE
-                                          ? stats::perf_samples_skipped
-                                          : stats::perf_record_skipped);
+    context_->storage->IncrementIndexedStats(
+        stats::perf_record_skipped, static_cast<int>(record.header.type));
   }
 }
 
@@ -159,6 +157,11 @@ base::Status RecordParser::InternSample(Sample sample) {
   if (!sample.pid_tid.has_value()) {
     return base::ErrStatus(
         "Can not parse samples with no PERF_SAMPLE_TID field");
+  }
+
+  if (sample.cpu_mode ==
+      protos::pbzero::perfetto_pbzero_enum_Profiling::MODE_UNKNOWN) {
+    context_->storage->IncrementStats(stats::perf_samples_cpu_mode_unknown);
   }
 
   UniqueTid utid = context_->process_tracker->UpdateThread(sample.pid_tid->tid,
@@ -221,7 +224,7 @@ std::optional<CallsiteId> RecordParser::InternCallchain(
       context_->storage->IncrementStats(stats::perf_dummy_mapping_used);
       // Simpleperf will not create mappings for anonymous executable mappings
       // which are used by JITted code (e.g. V8 JavaScript).
-      mapping = mapping_tracker_->GetDummyMapping();
+      mapping = GetDummyMapping(upid);
     }
 
     const FrameId frame_id =
@@ -340,6 +343,16 @@ base::Status RecordParser::UpdateCountersInReadGroups(const Sample& sample) {
         .AddCount(sample.trace_ts, static_cast<double>(entry.value));
   }
   return base::OkStatus();
+}
+
+DummyMemoryMapping* RecordParser::GetDummyMapping(UniquePid upid) {
+  if (auto it = dummy_mappings_.Find(upid); it) {
+    return *it;
+  }
+
+  DummyMemoryMapping* mapping = &mapping_tracker_->CreateDummyMapping("");
+  dummy_mappings_.Insert(upid, mapping);
+  return mapping;
 }
 
 }  // namespace perfetto::trace_processor::perf_importer

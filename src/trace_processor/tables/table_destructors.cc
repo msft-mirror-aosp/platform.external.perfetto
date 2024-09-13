@@ -64,15 +64,16 @@ ProcessTable::~ProcessTable() = default;
 FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 MachineTable::~MachineTable() = default;
+TraceFileTable::~TraceFileTable() = default;
 
 // profiler_tables_py.h
 StackProfileMappingTable::~StackProfileMappingTable() = default;
 StackProfileFrameTable::~StackProfileFrameTable() = default;
 StackProfileCallsiteTable::~StackProfileCallsiteTable() = default;
-StackSampleTable::~StackSampleTable() = default;
 CpuProfileStackSampleTable::~CpuProfileStackSampleTable() = default;
 PerfSessionTable::~PerfSessionTable() = default;
 PerfSampleTable::~PerfSampleTable() = default;
+InstrumentsSampleTable::~InstrumentsSampleTable() = default;
 SymbolTable::~SymbolTable() = default;
 HeapProfileAllocationTable::~HeapProfileAllocationTable() = default;
 ExperimentalFlamegraphTable::~ExperimentalFlamegraphTable() = default;
@@ -150,6 +151,7 @@ SurfaceFlingerLayersSnapshotTable::~SurfaceFlingerLayersSnapshotTable() =
 SurfaceFlingerLayerTable::~SurfaceFlingerLayerTable() = default;
 SurfaceFlingerTransactionsTable::~SurfaceFlingerTransactionsTable() = default;
 ViewCaptureTable::~ViewCaptureTable() = default;
+WindowManagerTable::~WindowManagerTable() = default;
 WindowManagerShellTransitionsTable::~WindowManagerShellTransitionsTable() =
     default;
 WindowManagerShellTransitionHandlersTable::

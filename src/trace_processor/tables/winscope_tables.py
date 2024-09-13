@@ -168,6 +168,22 @@ WINDOW_MANAGER_SHELL_TRANSITION_HANDLERS_TABLE = Table(
             'handler_name': 'The name of the handler',
         }))
 
+WINDOW_MANAGER_TABLE = Table(
+    python_module=__file__,
+    class_name='WindowManagerTable',
+    sql_name='__intrinsic_windowmanager',
+    columns=[
+        C('ts', CppInt64(), ColumnFlag.SORTED),
+        C('arg_set_id', CppUint32()),
+    ],
+    tabledoc=TableDoc(
+        doc='WindowManager',
+        group='Winscope',
+        columns={
+            'ts': 'The timestamp the state snapshot was captured',
+            'arg_set_id': 'Extra args parsed from the proto message',
+        }))
+
 PROTOLOG_TABLE = Table(
     python_module=__file__,
     class_name='ProtoLogTable',
@@ -178,16 +194,24 @@ PROTOLOG_TABLE = Table(
         C('tag', CppString()),
         C('message', CppString()),
         C('stacktrace', CppString()),
+        C('location', CppString()),
     ],
     tabledoc=TableDoc(
         doc='Protolog',
         group='Winscope',
         columns={
-            'ts': 'The timestamp the log message was sent',
-            'level': 'The log level of the protolog message',
-            'tag': 'The log tag of the protolog message',
-            'message': 'The protolog message',
-            'stacktrace': 'Stacktrace captured at the message\'s logpoint',
+            'ts':
+                'The timestamp the log message was sent',
+            'level':
+                'The log level of the protolog message',
+            'tag':
+                'The log tag of the protolog message',
+            'message':
+                'The protolog message',
+            'stacktrace':
+                'Stacktrace captured at the message\'s logpoint',
+            'location':
+                'The location of the logpoint (only for processed messages)',
         }))
 
 # Keep this list sorted.
@@ -202,4 +226,5 @@ ALL_TABLES = [
     VIEWCAPTURE_TABLE,
     WINDOW_MANAGER_SHELL_TRANSITIONS_TABLE,
     WINDOW_MANAGER_SHELL_TRANSITION_HANDLERS_TABLE,
+    WINDOW_MANAGER_TABLE,
 ]

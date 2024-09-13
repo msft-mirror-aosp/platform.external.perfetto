@@ -67,30 +67,19 @@ def perfetto_deps():
     )
 
     _add_repo_if_not_existing(
+        new_git_repository,
+        name = "perfetto_dep_expat",
+        remote = "https://github.com/libexpat/libexpat",
+        commit = "fa75b96546c069d17b8f80d91e0f4ef0cde3790d",  # R_2_6_2
+        build_file = "//bazel:expat.BUILD",
+    )
+
+    _add_repo_if_not_existing(
         http_archive,
         name = "perfetto_dep_zlib",
         url = "https://storage.googleapis.com/perfetto/zlib-6d3f6aa0f87c9791ca7724c279ef61384f331dfd.tar.gz",
         sha256 = "e9a1d6e8c936de68628ffb83a13d28a40cd6b2def2ad9378e8b951d4b8f4df18",
         build_file = "//bazel:zlib.BUILD",
-    )
-
-    _add_repo_if_not_existing(
-        new_git_repository,
-        name = "perfetto_dep_pigweed",
-        remote = "https://pigweed.googlesource.com/pigweed/pigweed.git",
-        commit = "ba53737947da18f2a357981538212c1be101e928",
-        build_file = "//bazel:pigweed.BUILD",
-        # Pigweed sometimes refers to itself in the third person.
-        repo_mapping = {"@pigweed": "@perfetto_dep_pigweed"},
-    )
-
-    # Needed by Pigweed.
-    _add_repo_if_not_existing(
-        http_archive,
-        name = "rules_fuzzing",
-        sha256 = "d9002dd3cd6437017f08593124fdd1b13b3473c7b929ceb0e60d317cb9346118",
-        strip_prefix = "rules_fuzzing-0.3.2",
-        url = "https://github.com/bazelbuild/rules_fuzzing/archive/v0.3.2.zip",
     )
 
     _add_repo_if_not_existing(
