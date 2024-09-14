@@ -12,11 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
+import("../../../../gn/test.gni")
 
-perfetto_sql_source_set("metasql") {
+assert(enable_perfetto_trace_processor_sqlite)
+
+source_set("tokenizer") {
   sources = [
-    "column_list.sql",
-    "table_list.sql",
+    "sqlite_tokenizer.cc",
+    "sqlite_tokenizer.h",
+  ]
+  deps = [
+    "../../../../gn:default_deps",
+    "../../../../gn:sqlite",
+    "../../../base",
+    "../../sqlite",
+  ]
+}
+
+perfetto_unittest_source_set("unittests") {
+  testonly = true
+  sources = [ "sqlite_tokenizer_unittest.cc" ]
+  deps = [
+    ":tokenizer",
+    "../../../../gn:default_deps",
+    "../../../../gn:gtest_and_gmock",
+    "../../../../gn:sqlite",
+    "../../../base",
+    "../../../base:test_support",
+    "../../sqlite",
+    "../../util",
   ]
 }

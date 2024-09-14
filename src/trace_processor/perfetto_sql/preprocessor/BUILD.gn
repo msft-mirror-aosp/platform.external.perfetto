@@ -1,4 +1,4 @@
-# Copyright (C) 2019 The Android Open Source Project
+# Copyright (C) 2024 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,51 +16,49 @@ import("../../../../gn/test.gni")
 
 assert(enable_perfetto_trace_processor_sqlite)
 
-source_set("engine") {
+source_set("preprocessor") {
   sources = [
-    "created_function.cc",
-    "created_function.h",
-    "perfetto_sql_engine.cc",
-    "perfetto_sql_engine.h",
-    "runtime_table_function.cc",
-    "runtime_table_function.h",
-    "table_pointer_module.cc",
-    "table_pointer_module.h",
+    "perfetto_sql_preprocessor.cc",
+    "perfetto_sql_preprocessor.h",
   ]
   deps = [
-    "../..:metatrace",
+    ":grammar",
     "../../../../gn:default_deps",
-    "../../../../gn:sqlite",
-    "../../../../include/perfetto/trace_processor:basic_types",
-    "../../../../protos/perfetto/trace_processor:zero",
     "../../../base",
-    "../../containers",
-    "../../db",
-    "../../db/column",
-    "../../perfetto_sql/intrinsics/functions:interface",
-    "../../perfetto_sql/intrinsics/table_functions:interface",
     "../../sqlite",
-    "../../types",
     "../../util",
-    "../../util:sql_argument",
-    "../../util:stdlib",
-    "../parser",
-    "../preprocessor",
     "../tokenizer",
   ]
 }
 
+source_set("grammar") {
+  sources = [
+    "preprocessor_grammar.c",
+    "preprocessor_grammar.h",
+    "preprocessor_grammar_interface.h",
+  ]
+  deps = [ "../../../../gn:default_deps" ]
+  visibility = [ ":preprocessor" ]
+  if (perfetto_build_standalone) {
+    configs -= [ "//gn/standalone:extra_warnings" ]  # nogncheck
+  } else {
+    cflags_c = [
+      "-Wno-unused-parameter",
+      "-Wno-unreachable-code",
+    ]
+  }
+}
+
 perfetto_unittest_source_set("unittests") {
   testonly = true
-  sources = [ "perfetto_sql_engine_unittest.cc" ]
+  sources = [ "perfetto_sql_preprocessor_unittest.cc" ]
   deps = [
-    ":engine",
+    ":preprocessor",
     "../../../../gn:default_deps",
     "../../../../gn:gtest_and_gmock",
     "../../../../gn:sqlite",
     "../../../base",
-    "../..//tables:tables_python",
-    "../../perfetto_sql/intrinsics/table_functions:interface",
     "../../sqlite",
+    "../parser:test_utils",
   ]
 }
