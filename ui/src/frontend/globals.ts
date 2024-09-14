@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {assertExists, assertUnreachable} from '../base/logging';
+import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
 import {duration, Time, time, TimeSpan} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
@@ -37,8 +37,7 @@ import type {Analytics} from './analytics';
 import {TimelineImpl} from '../core/timeline';
 import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {SelectionManagerImpl} from '../core/selection_manager';
-import {Selection, SelectionOpts} from '../public/selection';
-import {Optional, exists} from '../base/utils';
+import {exists} from '../base/utils';
 import {OmniboxManagerImpl} from '../core/omnibox_manager';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
@@ -49,15 +48,15 @@ import {
 import {TraceInfo} from '../public/trace_info';
 import {Registry} from '../base/registry';
 import {SidebarMenuItem} from '../public/sidebar';
-import {Workspace} from '../public/workspace';
+import {Workspace, WorkspaceManager} from '../public/workspace';
 import {ratelimit} from './rate_limiters';
 import {NoteManagerImpl} from '../core/note_manager';
 import {SearchManagerImpl} from '../core/search_manager';
 import {SearchResult} from '../public/search';
 import {selectCurrentSearchResult} from './search_handler';
-
-const INSTANT_FOCUS_DURATION = 1n;
-const INCOMPLETE_SLICE_DURATION = 30_000n;
+import {WorkspaceManagerImpl} from '../core/workspace_manager';
+import {ScrollHelper} from '../core/scroll_helper';
+import {setScrollToFunction} from '../public/scroll_helper';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
@@ -129,11 +128,6 @@ export interface Flow {
   name?: string;
 }
 
-export interface ThreadStateDetails {
-  ts?: time;
-  dur?: duration;
-}
-
 export interface QuantizedLoad {
   start: time;
   end: time;
@@ -161,6 +155,7 @@ export const defaultTraceContext: TraceInfo = {
   traceTzOffset: Time.ZERO,
   cpus: [],
   gpuCount: 0,
+  source: {type: 'URL', url: ''},
 };
 
 interface SqlModule {
@@ -172,8 +167,6 @@ interface SqlPackage {
   readonly name: string;
   readonly modules: SqlModule[];
 }
-
-const DEFAULT_WORKSPACE_NAME = 'Default Workspace';
 
 /**
  * Global accessors for state/dispatch in the frontend.
@@ -195,8 +188,6 @@ class Globals {
   private _overviewStore?: OverviewStore = undefined;
   private _aggregateDataStore?: AggregateDataStore = undefined;
   private _threadMap?: ThreadMap = undefined;
-  private _sliceDetails?: SliceDetails = undefined;
-  private _threadStateDetails?: ThreadStateDetails = undefined;
   private _connectedFlows?: Flow[] = undefined;
   private _selectedFlows?: Flow[] = undefined;
   private _visibleFlowCategories?: Map<string, boolean> = undefined;
@@ -212,19 +203,12 @@ class Globals {
   private _tabManager = new TabManagerImpl();
   private _trackManager = new TrackManagerImpl();
   private _selectionManager = new SelectionManagerImpl();
-  private _noteManager = new NoteManagerImpl(this._selectionManager);
+  private _noteManager = new NoteManagerImpl();
   private _hasFtrace: boolean = false;
   private _searchOverviewTrack?: SearchOverviewTrack;
-  readonly workspaces: Workspace[] = [];
-  private _currentWorkspace: Workspace;
+  private _workspaceManager = new WorkspaceManagerImpl();
   readonly omnibox = new OmniboxManagerImpl();
 
-  // TODO(primiano): this is a hack to work around circular deps in globals.
-  // This function is injected by scroll_helper.ts. Sort out once globals are no
-  // more.
-  verticalScrollToTrack?: (trackUri: string, openGroup?: boolean) => void;
-
-  scrollToTrackUri?: string;
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
@@ -236,11 +220,11 @@ class Globals {
   readonly sidebarMenuItems = new Registry<SidebarMenuItem>((m) => m.commandId);
 
   get workspace(): Workspace {
-    return this._currentWorkspace;
+    return this._workspaceManager.currentWorkspace;
   }
 
-  switchWorkspace(workspace: Workspace): void {
-    this._currentWorkspace = workspace;
+  get workspaceManager(): WorkspaceManager {
+    return this._workspaceManager;
   }
 
   // This is the app's equivalent of a plugin's onTraceLoad() function.
@@ -251,10 +235,7 @@ class Globals {
     this.traceContext = traceCtx;
 
     // Reset workspaces
-    this.workspaces.length = 0;
-    const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
-    this.workspaces.push(defaultWorkspace);
-    this._currentWorkspace = defaultWorkspace;
+    this._workspaceManager = new WorkspaceManagerImpl();
 
     const {start, end} = traceCtx;
     this._timeline = new TimelineImpl(new TimeSpan(start, end));
@@ -265,17 +246,43 @@ class Globals {
     // tracks
     this._trackManager = new TrackManagerImpl();
 
+    const scrollHelper = new ScrollHelper(
+      traceCtx,
+      this._timeline,
+      this._workspaceManager.currentWorkspace,
+      this._trackManager,
+    );
+    setScrollToFunction((args) => scrollHelper.scrollTo(args));
+
     this._searchManager = new SearchManagerImpl({
       timeline: this._timeline,
       trackManager: this._trackManager,
-      workspace: this._currentWorkspace,
+      workspace: this._workspaceManager.currentWorkspace,
       engine,
       onResultStep: (step: SearchResult) => {
-        selectCurrentSearchResult(
-          step,
-          this._selectionManager,
-          assertExists(this.verticalScrollToTrack),
-        );
+        selectCurrentSearchResult(step, this._selectionManager, scrollHelper);
+      },
+    });
+
+    this._selectionManager = new SelectionManagerImpl({
+      engine,
+      trackManager: this._trackManager,
+      noteManager: this._noteManager,
+      scrollHelper,
+      onSelectionChange: (_, opts) => {
+        const {clearSearch = true, switchToCurrentSelectionTab = true} = opts;
+        if (clearSearch) {
+          this.searchManager.reset();
+        }
+        if (switchToCurrentSelectionTab) {
+          globals.tabManager.showCurrentSelectionTab();
+        }
+        // pendingScrollId is handled by SelectionManager internally.
+
+        // TODO(primiano): this is temporarily necessary until we kill
+        // controllers. The flow controller needs to be re-kicked when we change
+        // the selection.
+        globals.dispatch(Actions.runControllers({}));
       },
     });
 
@@ -315,14 +322,6 @@ class Globals {
   constructor() {
     const {start, end} = defaultTraceContext;
     this._timeline = new TimelineImpl(new TimeSpan(start, end));
-    const defaultWorkspace = new Workspace(DEFAULT_WORKSPACE_NAME);
-    this.workspaces.push(defaultWorkspace);
-    this._currentWorkspace = defaultWorkspace;
-
-    this._selectionManager.onSelectionChange = (
-      _s: Selection,
-      opts: SelectionOpts,
-    ) => this.handleSelectionOpts(opts);
   }
 
   initialize(
@@ -356,11 +355,9 @@ class Globals {
     this._overviewStore = new Map<string, QuantizedLoad[]>();
     this._aggregateDataStore = new Map<string, AggregateData>();
     this._threadMap = new Map<number, ThreadDesc>();
-    this._sliceDetails = {};
     this._connectedFlows = [];
     this._selectedFlows = [];
     this._visibleFlowCategories = new Map<string, boolean>();
-    this._threadStateDetails = {};
     this.engines.clear();
     this._selectionManager.clear();
   }
@@ -421,22 +418,6 @@ class Globals {
 
   get threads() {
     return assertExists(this._threadMap);
-  }
-
-  get sliceDetails() {
-    return assertExists(this._sliceDetails);
-  }
-
-  set sliceDetails(click: SliceDetails) {
-    this._sliceDetails = assertExists(click);
-  }
-
-  get threadStateDetails() {
-    return assertExists(this._threadStateDetails);
-  }
-
-  set threadStateDetails(click: ThreadStateDetails) {
-    this._threadStateDetails = assertExists(click);
   }
 
   get connectedFlows() {
@@ -567,27 +548,6 @@ class Globals {
     return this.state.engine;
   }
 
-  private handleSelectionOpts(opts: SelectionOpts = {}): void {
-    const {
-      clearSearch = true,
-      switchToCurrentSelectionTab = true,
-      pendingScrollId = undefined,
-    } = opts;
-    if (clearSearch) {
-      this.searchManager.reset();
-    }
-    if (pendingScrollId !== undefined) {
-      globals.dispatch(
-        Actions.setPendingScrollId({
-          pendingScrollId,
-        }),
-      );
-    }
-    if (switchToCurrentSelectionTab) {
-      globals.tabManager.showCurrentSelectionTab();
-    }
-  }
-
   // This variable is set by the is_internal_user.js script if the user is a
   // googler. This is used to avoid exposing features that are not ready yet
   // for public consumption. The gated features themselves are not secret.
@@ -645,9 +605,11 @@ class Globals {
     switch (fmt) {
       case TimestampFormat.Timecode:
       case TimestampFormat.Seconds:
+      case TimestampFormat.Milliseoncds:
+      case TimestampFormat.Microseconds:
         return this.traceContext.start;
-      case TimestampFormat.Raw:
-      case TimestampFormat.RawLocale:
+      case TimestampFormat.TraceNs:
+      case TimestampFormat.TraceNsLocale:
         return Time.ZERO;
       case TimestampFormat.UTC:
         return this.traceContext.utcOffset;
@@ -663,104 +625,12 @@ class Globals {
   toDomainTime(ts: time): time {
     return Time.sub(ts, this.timestampOffset());
   }
-
-  async findTimeRangeOfSelection(): Promise<
-    Optional<{start: time; end: time}>
-  > {
-    const sel = globals.selectionManager.selection;
-    if (sel.kind === 'area') {
-      return sel;
-    } else if (sel.kind === 'note') {
-      const selectedNote = this.noteManager.getNote(sel.id);
-      if (selectedNote !== undefined) {
-        const kind = selectedNote.noteType;
-        switch (kind) {
-          case 'SPAN':
-            return {
-              start: selectedNote.start,
-              end: selectedNote.end,
-            };
-          case 'DEFAULT':
-            return {
-              start: selectedNote.timestamp,
-              end: Time.add(selectedNote.timestamp, INSTANT_FOCUS_DURATION),
-            };
-          default:
-            assertUnreachable(kind);
-        }
-      }
-    } else if (sel.kind === 'single') {
-      const uri = sel.trackUri;
-      const bounds = await globals.trackManager
-        .getTrack(uri)
-        ?.getEventBounds?.(sel.eventId);
-      if (bounds) {
-        return {
-          start: bounds.ts,
-          end: Time.add(bounds.ts, bounds.dur),
-        };
-      }
-      return undefined;
-    }
-
-    const selection = globals.selectionManager.legacySelection;
-    if (selection === null) {
-      return undefined;
-    }
-
-    if (selection.kind === 'SCHED_SLICE' || selection.kind === 'SLICE') {
-      const slice = this.sliceDetails;
-      return findTimeRangeOfSlice(slice);
-    } else if (selection.kind === 'THREAD_STATE') {
-      const threadState = this.threadStateDetails;
-      return findTimeRangeOfSlice(threadState);
-    } else if (selection.kind === 'LOG') {
-      // TODO(hjd): Make focus selection work for logs.
-    } else if (selection.kind === 'GENERIC_SLICE') {
-      return findTimeRangeOfSlice({
-        ts: selection.start,
-        dur: selection.duration,
-      });
-    }
-
-    return undefined;
-  }
-}
-
-interface SliceLike {
-  ts: time;
-  dur: duration;
-}
-
-// Returns the start and end points of a slice-like object If slice is instant
-// or incomplete, dummy time will be returned which instead.
-function findTimeRangeOfSlice(slice: Partial<SliceLike>): {
-  start: time;
-  end: time;
-} {
-  if (exists(slice.ts) && exists(slice.dur)) {
-    if (slice.dur === -1n) {
-      return {
-        start: slice.ts,
-        end: Time.add(slice.ts, INCOMPLETE_SLICE_DURATION),
-      };
-    } else if (slice.dur === 0n) {
-      return {
-        start: slice.ts,
-        end: Time.add(slice.ts, INSTANT_FOCUS_DURATION),
-      };
-    } else {
-      return {start: slice.ts, end: Time.add(slice.ts, slice.dur)};
-    }
-  } else {
-    return {start: Time.INVALID, end: Time.INVALID};
-  }
 }
 
 // Returns the time span of the current selection, or the visible window if
 // there is no current selection.
 export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<TimeSpan> {
-  const range = await globals.findTimeRangeOfSelection();
+  const range = await globals.selectionManager.findTimeRangeOfSelection();
   if (exists(range)) {
     return new TimeSpan(range.start, range.end);
   } else {
