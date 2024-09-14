@@ -67,10 +67,6 @@ import {
 } from './flow_events_controller';
 import {LoadingManager} from './loading_manager';
 import {PivotTableController} from './pivot_table_controller';
-import {
-  SelectionController,
-  SelectionControllerArgs,
-} from './selection_controller';
 import {TraceErrorController} from './trace_error_controller';
 import {
   TraceBufferStream,
@@ -83,8 +79,8 @@ import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
 } from '../common/state_serialization';
-import {TraceInfo} from '../public/trace_info';
 import {ProfileType, profileType} from '../public/selection';
+import {TraceInfo} from '../public/trace_info';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -248,11 +244,6 @@ export class TraceController extends Controller<States> {
         // At this point we are ready to serve queries and handle tracks.
         const engine = assertExists(this.engine);
         const childControllers: Children = [];
-
-        const selectionArgs: SelectionControllerArgs = {engine};
-        childControllers.push(
-          Child('selection', SelectionController, selectionArgs),
-        );
 
         const flowEventsArgs: FlowEventsControllerArgs = {engine};
         childControllers.push(
@@ -1228,6 +1219,7 @@ async function getTraceTimeDetails(
     traceTzOffset,
     cpus: await getCpus(engine),
     gpuCount: await getNumberOfGpus(engine),
+    source: engineCfg.source,
   };
 }
 
