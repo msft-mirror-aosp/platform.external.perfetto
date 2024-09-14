@@ -14,6 +14,13 @@
 
 import m from 'mithril';
 
+export interface TabManager {
+  registerTab(tab: TabDescriptor): void;
+  showTab(uri: string): void;
+  hideTab(uri: string): void;
+  addDefaultTab(uri: string): void;
+}
+
 export interface Tab {
   render(): m.Children;
   getTitle(): string;

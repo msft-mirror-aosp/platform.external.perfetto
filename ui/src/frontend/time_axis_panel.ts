@@ -57,8 +57,8 @@ export class TimeAxisPanel implements Panel {
   private renderOffsetTimestamp(ctx: CanvasRenderingContext2D): void {
     const offset = globals.timestampOffset();
     switch (timestampFormat()) {
-      case TimestampFormat.Raw:
-      case TimestampFormat.RawLocale:
+      case TimestampFormat.TraceNs:
+      case TimestampFormat.TraceNsLocale:
         break;
       case TimestampFormat.Seconds:
       case TimestampFormat.Timecode:
@@ -122,12 +122,28 @@ function renderTimestamp(
     case TimestampFormat.TraceTz:
     case TimestampFormat.Timecode:
       return renderTimecode(ctx, time, x, y, minWidth);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return renderRawTimestamp(ctx, time.toString(), x, y, minWidth);
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return renderRawTimestamp(ctx, time.toLocaleString(), x, y, minWidth);
     case TimestampFormat.Seconds:
       return renderRawTimestamp(ctx, Time.formatSeconds(time), x, y, minWidth);
+    case TimestampFormat.Milliseoncds:
+      return renderRawTimestamp(
+        ctx,
+        Time.formatMilliseconds(time),
+        x,
+        y,
+        minWidth,
+      );
+    case TimestampFormat.Microseconds:
+      return renderRawTimestamp(
+        ctx,
+        Time.formatMicroseconds(time),
+        x,
+        y,
+        minWidth,
+      );
     default:
       const z: never = fmt;
       throw new Error(`Invalid timestamp ${z}`);

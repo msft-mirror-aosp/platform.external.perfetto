@@ -468,9 +468,9 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
 
   oncreate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
     const {attrs} = vnode;
-    if (globals.scrollToTrackUri === attrs.trackNode.uri) {
+    if (globals.trackManager.scrollToTrackUriOnCreate === attrs.trackNode.uri) {
       vnode.dom.scrollIntoView();
-      globals.scrollToTrackUri = undefined;
+      globals.trackManager.scrollToTrackUriOnCreate = undefined;
     }
     this.onupdate(vnode);
 
@@ -692,15 +692,17 @@ export function renderWakeupVertical(
   size: Size2D,
 ) {
   const currentSelection = globals.selectionManager.legacySelection;
+  const sliceDetails = globals.selectionManager.legacySelectionDetails;
   if (currentSelection !== null) {
     if (
       currentSelection.kind === 'SCHED_SLICE' &&
-      globals.sliceDetails.wakeupTs !== undefined
+      exists(sliceDetails) &&
+      sliceDetails.wakeupTs !== undefined
     ) {
       drawVerticalLineAtTime(
         ctx,
         timescale,
-        globals.sliceDetails.wakeupTs,
+        sliceDetails.wakeupTs,
         size.height,
         `black`,
       );

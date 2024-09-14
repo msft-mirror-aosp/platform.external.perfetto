@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
 import {Flow, globals} from './globals';
-import {focusHorizontalRange, verticalScrollToTrack} from './scroll_helper';
 
 type Direction = 'Forward' | 'Backward';
 
@@ -113,19 +111,5 @@ export function moveByFocusedFlow(direction: Direction): void {
         );
       }
     }
-  }
-}
-
-export async function findCurrentSelection() {
-  const selection = globals.selectionManager.legacySelection;
-  if (selection === null) return;
-
-  const range = await globals.findTimeRangeOfSelection();
-  if (exists(range)) {
-    focusHorizontalRange(range.start, range.end);
-  }
-
-  if (selection.trackUri) {
-    verticalScrollToTrack(selection.trackUri, true);
   }
 }

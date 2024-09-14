@@ -257,12 +257,16 @@ function stringifyTimestamp(time: time): string {
     case TimestampFormat.Timecode:
       const THIN_SPACE = '\u2009';
       return Time.toTimecode(time).toString(THIN_SPACE);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return time.toString();
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return time.toLocaleString();
     case TimestampFormat.Seconds:
       return Time.formatSeconds(time);
+    case TimestampFormat.Milliseoncds:
+      return Time.formatMilliseconds(time);
+    case TimestampFormat.Microseconds:
+      return Time.formatMicroseconds(time);
     default:
       const z: never = fmt;
       throw new Error(`Invalid timestamp ${z}`);
