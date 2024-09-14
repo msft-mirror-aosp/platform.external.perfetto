@@ -100,10 +100,6 @@ class TimelineSync implements PerfettoPlugin {
     }
   }
 
-  onDeactivate(_: App) {
-    this.disableTimelineSync(this._sessionId);
-  }
-
   async onTraceLoad(ctx: Trace) {
     this._ctx = ctx;
     this._traceLoadTime = Date.now();
@@ -397,7 +393,7 @@ class TimelineSync implements PerfettoPlugin {
   }
 
   private getCurrentViewportBounds(): ViewportBounds {
-    return this._ctx!.timeline.viewport;
+    return this._ctx!.timeline.visibleWindow.toTimeSpan();
   }
 
   private purgeInactiveClients() {
