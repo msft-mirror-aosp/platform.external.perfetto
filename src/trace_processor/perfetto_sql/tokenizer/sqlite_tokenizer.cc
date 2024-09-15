@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/sqlite/sqlite_tokenizer.h"
+#include "src/trace_processor/perfetto_sql/tokenizer/sqlite_tokenizer.h"
 
 #include <ctype.h>
 #include <sqlite3.h>
@@ -383,7 +383,7 @@ int GetSqliteToken(const unsigned char* z, SqliteTokenType* tokenType) {
     case CC_X: {
       if (z[1] == '\'') {
         *tokenType = SqliteTokenType::TK_BLOB;
-        for (i = 2; isdigit(z[i]); i++) {
+        for (i = 2; isxdigit(z[i]); i++) {
         }
         if (z[i] != '\'' || i % 2) {
           *tokenType = SqliteTokenType::TK_ILLEGAL;
