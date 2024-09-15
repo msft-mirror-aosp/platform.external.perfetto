@@ -17,7 +17,6 @@ import m from 'mithril';
 import {currentTargetOffset} from '../base/dom_utils';
 import {Icons} from '../base/semantic_icons';
 import {TimeSpan} from '../base/time';
-import {Actions} from '../common/actions';
 import {TrackRenderer} from '../core/track_manager';
 import {raf} from '../core/raf_scheduler';
 import {Track, TrackTags} from '../public/track';
@@ -37,7 +36,6 @@ import {Button, ButtonBar} from '../widgets/button';
 import {Popup, PopupPosition} from '../widgets/popup';
 import {canvasClip} from '../base/canvas_utils';
 import {TimeScale} from '../base/time_scale';
-import {getLegacySelection} from '../common/state';
 import {exists, Optional} from '../base/utils';
 import {Intent} from '../widgets/common';
 import {TrackRenderContext} from '../public/track';
@@ -45,6 +43,7 @@ import {calculateResolution} from '../common/resolution';
 import {featureFlags} from '../core/feature_flags';
 import {Tree, TreeNode} from '../widgets/tree';
 import {TrackNode} from '../public/workspace';
+import {MiddleEllipsis} from '../widgets/middle_ellipsis';
 
 export const SHOW_TRACK_DETAILS_BUTTON = featureFlags.register({
   id: 'showTrackDetailsButton',
@@ -74,7 +73,7 @@ export function getTitleFontSize(title: string): string | undefined {
 }
 
 function isTrackSelected(track: TrackNode) {
-  const selection = globals.state.selection;
+  const selection = globals.selectionManager.selection;
   if (selection.kind !== 'area') return false;
   return selection.trackUris.includes(track.uri);
 }
@@ -128,7 +127,7 @@ export class CrashButton implements m.ClassComponent<CrashButtonAttrs> {
 }
 
 interface TrackShellAttrs {
-  readonly title: m.Children;
+  readonly title: string;
   readonly buttons: m.Children;
   readonly tags?: TrackTags;
   readonly chips?: ReadonlyArray<string>;
@@ -146,16 +145,18 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
     // The shell should be highlighted if the current search result is inside
     // this track.
     let highlightClass = undefined;
-    const searchIndex = globals.state.searchIndex;
-    if (searchIndex !== -1) {
-      const uri = globals.currentSearchResults.trackUris[searchIndex];
+    const searchIndex = globals.searchManager.resultIndex;
+    const searchResults = globals.searchManager.searchResults;
+    if (searchIndex !== -1 && searchResults !== undefined) {
+      const uri = searchResults.trackUris[searchIndex];
       if (uri === attrs.track.uri) {
         highlightClass = 'flash';
       }
     }
 
-    const currentSelection = globals.state.selection;
+    const currentSelection = globals.selectionManager.selection;
     const pinned = attrs.track.isPinned;
+    const chips = attrs.chips && renderChips(attrs.chips);
 
     return m(
       `.track-shell[draggable=true]`,
@@ -176,10 +177,10 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
         m(
           'h1',
           {
-            title: attrs.track.displayName,
+            ref: attrs.title,
           },
-          attrs.title,
-          attrs.chips && renderChips(attrs.chips),
+          m('.popup', attrs.title, chips),
+          m(MiddleEllipsis, {text: attrs.title}, chips),
         ),
         m(
           ButtonBar,
@@ -201,10 +202,8 @@ class TrackShell implements m.ClassComponent<TrackShellAttrs> {
           currentSelection.kind === 'area'
             ? m(Button, {
                 onclick: (e: MouseEvent) => {
-                  globals.dispatch(
-                    Actions.toggleTrackAreaSelection({
-                      key: attrs.track.uri,
-                    }),
+                  globals.selectionManager.toggleTrackAreaSelection(
+                    attrs.track.uri,
                   );
                   e.stopPropagation();
                 },
@@ -412,7 +411,7 @@ export class TrackContent implements m.ClassComponent<TrackContentAttrs> {
 
 interface TrackComponentAttrs {
   readonly heightPx?: number;
-  readonly title: m.Children;
+  readonly title: string;
   readonly buttons?: m.Children;
   readonly tags?: TrackTags;
   readonly chips?: ReadonlyArray<string>;
@@ -469,9 +468,9 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
 
   oncreate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
     const {attrs} = vnode;
-    if (globals.scrollToTrackUri === attrs.trackNode.uri) {
+    if (globals.trackManager.scrollToTrackUriOnCreate === attrs.trackNode.uri) {
       vnode.dom.scrollIntoView();
-      globals.scrollToTrackUri = undefined;
+      globals.trackManager.scrollToTrackUriOnCreate = undefined;
     }
     this.onupdate(vnode);
 
@@ -482,11 +481,27 @@ class TrackComponent implements m.ClassComponent<TrackComponentAttrs> {
 
   onupdate(vnode: m.VnodeDOM<TrackComponentAttrs>) {
     vnode.attrs.track?.onFullRedraw?.();
+    this.decidePopupRequired(vnode.dom);
+  }
+
+  // Works out whether to display a title popup on hover, based on whether the
+  // current title is truncated.
+  private decidePopupRequired(dom: Element) {
+    const popupElement = dom.querySelector('.popup') as HTMLElement;
+    const titleElement = dom.querySelector(
+      '.pf-middle-ellipsis',
+    ) as HTMLElement;
+
+    if (popupElement.clientWidth >= titleElement.clientWidth) {
+      popupElement.classList.add('show-popup');
+    } else {
+      popupElement.classList.remove('show-popup');
+    }
   }
 }
 
 interface TrackPanelAttrs {
-  readonly title: m.Children;
+  readonly title: string;
   readonly tags?: TrackTags;
   readonly chips?: ReadonlyArray<string>;
   readonly trackRenderer?: TrackRenderer;
@@ -547,7 +562,7 @@ export class TrackPanel implements Panel {
     timescale: TimeScale,
     size: Size2D,
   ) {
-    const selection = globals.state.selection;
+    const selection = globals.selectionManager.selection;
     if (selection.kind !== 'area') {
       return;
     }
@@ -676,16 +691,18 @@ export function renderWakeupVertical(
   timescale: TimeScale,
   size: Size2D,
 ) {
-  const currentSelection = getLegacySelection(globals.state);
+  const currentSelection = globals.selectionManager.legacySelection;
+  const sliceDetails = globals.selectionManager.legacySelectionDetails;
   if (currentSelection !== null) {
     if (
       currentSelection.kind === 'SCHED_SLICE' &&
-      globals.sliceDetails.wakeupTs !== undefined
+      exists(sliceDetails) &&
+      sliceDetails.wakeupTs !== undefined
     ) {
       drawVerticalLineAtTime(
         ctx,
         timescale,
-        globals.sliceDetails.wakeupTs,
+        sliceDetails.wakeupTs,
         size.height,
         `black`,
       );
@@ -700,7 +717,7 @@ export function renderNoteVerticals(
 ) {
   // All marked areas should have semi-transparent vertical lines
   // marking the start and end.
-  for (const note of Object.values(globals.state.notes)) {
+  for (const note of globals.noteManager.notes.values()) {
     if (note.noteType === 'SPAN') {
       const transparentNoteColor =
         'rgba(' + hex.rgb(note.color.substr(1)).toString() + ', 0.65)';

@@ -22,12 +22,7 @@ import {
   isMetatracingEnabled,
 } from '../common/metatracing';
 import {pluginManager} from '../common/plugins';
-import {
-  EngineConfig,
-  EngineMode,
-  PendingDeeplinkState,
-  ProfileType,
-} from '../common/state';
+import {EngineConfig, EngineMode, PendingDeeplinkState} from '../common/state';
 import {featureFlags, Flag} from '../core/feature_flags';
 import {globals, QuantizedLoad, ThreadDesc} from '../frontend/globals';
 import {
@@ -72,11 +67,6 @@ import {
 } from './flow_events_controller';
 import {LoadingManager} from './loading_manager';
 import {PivotTableController} from './pivot_table_controller';
-import {SearchController} from './search_controller';
-import {
-  SelectionController,
-  SelectionControllerArgs,
-} from './selection_controller';
 import {TraceErrorController} from './trace_error_controller';
 import {
   TraceBufferStream,
@@ -89,8 +79,8 @@ import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
 } from '../common/state_serialization';
-import {TraceContext} from '../frontend/trace_context';
-import {profileType} from '../core/selection_manager';
+import {ProfileType, profileType} from '../public/selection';
+import {TraceInfo} from '../public/trace_info';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -255,11 +245,6 @@ export class TraceController extends Controller<States> {
         const engine = assertExists(this.engine);
         const childControllers: Children = [];
 
-        const selectionArgs: SelectionControllerArgs = {engine};
-        childControllers.push(
-          Child('selection', SelectionController, selectionArgs),
-        );
-
         const flowEventsArgs: FlowEventsControllerArgs = {engine};
         childControllers.push(
           Child('flowEvents', FlowEventsController, flowEventsArgs),
@@ -344,12 +329,6 @@ export class TraceController extends Controller<States> {
           Child('frame_aggregation', FrameAggregationController, {
             engine,
             kind: 'frame_aggregation',
-          }),
-        );
-        childControllers.push(
-          Child('search', SearchController, {
-            engine,
-            app: globals,
           }),
         );
         childControllers.push(
@@ -478,6 +457,7 @@ export class TraceController extends Controller<States> {
     if (traceDetails.traceTitle) {
       document.title = `${traceDetails.traceTitle} - Perfetto UI`;
     }
+
     await globals.onTraceLoad(this.engine, traceDetails);
 
     const shownJsonWarning =
@@ -499,15 +479,9 @@ export class TraceController extends Controller<States> {
       }
     }
 
-    const emptyOmniboxState = {
-      omnibox: '',
-      mode: globals.state.omniboxState.mode || 'SEARCH',
-    };
-
-    const actions: DeferredAction[] = [
-      Actions.setOmnibox(emptyOmniboxState),
-      Actions.setTraceUuid({traceUuid}),
-    ];
+    globals.omnibox.reset();
+    globals.searchManager.reset();
+    const actions: DeferredAction[] = [Actions.setTraceUuid({traceUuid})];
 
     const visibleTimeSpan = await computeVisibleTime(
       traceDetails.start,
@@ -526,10 +500,6 @@ export class TraceController extends Controller<States> {
     await this.includeSummaryTables();
 
     await defineMaxLayoutDepthSqlFunction(engine);
-
-    // Remove all workspaces, and create an empty default workspace, ready for
-    // tracks to be inserted.
-    globals.resetWorkspaces();
 
     if (globals.restoreAppStateAfterTraceLoad) {
       deserializeAppStatePhase1(globals.restoreAppStateAfterTraceLoad);
@@ -589,13 +559,11 @@ export class TraceController extends Controller<States> {
     if (!isJsonTrace && ENABLE_CHROME_RELIABLE_RANGE_ANNOTATION_FLAG.get()) {
       const reliableRangeStart = await computeTraceReliableRangeStart(engine);
       if (reliableRangeStart > 0) {
-        globals.dispatch(
-          Actions.addNote({
-            timestamp: reliableRangeStart,
-            color: '#ff0000',
-            text: 'Reliable Range Start',
-          }),
-        );
+        globals.noteManager.addNote({
+          timestamp: reliableRangeStart,
+          color: '#ff0000',
+          text: 'Reliable Range Start',
+        });
       }
     }
 
@@ -627,15 +595,13 @@ export class TraceController extends Controller<States> {
     const upid = row.upid;
     const leftTs = traceTime.start;
     const rightTs = traceTime.end;
-    globals.dispatch(
-      Actions.selectPerfSamples({
-        id: 0,
-        upid,
-        leftTs,
-        rightTs,
-        type: ProfileType.PERF_SAMPLE,
-      }),
-    );
+    globals.selectionManager.setPerfSamples({
+      id: 0,
+      upid,
+      leftTs,
+      rightTs,
+      type: ProfileType.PERF_SAMPLE,
+    });
   }
 
   private async selectFirstHeapProfile() {
@@ -659,9 +625,12 @@ export class TraceController extends Controller<States> {
     const row = profile.firstRow({ts: LONG, type: STR, upid: NUM});
     const ts = Time.fromRaw(row.ts);
     const upid = row.upid;
-    globals.dispatch(
-      Actions.selectHeapProfile({id: 0, upid, ts, type: profileType(row.type)}),
-    );
+    globals.selectionManager.setHeapProfile({
+      id: 0,
+      upid,
+      ts,
+      type: profileType(row.type),
+    });
   }
 
   private async selectPendingDeeplink(link: PendingDeeplinkState) {
@@ -703,7 +672,7 @@ export class TraceController extends Controller<States> {
       if (track === undefined) {
         return;
       }
-      globals.setLegacySelection(
+      globals.selectionManager.setLegacy(
         {
           kind: 'SLICE',
           id: row.id,
@@ -711,7 +680,6 @@ export class TraceController extends Controller<States> {
           table: 'slice',
         },
         {
-          clearSearch: true,
           pendingScrollId: row.id,
           switchToCurrentSelectionTab: false,
         },
@@ -1148,7 +1116,7 @@ async function computeVisibleTime(
 async function getTraceTimeDetails(
   engine: Engine,
   engineCfg: EngineConfig,
-): Promise<TraceContext> {
+): Promise<TraceInfo> {
   const traceTime = await getTraceTimeBounds(engine);
 
   // Find the first REALTIME or REALTIME_COARSE clock snapshot.
@@ -1251,6 +1219,7 @@ async function getTraceTimeDetails(
     traceTzOffset,
     cpus: await getCpus(engine),
     gpuCount: await getNumberOfGpus(engine),
+    source: engineCfg.source,
   };
 }
 

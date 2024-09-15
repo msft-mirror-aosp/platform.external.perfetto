@@ -12,20 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Store} from '../base/store';
-import {CurrentSearchResults} from '../common/search_data';
-import {State} from '../common/state';
-import {TimelineImpl} from '../core/timeline';
-import {TraceContext} from './trace_context';
+import {Registry} from '../base/registry';
+import {SidebarManager, SidebarMenuItem} from '../public/sidebar';
 
-export interface AppContext {
-  readonly store: Store<State>;
-  readonly state: State;
-  readonly traceContext: TraceContext;
+export class SidebarManagerImpl implements SidebarManager {
+  readonly menuItems = new Registry<SidebarMenuItem>((m) => m.commandId);
 
-  // TODO(stevegolton): This could probably be moved into TraceContext.
-  readonly timeline: TimelineImpl;
-
-  // TODO(stevegolton): Move this into the search subsystem when it exists.
-  readonly currentSearchResults: CurrentSearchResults;
+  addMenuItem(menuItem: SidebarMenuItem): Disposable {
+    return this.menuItems.register(menuItem);
+  }
 }

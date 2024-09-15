@@ -21,12 +21,12 @@ import {
   isEmptyData,
 } from '../common/aggregation_data';
 import {colorForState} from '../core/colorizer';
-import {translateState} from '../common/thread_state';
 import {globals} from './globals';
 import {DurationWidget} from './widgets/duration';
 import {EmptyState} from '../widgets/empty_state';
 import {Anchor} from '../widgets/anchor';
 import {Icons} from '../base/semantic_icons';
+import {translateState} from '../trace_processor/sql_utils/thread_state';
 
 export interface AggregationPanelAttrs {
   data?: AggregateData;
@@ -143,7 +143,7 @@ export class AggregationPanel
   }
 
   showTimeRange() {
-    const selection = globals.state.selection;
+    const selection = globals.selectionManager.selection;
     if (selection.kind !== 'area') return undefined;
     const duration = selection.end - selection.start;
     return m(

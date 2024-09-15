@@ -15,15 +15,12 @@
 import m from 'mithril';
 import {assertExists, assertFalse} from '../../base/logging';
 import {Monitor} from '../../base/monitor';
-import {
-  HeapProfileSelection,
-  LegacySelection,
-  ProfileType,
-} from '../../core/selection_manager';
+import {ProfileType} from '../../public/selection';
+import {HeapProfileSelection, LegacySelection} from '../../public/selection';
 import {Timestamp} from '../../frontend/widgets/timestamp';
 import {Engine} from '../../trace_processor/engine';
 import {HEAP_PROFILE_TRACK_KIND} from '../../public/track_kinds';
-import {LegacyDetailsPanel} from '../../public/track';
+import {LegacyDetailsPanel} from '../../public/details_panel';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM} from '../../trace_processor/query_result';
@@ -60,7 +57,7 @@ class HeapProfilePlugin implements PerfettoPlugin {
       const upid = it.upid;
       const uri = `/process_${upid}/heap_profile`;
       const displayName = 'Heap Profile';
-      ctx.registerTrack({
+      ctx.tracks.registerTrack({
         uri,
         title: displayName,
         tags: {
@@ -75,7 +72,7 @@ class HeapProfilePlugin implements PerfettoPlugin {
           upid,
         ),
       });
-      const group = getOrCreateGroupForProcess(ctx.timeline.workspace, upid);
+      const group = getOrCreateGroupForProcess(ctx.workspace, upid);
       const track = new TrackNode(uri, displayName);
       track.sortOrder = -30;
       group.insertChildInOrder(track);
@@ -309,7 +306,7 @@ function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
             select
               id,
               parent_id as parentId,
-              name,
+              ifnull(name, '[Unknown]') as name,
               root_type,
               self_size,
               self_count
@@ -338,7 +335,7 @@ function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
             select
               id,
               parent_id as parentId,
-              name,
+              ifnull(name, '[Unknown]') as name,
               root_type,
               self_size,
               self_count
