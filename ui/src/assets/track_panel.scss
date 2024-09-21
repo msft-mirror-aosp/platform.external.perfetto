@@ -26,18 +26,24 @@
   text-overflow: ellipsis;
 
   .popup {
-    visibility: hidden;
-    box-shadow: 1px 1px 2px 2px var(--track-border-color);
     border-radius: 2px;
-    background: white;
-    color: black;
+    color: rgba(0, 0, 0, 0);
+    background: rgba(255, 255, 255, 0);
     position: absolute;
     text-overflow: unset;
     pointer-events: none;
+
+    visibility: hidden;
+
+    &.show-popup {
+      visibility: visible;
+    }
   }
 
   &:hover .popup.show-popup {
-    visibility: visible;
+    box-shadow: 1px 1px 2px 2px var(--track-border-color);
+    background: white;
+    color: black;
   }
 }
 
@@ -134,6 +140,7 @@
       height: 100%;
       align-items: center;
       font-size: 18px;
+      overflow: hidden;
     }
 
     &.flash {
@@ -209,6 +216,7 @@
 
     .chip {
       background-color: #bed6ff;
+      color: rgb(60, 75, 93);
       border-radius: $pf-border-radius;
       font-size: smaller;
       padding: 0 0.1rem;
@@ -233,6 +241,7 @@
       height: 100%;
       align-items: center;
       font-size: 18px;
+      overflow: hidden;
     }
 
     &.pf-clickable {
