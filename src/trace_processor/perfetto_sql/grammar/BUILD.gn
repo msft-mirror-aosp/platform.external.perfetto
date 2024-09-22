@@ -12,11 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("../../../../../gn/perfetto_sql.gni")
+import("../../../../gn/test.gni")
 
-perfetto_sql_source_set("metasql") {
+assert(enable_perfetto_trace_processor_sqlite)
+
+source_set("grammar") {
   sources = [
-    "column_list.sql",
-    "table_list.sql",
+    "perfettosql_grammar.c",
+    "perfettosql_grammar.h",
+    "perfettosql_keywordhash.h",
+    "perfettosql_keywordhash_helper.h",
   ]
+  deps = [
+    "../../../../gn:default_deps",
+    "../../../base",
+  ]
+  visibility = [
+    "../parser",
+    "../tokenizer",
+    "../tokenizer:tokenize_internal",
+  ]
+  if (perfetto_build_standalone) {
+    configs -= [ "//gn/standalone:extra_warnings" ]  # nogncheck
+  } else {
+    cflags_c = [
+      "-Wno-unused-parameter",
+      "-Wno-unreachable-code",
+    ]
+  }
 }
