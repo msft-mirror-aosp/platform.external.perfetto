@@ -77,7 +77,7 @@ class CpuProfile implements PerfettoPlugin {
         },
         track: new CpuProfileTrack(
           {
-            engine: ctx.engine,
+            trace: ctx,
             uri,
           },
           utid,
@@ -95,6 +95,7 @@ class CpuProfile implements PerfettoPlugin {
 }
 
 class CpuProfileSampleFlamegraphDetailsPanel implements LegacyDetailsPanel {
+  readonly panelType = 'LegacyDetailsPanel';
   private sel?: CpuProfileSampleSelection;
   private selMonitor = new Monitor([() => this.sel?.ts, () => this.sel?.utid]);
   private flamegraphAttrs?: QueryFlamegraphAttrs;

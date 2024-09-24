@@ -32,7 +32,7 @@ import {
   publishOverviewData,
   publishThreads,
 } from '../frontend/publish';
-import {addQueryResultsTab} from '../frontend/query_result_tab';
+import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
 import {Router} from '../frontend/router';
 import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
@@ -81,6 +81,7 @@ import {
 } from '../common/state_serialization';
 import {ProfileType, profileType} from '../public/selection';
 import {TraceInfo} from '../public/trace_info';
+import {AppImpl} from '../core/app_trace_impl';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -349,6 +350,7 @@ export class TraceController extends Controller<States> {
 
   onDestroy() {
     pluginManager.onTraceClose();
+    AppImpl.instance.closeCurrentTrace();
     globals.engines.delete(this.engineId);
   }
 
@@ -457,8 +459,8 @@ export class TraceController extends Controller<States> {
     if (traceDetails.traceTitle) {
       document.title = `${traceDetails.traceTitle} - Perfetto UI`;
     }
-
-    await globals.onTraceLoad(this.engine, traceDetails);
+    const trace = AppImpl.instance.newTraceInstance(this.engine, traceDetails);
+    await globals.onTraceLoad(trace);
 
     const shownJsonWarning =
       window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) !== null;
@@ -479,8 +481,7 @@ export class TraceController extends Controller<States> {
       }
     }
 
-    globals.omnibox.reset();
-    globals.searchManager.reset();
+    AppImpl.instance.omnibox.reset();
     const actions: DeferredAction[] = [Actions.setTraceUuid({traceUuid})];
 
     const visibleTimeSpan = await computeVisibleTime(
@@ -502,10 +503,10 @@ export class TraceController extends Controller<States> {
     await defineMaxLayoutDepthSqlFunction(engine);
 
     if (globals.restoreAppStateAfterTraceLoad) {
-      deserializeAppStatePhase1(globals.restoreAppStateAfterTraceLoad);
+      deserializeAppStatePhase1(globals.restoreAppStateAfterTraceLoad, trace);
     }
 
-    await pluginManager.onTraceLoad(engine, (id) => {
+    await pluginManager.onTraceLoad(trace, (id) => {
       this.updateStatus(`Running plugin: ${id}`);
     });
 
@@ -547,7 +548,7 @@ export class TraceController extends Controller<States> {
         );
       }
       if (pendingDeeplink.query !== undefined) {
-        addQueryResultsTab({
+        addQueryResultsTab(trace, {
           query: pendingDeeplink.query,
           title: 'Deeplink Query',
         });
