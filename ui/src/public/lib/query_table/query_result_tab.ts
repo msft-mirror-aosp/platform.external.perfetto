@@ -14,22 +14,20 @@
 
 import m from 'mithril';
 import {v4 as uuidv4} from 'uuid';
-import {assertExists} from '../base/logging';
-import {QueryResponse, runQuery} from '../common/queries';
-import {raf} from '../core/raf_scheduler';
-import {QueryError} from '../trace_processor/query_result';
+import {assertExists} from '../../../base/logging';
+import {QueryResponse, runQuery} from './queries';
+import {QueryError} from '../../../trace_processor/query_result';
 import {
   AddDebugTrackMenu,
   uuidToViewName,
-} from './debug_tracks/add_debug_track_menu';
-import {Button} from '../widgets/button';
-import {PopupMenu2} from '../widgets/menu';
-import {PopupPosition} from '../widgets/popup';
-import {BottomTab, NewBottomTabArgs} from './bottom_tab';
+} from '../debug_tracks/add_debug_track_menu';
+import {Button} from '../../../widgets/button';
+import {PopupMenu2} from '../../../widgets/menu';
+import {PopupPosition} from '../../../widgets/popup';
+import {BottomTab, NewBottomTabArgs} from '../bottom_tab';
 import {QueryTable} from './query_table';
-import {globals} from './globals';
-import {BottomTabToTabAdapter} from '../public/utils';
-import {Engine} from '../trace_processor/engine';
+import {BottomTabToTabAdapter} from '../../../public/utils';
+import {Trace} from '../../../public/trace';
 
 interface QueryResultTabConfig {
   readonly query: string;
@@ -42,30 +40,24 @@ interface QueryResultTabConfig {
 // External interface for adding a new query results tab
 // Automatically decided whether to add v1 or v2 tab
 export function addQueryResultsTab(
+  trace: Trace,
   config: QueryResultTabConfig,
   tag?: string,
 ): void {
   const queryResultsTab = new QueryResultTab({
+    trace,
     config,
-    engine: getEngine(),
     uuid: uuidv4(),
   });
 
   const uri = 'queryResults#' + (tag ?? uuidv4());
 
-  globals.tabManager.registerTab({
+  trace.tabs.registerTab({
     uri,
     content: new BottomTabToTabAdapter(queryResultsTab),
     isEphemeral: true,
   });
-  globals.tabManager.showTab(uri);
-}
-
-// TODO(stevegolton): Find a way to make this more elegant.
-function getEngine(): Engine {
-  const engConfig = globals.getCurrentEngine();
-  const engineId = assertExists(engConfig).id;
-  return assertExists(globals.engines.get(engineId)).getProxy('QueryResult');
+  trace.tabs.showTab(uri);
 }
 
 export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
@@ -92,7 +84,6 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     } else {
       const result = await runQuery(this.config.query, this.engine);
       this.queryResponse = result;
-      raf.scheduleFullRedraw();
       if (result.error !== undefined) {
         return;
       }
@@ -103,7 +94,7 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
     if (uuid !== '') {
       this.sqlViewName = await this.createViewForDebugTrack(uuid);
       if (this.sqlViewName) {
-        raf.scheduleFullRedraw();
+        this.trace.scheduleRedraw();
       }
     }
   }
@@ -130,11 +121,11 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
                 popupPosition: PopupPosition.Top,
               },
               m(AddDebugTrackMenu, {
+                trace: this.trace,
                 dataSource: {
                   sqlSource: `select * from ${this.sqlViewName}`,
                   columns: assertExists(this.queryResponse).columns,
                 },
-                engine: this.engine,
               }),
             ),
       ],

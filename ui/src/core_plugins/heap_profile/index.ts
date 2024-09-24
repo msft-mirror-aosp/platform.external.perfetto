@@ -66,7 +66,7 @@ class HeapProfilePlugin implements PerfettoPlugin {
         },
         track: new HeapProfileTrack(
           {
-            engine: ctx.engine,
+            trace: ctx,
             uri,
           },
           upid,
@@ -89,6 +89,7 @@ class HeapProfilePlugin implements PerfettoPlugin {
 }
 
 class HeapProfileFlamegraphDetailsPanel implements LegacyDetailsPanel {
+  readonly panelType = 'LegacyDetailsPanel';
   private sel?: HeapProfileSelection;
   private selMonitor = new Monitor([
     () => this.sel?.ts,
