@@ -13,12 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {findRef} from '../../base/dom_utils';
-import {raf} from '../../core/raf_scheduler';
-import {Engine} from '../../trace_processor/engine';
-import {Form, FormLabel} from '../../widgets/form';
-import {Select} from '../../widgets/select';
-import {TextInput} from '../../widgets/text_input';
+import {findRef} from '../../../base/dom_utils';
+import {Form, FormLabel} from '../../../widgets/form';
+import {Select} from '../../../widgets/select';
+import {TextInput} from '../../../widgets/text_input';
 import {
   CounterColumns,
   SliceColumns,
@@ -27,7 +25,7 @@ import {
   addDebugSliceTrack,
   addPivotedTracks,
 } from './debug_tracks';
-import {globals} from '../globals';
+import {Trace} from '../../trace';
 
 export function uuidToViewName(uuid: string): string {
   return `view_${uuid.split('-').join('_')}`;
@@ -35,7 +33,7 @@ export function uuidToViewName(uuid: string): string {
 
 interface AddDebugTrackMenuAttrs {
   dataSource: Required<SqlDataSource>;
-  engine: Engine;
+  trace: Trace;
 }
 
 const TRACK_NAME_FIELD_REF = 'TRACK_NAME_FIELD';
@@ -100,7 +98,7 @@ export class AddDebugTrackMenu
     }
   }
 
-  private renderTrackTypeSelect() {
+  private renderTrackTypeSelect(trace: Trace) {
     const options = [];
     for (const type of ['slice', 'counter']) {
       options.push(
@@ -123,7 +121,7 @@ export class AddDebugTrackMenu
           this.trackType = (e.target as HTMLSelectElement).value as
             | 'slice'
             | 'counter';
-          raf.scheduleFullRedraw();
+          trace.scheduleRedraw();
         },
       },
       options,
@@ -190,13 +188,7 @@ export class AddDebugTrackMenu
               };
               if (this.renderParams.pivot) {
                 addPivotedTracks(
-                  {
-                    engine: vnode.attrs.engine,
-                    tracks: {
-                      registerTrack: (x) =>
-                        globals.trackManager.registerTrack(x),
-                    },
-                  },
+                  vnode.attrs.trace,
                   vnode.attrs.dataSource,
                   this.name,
                   this.renderParams.pivot,
@@ -211,16 +203,7 @@ export class AddDebugTrackMenu
                 );
               } else {
                 addDebugSliceTrack(
-                  // TODO(stevegolton): This is a temporary patch, this menu
-                  // should become part of the debug tracks plugin, at which
-                  // point we can just use the plugin's context object.
-                  {
-                    engine: vnode.attrs.engine,
-                    tracks: {
-                      registerTrack: (x) =>
-                        globals.trackManager.registerTrack(x),
-                    },
-                  },
+                  vnode.attrs.trace,
                   vnode.attrs.dataSource,
                   this.name,
                   sliceColumns,
@@ -236,13 +219,7 @@ export class AddDebugTrackMenu
 
               if (this.renderParams.pivot) {
                 addPivotedTracks(
-                  {
-                    engine: vnode.attrs.engine,
-                    tracks: {
-                      registerTrack: (x) =>
-                        globals.trackManager.registerTrack(x),
-                    },
-                  },
+                  vnode.attrs.trace,
                   vnode.attrs.dataSource,
                   this.name,
                   this.renderParams.pivot,
@@ -251,16 +228,7 @@ export class AddDebugTrackMenu
                 );
               } else {
                 addDebugCounterTrack(
-                  // TODO(stevegolton): This is a temporary patch, this menu
-                  // should become part of the debug tracks plugin, at which
-                  // point we can just use the plugin's context object.
-                  {
-                    engine: vnode.attrs.engine,
-                    tracks: {
-                      registerTrack: (x) =>
-                        globals.trackManager.registerTrack(x),
-                    },
-                  },
+                  vnode.attrs.trace,
                   vnode.attrs.dataSource,
                   this.name,
                   counterColumns,
@@ -285,7 +253,7 @@ export class AddDebugTrackMenu
         },
       }),
       m(FormLabel, {for: 'track_type'}, 'Track type'),
-      this.renderTrackTypeSelect(),
+      this.renderTrackTypeSelect(vnode.attrs.trace),
       renderSelect('ts'),
       this.trackType === 'slice' && renderSelect('dur'),
       this.trackType === 'slice' && renderSelect('name'),

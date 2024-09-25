@@ -23,6 +23,7 @@ import {Workspace, WorkspaceManager} from './workspace';
 import {DetailsPanel, LegacyDetailsPanel} from './details_panel';
 import {SelectionManager} from './selection';
 import {ScrollToArgs} from './scroll_helper';
+import {NoteManager} from './note';
 
 /**
  * The main API endpoint to interact programmaticaly with the UI and alter its
@@ -34,6 +35,7 @@ import {ScrollToArgs} from './scroll_helper';
  */
 export interface Trace extends App {
   readonly engine: Engine;
+  readonly notes: NoteManager;
   readonly timeline: Timeline;
   readonly tabs: TabManager;
   readonly tracks: TrackManager;
@@ -51,12 +53,6 @@ export interface Trace extends App {
   // registerDetailsPanel in TabManagerImpl takes a non-Legacy DetailsPanel, but
   // all plugins use a Legacy one. Keeping this as a bridge for now.
   registerDetailsPanel(detailsPanel: DetailsPanel | LegacyDetailsPanel): void;
-
-  // Creates and shows a tab with a tabular result for the given query.
-  // TODO(primiano): I am not convinced this belongs here, this should probably
-  // go under public/lib/query_result_tab.ts as a utility function that takes
-  // Trace as an argument. However I need first to plumb App everywhere.
-  addQueryResultsTab(query: string, title: string): void;
 
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;
