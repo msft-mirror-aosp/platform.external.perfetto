@@ -13,19 +13,18 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {BaseCounterTrack} from '../../frontend/base_counter_track';
-import {TrackContext} from '../../public/track';
-import {Engine} from '../../trace_processor/engine';
-import {Button} from '../../widgets/button';
-import {globals} from '../globals';
-import {Icons} from '../../base/semantic_icons';
+import {BaseCounterTrack} from '../../../frontend/base_counter_track';
+import {TrackContext} from '../../track';
+import {Button} from '../../../widgets/button';
+import {Icons} from '../../../base/semantic_icons';
+import {Trace} from '../../trace';
 
 export class DebugCounterTrack extends BaseCounterTrack {
   private readonly sqlTableName: string;
 
-  constructor(engine: Engine, ctx: TrackContext, tableName: string) {
+  constructor(trace: Trace, ctx: TrackContext, tableName: string) {
     super({
-      engine,
+      trace,
       uri: ctx.trackUri,
     });
     this.sqlTableName = tableName;
@@ -38,7 +37,7 @@ export class DebugCounterTrack extends BaseCounterTrack {
   getTrackShellButtons(): m.Children {
     return m(Button, {
       onclick: () => {
-        globals.workspace.getTrackByUri(this.uri)?.remove();
+        this.trace.workspace.getTrackByUri(this.uri)?.remove();
       },
       icon: Icons.Close,
       title: 'Close',
