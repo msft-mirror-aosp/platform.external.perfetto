@@ -231,6 +231,7 @@ export interface TrackNodeArgs {
   headless: boolean;
   sortOrder: number;
   collapsed: boolean;
+  isSummary: boolean;
 }
 
 /**
@@ -264,7 +265,14 @@ export class TrackNode extends TrackNodeContainer {
   // sorting/grouping plugins.
   public headless: boolean;
 
-  protected _collapsed: boolean;
+  // If true, this track is to be used as a summary for its children. When the
+  // group is expanded the track will become sticky to the top of the viewport
+  // to provide context for the tracks within, and the content of this track
+  // shall be omitted. It will also be squashed down to a smaller height to save
+  // vertical space.
+  public isSummary: boolean;
+
+  protected _collapsed = true;
 
   constructor(args?: Partial<TrackNodeArgs>) {
     super();
@@ -276,6 +284,7 @@ export class TrackNode extends TrackNodeContainer {
       headless = false,
       sortOrder,
       collapsed = true,
+      isSummary = false,
     } = args ?? {};
 
     this.id = id;
@@ -283,6 +292,7 @@ export class TrackNode extends TrackNodeContainer {
     this.headless = headless;
     this.title = title;
     this.sortOrder = sortOrder;
+    this.isSummary = isSummary;
     this._collapsed = collapsed;
   }
 
@@ -419,6 +429,24 @@ export class TrackNode extends TrackNodeContainer {
    */
   get expanded(): boolean {
     return !this._collapsed;
+  }
+
+  /**
+   * Returns the list of titles representing the full path from the root node to
+   * the current node. This path consists only of node titles, workspaces are
+   * omitted.
+   */
+  get fullPath(): ReadonlyArray<string> {
+    let fullPath = [this.title];
+    let parent = this.parent;
+    while (parent && parent instanceof TrackNode) {
+      // Ignore headless containers as they don't appear in the tree...
+      if (!parent.headless) {
+        fullPath = [parent.title, ...fullPath];
+      }
+      parent = parent.parent;
+    }
+    return fullPath;
   }
 }
 
