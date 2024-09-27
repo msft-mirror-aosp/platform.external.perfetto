@@ -12,41 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ColumnDef} from '../../common/aggregation_data';
-import {Sorting} from '../../common/state';
-import {Area} from '../../public/selection';
-import {globals} from '../../frontend/globals';
+import {ColumnDef, Sorting} from '../../public/aggregation';
+import {AreaSelection} from '../../public/selection';
 import {Engine} from '../../trace_processor/engine';
-import {AggregationController} from './aggregation_controller';
+import {AreaSelectionAggregator} from '../../public/selection';
 import {
   ASYNC_SLICE_TRACK_KIND,
   THREAD_SLICE_TRACK_KIND,
 } from '../../public/track_kinds';
 
-export function getSelectedTrackKeys(area: Area): number[] {
-  const selectedTrackKeys: number[] = [];
-  for (const trackUri of area.trackUris) {
-    const trackInfo = globals.trackManager.getTrack(trackUri);
-    if (trackInfo?.tags?.kind === THREAD_SLICE_TRACK_KIND) {
-      trackInfo.tags.trackIds &&
-        selectedTrackKeys.push(...trackInfo.tags.trackIds);
-    }
-    if (trackInfo?.tags?.kind === ASYNC_SLICE_TRACK_KIND) {
-      trackInfo.tags.trackIds &&
-        selectedTrackKeys.push(...trackInfo.tags.trackIds);
-    }
-  }
-  return selectedTrackKeys;
-}
+export class AsyncAndThreadSliceSelectionAggregator
+  implements AreaSelectionAggregator
+{
+  readonly id = 'slice_aggregation';
 
-export class SliceAggregationController extends AggregationController {
-  async createAggregateView(engine: Engine, area: Area) {
-    const selectedTrackKeys = getSelectedTrackKeys(area);
+  async createAggregateView(engine: Engine, area: AreaSelection) {
+    const selectedTrackKeys = getSelectedTrackSqlIds(area);
 
     if (selectedTrackKeys.length === 0) return false;
 
     await engine.query(`
-      create or replace perfetto table ${this.kind} as
+      create or replace perfetto table ${this.id} as
       select
         name,
         sum(dur) AS total_dur,
@@ -101,4 +87,19 @@ export class SliceAggregationController extends AggregationController {
       },
     ];
   }
+}
+
+function getSelectedTrackSqlIds(area: AreaSelection): number[] {
+  const selectedTrackKeys: number[] = [];
+  for (const trackInfo of area.tracks) {
+    if (trackInfo?.tags?.kind === THREAD_SLICE_TRACK_KIND) {
+      trackInfo.tags.trackIds &&
+        selectedTrackKeys.push(...trackInfo.tags.trackIds);
+    }
+    if (trackInfo?.tags?.kind === ASYNC_SLICE_TRACK_KIND) {
+      trackInfo.tags.trackIds &&
+        selectedTrackKeys.push(...trackInfo.tags.trackIds);
+    }
+  }
+  return selectedTrackKeys;
 }
