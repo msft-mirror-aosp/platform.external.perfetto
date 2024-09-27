@@ -23,7 +23,7 @@ import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
 import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
-import {flattenArgs, traceEvent} from '../common/metatracing';
+import {traceEvent} from '../common/metatracing';
 import {pluginManager} from '../common/plugins';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
@@ -376,6 +376,13 @@ function onCssLoaded() {
 
   // Initialize plugins, now that we are ready to go
   pluginManager.initialize();
+
+  const route = Router.parseUrl(window.location.href);
+  for (const pluginId of (route.args.enablePlugins ?? '').split(',')) {
+    if (pluginManager.hasPlugin(pluginId)) {
+      pluginManager.activatePlugin(pluginId);
+    }
+  }
 }
 
 // If the URL is /#!?rpc_port=1234, change the default RPC port.
@@ -412,18 +419,12 @@ function maybeChangeRpcPortFromFragment() {
 
 function stateActionDispatcher(actions: DeferredAction[]) {
   const edits = actions.map((action) => {
-    return traceEvent(
-      `action.${action.type}`,
-      () => {
-        return (draft: Draft<State>) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (StateActions as any)[action.type](draft, action.args);
-        };
-      },
-      {
-        args: flattenArgs(action.args),
-      },
-    );
+    return traceEvent(`action.${action.type}`, () => {
+      return (draft: Draft<State>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (StateActions as any)[action.type](draft, action.args);
+      };
+    });
   });
   globals.store.edit(edits);
 }

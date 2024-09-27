@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ColumnDef} from '../../common/aggregation_data';
-import {Sorting} from '../../common/state';
-import {Area} from '../../public/selection';
+import {ColumnDef, Sorting} from '../../public/aggregation';
+import {AreaSelection} from '../../public/selection';
 import {ACTUAL_FRAMES_SLICE_TRACK_KIND} from '../../public/track_kinds';
-import {globals} from '../../frontend/globals';
 import {Engine} from '../../trace_processor/engine';
-import {AggregationController} from './aggregation_controller';
+import {AreaSelectionAggregator} from '../../public/selection';
 
-export class FrameAggregationController extends AggregationController {
-  async createAggregateView(engine: Engine, area: Area) {
+export class FrameSelectionAggregator implements AreaSelectionAggregator {
+  readonly id = 'frame_aggregation';
+
+  async createAggregateView(engine: Engine, area: AreaSelection) {
     const selectedSqlTrackIds: number[] = [];
-    for (const trackUri of area.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of area.tracks) {
       if (trackInfo?.tags?.kind === ACTUAL_FRAMES_SLICE_TRACK_KIND) {
         trackInfo.tags.trackIds &&
           selectedSqlTrackIds.push(...trackInfo.tags.trackIds);
@@ -33,7 +32,7 @@ export class FrameAggregationController extends AggregationController {
     if (selectedSqlTrackIds.length === 0) return false;
 
     await engine.query(`
-      create or replace perfetto table ${this.kind} as
+      create or replace perfetto table ${this.id} as
       select
         jank_type,
         count(1) as occurrences,

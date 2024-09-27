@@ -13,19 +13,20 @@
 // limitations under the License.
 
 import {exists} from '../../base/utils';
-import {ColumnDef} from '../../common/aggregation_data';
-import {Sorting} from '../../common/state';
-import {Area} from '../../public/selection';
-import {globals} from '../../frontend/globals';
+import {ColumnDef, Sorting} from '../../public/aggregation';
+import {AreaSelection} from '../../public/selection';
 import {Engine} from '../../trace_processor/engine';
 import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
-import {AggregationController} from './aggregation_controller';
+import {AreaSelectionAggregator} from '../../public/selection';
 
-export class CpuByProcessAggregationController extends AggregationController {
-  async createAggregateView(engine: Engine, area: Area) {
+export class CpuSliceByProcessSelectionAggregator
+  implements AreaSelectionAggregator
+{
+  readonly id = 'cpu_by_process_aggregation';
+
+  async createAggregateView(engine: Engine, area: AreaSelection) {
     const selectedCpus: number[] = [];
-    for (const trackUri of area.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of area.tracks) {
       if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
         exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
       }
@@ -33,7 +34,7 @@ export class CpuByProcessAggregationController extends AggregationController {
     if (selectedCpus.length === 0) return false;
 
     await engine.query(`
-      create or replace perfetto table ${this.kind} as
+      create or replace perfetto table ${this.id} as
       select
         process.name as process_name,
         process.pid,

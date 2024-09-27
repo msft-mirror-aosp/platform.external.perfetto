@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {exists} from '../../../base/utils';
-import {ColumnDef} from '../../../common/aggregation_data';
-import {Sorting} from '../../../common/state';
-import {Area} from '../../../public/selection';
-import {globals} from '../../../frontend/globals';
-import {Engine} from '../../../trace_processor/engine';
-import {NUM} from '../../../trace_processor/query_result';
-import {CPU_SLICE_TRACK_KIND} from '../../../public/track_kinds';
-import {AggregationController} from '../aggregation_controller';
-import {hasWattsonSupport} from '../../../core/trace_config_utils';
+import {exists} from '../../base/utils';
+import {ColumnDef, Sorting} from '../../public/aggregation';
+import {AreaSelection} from '../../public/selection';
+import {Engine} from '../../trace_processor/engine';
+import {NUM} from '../../trace_processor/query_result';
+import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
+import {AreaSelectionAggregator} from '../../public/selection';
 
-export class WattsonPackageAggregationController extends AggregationController {
-  async createAggregateView(engine: Engine, area: Area) {
-    await engine.query(`drop view if exists ${this.kind};`);
+export class WattsonPackageSelectionAggregator
+  implements AreaSelectionAggregator
+{
+  readonly id = 'wattson_package_aggregation';
 
-    // Short circuit if Wattson is not supported for this Perfetto trace
-    if (!(await hasWattsonSupport(engine))) return false;
+  async createAggregateView(engine: Engine, area: AreaSelection) {
+    await engine.query(`drop view if exists ${this.id};`);
+
     const packageInfo = await engine.query(`
       INCLUDE PERFETTO MODULE android.process_metadata;
       SELECT COUNT(*) as isValid FROM android_process_metadata
@@ -37,8 +36,7 @@ export class WattsonPackageAggregationController extends AggregationController {
     if (packageInfo.firstRow({isValid: NUM}).isValid === 0) return false;
 
     const selectedCpus: number[] = [];
-    for (const trackUri of area.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of area.tracks) {
       if (trackInfo?.tags?.kind === CPU_SLICE_TRACK_KIND) {
         exists(trackInfo.tags.cpu) && selectedCpus.push(trackInfo.tags.cpu);
       }
@@ -51,7 +49,7 @@ export class WattsonPackageAggregationController extends AggregationController {
     // which is run prior to execution of this module
     engine.query(`
       -- Grouped by UID and made CPU agnostic
-      CREATE VIEW ${this.kind} AS
+      CREATE VIEW ${this.id} AS
       SELECT
         ROUND(SUM(total_pws) / ${duration}, 2) as avg_mw,
         ROUND(SUM(total_pws) / 1000000000, 2) as total_mws,
