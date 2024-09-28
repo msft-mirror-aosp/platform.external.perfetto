@@ -47,8 +47,12 @@ export class PerfettoTestHelper {
     await this.page.click('body');
   }
 
-  async openTraceFile(traceName: string): Promise<void> {
-    await this.page.goto('/?testing=1');
+  async openTraceFile(traceName: string, args?: {}): Promise<void> {
+    args = {testing: '1', ...args};
+    const qs = Object.entries(args ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join('&');
+    await this.page.goto('/?' + qs);
     const file = await this.page.waitForSelector('input.trace_file', {
       state: 'attached',
     });
@@ -98,6 +102,23 @@ export class PerfettoTestHelper {
 
   pinTrackUsingShellBtn(track: Locator) {
     track.locator('button[title="Pin to top"]').click({force: true});
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async runCommand(cmdId: string, ...args: any[]) {
+    await this.page.evaluate(
+      (arg) => self.globals.commandManager.runCommand(arg.cmdId, ...arg.args),
+      {cmdId, args},
+    );
+  }
+
+  async searchSlice(name: string) {
+    const omnibox = this.page.locator('input[ref=omnibox]');
+    await omnibox.focus();
+    await omnibox.fill(name);
+    await this.waitForPerfettoIdle();
+    await omnibox.press('Enter');
+    await this.waitForPerfettoIdle();
   }
 
   getTestTracePath(fname: string): string {

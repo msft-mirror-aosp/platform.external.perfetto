@@ -17,7 +17,6 @@ import {
   Selection,
   LegacySelection,
   Area,
-  ProfileType,
   SelectionOpts,
   SelectionManager,
   AreaSelectionAggregator,
@@ -100,6 +99,7 @@ export class SelectionManagerImpl implements SelectionManager {
     assertTrue(start <= end);
     this.setSelection({
       kind: 'area',
+      tracks: [],
       ...args,
     });
   }
@@ -160,92 +160,6 @@ export class SelectionManagerImpl implements SelectionManager {
     );
   }
 
-  setHeapProfile(args: {
-    id: number;
-    upid: number;
-    ts: time;
-    type: ProfileType;
-  }): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'HEAP_PROFILE',
-        id: args.id,
-        upid: args.upid,
-        ts: args.ts,
-        type: args.type,
-      },
-    });
-  }
-
-  setPerfSamples(args: {
-    id: number;
-    utid?: number;
-    upid?: number;
-    leftTs: time;
-    rightTs: time;
-    type: ProfileType;
-  }) {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'PERF_SAMPLES',
-        id: args.id,
-        utid: args.utid,
-        upid: args.upid,
-        leftTs: args.leftTs,
-        rightTs: args.rightTs,
-        type: args.type,
-      },
-    });
-  }
-
-  setCpuProfileSample(args: {id: number; utid: number; ts: time}): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'CPU_PROFILE_SAMPLE',
-        id: args.id,
-        utid: args.utid,
-        ts: args.ts,
-      },
-    });
-  }
-
-  setSchedSlice(args: {id: number; trackUri?: string}): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'SCHED_SLICE',
-        id: args.id,
-        trackUri: args.trackUri,
-      },
-    });
-  }
-
-  setLegacySlice(
-    args: {
-      id: number;
-      trackUri?: string;
-      table?: string;
-      scroll?: boolean;
-    },
-    opts?: SelectionOpts,
-  ): void {
-    this.setSelection(
-      {
-        kind: 'legacy',
-        legacySelection: {
-          kind: 'SLICE',
-          id: args.id,
-          table: args.table,
-          trackUri: args.trackUri,
-        },
-      },
-      opts,
-    );
-  }
-
   setGenericSlice(args: {
     id: number;
     sqlTableName: string;
@@ -278,17 +192,6 @@ export class SelectionManagerImpl implements SelectionManager {
     });
   }
 
-  setThreadState(args: {id: number; trackUri?: string}): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'THREAD_STATE',
-        id: args.id,
-        trackUri: args.trackUri,
-      },
-    });
-  }
-
   get selection(): Selection {
     return this._selection;
   }
@@ -302,14 +205,28 @@ export class SelectionManagerImpl implements SelectionManager {
   }
 
   private setSelection(selection: Selection, opts?: SelectionOpts) {
+    if (selection.kind === 'area') {
+      // In the case of area selection, the caller provides a list of trackUris.
+      // However, all the consumer want to access the resolved TrackDescriptor.
+      // Rather than delegating this to the various consumers, we resolve them
+      // now once and for all and place them in the selection object.
+      const tracks = [];
+      for (const uri of selection.trackUris) {
+        const trackDescr = this.trackManager.getTrack(uri);
+        if (trackDescr === undefined) continue;
+        tracks.push(trackDescr);
+      }
+      selection = {...selection, tracks};
+    }
+
     this._selection = selection;
     this._pendingScrollId = opts?.pendingScrollId;
     this.onSelectionChange(selection, opts ?? {});
     const generation = ++this._selectionGeneration;
     raf.scheduleFullRedraw();
 
-    if (this.selection.kind === 'area') {
-      this._aggregationManager.aggregateArea(this.selection);
+    if (this._selection.kind === 'area') {
+      this._aggregationManager.aggregateArea(this._selection);
     } else {
       this._aggregationManager.clear();
     }
