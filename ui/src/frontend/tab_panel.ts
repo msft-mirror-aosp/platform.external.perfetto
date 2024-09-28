@@ -23,12 +23,15 @@ import {
 } from './drag_handle';
 import {globals} from './globals';
 import {raf} from '../core/raf_scheduler';
+import {TraceAttrs} from '../public/trace';
 
 interface TabWithContent extends Tab {
   content: m.Children;
 }
 
-export class TabPanel implements m.ClassComponent {
+export type TabPanelAttrs = TraceAttrs;
+
+export class TabPanel implements m.ClassComponent<TabPanelAttrs> {
   // Tabs panel starts collapsed.
   private detailsHeight = 0;
   private fadeContext = new FadeContext();
@@ -119,7 +122,6 @@ export class TabPanel implements m.ClassComponent {
 
   private renderCSTabContent(): {isLoading: boolean; content: m.Children} {
     const currentSelection = globals.selectionManager.selection;
-    const legacySelection = globals.selectionManager.legacySelection;
     if (currentSelection.kind === 'empty') {
       return {
         isLoading: false,
@@ -151,25 +153,12 @@ export class TabPanel implements m.ClassComponent {
     }
 
     // Get the first "truthy" details panel
-    let detailsPanels = globals.tabManager.detailsPanels.map((dp) => {
+    const detailsPanels = globals.tabManager.detailsPanels.map((dp) => {
       return {
         content: dp.render(currentSelection),
         isLoading: dp.isLoading?.() ?? false,
       };
     });
-
-    if (legacySelection !== null) {
-      const legacyDetailsPanels = globals.tabManager.legacyDetailsPanels.map(
-        (dp) => {
-          return {
-            content: dp.render(legacySelection),
-            isLoading: dp.isLoading?.() ?? false,
-          };
-        },
-      );
-
-      detailsPanels = detailsPanels.concat(legacyDetailsPanels);
-    }
 
     const panel = detailsPanels.find(({content}) => content);
 

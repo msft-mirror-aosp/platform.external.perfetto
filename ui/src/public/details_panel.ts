@@ -13,12 +13,7 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {LegacySelection, Selection} from './selection';
-
-export interface LegacyDetailsPanel {
-  render(selection: LegacySelection): m.Children;
-  isLoading?(): boolean;
-}
+import {Selection} from './selection';
 
 export interface DetailsPanel {
   render(selection: Selection): m.Children;

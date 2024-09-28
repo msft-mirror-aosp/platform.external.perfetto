@@ -340,6 +340,7 @@ enum BuiltinClock {
   BUILTIN_CLOCK_MONOTONIC_RAW = 5;
   BUILTIN_CLOCK_BOOTTIME = 6;
   BUILTIN_CLOCK_TSC = 9;
+  BUILTIN_CLOCK_PERF = 10;
   BUILTIN_CLOCK_MAX_ID = 63;
 
   reserved 7, 8;
@@ -926,7 +927,7 @@ message EtwConfig {
 
 // Begin of protos/perfetto/config/ftrace/ftrace_config.proto
 
-// Next id: 29
+// Next id: 30
 message FtraceConfig {
   // Ftrace events to record, example: "sched/sched_switch".
   repeated string ftrace_events = 1;
@@ -953,9 +954,9 @@ message FtraceConfig {
   // of 50 means that a read pass is triggered as soon as any per-cpu buffer is
   // half-full. Not guaranteed if there are multiple concurrent tracing
   // sessions.
-  // Currently does nothing on Linux kernels below v6.1.
-  // Introduced in: perfetto v43.
-  optional uint32 drain_buffer_percent = 26;
+  // Currently does nothing on Linux kernels below v6.9.
+  // Introduced in: perfetto v48.
+  optional uint32 drain_buffer_percent = 29;
 
   // Configuration for compact encoding of scheduler events. When enabled (and
   // recording the relevant ftrace events), specific high-volume events are
@@ -1145,6 +1146,9 @@ message FtraceConfig {
   // the recording in the kernel.
   // Introduced in: perfetto v43.
   optional bool buffer_size_lower_bound = 27;
+
+  // Previously drain_buffer_percent, perfetto v43-v47.
+  reserved 26;
 }
 
 // End of protos/perfetto/config/ftrace/ftrace_config.proto
@@ -13399,6 +13403,13 @@ message PerfettoMetatrace {
 
 // Events emitted by the tracing service.
 message TracingServiceEvent {
+  message DataSources {
+    message DataSource {
+      optional string producer_name = 1;
+      optional string data_source_name = 2;
+    }
+    repeated DataSource data_source = 1;
+  }
   oneof event_type {
     // When each of the following booleans are set to true, they report the
     // point in time (through TracePacket's timestamp) where the condition
@@ -13442,6 +13453,14 @@ message TracingServiceEvent {
     // Deprecated since Android U, where --save-for-bugreport uses
     // non-destructive cloning.
     bool seized_for_bugreport = 6;
+
+    // Emitted when not all data sources in all producers reply to a start
+    // request after some time.
+    DataSources slow_starting_data_sources = 7;
+
+    // Emitted when the last flush request has failed. Lists data sources that
+    // did not reply on time.
+    DataSources last_flush_slow_data_sources = 8;
   }
 }
 
@@ -14595,6 +14614,23 @@ message SystemInfo {
 
 // Information about CPUs from procfs and sysfs.
 message CpuInfo {
+  message ArmCpuIdentifier {
+    // Implementer code
+    optional uint32 implementer = 1;
+
+    // Architecture code
+    optional uint32 architecture = 2;
+
+    // CPU variant
+    optional uint32 variant = 3;
+
+    // CPU part
+    optional uint32 part = 4;
+
+    // CPU revision
+    optional uint32 revision = 5;
+  }
+
   // Information about a single CPU.
   message Cpu {
     // Value of "Processor" field from /proc/cpuinfo for this CPU.
@@ -14609,6 +14645,11 @@ message CpuInfo {
     // Cpu capacity from /sys/devices/system/cpu/cpuX/cpu_capacity where X is
     // the index of this CPU.
     optional uint32 capacity = 3;
+
+    // Code to identify the CPU
+    oneof identifier {
+      ArmCpuIdentifier arm_identifier = 4;
+    }
   }
 
   // Describes available CPUs, one entry per CPU.
