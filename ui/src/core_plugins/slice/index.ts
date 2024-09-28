@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {addSqlTableTab} from '../../frontend/sql_table_tab_command';
+import {addSqlTableTab} from '../../frontend/sql_table_tab_interface';
 import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {getSliceTable} from './table';
+import {AsyncAndThreadSliceSelectionAggregator} from './async_and_thread_slice_selection_aggregator';
 
 class SlicePlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace) {
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new AsyncAndThreadSliceSelectionAggregator(),
+    );
+
     sqlTableRegistry['slice'] = getSliceTable();
     ctx.commands.registerCommand({
       id: 'perfetto.ShowTable.slice',
