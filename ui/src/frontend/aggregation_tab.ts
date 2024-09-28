@@ -15,7 +15,7 @@
 import m from 'mithril';
 import {AggregationPanel} from './aggregation_panel';
 import {globals} from './globals';
-import {isEmptyData} from '../common/aggregation_data';
+import {isEmptyData} from '../public/aggregation';
 import {DetailsShell} from '../widgets/details_shell';
 import {Button, ButtonBar} from '../widgets/button';
 import {raf} from '../core/raf_scheduler';
@@ -36,7 +36,8 @@ import {
 } from '../core/query_flamegraph';
 import {DisposableStack} from '../base/disposable_stack';
 import {assertExists} from '../base/logging';
-import {Trace, TraceAttrs} from '../public/trace';
+import {TraceImpl} from '../core/app_trace_impl';
+import {Trace} from '../public/trace';
 
 interface View {
   key: string;
@@ -44,7 +45,7 @@ interface View {
   content: m.Children;
 }
 
-export type AreaDetailsPanelAttrs = TraceAttrs;
+export type AreaDetailsPanelAttrs = {trace: TraceImpl};
 
 class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
   private readonly monitor = new Monitor([
@@ -55,7 +56,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
   private perfSampleFlamegraphAttrs?: QueryFlamegraphAttrs;
   private sliceFlamegraphAttrs?: QueryFlamegraphAttrs;
 
-  private getCurrentView(trace: Trace): string | undefined {
+  private getCurrentView(trace: TraceImpl): string | undefined {
     const types = this.getViews(trace).map(({key}) => key);
 
     if (types.length === 0) {
@@ -73,20 +74,22 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
     return this.currentTab;
   }
 
-  private getViews(trace: Trace): View[] {
+  private getViews(trace: TraceImpl): View[] {
     const views: View[] = [];
 
-    for (const [key, value] of globals.aggregateDataStore.entries()) {
-      if (!isEmptyData(value)) {
+    for (const aggregator of trace.selection.aggregation.aggregators) {
+      const aggregatorId = aggregator.id;
+      const value = trace.selection.aggregation.getAggregatedData(aggregatorId);
+      if (value !== undefined && !isEmptyData(value)) {
         views.push({
           key: value.tabName,
           name: value.tabName,
-          content: m(AggregationPanel, {kind: key, key, data: value}),
+          content: m(AggregationPanel, {aggregatorId, data: value, trace}),
         });
       }
     }
 
-    const pivotTableState = globals.state.nonSerializableState.pivotTable;
+    const pivotTableState = trace.pivotTable.state;
     const tree = pivotTableState.queryResult?.tree;
     if (
       pivotTableState.selectionArea != undefined &&
@@ -209,8 +212,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
       return this.cpuProfileFlamegraphAttrs;
     }
     const utids = [];
-    for (const trackUri of currentSelection.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of currentSelection.tracks) {
       if (trackInfo?.tags?.kind === CPU_PROFILE_TRACK_KIND) {
         utids.push(trackInfo.tags?.utid);
       }
@@ -318,8 +320,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
       return this.sliceFlamegraphAttrs;
     }
     const trackIds = [];
-    for (const trackUri of currentSelection.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of currentSelection.tracks) {
       if (trackInfo?.tags?.kind !== THREAD_SLICE_TRACK_KIND) {
         continue;
       }
@@ -369,7 +370,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
 export class AggregationsTabs implements Disposable {
   private trash = new DisposableStack();
 
-  constructor(trace: Trace) {
+  constructor(trace: TraceImpl) {
     const unregister = globals.tabManager.registerDetailsPanel({
       panelType: 'DetailsPanel',
       render(selection) {
@@ -391,8 +392,7 @@ export class AggregationsTabs implements Disposable {
 
 function getUpidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
   const upids = [];
-  for (const trackUri of currentSelection.trackUris) {
-    const trackInfo = globals.trackManager.getTrack(trackUri);
+  for (const trackInfo of currentSelection.tracks) {
     if (
       trackInfo?.tags?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND &&
       trackInfo.tags?.utid === undefined
@@ -405,8 +405,7 @@ function getUpidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
 
 function getUtidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
   const utids = [];
-  for (const trackUri of currentSelection.trackUris) {
-    const trackInfo = globals.trackManager.getTrack(trackUri);
+  for (const trackInfo of currentSelection.tracks) {
     if (
       trackInfo?.tags?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND &&
       trackInfo.tags?.utid !== undefined
