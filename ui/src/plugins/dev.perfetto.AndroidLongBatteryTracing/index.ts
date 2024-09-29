@@ -24,8 +24,7 @@ import {
   SimpleCounterTrack,
   SimpleCounterTrackConfig,
 } from '../../frontend/simple_counter_track';
-import {globals} from '../../frontend/globals';
-import {GroupNode, TrackNode} from '../../public/workspace';
+import {TrackNode} from '../../public/workspace';
 
 interface ContainedTrace {
   uuid: string;
@@ -1150,21 +1149,21 @@ const BT_ACTIVITY = `
 `;
 
 class AndroidLongBatteryTracing implements PerfettoPlugin {
-  private readonly groups = new Map<string, GroupNode>();
+  private readonly groups = new Map<string, TrackNode>();
 
   private addTrack(ctx: Trace, track: TrackNode, groupName?: string): void {
     if (groupName) {
       const existingGroup = this.groups.get(groupName);
       if (existingGroup) {
-        existingGroup.insertChildInOrder(track);
+        existingGroup.addChildInOrder(track);
       } else {
-        const group = new GroupNode(groupName);
-        group.insertChildInOrder(track);
+        const group = new TrackNode({title: groupName, isSummary: true});
+        group.addChildInOrder(track);
         this.groups.set(groupName, group);
-        ctx.workspace.insertChildInOrder(group);
+        ctx.workspace.addChildInOrder(group);
       }
     } else {
-      ctx.workspace.insertChildInOrder(track);
+      ctx.workspace.addChildInOrder(track);
     }
   }
 
@@ -1188,9 +1187,9 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     ctx.tracks.registerTrack({
       uri,
       title: name,
-      track: new SimpleSliceTrack(ctx.engine, {trackUri: uri}, config),
+      track: new SimpleSliceTrack(ctx, {trackUri: uri}, config),
     });
-    const track = new TrackNode(uri, name);
+    const track = new TrackNode({uri, title: name});
     this.addTrack(ctx, track, groupName);
   }
 
@@ -1214,9 +1213,9 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     ctx.tracks.registerTrack({
       uri,
       title: name,
-      track: new SimpleCounterTrack(ctx.engine, {trackUri: uri}, config),
+      track: new SimpleCounterTrack(ctx, {trackUri: uri}, config),
     });
-    const track = new TrackNode(uri, name);
+    const track = new TrackNode({uri, title: name});
     this.addTrack(ctx, track, groupName);
   }
 
@@ -1459,13 +1458,16 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
 
     const e = ctx.engine;
 
-    if (
-      globals.extraSqlPackages.find((x) => x.name === 'google3') !== undefined
-    ) {
+    let thrown = false;
+    try {
       await e.query(
         `INCLUDE PERFETTO MODULE
             google3.wireless.android.telemetry.trace_extractor.modules.modem_tea_metrics`,
       );
+    } catch {
+      thrown = true;
+    }
+    if (!thrown) {
       const counters = await e.query(
         `select distinct name from pixel_modem_counters`,
       );
