@@ -64,7 +64,7 @@ class FramesPlugin implements PerfettoPlugin {
       const pid = it.pid;
       const maxDepth = it.maxDepth;
 
-      const displayName = getTrackName({
+      const title = getTrackName({
         name: trackName,
         upid,
         pid,
@@ -75,8 +75,8 @@ class FramesPlugin implements PerfettoPlugin {
       const uri = `/process_${upid}/expected_frames`;
       ctx.tracks.registerTrack({
         uri,
-        title: displayName,
-        track: new ExpectedFramesTrack(engine, maxDepth, uri, trackIds),
+        title,
+        track: new ExpectedFramesTrack(ctx, maxDepth, uri, trackIds),
         tags: {
           trackIds,
           upid,
@@ -84,9 +84,8 @@ class FramesPlugin implements PerfettoPlugin {
         },
       });
       const group = getOrCreateGroupForProcess(ctx.workspace, upid);
-      const track = new TrackNode(uri, displayName);
-      track.sortOrder = -50;
-      group.insertChildInOrder(track);
+      const track = new TrackNode({uri, title, sortOrder: -50});
+      group.addChildInOrder(track);
     }
   }
 
@@ -128,7 +127,7 @@ class FramesPlugin implements PerfettoPlugin {
       }
 
       const kind = 'ActualFrames';
-      const displayName = getTrackName({
+      const title = getTrackName({
         name: trackName,
         upid,
         pid,
@@ -139,8 +138,8 @@ class FramesPlugin implements PerfettoPlugin {
       const uri = `/process_${upid}/actual_frames`;
       ctx.tracks.registerTrack({
         uri,
-        title: displayName,
-        track: new ActualFramesTrack(engine, maxDepth, uri, trackIds),
+        title,
+        track: new ActualFramesTrack(ctx, maxDepth, uri, trackIds),
         tags: {
           upid,
           trackIds,
@@ -148,9 +147,8 @@ class FramesPlugin implements PerfettoPlugin {
         },
       });
       const group = getOrCreateGroupForProcess(ctx.workspace, upid);
-      const track = new TrackNode(uri, displayName);
-      track.sortOrder = -50;
-      group.insertChildInOrder(track);
+      const track = new TrackNode({uri, title, sortOrder: -50});
+      group.addChildInOrder(track);
     }
   }
 }

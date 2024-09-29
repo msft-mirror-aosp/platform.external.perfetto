@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {globals} from '../../frontend/globals';
 import {
   BaseCounterTrack,
   CounterOptions,
 } from '../../frontend/base_counter_track';
-import {Engine} from '../../trace_processor/engine';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {CPUSS_ESTIMATE_TRACK_KIND} from '../../public/track_kinds';
 import {hasWattsonSupport} from '../../core/trace_config_utils';
-import {GroupNode, TrackNode} from '../../public/workspace';
+import {TrackNode} from '../../public/workspace';
 
 class Wattson implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
@@ -31,54 +29,52 @@ class Wattson implements PerfettoPlugin {
 
     ctx.engine.query(`INCLUDE PERFETTO MODULE wattson.curves.ungrouped;`);
 
-    const group = new GroupNode('Wattson');
-    ctx.workspace.insertChildInOrder(group);
+    const group = new TrackNode({title: 'Wattson', isSummary: true});
+    ctx.workspace.addChildInOrder(group);
 
     // CPUs estimate as part of CPU subsystem
-    const cpus = globals.traceContext.cpus;
+    const cpus = ctx.traceInfo.cpus;
     for (const cpu of cpus) {
       const queryKey = `cpu${cpu}_curve`;
       const uri = `/wattson/cpu_subsystem_estimate_cpu${cpu}`;
-      const displayName = `Cpu${cpu} Estimate`;
+      const title = `Cpu${cpu} Estimate`;
       ctx.tracks.registerTrack({
         uri,
-        title: displayName,
-        track: new CpuSubsystemEstimateTrack(ctx.engine, uri, queryKey),
+        title,
+        track: new CpuSubsystemEstimateTrack(ctx, uri, queryKey),
         tags: {
           kind: CPUSS_ESTIMATE_TRACK_KIND,
           wattson: `CPU${cpu}`,
           groupName: `Wattson`,
         },
       });
-      group.insertChildInOrder(new TrackNode(uri, displayName));
+      group.addChildInOrder(new TrackNode({uri, title}));
     }
 
     const uri = `/wattson/cpu_subsystem_estimate_dsu_scu`;
-    const displayName = `DSU/SCU Estimate`;
+    const title = `DSU/SCU Estimate`;
     ctx.tracks.registerTrack({
       uri,
-      title: displayName,
-      track: new CpuSubsystemEstimateTrack(ctx.engine, uri, `dsu_scu`),
+      title,
+      track: new CpuSubsystemEstimateTrack(ctx, uri, `dsu_scu`),
       tags: {
         kind: CPUSS_ESTIMATE_TRACK_KIND,
         wattson: 'Dsu_Scu',
         groupName: `Wattson`,
       },
     });
-    group.insertChildInOrder(new TrackNode(uri, displayName));
+    group.addChildInOrder(new TrackNode({uri, title}));
   }
 }
 
 class CpuSubsystemEstimateTrack extends BaseCounterTrack {
-  readonly engine: Engine;
   readonly queryKey: string;
 
-  constructor(engine: Engine, uri: string, queryKey: string) {
+  constructor(trace: Trace, uri: string, queryKey: string) {
     super({
-      engine,
+      trace,
       uri,
     });
-    this.engine = engine;
     this.queryKey = queryKey;
   }
 
