@@ -25,7 +25,7 @@ import {Timestamp} from '../../frontend/widgets/timestamp';
 import {THREAD_STATE_TRACK_KIND} from '../../public/track_kinds';
 import {scrollTo} from '../../public/scroll_helper';
 import {SchedSqlId} from '../../trace_processor/sql_utils/core_types';
-import {BottomTab, NewBottomTabArgs} from '../../frontend/bottom_tab';
+import {BottomTab, NewBottomTabArgs} from '../../public/lib/bottom_tab';
 import {
   getSched,
   getSchedWakeupInfo,
@@ -282,11 +282,10 @@ export class SchedDetailsTab extends BottomTab<SchedDetailsTabConfig> {
     );
 
     if (trackDescriptor && data.sched.threadStateId) {
-      globals.selectionManager.setThreadState({
-        id: data.sched.threadStateId,
-        trackUri: trackDescriptor.uri,
-      });
-
+      globals.selectionManager.selectSqlEvent(
+        'thread_state',
+        data.sched.threadStateId,
+      );
       scrollTo({
         track: {uri: trackDescriptor.uri, expandGroup: true},
         time: {start: data.sched.ts},

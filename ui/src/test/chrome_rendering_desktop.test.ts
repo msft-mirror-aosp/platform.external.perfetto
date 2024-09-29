@@ -31,22 +31,15 @@ test('load trace', async () => {
 });
 
 test('expand browser', async () => {
-  const trackGroup = pth.locateTrackGroup('Browser 12685');
-  await trackGroup.scrollIntoViewIfNeeded();
-  await trackGroup.locator('.fold-button').click();
+  const grp = pth.locateTrackGroup('Browser 12685');
+  grp.scrollIntoViewIfNeeded();
+  await pth.toggleTrackGroup(grp);
   await pth.waitForIdleAndScreenshot('browser_expanded.png');
-  await trackGroup.locator('.fold-button').click();
+  await pth.toggleTrackGroup(grp);
 });
 
 test('slice with flows', async () => {
-  const omnibox = page.locator('input[ref=omnibox]');
-  await omnibox.focus();
-  await omnibox.fill('GenerateRenderPass');
-  await pth.waitForPerfettoIdle();
-
-  await omnibox.press('Enter');
-  await pth.waitForPerfettoIdle();
-
+  await pth.searchSlice('GenerateRenderPass');
   await pth.resetFocus();
   await page.keyboard.press('f');
   await pth.waitForPerfettoIdle();
