@@ -14,9 +14,8 @@
 
 import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {duration, Time, time, TimeSpan} from '../base/time';
+import {duration, Time, time} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
-import {AggregateData} from '../common/aggregation_data';
 import {CommandManagerImpl} from '../core/command_manager';
 import {
   ConversionJobName,
@@ -32,7 +31,6 @@ import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import type {Analytics} from './analytics';
 import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
-import {exists} from '../base/utils';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {Workspace} from '../public/workspace';
@@ -46,7 +44,6 @@ import {createFakeTraceImpl} from '../common/fake_trace_impl';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
-type AggregateDataStore = Map<string, AggregateData>;
 
 export interface FlowPoint {
   trackId: number;
@@ -129,7 +126,6 @@ class Globals {
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;
   private _overviewStore?: OverviewStore = undefined;
-  private _aggregateDataStore?: AggregateDataStore = undefined;
   private _threadMap?: ThreadMap = undefined;
   private _connectedFlows?: Flow[] = undefined;
   private _selectedFlows?: Flow[] = undefined;
@@ -224,7 +220,6 @@ class Globals {
     // entire file soon).
     this._trackDataStore = new Map<string, {}>();
     this._overviewStore = new Map<string, QuantizedLoad[]>();
-    this._aggregateDataStore = new Map<string, AggregateData>();
     this._threadMap = new Map<number, ThreadDesc>();
     this._connectedFlows = [];
     this._selectedFlows = [];
@@ -321,10 +316,6 @@ class Globals {
     this._visibleFlowCategories = assertExists(visibleFlowCategories);
   }
 
-  get aggregateDataStore(): AggregateDataStore {
-    return assertExists(this._aggregateDataStore);
-  }
-
   get traceErrors() {
     return this._traceErrors;
   }
@@ -417,10 +408,6 @@ class Globals {
     this._recordingLog = recordingLog;
   }
 
-  setAggregateData(kind: string, data: AggregateData) {
-    this.aggregateDataStore.set(kind, data);
-  }
-
   getCurrentEngine(): EngineConfig | undefined {
     return this.state.engine;
   }
@@ -501,17 +488,6 @@ class Globals {
   // Convert absolute time to domain time.
   toDomainTime(ts: time): time {
     return Time.sub(ts, this.timestampOffset());
-  }
-}
-
-// Returns the time span of the current selection, or the visible window if
-// there is no current selection.
-export async function getTimeSpanOfSelectionOrVisibleWindow(): Promise<TimeSpan> {
-  const range = await globals.selectionManager.findTimeRangeOfSelection();
-  if (exists(range)) {
-    return new TimeSpan(range.start, range.end);
-  } else {
-    return globals.timeline.visibleWindow.toTimeSpan();
   }
 }
 

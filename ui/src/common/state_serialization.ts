@@ -127,7 +127,9 @@ export function serializeAppState(): SerializedAppState {
 
   return {
     version: SERIALIZED_STATE_VERSION,
-    pinnedTracks: globals.workspace.pinnedTracks.map((t) => t.uri),
+    pinnedTracks: globals.workspace.pinnedTracks
+      .map((t) => t.uri)
+      .filter((uri) => uri !== undefined),
     viewport: {
       start: vizWindow.start,
       end: vizWindow.end,
@@ -196,7 +198,7 @@ export function deserializeAppStatePhase2(appState: SerializedAppState): void {
 
   // Restore the pinned tracks, if they exist.
   for (const uri of appState.pinnedTracks) {
-    const track = globals.workspace.getTrackByUri(uri);
+    const track = globals.workspace.findTrackByUri(uri);
     if (track) {
       track.pin();
     }
@@ -227,19 +229,20 @@ export function deserializeAppStatePhase2(appState: SerializedAppState): void {
     const selMgr = globals.selectionManager;
     switch (sel.kind) {
       case 'TRACK_EVENT':
-        selMgr.setEvent(sel.trackKey, parseInt(sel.eventId));
+        selMgr.selectTrackEvent(sel.trackKey, parseInt(sel.eventId));
         break;
       case 'LEGACY_SCHED_SLICE':
-        selMgr.setSchedSlice({id: sel.id});
+        selMgr.selectSqlEvent('sched_slice', sel.id);
         break;
       case 'LEGACY_SLICE':
-        selMgr.setLegacySlice({id: sel.id});
+        selMgr.selectSqlEvent('slice', sel.id);
         break;
       case 'LEGACY_THREAD_STATE':
-        selMgr.setThreadState({id: sel.id});
+        selMgr.selectSqlEvent('thread_slice', sel.id);
         break;
       case 'LEGACY_HEAP_PROFILE':
-        selMgr.setHeapProfile({
+        selMgr.selectLegacy({
+          kind: 'HEAP_PROFILE',
           id: sel.id,
           upid: sel.upid,
           ts: sel.ts,

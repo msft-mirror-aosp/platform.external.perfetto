@@ -19,10 +19,9 @@ import {TimeSpan} from '../base/time';
 import {TimelineImpl} from '../core/timeline';
 import {App} from '../public/app';
 import {Command} from '../public/command';
-import {DetailsPanel, LegacyDetailsPanel} from '../public/details_panel';
 import {Trace} from '../public/trace';
 import {setScrollToFunction} from '../public/scroll_helper';
-import {ScrollToArgs} from 'src/public/scroll_helper';
+import {ScrollToArgs} from '../public/scroll_helper';
 import {TraceInfo} from '../public/trace_info';
 import {TrackDescriptor} from '../public/track';
 import {EngineBase, EngineProxy} from '../trace_processor/engine';
@@ -39,6 +38,8 @@ import {SidebarMenuItem} from '../public/sidebar';
 import {ScrollHelper} from './scroll_helper';
 import {Selection, SelectionOpts} from '../public/selection';
 import {SearchResult} from '../public/search';
+import {raf} from './raf_scheduler';
+import {PivotTableManager} from './pivot_table_manager';
 
 // The pseudo plugin id used for the core instance of AppImpl.
 export const CORE_PLUGIN_ID = '__core__';
@@ -135,6 +136,10 @@ export class AppImpl implements App {
     this.appCtx.setActiveTrace(undefined);
   }
 
+  scheduleRedraw(): void {
+    raf.scheduleFullRedraw();
+  }
+
   // This is called by TraceController when loading a new trace, soon after the
   // engine has been set up. It obtains a new TraceImpl for the core. From that
   // we can fork sibling instances (i.e. bound to the same TraceContext) for
@@ -175,6 +180,7 @@ class TraceContext implements Disposable {
   readonly noteMgr = new NoteManagerImpl();
   readonly pluginSerializableState = createStore<{[key: string]: {}}>({});
   readonly scrollHelper: ScrollHelper;
+  readonly pivotTableMgr;
   readonly trash = new DisposableStack();
 
   constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfo) {
@@ -199,6 +205,19 @@ class TraceContext implements Disposable {
       this.onSelectionChange.bind(this),
     );
 
+    this.noteMgr.onNoteDeleted = (noteId) => {
+      if (
+        this.selectionMgr.selection.kind === 'note' &&
+        this.selectionMgr.selection.id === noteId
+      ) {
+        this.selectionMgr.clear();
+      }
+    };
+
+    this.pivotTableMgr = new PivotTableManager(
+      engine.getProxy('PivotTableManager'),
+    );
+
     this.searchMgr = new SearchManagerImpl({
       timeline: this.timeline,
       trackManager: this.trackMgr,
@@ -210,7 +229,7 @@ class TraceContext implements Disposable {
 
   // This method wires up changes to selection to side effects on search and
   // tabs. This is to avoid entangling too many dependencies between managers.
-  private onSelectionChange(_: Selection, opts: SelectionOpts) {
+  private onSelectionChange(selection: Selection, opts: SelectionOpts) {
     const {clearSearch = true, switchToCurrentSelectionTab = true} = opts;
     if (clearSearch) {
       this.searchMgr.reset();
@@ -219,6 +238,10 @@ class TraceContext implements Disposable {
       this.tabMgr.showCurrentSelectionTab();
     }
     // pendingScrollId is handled by SelectionManager internally.
+
+    if (selection.kind === 'area') {
+      this.pivotTableMgr.setSelectionArea(selection);
+    }
 
     // TODO(primiano): this is temporarily necessary until we kill
     // controllers. The flow controller needs to be re-kicked when we change
@@ -304,27 +327,6 @@ export class TraceImpl implements Trace {
     return new TraceImpl(this.appImpl.forkForPlugin(pluginId), this.traceCtx);
   }
 
-  registerDetailsPanel(
-    detailsPanel: DetailsPanel | LegacyDetailsPanel,
-  ): Disposable {
-    if (detailsPanel.panelType === 'LegacyDetailsPanel') {
-      return this.traceCtx.tabMgr.registerLegacyDetailsPanel(detailsPanel);
-    } else {
-      return this.traceCtx.tabMgr.registerDetailsPanel(detailsPanel);
-    }
-  }
-
-  // TODO(primiano): there are two things here:
-  // 1. I'm not sure this belongs to here (see comment in public/trace.ts).
-  // 2. Even if we agree it belongs here, right now the dependencies are too
-  //    enagnled and this needs to be injected by globals. This can be supported
-  //    once we clean up properly queryResult and debug tracks, so that they
-  //    don't depend on globals and take a Trace as argument.
-  static addQueryResultsTabFunction?: (query: string, title: string) => void;
-  addQueryResultsTab(query: string, title: string) {
-    return TraceImpl.addQueryResultsTabFunction?.(query, title);
-  }
-
   mountStore<T>(migrate: Migrate<T>): Store<T> {
     return this.traceCtx.pluginSerializableState.createSubStore(
       [this.pluginId],
@@ -385,6 +387,10 @@ export class TraceImpl implements Trace {
     return this.traceCtx.noteMgr;
   }
 
+  get pivotTable() {
+    return this.traceCtx.pivotTableMgr;
+  }
+
   // App interface implementation.
 
   get pluginId(): string {
@@ -401,6 +407,10 @@ export class TraceImpl implements Trace {
 
   get omnibox(): OmniboxManagerImpl {
     return this.appImpl.omnibox;
+  }
+
+  scheduleRedraw(): void {
+    this.appImpl.scheduleRedraw();
   }
 }
 

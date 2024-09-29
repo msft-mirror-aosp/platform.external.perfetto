@@ -12,14 +12,106 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {time, duration} from '../base/time';
+import {time, duration, TimeSpan} from '../base/time';
+import {Optional} from '../base/utils';
+import {Engine} from '../trace_processor/engine';
+import {ColumnDef, Sorting, ThreadStateExtra} from './aggregation';
 import {GenericSliceDetailsTabConfigBase} from './details_panel';
+import {TrackDescriptor} from './track';
 
 export interface SelectionManager {
   readonly selection: Selection;
+  readonly legacySelection: LegacySelection | null;
+  findTimeRangeOfSelection(): Promise<Optional<TimeSpan>>;
+
   clear(): void;
-  setLegacy(args: LegacySelection, opts?: SelectionOpts): void;
+
+  /**
+   * Select a track event.
+   *
+   * @param trackUri - The URI of the track to select.
+   * @param eventId - The value of the events ID column.
+   * @param opts - Additional options.
+   */
+  selectTrackEvent(
+    trackUri: string,
+    eventId: number,
+    opts?: SelectionOpts,
+  ): void;
+
+  /**
+   * Select a track event via a sql table name + id.
+   *
+   * @param sqlTableName - The name of the SQL table to resolve.
+   * @param id - The ID of the event in that table.
+   * @param opts - Additional options.
+   */
+  selectSqlEvent(sqlTableName: string, id: number, opts?: SelectionOpts): void;
+
+  /**
+   * Select a legacy selection.
+   *
+   * @param selection - The legacy selection to select.
+   * @param opts - Additional options.
+   */
+  selectLegacy(selection: LegacySelection, opts?: SelectionOpts): void;
+
+  /**
+   * Create an area selection for the purposes of aggregation.
+   *
+   * @param args - The area to select.
+   * @param opts - Additional options.
+   */
+  selectArea(args: Area, opts?: SelectionOpts): void;
+
   scrollToCurrentSelection(): void;
+  registerAreaSelectionAggreagtor(aggr: AreaSelectionAggregator): void;
+
+  // TODO(primiano): I don't undertsand what this generic slice is, but now
+  // is exposed to plugins. For now i'm just carrying it forward.
+  selectGenericSlice(args: {
+    id: number;
+    sqlTableName: string;
+    start: time;
+    duration: duration;
+    trackUri: string;
+    detailsPanelConfig: {
+      kind: string;
+      config: GenericSliceDetailsTabConfigBase;
+    };
+  }): void;
+
+  /**
+   * Register a new SQL selection resolver.
+   *
+   * A resolver consists of a SQL table name and a callback. When someone
+   * expresses an interest in selecting a slice on a matching table, the
+   * callback is called which can return a selection object or undefined.
+   */
+  registerSqlSelectionResolver(resolver: SqlSelectionResolver): void;
+
+  /**
+   * Resolve a section object for a given table and ID.
+   *
+   * @param sqlTableName - The name of the SQL table to resolve.
+   * @param id - The ID of the event in that table.
+   */
+  resolveSqlEvent(
+    sqlTableName: string,
+    id: number,
+  ): Promise<Selection | undefined>;
+}
+
+export interface AreaSelectionAggregator {
+  readonly id: string;
+  createAggregateView(engine: Engine, area: AreaSelection): Promise<boolean>;
+  getExtra(
+    engine: Engine,
+    area: AreaSelection,
+  ): Promise<ThreadStateExtra | void>;
+  getTabName(): string;
+  getDefaultSorting(): Sorting;
+  getColumnDefinitions(): ColumnDef[];
 }
 
 export type Selection =
@@ -135,6 +227,11 @@ export interface Area {
 
 export interface AreaSelection extends Area {
   readonly kind: 'area';
+
+  // This array contains the resolved TrackDescriptor from Area.trackUris.
+  // The resolution is done by SelectionManager whenever a kind='area' selection
+  // is performed.
+  readonly tracks: ReadonlyArray<TrackDescriptor>;
 }
 
 export interface NoteSelection {
@@ -171,4 +268,12 @@ export function profileType(s: string): ProfileType {
     return ProfileType.HEAP_PROFILE;
   }
   throw new Error('Unknown type ${s}');
+}
+
+export interface SqlSelectionResolver {
+  readonly sqlTableName: string;
+  readonly callback: (
+    id: number,
+    sqlTable: string,
+  ) => Promise<Selection | undefined>;
 }
