@@ -27,7 +27,8 @@ import {Section} from '../widgets/section';
 import {Tree} from '../widgets/tree';
 import {BottomTab, NewBottomTabArgs} from '../public/lib/bottom_tab';
 import {addDebugSliceTrack} from '../public/lib/debug_tracks/debug_tracks';
-import {Flow, FlowPoint, globals} from './globals';
+import {globals} from './globals';
+import {Flow, FlowPoint} from 'src/core/flow_types';
 import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
 import {hasArgs, renderArguments} from './slice_args';
 import {renderDetails} from './slice_details';
@@ -38,7 +39,7 @@ import {
 } from './sql/thread_state';
 import {asSliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {DurationWidget} from './widgets/duration';
-import {addSqlTableTab} from './sql_table_tab_command';
+import {addSqlTableTab} from './sql_table_tab_interface';
 import {SliceRef} from './widgets/slice';
 import {BasicTable} from '../widgets/basic_table';
 import {getSqlTableDescription} from './widgets/sql/table/sql_table_registry';
@@ -340,7 +341,7 @@ export class ThreadSliceDetailsTab extends BottomTab<ThreadSliceDetailsTabConfig
   }
 
   private renderPrecedingFlows(slice: SliceDetails): m.Children {
-    const flows = globals.connectedFlows;
+    const flows = globals.trace.flows.connectedFlows;
     const inFlows = flows.filter(({end}) => end.sliceId === slice.id);
 
     if (inFlows.length > 0) {
@@ -387,7 +388,7 @@ export class ThreadSliceDetailsTab extends BottomTab<ThreadSliceDetailsTabConfig
   }
 
   private renderFollowingFlows(slice: SliceDetails): m.Children {
-    const flows = globals.connectedFlows;
+    const flows = globals.trace.flows.connectedFlows;
     const outFlows = flows.filter(({begin}) => begin.sliceId === slice.id);
 
     if (outFlows.length > 0) {

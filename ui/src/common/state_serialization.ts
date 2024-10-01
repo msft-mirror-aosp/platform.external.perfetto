@@ -23,7 +23,8 @@ import {
 } from './state_serialization_schema';
 import {TimeSpan} from '../base/time';
 import {ProfileType} from '../public/selection';
-import {AppImpl, TraceImpl} from '../core/app_trace_impl';
+import {TraceImpl} from '../core/trace_impl';
+import {AppImpl} from '../core/app_impl';
 
 // When it comes to serialization & permalinks there are two different use cases
 // 1. Uploading the current trace in a Cloud Storage (GCS) file AND serializing
@@ -229,19 +230,20 @@ export function deserializeAppStatePhase2(appState: SerializedAppState): void {
     const selMgr = globals.selectionManager;
     switch (sel.kind) {
       case 'TRACK_EVENT':
-        selMgr.setEvent(sel.trackKey, parseInt(sel.eventId));
+        selMgr.selectTrackEvent(sel.trackKey, parseInt(sel.eventId));
         break;
       case 'LEGACY_SCHED_SLICE':
-        selMgr.setSchedSlice({id: sel.id});
+        selMgr.selectSqlEvent('sched_slice', sel.id);
         break;
       case 'LEGACY_SLICE':
-        selMgr.setLegacySlice({id: sel.id});
+        selMgr.selectSqlEvent('slice', sel.id);
         break;
       case 'LEGACY_THREAD_STATE':
-        selMgr.setThreadState({id: sel.id});
+        selMgr.selectSqlEvent('thread_slice', sel.id);
         break;
       case 'LEGACY_HEAP_PROFILE':
-        selMgr.setHeapProfile({
+        selMgr.selectLegacy({
+          kind: 'HEAP_PROFILE',
           id: sel.id,
           upid: sel.upid,
           ts: sel.ts,

@@ -122,7 +122,7 @@ export class SchedDetailsTab extends BottomTab<SchedDetailsTabConfig> {
   private renderSchedLatencyInfo(data: Data): m.Children {
     if (
       data.wakeup?.wakeupTs === undefined ||
-      data.wakeup?.wakerThread === undefined
+      data.wakeup?.wakerUtid === undefined
     ) {
       return null;
     }
@@ -142,12 +142,13 @@ export class SchedDetailsTab extends BottomTab<SchedDetailsTabConfig> {
 
   private renderWakeupText(data: Data): m.Children {
     if (
-      data.wakeup?.wakerThread === undefined ||
-      data.wakeup?.wakeupTs === undefined
+      data.wakeup?.wakerUtid === undefined ||
+      data.wakeup?.wakeupTs === undefined ||
+      data.wakeup?.wakerCpu === undefined
     ) {
       return null;
     }
-    const threadInfo = globals.threads.get(data.wakeup.wakerThread.utid);
+    const threadInfo = globals.threads.get(data.wakeup.wakerUtid);
     if (!threadInfo) {
       return null;
     }
@@ -282,11 +283,10 @@ export class SchedDetailsTab extends BottomTab<SchedDetailsTabConfig> {
     );
 
     if (trackDescriptor && data.sched.threadStateId) {
-      globals.selectionManager.setThreadState({
-        id: data.sched.threadStateId,
-        trackUri: trackDescriptor.uri,
-      });
-
+      globals.selectionManager.selectSqlEvent(
+        'thread_state',
+        data.sched.threadStateId,
+      );
       scrollTo({
         track: {uri: trackDescriptor.uri, expandGroup: true},
         time: {start: data.sched.ts},

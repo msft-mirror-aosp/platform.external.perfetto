@@ -16,7 +16,7 @@ import {OmniboxMode} from '../../core/omnibox_manager';
 import {Trace} from '../../public/trace';
 import {PromptOption} from '../../public/omnibox';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
-import {AppImpl} from '../../core/app_trace_impl';
+import {AppImpl} from '../../core/app_impl';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../../public/utils';
 
 class TrackUtilsPlugin implements PerfettoPlugin {
@@ -60,7 +60,7 @@ class TrackUtilsPlugin implements PerfettoPlugin {
         );
         if (selectedUri === undefined) return; // Prompt cancelled.
         ctx.scrollTo({track: {uri: selectedUri, expandGroup: true}});
-        ctx.selection.setArea({
+        ctx.selection.selectArea({
           start: ctx.traceInfo.start,
           end: ctx.traceInfo.end,
           trackUris: [selectedUri],

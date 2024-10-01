@@ -222,10 +222,10 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
         if (edit) {
           const selection = globals.selectionManager.selection;
           if (selection.kind === 'area' && area) {
-            globals.selectionManager.setArea({...area});
+            globals.selectionManager.selectArea({...area});
           }
         } else if (area) {
-          globals.selectionManager.setArea({...area});
+          globals.selectionManager.selectArea({...area});
         }
         // Now the selection has ended we stored the final selected area in the
         // global state and can remove the in progress selection from the
@@ -294,6 +294,8 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
               });
             }
           }),
+          renderUnderlay,
+          renderOverlay,
         }),
         scrollingPanels.length === 0 &&
           filterTermIsValid(globals.state.trackFilterTerm)
@@ -353,7 +355,9 @@ function renderOverlay(
   using _ = canvasSave(ctx);
   ctx.translate(TRACK_SHELL_WIDTH, 0);
   canvasClip(ctx, 0, 0, size.width, size.height);
-  renderFlows(ctx, size, panels);
+
+  // TODO(primiano): plumb the TraceImpl obj throughout the viwer page.
+  renderFlows(globals.trace, ctx, size, panels);
 
   const timewindow = globals.timeline.visibleWindow;
   const timescale = new TimeScale(timewindow, {left: 0, right: size.width});
@@ -437,7 +441,7 @@ export function drawGridLines(
 
   if (size.width > 0 && timespan.duration > 0n) {
     const maxMajorTicks = getMaxMajorTicks(size.width);
-    const offset = globals.timestampOffset();
+    const offset = globals.trace.timeline.timestampOffset();
     for (const {type, time} of generateTicks(timespan, maxMajorTicks, offset)) {
       const px = Math.floor(timescale.timeToPx(time));
       if (type === TickType.MAJOR) {
@@ -455,11 +459,11 @@ export function renderHoveredCursorVertical(
   timescale: TimeScale,
   size: Size2D,
 ) {
-  if (globals.state.hoverCursorTimestamp !== -1n) {
+  if (globals.trace.timeline.hoverCursorTimestamp !== undefined) {
     drawVerticalLineAtTime(
       ctx,
       timescale,
-      globals.state.hoverCursorTimestamp,
+      globals.trace.timeline.hoverCursorTimestamp,
       size.height,
       `#344596`,
     );
