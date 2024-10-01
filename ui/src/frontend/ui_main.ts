@@ -40,7 +40,6 @@ import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
 import {AggregationsTabs} from './aggregation_tab';
-import {focusOtherFlow, moveByFocusedFlow} from './keyboard_event_handler';
 import {publishPermalinkHash} from './publish';
 import {OmniboxMode} from '../core/omnibox_manager';
 import {PromptOption} from '../public/omnibox';
@@ -307,25 +306,25 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.NextFlow',
         name: 'Next flow',
-        callback: () => focusOtherFlow('Forward'),
+        callback: () => trace.flows.focusOtherFlow('Forward'),
         defaultHotkey: 'Mod+]',
       },
       {
         id: 'perfetto.PrevFlow',
         name: 'Prev flow',
-        callback: () => focusOtherFlow('Backward'),
+        callback: () => trace.flows.focusOtherFlow('Backward'),
         defaultHotkey: 'Mod+[',
       },
       {
         id: 'perfetto.MoveNextFlow',
         name: 'Move next flow',
-        callback: () => moveByFocusedFlow('Forward'),
+        callback: () => trace.flows.moveByFocusedFlow('Forward'),
         defaultHotkey: ']',
       },
       {
         id: 'perfetto.MovePrevFlow',
         name: 'Move prev flow',
-        callback: () => moveByFocusedFlow('Backward'),
+        callback: () => trace.flows.moveByFocusedFlow('Backward'),
         defaultHotkey: '[',
       },
       {
@@ -678,6 +677,7 @@ export class UiMainPerTrace implements m.ClassComponent {
         m(Sidebar),
         m(Topbar, {
           omnibox: this.renderOmnibox(),
+          trace: this.trace,
         }),
         m(Alerts),
         children,
