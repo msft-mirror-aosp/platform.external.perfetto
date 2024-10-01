@@ -37,7 +37,7 @@ import {
   SqlValue,
 } from '../../../../trace_processor/query_result';
 import {Anchor} from '../../../../widgets/anchor';
-import {BasicTable} from '../../../../widgets/basic_table';
+import {BasicTable, ReorderableColumns} from '../../../../widgets/basic_table';
 import {Spinner} from '../../../../widgets/spinner';
 
 import {ArgumentSelector} from './argument_selector';
@@ -62,8 +62,7 @@ function renderCell(
   const sqlValue = row[columns[sqlColumnId(column.primaryColumn())]];
 
   const additionalValues: {[key: string]: SqlValue} = {};
-  const dependentColumns =
-    column.dependentColumns !== undefined ? column.dependentColumns() : {};
+  const dependentColumns = column.dependentColumns?.() ?? {};
   for (const [key, col] of Object.entries(dependentColumns)) {
     additionalValues[key] = row[columns[sqlColumnId(col)]];
   }
@@ -276,7 +275,7 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
           icon: Icons.SortedDesc,
           onclick: () => {
             this.state.sortBy({
-              column: column.primaryColumn(),
+              column: column,
               direction: 'DESC',
             });
           },
@@ -287,7 +286,7 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
           icon: Icons.SortedAsc,
           onclick: () => {
             this.state.sortBy({
-              column: column.primaryColumn(),
+              column: column,
               direction: 'ASC',
             });
           },
@@ -342,18 +341,26 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
   view() {
     const rows = this.state.getDisplayedRows();
 
+    const columns = this.state.getSelectedColumns();
+    const columnDescriptors = columns.map((column, i) => {
+      return {
+        title: this.renderColumnHeader(column, i),
+        render: (row: Row) => renderCell(column, row, this.state),
+      };
+    });
+
     return [
       m('div', this.renderFilters()),
       m(
         BasicTable<Row>,
         {
           data: rows,
-          columns: this.state.getSelectedColumns().map((column, i) => {
-            return {
-              title: this.renderColumnHeader(column, i),
-              render: (row: Row) => renderCell(column, row, this.state),
-            };
-          }),
+          columns: [
+            new ReorderableColumns(
+              columnDescriptors,
+              (from: number, to: number) => this.state.moveColumn(from, to),
+            ),
+          ],
         },
         this.state.isLoading() && m(Spinner),
         this.state.getQueryError() !== undefined &&
