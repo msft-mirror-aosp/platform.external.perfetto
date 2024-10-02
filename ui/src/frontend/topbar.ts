@@ -20,24 +20,21 @@ import {taskTracker} from './task_tracker';
 import {Popup, PopupPosition} from '../widgets/popup';
 import {assertFalse} from '../base/logging';
 import {OmniboxMode} from '../core/omnibox_manager';
-import {AppImpl} from '../core/app_trace_impl';
+import {AppImpl} from '../core/app_impl';
 import {Trace, TraceAttrs} from '../public/trace';
 
 export const DISMISSED_PANNING_HINT_KEY = 'dismissedPanningHint';
 
-class Progress implements m.ClassComponent {
-  view(_vnode: m.Vnode): m.Children {
-    const classes = classNames(this.isLoading() && 'progress-anim');
+class Progress implements m.ClassComponent<TraceAttrs> {
+  view({attrs}: m.CVnode<TraceAttrs>): m.Children {
+    const engine = attrs.trace.engine;
+    const engineCfg = globals.getCurrentEngine();
+    const isLoading =
+      (engineCfg && !engineCfg.ready) ||
+      engine.numRequestsPending > 0 ||
+      taskTracker.hasPendingTasks();
+    const classes = classNames(isLoading && 'progress-anim');
     return m('.progress', {class: classes});
-  }
-
-  private isLoading(): boolean {
-    const engine = globals.getCurrentEngine();
-    return (
-      (engine && !engine.ready) ||
-      globals.numQueuedQueries > 0 ||
-      taskTracker.hasPendingTasks()
-    );
   }
 }
 
@@ -136,7 +133,7 @@ export class Topbar implements m.ClassComponent<TopbarAttrs> {
       '.topbar',
       {class: globals.state.sidebarVisible ? '' : 'hide-sidebar'},
       omnibox,
-      m(Progress),
+      attrs.trace && m(Progress, {trace: attrs.trace}),
       m(HelpPanningNotification),
       attrs.trace && m(TraceErrorIcon, {trace: attrs.trace}),
     );
