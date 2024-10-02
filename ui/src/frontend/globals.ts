@@ -14,7 +14,7 @@
 
 import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {Time, time} from '../base/time';
+import {time} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {CommandManagerImpl} from '../core/command_manager';
 import {
@@ -23,7 +23,6 @@ import {
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
 import {EngineConfig, State} from '../common/state';
-import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
@@ -34,11 +33,8 @@ import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {Workspace} from '../public/workspace';
 import {ratelimit} from './rate_limiters';
-import {
-  AppImpl,
-  setRerunControllersFunction,
-  TraceImpl,
-} from '../core/app_trace_impl';
+import {setRerunControllersFunction, TraceImpl} from '../core/trace_impl';
+import {AppImpl} from '../core/app_impl';
 import {createFakeTraceImpl} from '../common/fake_trace_impl';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
@@ -89,7 +85,6 @@ class Globals {
   private _trackDataStore?: TrackDataStore = undefined;
   private _overviewStore?: OverviewStore = undefined;
   private _threadMap?: ThreadMap = undefined;
-  private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
   private _metricError?: string = undefined;
@@ -254,14 +249,6 @@ class Globals {
     this._metricError = arg;
   }
 
-  set numQueuedQueries(value: number) {
-    this._numQueriesQueued = value;
-  }
-
-  get numQueuedQueries() {
-    return this._numQueriesQueued;
-  }
-
   get bufferUsage() {
     return this._bufferUsage;
   }
@@ -383,33 +370,6 @@ class Globals {
 
   get noteManager() {
     return this._trace.notes;
-  }
-
-  // Offset between t=0 and the configured time domain.
-  timestampOffset(): time {
-    const fmt = timestampFormat();
-    switch (fmt) {
-      case TimestampFormat.Timecode:
-      case TimestampFormat.Seconds:
-      case TimestampFormat.Milliseoncds:
-      case TimestampFormat.Microseconds:
-        return this._trace.traceInfo.start;
-      case TimestampFormat.TraceNs:
-      case TimestampFormat.TraceNsLocale:
-        return Time.ZERO;
-      case TimestampFormat.UTC:
-        return this._trace.traceInfo.utcOffset;
-      case TimestampFormat.TraceTz:
-        return this._trace.traceInfo.traceTzOffset;
-      default:
-        const x: never = fmt;
-        throw new Error(`Unsupported format ${x}`);
-    }
-  }
-
-  // Convert absolute time to domain time.
-  toDomainTime(ts: time): time {
-    return Time.sub(ts, this.timestampOffset());
   }
 }
 
