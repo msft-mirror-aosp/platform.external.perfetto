@@ -400,7 +400,7 @@ export abstract class BaseSliceTrack<
     let selectedId: number | undefined = undefined;
     const selection = globals.selectionManager.selection;
     switch (selection.kind) {
-      case 'single':
+      case 'track_event':
         if (selection.trackUri === this.uri) {
           selectedId = selection.eventId;
         }
@@ -973,7 +973,11 @@ export abstract class BaseSliceTrack<
     id: number,
   ): Promise<TrackEventDetails | undefined> {
     const query = `
-      SELECT ts, dur FROM (${this.getSqlSource()}) WHERE id = ${id}
+      SELECT
+        ts,
+        dur
+      FROM (${this.getSqlSource()})
+      WHERE id = ${id}
     `;
 
     const result = await this.engine.query(query);

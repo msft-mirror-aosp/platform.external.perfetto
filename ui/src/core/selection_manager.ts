@@ -90,7 +90,7 @@ export class SelectionManagerImpl implements SelectionManager {
     this.setSelection(
       {
         ...details,
-        kind: 'single',
+        kind: 'track_event',
         trackUri,
         eventId,
       },
@@ -300,17 +300,7 @@ export class SelectionManagerImpl implements SelectionManager {
         });
         break;
       case 'log':
-        this.selectLegacy(
-          {
-            kind: 'LOG',
-            id: eventId,
-            trackUri,
-          },
-          {
-            clearSearch: false,
-            switchToCurrentSelectionTab: true,
-          },
-        );
+        // TODO(stevegolton): Get log selection working.
         break;
       case 'slice':
         // Search results only include slices from the slice table for now.
@@ -329,7 +319,7 @@ export class SelectionManagerImpl implements SelectionManager {
   scrollToCurrentSelection() {
     const uri = (() => {
       switch (this.selection.kind) {
-        case 'single':
+        case 'track_event':
           return this.selection.trackUri;
         case 'legacy':
           return this.selection.legacySelection.trackUri;
@@ -364,7 +354,7 @@ export class SelectionManagerImpl implements SelectionManager {
             assertUnreachable(kind);
         }
       }
-    } else if (sel.kind === 'single') {
+    } else if (sel.kind === 'track_event') {
       return TimeSpan.fromTimeAndDuration(sel.ts, sel.dur);
     }
 
@@ -373,9 +363,7 @@ export class SelectionManagerImpl implements SelectionManager {
       return undefined;
     }
 
-    if (legacySel.kind === 'LOG') {
-      // TODO(hjd): Make focus selection work for logs.
-    } else if (legacySel.kind === 'GENERIC_SLICE') {
+    if (legacySel.kind === 'GENERIC_SLICE') {
       return findTimeRangeOfSlice({
         ts: legacySel.start,
         dur: legacySel.duration,
@@ -393,7 +381,7 @@ export class SelectionManagerImpl implements SelectionManager {
 function toLegacySelection(selection: Selection): LegacySelection | null {
   switch (selection.kind) {
     case 'area':
-    case 'single':
+    case 'track_event':
     case 'empty':
     case 'note':
       return null;

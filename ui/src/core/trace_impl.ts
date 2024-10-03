@@ -38,6 +38,7 @@ import {SearchResult} from '../public/search';
 import {PivotTableManager} from './pivot_table_manager';
 import {FlowManager} from './flow_manager';
 import {AppContext, AppImpl, CORE_PLUGIN_ID} from './app_impl';
+import {PluginManager} from './plugin_manager';
 
 /**
  * Handles the per-trace state of the UI
@@ -68,6 +69,7 @@ export class TraceContext implements Disposable {
   constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfo) {
     this.appCtx = gctx;
     this.engine = engine;
+    this.trash.use(engine);
     this.traceInfo = traceInfo;
     this.timeline = new TimelineImpl(traceInfo);
 
@@ -316,6 +318,10 @@ export class TraceImpl implements Trace {
 
   get omnibox(): OmniboxManagerImpl {
     return this.appImpl.omnibox;
+  }
+
+  get plugins(): PluginManager {
+    return this.appImpl.plugins;
   }
 
   scheduleRedraw(): void {

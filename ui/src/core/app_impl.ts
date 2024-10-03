@@ -19,6 +19,8 @@ import {CommandManagerImpl} from './command_manager';
 import {OmniboxManagerImpl} from './omnibox_manager';
 import {raf} from './raf_scheduler';
 import {SidebarManagerImpl} from './sidebar_manager';
+import {PluginManager} from './plugin_manager';
+import {NewEngineMode} from '../trace_processor/engine';
 
 // The pseudo plugin id used for the core instance of AppImpl.
 
@@ -36,6 +38,8 @@ export class AppContext {
   readonly commandMgr = new CommandManagerImpl();
   readonly omniboxMgr = new OmniboxManagerImpl();
   readonly sidebarMgr = new SidebarManagerImpl();
+  readonly pluginMgr: PluginManager;
+  newEngineMode: NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE';
 
   // The most recently created trace context. Can be undefined before any trace
   // is loaded.
@@ -47,7 +51,14 @@ export class AppContext {
     return (AppContext._instance = AppContext._instance ?? new AppContext());
   }
 
-  private constructor() {}
+  private constructor() {
+    this.pluginMgr = new PluginManager({
+      forkForPlugin: (p) => AppImpl.instance.forkForPlugin(p),
+      get trace() {
+        return AppImpl.instance.trace;
+      },
+    });
+  }
 
   get currentTraceCtx(): TraceContext | undefined {
     return this.traceCtx;
@@ -62,6 +73,9 @@ export class AppContext {
     }
     this.traceCtx = traceCtx;
   }
+
+  // This is set to true when calling loadTrace() and cleared when it resolves.
+  isLoadingTrace = false;
 }
 /*
  * Every plugin gets its own instance. This is how we keep track
@@ -102,6 +116,10 @@ export class AppImpl implements App {
     return this.appCtx.omniboxMgr;
   }
 
+  get plugins(): PluginManager {
+    return this.appCtx.pluginMgr;
+  }
+
   get trace(): TraceImpl | undefined {
     return this.currentTrace;
   }
@@ -123,5 +141,24 @@ export class AppImpl implements App {
   forkForPlugin(pluginId: string): AppImpl {
     assertTrue(pluginId != CORE_PLUGIN_ID);
     return new AppImpl(this.appCtx, pluginId);
+  }
+
+  get newEngineMode() {
+    return this.appCtx.newEngineMode;
+  }
+
+  set newEngineMode(mode: NewEngineMode) {
+    this.appCtx.newEngineMode = mode;
+  }
+
+  get isLoadingTrace() {
+    return this.appCtx.isLoadingTrace;
+  }
+
+  // TODO(primiano): this is very temporary and will go away as soon as
+  // TraceController is turned into an async function.
+  setIsLoadingTrace(loading: boolean) {
+    this.appCtx.isLoadingTrace = loading;
+    raf.scheduleFullRedraw();
   }
 }

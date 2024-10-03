@@ -24,14 +24,13 @@ import {
 } from './metatracing';
 import {
   AdbRecordingTarget,
-  EngineMode,
   LoadedConfig,
-  NewEngineMode,
   PendingDeeplinkState,
   RecordingTarget,
   State,
   Status,
 } from './state';
+import {SerializedAppState} from '../public/state_serialization_schema';
 
 type StateDraft = Draft<State>;
 
@@ -69,7 +68,6 @@ function clearTraceState(state: StateDraft) {
   const extensionInstalled = state.extensionInstalled;
   const availableAdbDevices = state.availableAdbDevices;
   const chromeCategories = state.chromeCategories;
-  const newEngineMode = state.newEngineMode;
 
   Object.assign(state, createEmptyState());
   state.nextId = nextId;
@@ -79,7 +77,6 @@ function clearTraceState(state: StateDraft) {
   state.extensionInstalled = extensionInstalled;
   state.availableAdbDevices = availableAdbDevices;
   state.chromeCategories = chromeCategories;
-  state.newEngineMode = newEngineMode;
 }
 
 function generateNextId(draft: StateDraft): string {
@@ -96,7 +93,6 @@ export const StateActions = {
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
       source: {type: 'FILE', file: args.file},
     };
   },
@@ -106,18 +102,23 @@ export const StateActions = {
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
       source: {type: 'ARRAY_BUFFER', ...args},
     };
   },
 
-  openTraceFromUrl(state: StateDraft, args: {url: string}): void {
+  openTraceFromUrl(
+    state: StateDraft,
+    args: {url: string; serializedAppState?: SerializedAppState},
+  ): void {
     clearTraceState(state);
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
-      source: {type: 'URL', url: args.url},
+      source: {
+        type: 'URL',
+        url: args.url,
+        serializedAppState: args.serializedAppState,
+      },
     };
   },
 
@@ -126,13 +127,8 @@ export const StateActions = {
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
       source: {type: 'HTTP_RPC'},
     };
-  },
-
-  setTraceUuid(state: StateDraft, args: {traceUuid: string}) {
-    state.traceUuid = args.traceUuid;
   },
 
   requestTrackReload(state: StateDraft, _: {}) {
@@ -150,34 +146,6 @@ export const StateActions = {
 
   clearPendingDeeplink(state: StateDraft, _: {}) {
     state.pendingDeeplink = undefined;
-  },
-
-  // TODO(hjd): engine.ready should be a published thing. If it's part
-  // of the state it interacts badly with permalinks.
-  setEngineReady(
-    state: StateDraft,
-    args: {engineId: string; ready: boolean; mode: EngineMode},
-  ): void {
-    const engine = state.engine;
-    if (engine === undefined || engine.id !== args.engineId) {
-      return;
-    }
-    engine.ready = args.ready;
-    engine.mode = args.mode;
-  },
-
-  setNewEngineMode(state: StateDraft, args: {mode: NewEngineMode}): void {
-    state.newEngineMode = args.mode;
-  },
-
-  // Marks all engines matching the given |mode| as failed.
-  setEngineFailed(
-    state: StateDraft,
-    args: {mode: EngineMode; failure: string},
-  ): void {
-    if (state.engine !== undefined && state.engine.mode === args.mode) {
-      state.engine.failed = args.failure;
-    }
   },
 
   updateStatus(state: StateDraft, args: Status): void {
@@ -199,12 +167,6 @@ export const StateActions = {
     for (const key of Object.keys(args.newState)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (state as any)[key] = (args.newState as any)[key];
-    }
-
-    // If we're loading from a permalink then none of the engines can
-    // possibly be ready:
-    if (state.engine !== undefined) {
-      state.engine.ready = false;
     }
   },
 

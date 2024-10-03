@@ -103,15 +103,8 @@ export const STATE_VERSION = 61;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
-export type EngineMode = 'WASM' | 'HTTP_RPC';
-
-export type NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE' | 'FORCE_BUILTIN_WASM';
-
 export interface EngineConfig {
   id: string;
-  mode?: EngineMode; // Is undefined until |ready| is true.
-  ready: boolean;
-  failed?: string; // If defined the engine has crashed with the given message.
   source: TraceSource;
 }
 
@@ -182,9 +175,7 @@ export interface State {
   /**
    * Open traces.
    */
-  newEngineMode: NewEngineMode;
   engine?: EngineConfig;
-  traceUuid?: string;
 
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
