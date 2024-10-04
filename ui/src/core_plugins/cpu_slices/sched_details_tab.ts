@@ -33,10 +33,10 @@ import {
 import {exists} from '../../base/utils';
 import {raf} from '../../core/raf_scheduler';
 import {translateState} from '../../trace_processor/sql_utils/thread_state';
-import {AsyncLimiter} from '../../base/async_limiter';
 import {Trace} from '../../public/trace';
-import {TrackSelectionDetailsPanel} from '../../public/details_panel';
+import {TrackEventDetailsPanel} from '../../public/details_panel';
 import {THREAD_STATE_TRACK_KIND} from '../../public/track_kinds';
+import {TrackEventSelection} from '../../public/selection';
 
 const MIN_NORMAL_SCHED_PRIORITY = 100;
 
@@ -56,27 +56,13 @@ interface Data {
   wakeup?: SchedWakeupInfo;
 }
 
-export class SchedSliceDetailsPanel implements TrackSelectionDetailsPanel {
-  private readonly queryLimiter = new AsyncLimiter();
+export class SchedSliceDetailsPanel implements TrackEventDetailsPanel {
   private details?: Data;
-  private id?: number;
 
   constructor(private readonly trace: Trace) {}
 
-  render(id: number): m.Children {
-    if (id !== this.id) {
-      this.id = id;
-      this.queryLimiter.schedule(async () => {
-        await this.load(id);
-        raf.scheduleFullRedraw();
-      });
-    }
-
-    return this.renderView();
-  }
-
-  private async load(id: number) {
-    const sched = await getSched(this.trace.engine, asSchedSqlId(id));
+  async load({eventId}: TrackEventSelection) {
+    const sched = await getSched(this.trace.engine, asSchedSqlId(eventId));
     if (sched === undefined) {
       return;
     }
@@ -85,7 +71,7 @@ export class SchedSliceDetailsPanel implements TrackSelectionDetailsPanel {
     raf.scheduleRedraw();
   }
 
-  private renderView() {
+  render() {
     if (this.details === undefined) {
       return m(DetailsShell, {title: 'Sched', description: 'Loading...'});
     }
