@@ -104,7 +104,7 @@ export interface AreaSelectionAggregator {
 }
 
 export type Selection =
-  | SingleSelection
+  | TrackEventSelection
   | AreaSelection
   | NoteSelection
   | UnionSelection
@@ -125,44 +125,9 @@ export interface LegacySelectionWrapper {
   readonly legacySelection: LegacySelection;
 }
 
-export type LegacySelection = (
-  | HeapProfileSelection
-  | CpuProfileSampleSelection
-  | PerfSamplesSelection
-  | LogSelection
-  | GenericSliceSelection
-) & {trackUri?: string};
-
-export interface HeapProfileSelection {
-  readonly kind: 'HEAP_PROFILE';
-  readonly id: number;
-  readonly upid: number;
-  readonly ts: time;
-  readonly type: ProfileType;
-}
-
-export interface PerfSamplesSelection {
-  readonly kind: 'PERF_SAMPLES';
-  readonly id: number;
-  readonly utid?: number;
-  readonly upid?: number;
-  readonly leftTs: time;
-  readonly rightTs: time;
-  readonly type: ProfileType;
-}
-
-export interface CpuProfileSampleSelection {
-  readonly kind: 'CPU_PROFILE_SAMPLE';
-  readonly id: number;
-  readonly utid: number;
-  readonly ts: time;
-}
-
-export interface LogSelection {
-  readonly kind: 'LOG';
-  readonly id: number;
-  readonly trackUri: string;
-}
+export type LegacySelection = GenericSliceSelection & {
+  trackUri?: string;
+};
 
 export interface GenericSliceSelection {
   readonly kind: 'GENERIC_SLICE';
@@ -179,8 +144,8 @@ export interface GenericSliceSelection {
 
 // New Selection types:
 
-export interface SingleSelection extends TrackEventDetails {
-  readonly kind: 'single';
+export interface TrackEventSelection extends TrackEventDetails {
+  readonly kind: 'track_event';
   readonly trackUri: string;
   readonly eventId: number;
 }
@@ -196,8 +161,10 @@ export interface TrackEventDetails {
   // the core.
   readonly wakeupTs?: time;
   readonly wakerCpu?: number;
+  readonly upid?: number;
   readonly utid?: number;
   readonly tableName?: string;
+  readonly profileType?: ProfileType;
 }
 
 export interface Area {
