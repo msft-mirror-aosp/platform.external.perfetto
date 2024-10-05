@@ -17,48 +17,15 @@ import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {createEmptyState} from './empty_state';
 import {
-  MetatraceTrackId,
-  traceEventBegin,
-  traceEventEnd,
-  TraceEventScope,
-} from './metatracing';
-import {
   AdbRecordingTarget,
   LoadedConfig,
-  PendingDeeplinkState,
   RecordingTarget,
   State,
-  Status,
 } from './state';
 import {SerializedAppState} from '../public/state_serialization_schema';
+import {PostedTrace} from '../public/trace_source';
 
 type StateDraft = Draft<State>;
-
-export interface PostedTrace {
-  buffer: ArrayBuffer;
-  title: string;
-  fileName?: string;
-  url?: string;
-  uuid?: string;
-  localOnly?: boolean;
-  keepApiOpen?: boolean;
-
-  // Allows to pass extra arguments to plugins. This can be read by plugins
-  // onTraceLoad() and can be used to trigger plugin-specific-behaviours (e.g.
-  // allow dashboards like APC to pass extra data to materialize onto tracks).
-  // The format is the following:
-  // pluginArgs: {
-  //   'dev.perfetto.PluginFoo': { 'key1': 'value1', 'key2': 1234 }
-  //   'dev.perfetto.PluginBar': { 'key3': '...', 'key4': ... }
-  // }
-  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
-}
-
-export interface PostedScrollToRange {
-  timeStart: number;
-  timeEnd: number;
-  viewPercentage?: number;
-}
 
 function clearTraceState(state: StateDraft) {
   const nextId = state.nextId;
@@ -84,8 +51,6 @@ function generateNextId(draft: StateDraft): string {
   draft.nextId = nextId;
   return nextId;
 }
-
-let statusTraceEvent: TraceEventScope | undefined;
 
 export const StateActions = {
   openTraceFromFile(state: StateDraft, args: {file: File}): void {
@@ -138,24 +103,6 @@ export const StateActions = {
     } else {
       state.lastTrackReloadRequest = 1;
     }
-  },
-
-  maybeSetPendingDeeplink(state: StateDraft, args: PendingDeeplinkState) {
-    state.pendingDeeplink = args;
-  },
-
-  clearPendingDeeplink(state: StateDraft, _: {}) {
-    state.pendingDeeplink = undefined;
-  },
-
-  updateStatus(state: StateDraft, args: Status): void {
-    if (statusTraceEvent) {
-      traceEventEnd(statusTraceEvent);
-    }
-    statusTraceEvent = traceEventBegin(args.msg, {
-      track: MetatraceTrackId.kOmniboxStatus,
-    });
-    state.status = args;
   },
 
   // TODO(hjd): Remove setState - it causes problems due to reuse of ids.
