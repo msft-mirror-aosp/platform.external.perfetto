@@ -38,6 +38,7 @@ import {SearchResult} from '../public/search';
 import {PivotTableManager} from './pivot_table_manager';
 import {FlowManager} from './flow_manager';
 import {AppContext, AppImpl, CORE_PLUGIN_ID} from './app_impl';
+import {PluginManager} from './plugin_manager';
 
 /**
  * Handles the per-trace state of the UI
@@ -68,6 +69,7 @@ export class TraceContext implements Disposable {
   constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfo) {
     this.appCtx = gctx;
     this.engine = engine;
+    this.trash.use(engine);
     this.traceInfo = traceInfo;
     this.timeline = new TimelineImpl(traceInfo);
 
@@ -125,18 +127,12 @@ export class TraceContext implements Disposable {
     if (switchToCurrentSelectionTab) {
       this.tabMgr.showCurrentSelectionTab();
     }
-    // pendingScrollId is handled by SelectionManager internally.
 
     if (selection.kind === 'area') {
       this.pivotTableMgr.setSelectionArea(selection);
     }
 
     this.flowMgr.updateFlows(selection);
-
-    // TODO(primiano): this is temporarily necessary until we kill
-    // controllers. The flow controller needs to be re-kicked when we change
-    // the selection.
-    rerunControllersFunction?.();
   }
 
   private onResultStep(searchResult: SearchResult) {
@@ -319,6 +315,10 @@ export class TraceImpl implements Trace {
     return this.appImpl.omnibox;
   }
 
+  get plugins(): PluginManager {
+    return this.appImpl.plugins;
+  }
+
   scheduleRedraw(): void {
     this.appImpl.scheduleRedraw();
   }
@@ -344,12 +344,4 @@ function createProxy<T extends object>(target: T, overrides: Partial<T>): T {
         : baseValue;
     },
   }) as T;
-}
-
-// TODO(primiano): remove this once we get rid of controllers. This function
-// gets bound to `globals.dispatch(Actions.runControllers({}));` and exists
-// only to avoid a circular dependency between globals.ts and this file.
-let rerunControllersFunction: () => void;
-export function setRerunControllersFunction(f: () => void) {
-  rerunControllersFunction = f;
 }

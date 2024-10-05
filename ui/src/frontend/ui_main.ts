@@ -269,8 +269,8 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.SetTemporarySpanNote',
         name: 'Set the temporary span note based on the current selection',
-        callback: async () => {
-          const range = await trace.selection.findTimeRangeOfSelection();
+        callback: () => {
+          const range = trace.selection.findTimeRangeOfSelection();
           if (range) {
             trace.notes.addSpanNote({
               start: range.start,
@@ -284,8 +284,8 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.AddSpanNote',
         name: 'Add a new span note based on the current selection',
-        callback: async () => {
-          const range = await trace.selection.findTimeRangeOfSelection();
+        callback: () => {
+          const range = trace.selection.findTimeRangeOfSelection();
           if (range) {
             trace.notes.addSpanNote({
               start: range.start,
@@ -398,24 +398,16 @@ export class UiMainPerTrace implements m.ClassComponent {
   }
 
   private renderOmnibox(): m.Children {
-    const msgTTL = globals.state.status.timestamp + 1 - Date.now() / 1e3;
-    const engineIsBusy =
-      globals.state.engine !== undefined && !globals.state.engine.ready;
-
-    if (msgTTL > 0 || engineIsBusy) {
-      setTimeout(() => raf.scheduleFullRedraw(), msgTTL * 1000);
+    const omniboxMode = AppImpl.instance.omnibox.mode;
+    if (omniboxMode === OmniboxMode.StatusMessage) {
       return m(
         `.omnibox.message-mode`,
         m(`input[readonly][disabled][ref=omnibox]`, {
           value: '',
-          placeholder: globals.state.status.msg,
+          placeholder: AppImpl.instance.omnibox.statusMessage,
         }),
       );
-    }
-
-    const omniboxMode = AppImpl.instance.omnibox.mode;
-
-    if (omniboxMode === OmniboxMode.Command) {
+    } else if (omniboxMode === OmniboxMode.Command) {
       return this.renderCommandOmnibox();
     } else if (omniboxMode === OmniboxMode.Prompt) {
       return this.renderPromptOmnibox();
