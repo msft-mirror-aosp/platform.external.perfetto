@@ -20,7 +20,8 @@ import {Size2D, VerticalBounds} from '../base/geom';
 import {TimeScale} from '../base/time_scale';
 import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
 import {ColorScheme} from './color_scheme';
-import {TrackSelectionDetailsPanel} from './details_panel';
+import {TrackEventDetailsPanel} from './details_panel';
+import {TrackEventDetails, TrackEventSelection} from './selection';
 
 export interface TrackManager {
   /**
@@ -102,13 +103,10 @@ export interface TrackDescriptor {
 
   readonly pluginId?: string;
 
-  // Optional: A details panel to use when this track is selected.
-  readonly detailsPanel?: TrackSelectionDetailsPanel;
-
-  // Optional: method to look up the start and duration of an event on this track
-  readonly getEventBounds?: (
-    id: number,
-  ) => Promise<Optional<{ts: time; dur: duration}>>;
+  // Optional: A factory that returns a details panel object. This is called
+  // each time the selection is changed (and the selection is relevant to this
+  // track).
+  readonly detailsPanel?: (id: TrackEventSelection) => TrackEventDetailsPanel;
 }
 
 /**
@@ -187,6 +185,11 @@ export interface Track {
    * Optional: Get the event set that represents this track's data.
    */
   getEventSet?(): UntypedEventSet;
+
+  /**
+   * Optional: Get details of a track event given by eventId on this track.
+   */
+  getSelectionDetails?(eventId: number): Promise<TrackEventDetails | undefined>;
 }
 
 // An set of key/value pairs describing a given track. These are used for

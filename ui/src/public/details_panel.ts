@@ -13,16 +13,25 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {Selection} from './selection';
+import {Selection, TrackEventSelection} from './selection';
 
 export interface DetailsPanel {
   render(selection: Selection): m.Children;
   isLoading?(): boolean;
 }
 
-export interface TrackSelectionDetailsPanel {
-  render(id: number): m.Children;
-  isLoading?(): boolean;
+export interface TrackEventDetailsPanel {
+  // Optional: Do any loading required to render the details panel in here and
+  // the core will:
+  // - Ensure that no more than one concurrent loads are enqueued at any given
+  //   time in order to keep the UI snappy.
+  // - Hold off switching to this tab for up to around 50ms while this loading
+  //   is going, to avoid flickering when loading is fast.
+  load?(id: TrackEventSelection): Promise<void>;
+
+  // Called every render cycle to render the details panel. Note: This function
+  // is called regardless of whether |load| has completed yet.
+  render(): m.Children;
 }
 
 // TODO(primiano): rationalize this GenericSliceDetailsTabConfig. it should be

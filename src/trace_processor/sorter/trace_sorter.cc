@@ -26,10 +26,12 @@
 #include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/public/compiler.h"
+#include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
+#include "src/trace_processor/importers/gecko/gecko_event.h"
 #include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
@@ -245,6 +247,10 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
           event.ts,
           std::move(token_buffer_.Extract<JsonWithDurEvent>(id).value));
       return;
+    case TimestampedEvent::Type::kSpeRecord:
+      context.spe_record_parser->ParseSpeRecord(
+          event.ts, token_buffer_.Extract<TraceBlobView>(id));
+      return;
     case TimestampedEvent::Type::kSystraceLine:
       context.json_trace_parser->ParseSystraceLine(
           event.ts, token_buffer_.Extract<SystraceLine>(id));
@@ -256,6 +262,10 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
       context.proto_trace_parser->ParseLegacyV8ProfileEvent(
           event.ts, token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
+      return;
+    case TimestampedEvent::Type::kGeckoEvent:
+      context.gecko_trace_parser->ParseGeckoEvent(
+          event.ts, token_buffer_.Extract<gecko_importer::GeckoEvent>(id));
       return;
     case TimestampedEvent::Type::kInlineSchedSwitch:
     case TimestampedEvent::Type::kInlineSchedWaking:
@@ -279,6 +289,7 @@ void TraceSorter::ParseEtwPacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kInlineSchedWaking:
     case TimestampedEvent::Type::kFtraceEvent:
     case TimestampedEvent::Type::kTrackEvent:
+    case TimestampedEvent::Type::kSpeRecord:
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
     case TimestampedEvent::Type::kPerfRecord:
@@ -288,6 +299,7 @@ void TraceSorter::ParseEtwPacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kFuchsiaRecord:
     case TimestampedEvent::Type::kAndroidLogEvent:
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+    case TimestampedEvent::Type::kGeckoEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -312,6 +324,7 @@ void TraceSorter::ParseFtracePacket(TraceProcessorContext& context,
       return;
     case TimestampedEvent::Type::kEtwEvent:
     case TimestampedEvent::Type::kTrackEvent:
+    case TimestampedEvent::Type::kSpeRecord:
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
     case TimestampedEvent::Type::kPerfRecord:
@@ -321,6 +334,7 @@ void TraceSorter::ParseFtracePacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kFuchsiaRecord:
     case TimestampedEvent::Type::kAndroidLogEvent:
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+    case TimestampedEvent::Type::kGeckoEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -347,6 +361,9 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
     case TimestampedEvent::Type::kJsonValueWithDur:
       base::ignore_result(token_buffer_.Extract<JsonWithDurEvent>(id));
       return;
+    case TimestampedEvent::Type::kSpeRecord:
+      base::ignore_result(token_buffer_.Extract<TraceBlobView>(id));
+      return;
     case TimestampedEvent::Type::kSystraceLine:
       base::ignore_result(token_buffer_.Extract<SystraceLine>(id));
       return;
@@ -367,6 +384,10 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
       return;
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
       base::ignore_result(token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
+      return;
+    case TimestampedEvent::Type::kGeckoEvent:
+      base::ignore_result(
+          token_buffer_.Extract<gecko_importer::GeckoEvent>(id));
       return;
   }
   PERFETTO_FATAL("For GCC");

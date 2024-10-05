@@ -1240,7 +1240,7 @@ base::Status IncludeSqlModule(std::string root, bool allow_override) {
 
   std::vector<std::string> paths;
   RETURN_IF_ERROR(base::ListFilesRecursive(root, paths));
-  sql_modules::NameToModule modules;
+  sql_modules::NameToPackage modules;
   for (const auto& path : paths) {
     if (base::GetFileExtension(path) != ".sql")
       continue;
@@ -1257,7 +1257,8 @@ base::Status IncludeSqlModule(std::string root, bool allow_override) {
   }
   for (auto module_it = modules.GetIterator(); module_it; ++module_it) {
     auto status = g_tp->RegisterSqlModule(
-        {module_it.key(), module_it.value(), allow_override});
+        {/*name=*/module_it.key(), /*files=*/module_it.value(),
+         /*allow_module_override=*/allow_override});
     if (!status.ok())
       return status;
   }
@@ -1272,27 +1273,30 @@ base::Status LoadOverridenStdlib(std::string root) {
   }
 
   if (!base::FileExists(root)) {
-    return base::ErrStatus("Directory %s does not exist.", root.c_str());
+    return base::ErrStatus("Directory '%s' does not exist.", root.c_str());
   }
 
   std::vector<std::string> paths;
   RETURN_IF_ERROR(base::ListFilesRecursive(root, paths));
-  sql_modules::NameToModule modules;
+  sql_modules::NameToPackage packages;
   for (const auto& path : paths) {
     if (base::GetFileExtension(path) != ".sql") {
       continue;
     }
     std::string filename = root + "/" + path;
-    std::string file_contents;
-    if (!base::ReadFile(filename, &file_contents)) {
-      return base::ErrStatus("Cannot read file %s", filename.c_str());
+    std::string module_file;
+    if (!base::ReadFile(filename, &module_file)) {
+      return base::ErrStatus("Cannot read file '%s'", filename.c_str());
     }
-    std::string import_key = sql_modules::GetIncludeKey(path);
-    std::string module = sql_modules::GetModuleName(import_key);
-    modules.Insert(module, {}).first->push_back({import_key, file_contents});
+    std::string module_name = sql_modules::GetIncludeKey(path);
+    std::string package_name = sql_modules::GetPackageName(module_name);
+    packages.Insert(package_name, {})
+        .first->push_back({module_name, module_file});
   }
-  for (auto module_it = modules.GetIterator(); module_it; ++module_it) {
-    g_tp->RegisterSqlModule({module_it.key(), module_it.value(), true});
+  for (auto package = packages.GetIterator(); package; ++package) {
+    g_tp->RegisterSqlModule({/*name=*/package.key(),
+                             /*files=*/package.value(),
+                             /*allow_module_override=*/true});
   }
 
   return base::OkStatus();

@@ -13,9 +13,9 @@
 // limitations under the License.
 
 import {Time} from '../base/time';
-import {AppImpl} from '../core/app_trace_impl';
 import {TraceInfo} from '../public/trace_info';
 import {EngineBase} from '../trace_processor/engine';
+import {TraceImpl} from './trace_impl';
 
 export interface FakeTraceImplArgs {
   // If true suppresses exceptions when trying to issue a query. This is to
@@ -40,14 +40,19 @@ export function createFakeTraceImpl(args: FakeTraceImplArgs = {}) {
     traceTzOffset: Time.ZERO,
     cpus: [],
     gpuCount: 0,
+    importErrors: 0,
+    traceType: 'proto',
+    uuid: '',
+    cached: false,
   };
-  return AppImpl.instance.newTraceInstance(
+  return TraceImpl.newInstance(
     new FakeEngine(args.allowQueries ?? false),
     fakeTraceInfo,
   );
 }
 
 class FakeEngine extends EngineBase {
+  readonly mode = 'WASM';
   id: string = 'TestEngine';
 
   constructor(private allowQueries: boolean) {
@@ -63,4 +68,6 @@ class FakeEngine extends EngineBase {
       );
     }
   }
+
+  [Symbol.dispose]() {}
 }

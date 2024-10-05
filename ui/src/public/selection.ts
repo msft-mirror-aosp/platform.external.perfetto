@@ -22,8 +22,8 @@ import {TrackDescriptor} from './track';
 export interface SelectionManager {
   readonly selection: Selection;
   readonly legacySelection: LegacySelection | null;
-  findTimeRangeOfSelection(): Promise<Optional<TimeSpan>>;
 
+  findTimeRangeOfSelection(): Optional<TimeSpan>;
   clear(): void;
 
   /**
@@ -89,17 +89,6 @@ export interface SelectionManager {
    * callback is called which can return a selection object or undefined.
    */
   registerSqlSelectionResolver(resolver: SqlSelectionResolver): void;
-
-  /**
-   * Resolve a section object for a given table and ID.
-   *
-   * @param sqlTableName - The name of the SQL table to resolve.
-   * @param id - The ID of the event in that table.
-   */
-  resolveSqlEvent(
-    sqlTableName: string,
-    id: number,
-  ): Promise<Selection | undefined>;
 }
 
 export interface AreaSelectionAggregator {
@@ -115,7 +104,7 @@ export interface AreaSelectionAggregator {
 }
 
 export type Selection =
-  | SingleSelection
+  | TrackEventSelection
   | AreaSelection
   | NoteSelection
   | UnionSelection
@@ -126,7 +115,7 @@ export type Selection =
 export interface SelectionOpts {
   clearSearch?: boolean; // Default: true.
   switchToCurrentSelectionTab?: boolean; // Default: true.
-  pendingScrollId?: number; // Default: no auto-scroll.
+  scrollToSelection?: boolean; // Default: false.
 }
 
 // LEGACY Selection types:
@@ -136,65 +125,9 @@ export interface LegacySelectionWrapper {
   readonly legacySelection: LegacySelection;
 }
 
-export type LegacySelection = (
-  | SliceSelection
-  | HeapProfileSelection
-  | CpuProfileSampleSelection
-  | ThreadSliceSelection
-  | ThreadStateSelection
-  | PerfSamplesSelection
-  | LogSelection
-  | GenericSliceSelection
-) & {trackUri?: string};
-
-export type SelectionKind = LegacySelection['kind']; // 'THREAD_STATE' | 'SLICE' ...
-
-export interface SliceSelection {
-  readonly kind: 'SCHED_SLICE';
-  readonly id: number;
-}
-
-export interface HeapProfileSelection {
-  readonly kind: 'HEAP_PROFILE';
-  readonly id: number;
-  readonly upid: number;
-  readonly ts: time;
-  readonly type: ProfileType;
-}
-
-export interface PerfSamplesSelection {
-  readonly kind: 'PERF_SAMPLES';
-  readonly id: number;
-  readonly utid?: number;
-  readonly upid?: number;
-  readonly leftTs: time;
-  readonly rightTs: time;
-  readonly type: ProfileType;
-}
-
-export interface CpuProfileSampleSelection {
-  readonly kind: 'CPU_PROFILE_SAMPLE';
-  readonly id: number;
-  readonly utid: number;
-  readonly ts: time;
-}
-
-export interface ThreadSliceSelection {
-  readonly kind: 'SLICE';
-  readonly id: number;
-  readonly table?: string;
-}
-
-export interface ThreadStateSelection {
-  readonly kind: 'THREAD_STATE';
-  readonly id: number;
-}
-
-export interface LogSelection {
-  readonly kind: 'LOG';
-  readonly id: number;
-  readonly trackUri: string;
-}
+export type LegacySelection = GenericSliceSelection & {
+  trackUri?: string;
+};
 
 export interface GenericSliceSelection {
   readonly kind: 'GENERIC_SLICE';
@@ -211,10 +144,27 @@ export interface GenericSliceSelection {
 
 // New Selection types:
 
-export interface SingleSelection {
-  readonly kind: 'single';
+export interface TrackEventSelection extends TrackEventDetails {
+  readonly kind: 'track_event';
   readonly trackUri: string;
   readonly eventId: number;
+}
+
+export interface TrackEventDetails {
+  // ts and dur are required by the core, and must be provided.
+  readonly ts: time;
+  // Note: dur can be -1 for instant events.
+  readonly dur: duration;
+
+  // Optional additional information.
+  // TODO(stevegolton): Find an elegant way of moving this information out of
+  // the core.
+  readonly wakeupTs?: time;
+  readonly wakerCpu?: number;
+  readonly upid?: number;
+  readonly utid?: number;
+  readonly tableName?: string;
+  readonly profileType?: ProfileType;
 }
 
 export interface Area {
@@ -275,5 +225,5 @@ export interface SqlSelectionResolver {
   readonly callback: (
     id: number,
     sqlTable: string,
-  ) => Promise<Selection | undefined>;
+  ) => Promise<{trackUri: string; eventId: number} | undefined>;
 }

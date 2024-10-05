@@ -162,7 +162,7 @@ export class TimeSelectionPanel implements Panel {
 
     if (size.width > 0 && timespan.duration > 0n) {
       const maxMajorTicks = getMaxMajorTicks(size.width);
-      const offset = globals.timestampOffset();
+      const offset = globals.trace.timeline.timestampOffset();
       const tickGen = generateTicks(timespan, maxMajorTicks, offset);
       for (const {type, time} of tickGen) {
         const px = Math.floor(timescale.timeToPx(time));
@@ -184,19 +184,19 @@ export class TimeSelectionPanel implements Panel {
       this.renderSpan(ctx, timescale, size, start, end);
     }
 
-    if (globals.state.hoverCursorTimestamp !== -1n) {
+    if (globals.trace.timeline.hoverCursorTimestamp !== undefined) {
       this.renderHover(
         ctx,
         timescale,
         size,
-        globals.state.hoverCursorTimestamp,
+        globals.trace.timeline.hoverCursorTimestamp,
       );
     }
 
     for (const note of globals.noteManager.notes.values()) {
       const noteIsSelected =
         selection.kind === 'note' && selection.id === note.id;
-      if (note.noteType === 'SPAN' && !noteIsSelected) {
+      if (note.noteType === 'SPAN' && noteIsSelected) {
         this.renderSpan(ctx, timescale, size, note.start, note.end);
       }
     }
@@ -211,7 +211,7 @@ export class TimeSelectionPanel implements Panel {
     ts: time,
   ) {
     const xPos = Math.floor(timescale.timeToPx(ts));
-    const domainTime = globals.toDomainTime(ts);
+    const domainTime = globals.trace.timeline.toDomainTime(ts);
     const label = stringifyTimestamp(domainTime);
     drawIBar(ctx, xPos, this.getBBoxFromSize(size), label);
   }

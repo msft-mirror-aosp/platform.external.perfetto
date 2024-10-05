@@ -29,7 +29,7 @@ import {raf} from '../core/raf_scheduler';
 import {Command} from '../public/command';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
-import {maybeRenderFullscreenModalDialog} from '../widgets/modal';
+import {maybeRenderFullscreenModalDialog, showModal} from '../widgets/modal';
 import {onClickCopy} from './clipboard';
 import {CookieConsent} from './cookie_consent';
 import {globals} from './globals';
@@ -40,13 +40,13 @@ import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
 import {AggregationsTabs} from './aggregation_tab';
-import {focusOtherFlow, moveByFocusedFlow} from './keyboard_event_handler';
 import {publishPermalinkHash} from './publish';
 import {OmniboxMode} from '../core/omnibox_manager';
 import {PromptOption} from '../public/omnibox';
 import {DisposableStack} from '../base/disposable_stack';
 import {Spinner} from '../widgets/spinner';
-import {AppImpl, TraceImpl} from '../core/app_trace_impl';
+import {TraceImpl} from '../core/trace_impl';
+import {AppImpl} from '../core/app_impl';
 import {NotesEditorTab} from './notes_panel';
 import {NotesListEditor} from './notes_list_editor';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../public/utils';
@@ -129,6 +129,8 @@ export class UiMainPerTrace implements m.ClassComponent {
     if (trace === undefined) return;
     assertTrue(trace instanceof TraceImpl);
     this.trace = trace;
+    document.title = `${trace.traceInfo.traceTitle || 'Trace'} - Perfetto UI`;
+    this.maybeShowJsonWarning();
 
     // Register the aggregation tabs.
     this.trash.use(new AggregationsTabs(trace));
@@ -267,8 +269,8 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.SetTemporarySpanNote',
         name: 'Set the temporary span note based on the current selection',
-        callback: async () => {
-          const range = await trace.selection.findTimeRangeOfSelection();
+        callback: () => {
+          const range = trace.selection.findTimeRangeOfSelection();
           if (range) {
             trace.notes.addSpanNote({
               start: range.start,
@@ -282,8 +284,8 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.AddSpanNote',
         name: 'Add a new span note based on the current selection',
-        callback: async () => {
-          const range = await trace.selection.findTimeRangeOfSelection();
+        callback: () => {
+          const range = trace.selection.findTimeRangeOfSelection();
           if (range) {
             trace.notes.addSpanNote({
               start: range.start,
@@ -307,25 +309,25 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.NextFlow',
         name: 'Next flow',
-        callback: () => focusOtherFlow('Forward'),
+        callback: () => trace.flows.focusOtherFlow('Forward'),
         defaultHotkey: 'Mod+]',
       },
       {
         id: 'perfetto.PrevFlow',
         name: 'Prev flow',
-        callback: () => focusOtherFlow('Backward'),
+        callback: () => trace.flows.focusOtherFlow('Backward'),
         defaultHotkey: 'Mod+[',
       },
       {
         id: 'perfetto.MoveNextFlow',
         name: 'Move next flow',
-        callback: () => moveByFocusedFlow('Forward'),
+        callback: () => trace.flows.moveByFocusedFlow('Forward'),
         defaultHotkey: ']',
       },
       {
         id: 'perfetto.MovePrevFlow',
         name: 'Move prev flow',
-        callback: () => moveByFocusedFlow('Backward'),
+        callback: () => trace.flows.moveByFocusedFlow('Backward'),
         defaultHotkey: '[',
       },
       {
@@ -396,24 +398,16 @@ export class UiMainPerTrace implements m.ClassComponent {
   }
 
   private renderOmnibox(): m.Children {
-    const msgTTL = globals.state.status.timestamp + 1 - Date.now() / 1e3;
-    const engineIsBusy =
-      globals.state.engine !== undefined && !globals.state.engine.ready;
-
-    if (msgTTL > 0 || engineIsBusy) {
-      setTimeout(() => raf.scheduleFullRedraw(), msgTTL * 1000);
+    const omniboxMode = AppImpl.instance.omnibox.mode;
+    if (omniboxMode === OmniboxMode.StatusMessage) {
       return m(
         `.omnibox.message-mode`,
         m(`input[readonly][disabled][ref=omnibox]`, {
           value: '',
-          placeholder: globals.state.status.msg,
+          placeholder: AppImpl.instance.omnibox.statusMessage,
         }),
       );
-    }
-
-    const omniboxMode = AppImpl.instance.omnibox.mode;
-
-    if (omniboxMode === OmniboxMode.Command) {
+    } else if (omniboxMode === OmniboxMode.Command) {
       return this.renderCommandOmnibox();
     } else if (omniboxMode === OmniboxMode.Prompt) {
       return this.renderPromptOmnibox();
@@ -675,9 +669,10 @@ export class UiMainPerTrace implements m.ClassComponent {
       {hotkeys},
       m(
         'main',
-        m(Sidebar),
+        m(Sidebar, {trace: this.trace}),
         m(Topbar, {
           omnibox: this.renderOmnibox(),
+          trace: this.trace,
         }),
         m(Alerts),
         children,
@@ -733,5 +728,45 @@ export class UiMainPerTrace implements m.ClassComponent {
       }
       AppImpl.instance.omnibox.clearFocusFlag();
     }
+  }
+
+  private async maybeShowJsonWarning() {
+    // Show warning if the trace is in JSON format.
+    const isJsonTrace = this.trace?.traceInfo.traceType === 'json';
+    const SHOWN_JSON_WARNING_KEY = 'shownJsonWarning';
+
+    if (
+      !isJsonTrace ||
+      window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) === 'true' ||
+      globals.embeddedMode
+    ) {
+      // When in embedded mode, the host app will control which trace format
+      // it passes to Perfetto, so we don't need to show this warning.
+      return;
+    }
+
+    // Save that the warning has been shown. Value is irrelevant since only
+    // the presence of key is going to be checked.
+    window.localStorage.setItem(SHOWN_JSON_WARNING_KEY, 'true');
+
+    showModal({
+      title: 'Warning',
+      content: m(
+        'div',
+        m(
+          'span',
+          'Perfetto UI features are limited for JSON traces. ',
+          'We recommend recording ',
+          m(
+            'a',
+            {href: 'https://perfetto.dev/docs/quickstart/chrome-tracing'},
+            'proto-format traces',
+          ),
+          ' from Chrome.',
+        ),
+        m('br'),
+      ),
+      buttons: [],
+    });
   }
 }
