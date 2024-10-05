@@ -22,20 +22,17 @@ import {
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {EngineConfig, State} from '../common/state';
+import {State} from '../common/state';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
-import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import type {Analytics} from './analytics';
-import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {Workspace} from '../public/workspace';
-import {ratelimit} from './rate_limiters';
-import {setRerunControllersFunction, TraceImpl} from '../core/trace_impl';
+import {TraceImpl} from '../core/trace_impl';
 import {AppImpl} from '../core/app_impl';
-import {createFakeTraceImpl} from '../common/fake_trace_impl';
+import {createFakeTraceImpl} from '../core/fake_trace_impl';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
@@ -108,20 +105,11 @@ class Globals {
   // is gone, figure out what to do with createSearchOverviewTrack().
   async onTraceLoad(trace: TraceImpl): Promise<void> {
     this._trace = trace;
-
-    this._trace.timeline.retriggerControllersOnChange = () =>
-      ratelimit(() => this.store.edit(() => {}), 50);
-
     this._currentTraceId = trace.engine.engineId;
   }
 
-  // Used for permalink load by trace_controller.ts.
-  restoreAppStateAfterTraceLoad?: SerializedAppState;
-
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
-
-  engines = new Map<string, EngineBase>();
 
   constructor() {
     // TODO(primiano): we do this to avoid making all our members possibly
@@ -133,10 +121,6 @@ class Globals {
     // We just want an empty instance of TraceImpl but don't want to mark it
     // as the current trace, otherwise this will trigger the plugins' OnLoad().
     AppImpl.instance.closeCurrentTrace();
-
-    setRerunControllersFunction(() =>
-      this.dispatch(Actions.runControllers({})),
-    );
   }
 
   initialize(
@@ -173,7 +157,6 @@ class Globals {
     this._trackDataStore = new Map<string, {}>();
     this._overviewStore = new Map<string, QuantizedLoad[]>();
     this._threadMap = new Map<number, ThreadDesc>();
-    this.engines.clear();
   }
 
   get publishRedraw(): () => void {
@@ -315,10 +298,6 @@ class Globals {
 
   setRecordingLog(recordingLog: string) {
     this._recordingLog = recordingLog;
-  }
-
-  getCurrentEngine(): EngineConfig | undefined {
-    return this.state.engine;
   }
 
   // This variable is set by the is_internal_user.js script if the user is a
