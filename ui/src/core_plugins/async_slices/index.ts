@@ -25,17 +25,57 @@ import {
   getOrCreateGroupForThread,
 } from '../../public/standard_groups';
 import {exists} from '../../base/utils';
+import {ThreadSliceDetailsPanel} from '../../frontend/thread_slice_details_tab';
 
 class AsyncSlicePlugin implements PerfettoPlugin {
+  private readonly trackIdsToUris = new Map<number, string>();
+
   async onTraceLoad(ctx: Trace): Promise<void> {
+    this.trackIdsToUris.clear();
+
     await this.addGlobalAsyncTracks(ctx);
     await this.addProcessAsyncSliceTracks(ctx);
     await this.addThreadAsyncSliceTracks(ctx);
     await this.addUserAsyncSliceTracks(ctx);
+
+    ctx.selection.registerSqlSelectionResolver({
+      sqlTableName: 'slice',
+      callback: async (id: number) => {
+        // Locate the track for a given id in the slice table
+        const result = await ctx.engine.query(`
+          select
+            track_id as trackId
+          from
+            slice
+          where slice.id = ${id}
+        `);
+
+        if (result.numRows() === 0) {
+          return undefined;
+        }
+
+        const {trackId} = result.firstRow({
+          trackId: NUM,
+        });
+
+        const trackUri = this.trackIdsToUris.get(trackId);
+        if (!trackUri) {
+          return undefined;
+        }
+
+        return {
+          trackUri,
+          eventId: id,
+        };
+      },
+    });
   }
 
   async addGlobalAsyncTracks(ctx: Trace): Promise<void> {
     const {engine} = ctx;
+    // TODO(stevegolton): The track exclusion logic is currently a hack. This will be replaced
+    // by a mechanism for more specific plugins to override tracks from more generic plugins.
+    const suspendResumeLatencyTrackName = 'Suspend/Resume Latency';
     const rawGlobalAsyncTracks = await engine.query(`
       with global_tracks_grouped as (
         select
@@ -46,6 +86,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         from track t
         join _slice_track_summary using (id)
         where t.type in ('__intrinsic_track', 'gpu_track', '__intrinsic_cpu_track')
+              and (name != '${suspendResumeLatencyTrackName}' or name is null)
         group by parent_id, name
       )
       select
@@ -88,11 +129,13 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           scope: 'global',
         },
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+        detailsPanel: () => new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
       const trackNode = new TrackNode({uri, title, sortOrder: -25});
-      trackIds.forEach((id) =>
-        trackMap.set(id, {parentId: it.parentId, trackNode}),
-      );
+      trackIds.forEach((id) => {
+        trackMap.set(id, {parentId: it.parentId, trackNode});
+        this.trackIdsToUris.set(id, uri);
+      });
     }
 
     // Attach track nodes to parents / or the workspace if they have no parent
@@ -165,11 +208,13 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           upid,
         },
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+        detailsPanel: () => new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
       const track = new TrackNode({uri, title, sortOrder: 30});
-      trackIds.forEach((id) =>
-        trackMap.set(id, {trackNode: track, parentId: it.parentId, upid}),
-      );
+      trackIds.forEach((id) => {
+        trackMap.set(id, {trackNode: track, parentId: it.parentId, upid});
+        this.trackIdsToUris.set(id, uri);
+      });
     }
 
     // Attach track nodes to parents / or the workspace if they have no parent
@@ -262,11 +307,13 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           isKernelThread === 0 && isMainThread === 1 && 'main thread',
         ]),
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+        detailsPanel: () => new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
       const track = new TrackNode({uri, title, sortOrder: 20});
-      trackIds.forEach((id) =>
-        trackMap.set(id, {trackNode: track, parentId, utid}),
-      );
+      trackIds.forEach((id) => {
+        trackMap.set(id, {trackNode: track, parentId, utid});
+        this.trackIdsToUris.set(id, uri);
+      });
     }
 
     // Attach track nodes to parents / or the workspace if they have no parent
@@ -340,10 +387,14 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           kind: ASYNC_SLICE_TRACK_KIND,
         },
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+        detailsPanel: () => new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
 
       const track = new TrackNode({uri, title});
-      trackIds.forEach((id) => trackMap.set(id, {trackNode: track, parentId}));
+      trackIds.forEach((id) => {
+        trackMap.set(id, {trackNode: track, parentId});
+        this.trackIdsToUris.set(id, uri);
+      });
     }
 
     // Attach track nodes to parents / or the workspace if they have no parent

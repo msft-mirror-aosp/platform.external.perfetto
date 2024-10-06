@@ -38,6 +38,7 @@
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
+#include "src/trace_processor/importers/gecko/gecko_event.h"
 #include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
 #include "src/trace_processor/importers/systrace/systrace_line.h"
@@ -129,6 +130,15 @@ class TraceSorter {
                          machine_id);
   }
 
+  inline void PushSpeRecord(
+      int64_t timestamp,
+      TraceBlobView record,
+      std::optional<MachineId> machine_id = std::nullopt) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(std::move(record));
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kSpeRecord, id,
+                         machine_id);
+  }
+
   inline void PushInstrumentsRow(
       int64_t timestamp,
       instruments_importer::Row row,
@@ -161,8 +171,8 @@ class TraceSorter {
                             std::string json_value,
                             std::optional<int64_t> dur = std::nullopt) {
     if (dur.has_value()) {
-      // We need to account for slices with duration by sorting them first: this requires us to
-      // use the slower comparator which takes this into account.
+      // We need to account for slices with duration by sorting them first: this
+      // requires us to use the slower comparator which takes this into account.
       use_slow_sorting_ = true;
 
       TraceTokenBuffer::Id id =
@@ -225,19 +235,21 @@ class TraceSorter {
     UpdateAppendMaxTs(queue);
   }
 
-  inline void PushLegacyV8CpuProfileEvent(
-      int64_t timestamp,
-      uint64_t session_id,
-      uint32_t pid,
-      uint32_t tid,
-      uint32_t callsite_id,
-      std::optional<MachineId> machine_id = std::nullopt) {
+  inline void PushLegacyV8CpuProfileEvent(int64_t timestamp,
+                                          uint64_t session_id,
+                                          uint32_t pid,
+                                          uint32_t tid,
+                                          uint32_t callsite_id) {
     TraceTokenBuffer::Id id = token_buffer_.Append(
         LegacyV8CpuProfileEvent{session_id, pid, tid, callsite_id});
-    auto* queue = GetQueue(0, machine_id);
-    queue->Append(timestamp, TimestampedEvent::Type::kLegacyV8CpuProfileEvent,
-                  id, use_slow_sorting_);
-    UpdateAppendMaxTs(queue);
+    AppendNonFtraceEvent(timestamp,
+                         TimestampedEvent::Type::kLegacyV8CpuProfileEvent, id);
+  }
+
+  inline void PushGeckoEvent(int64_t timestamp,
+                             gecko_importer::GeckoEvent event) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(std::move(event));
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kGeckoEvent, id);
   }
 
   inline void PushInlineFtraceEvent(
@@ -305,21 +317,23 @@ class TraceSorter {
  private:
   struct TimestampedEvent {
     enum class Type : uint8_t {
+      kAndroidLogEvent,
+      kEtwEvent,
       kFtraceEvent,
-      kPerfRecord,
-      kInstrumentsRow,
-      kTracePacket,
+      kFuchsiaRecord,
       kInlineSchedSwitch,
       kInlineSchedWaking,
+      kInstrumentsRow,
       kJsonValue,
       kJsonValueWithDur,
-      kFuchsiaRecord,
-      kTrackEvent,
-      kSystraceLine,
-      kEtwEvent,
-      kAndroidLogEvent,
       kLegacyV8CpuProfileEvent,
-      kMax = kLegacyV8CpuProfileEvent,
+      kPerfRecord,
+      kSpeRecord,
+      kSystraceLine,
+      kTracePacket,
+      kTrackEvent,
+      kGeckoEvent,
+      kMax = kGeckoEvent,
     };
 
     // Number of bits required to store the max element in |Type|.

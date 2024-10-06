@@ -14,7 +14,7 @@
 
 import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {duration, Time, time} from '../base/time';
+import {time} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {CommandManagerImpl} from '../core/command_manager';
 import {
@@ -22,65 +22,20 @@ import {
   ConversionJobStatus,
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
-import {EngineConfig, State} from '../common/state';
-import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
+import {State} from '../common/state';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
-import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import type {Analytics} from './analytics';
-import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
-import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {Workspace} from '../public/workspace';
-import {ratelimit} from './rate_limiters';
-import {
-  AppImpl,
-  setRerunControllersFunction,
-  TraceImpl,
-} from '../core/app_trace_impl';
-import {createFakeTraceImpl} from '../common/fake_trace_impl';
+import {TraceImpl} from '../core/trace_impl';
+import {AppImpl} from '../core/app_impl';
+import {createFakeTraceImpl} from '../core/fake_trace_impl';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
-
-export interface FlowPoint {
-  trackId: number;
-
-  sliceName: string;
-  sliceCategory: string;
-  sliceId: SliceSqlId;
-  sliceStartTs: time;
-  sliceEndTs: time;
-  // Thread and process info. Only set in sliceSelected not in areaSelected as
-  // the latter doesn't display per-flow info and it'd be a waste to join
-  // additional tables for undisplayed info in that case. Nothing precludes
-  // adding this in a future iteration however.
-  threadName: string;
-  processName: string;
-
-  depth: number;
-
-  // TODO(altimin): Ideally we should have a generic mechanism for allowing to
-  // customise the name here, but for now we are hardcording a few
-  // Chrome-specific bits in the query here.
-  sliceChromeCustomName?: string;
-}
-
-export interface Flow {
-  id: number;
-
-  begin: FlowPoint;
-  end: FlowPoint;
-  dur: duration;
-
-  // Whether this flow connects a slice with its descendant.
-  flowToDescendant: boolean;
-
-  category?: string;
-  name?: string;
-}
 
 export interface QuantizedLoad {
   start: time;
@@ -127,13 +82,8 @@ class Globals {
   private _trackDataStore?: TrackDataStore = undefined;
   private _overviewStore?: OverviewStore = undefined;
   private _threadMap?: ThreadMap = undefined;
-  private _connectedFlows?: Flow[] = undefined;
-  private _selectedFlows?: Flow[] = undefined;
-  private _visibleFlowCategories?: Map<string, boolean> = undefined;
-  private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
-  private _traceErrors?: number = undefined;
   private _metricError?: string = undefined;
   private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
   private _embeddedMode?: boolean = undefined;
@@ -143,7 +93,6 @@ class Globals {
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
-  showTraceErrorPopup = true;
   extraSqlPackages: SqlPackage[] = [];
 
   get workspace(): Workspace {
@@ -156,20 +105,11 @@ class Globals {
   // is gone, figure out what to do with createSearchOverviewTrack().
   async onTraceLoad(trace: TraceImpl): Promise<void> {
     this._trace = trace;
-
-    this._trace.timeline.retriggerControllersOnChange = () =>
-      ratelimit(() => this.store.edit(() => {}), 50);
-
     this._currentTraceId = trace.engine.engineId;
   }
 
-  // Used for permalink load by trace_controller.ts.
-  restoreAppStateAfterTraceLoad?: SerializedAppState;
-
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
-
-  engines = new Map<string, EngineBase>();
 
   constructor() {
     // TODO(primiano): we do this to avoid making all our members possibly
@@ -181,10 +121,6 @@ class Globals {
     // We just want an empty instance of TraceImpl but don't want to mark it
     // as the current trace, otherwise this will trigger the plugins' OnLoad().
     AppImpl.instance.closeCurrentTrace();
-
-    setRerunControllersFunction(() =>
-      this.dispatch(Actions.runControllers({})),
-    );
   }
 
   initialize(
@@ -221,10 +157,6 @@ class Globals {
     this._trackDataStore = new Map<string, {}>();
     this._overviewStore = new Map<string, QuantizedLoad[]>();
     this._threadMap = new Map<number, ThreadDesc>();
-    this._connectedFlows = [];
-    this._selectedFlows = [];
-    this._visibleFlowCategories = new Map<string, boolean>();
-    this.engines.clear();
   }
 
   get publishRedraw(): () => void {
@@ -292,52 +224,12 @@ class Globals {
     return assertExists(this._threadMap);
   }
 
-  get connectedFlows() {
-    return assertExists(this._connectedFlows);
-  }
-
-  set connectedFlows(connectedFlows: Flow[]) {
-    this._connectedFlows = assertExists(connectedFlows);
-  }
-
-  get selectedFlows() {
-    return assertExists(this._selectedFlows);
-  }
-
-  set selectedFlows(selectedFlows: Flow[]) {
-    this._selectedFlows = assertExists(selectedFlows);
-  }
-
-  get visibleFlowCategories() {
-    return assertExists(this._visibleFlowCategories);
-  }
-
-  set visibleFlowCategories(visibleFlowCategories: Map<string, boolean>) {
-    this._visibleFlowCategories = assertExists(visibleFlowCategories);
-  }
-
-  get traceErrors() {
-    return this._traceErrors;
-  }
-
-  setTraceErrors(arg: number) {
-    this._traceErrors = arg;
-  }
-
   get metricError() {
     return this._metricError;
   }
 
   setMetricError(arg: string) {
     this._metricError = arg;
-  }
-
-  set numQueuedQueries(value: number) {
-    this._numQueriesQueued = value;
-  }
-
-  get numQueuedQueries() {
-    return this._numQueriesQueued;
   }
 
   get bufferUsage() {
@@ -408,10 +300,6 @@ class Globals {
     this._recordingLog = recordingLog;
   }
 
-  getCurrentEngine(): EngineConfig | undefined {
-    return this.state.engine;
-  }
-
   // This variable is set by the is_internal_user.js script if the user is a
   // googler. This is used to avoid exposing features that are not ready yet
   // for public consumption. The gated features themselves are not secret.
@@ -461,33 +349,6 @@ class Globals {
 
   get noteManager() {
     return this._trace.notes;
-  }
-
-  // Offset between t=0 and the configured time domain.
-  timestampOffset(): time {
-    const fmt = timestampFormat();
-    switch (fmt) {
-      case TimestampFormat.Timecode:
-      case TimestampFormat.Seconds:
-      case TimestampFormat.Milliseoncds:
-      case TimestampFormat.Microseconds:
-        return this._trace.traceInfo.start;
-      case TimestampFormat.TraceNs:
-      case TimestampFormat.TraceNsLocale:
-        return Time.ZERO;
-      case TimestampFormat.UTC:
-        return this._trace.traceInfo.utcOffset;
-      case TimestampFormat.TraceTz:
-        return this._trace.traceInfo.traceTzOffset;
-      default:
-        const x: never = fmt;
-        throw new Error(`Unsupported format ${x}`);
-    }
-  }
-
-  // Convert absolute time to domain time.
-  toDomainTime(ts: time): time {
-    return Time.sub(ts, this.timestampOffset());
   }
 }
 
