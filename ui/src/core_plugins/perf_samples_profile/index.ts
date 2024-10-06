@@ -15,12 +15,16 @@
 import m from 'mithril';
 import {TrackData} from '../../common/track_data';
 import {Engine} from '../../trace_processor/engine';
-import {LegacyDetailsPanel} from '../../public/details_panel';
+import {DetailsPanel} from '../../public/details_panel';
 import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../../public/track_kinds';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
-import {LegacySelection, PerfSamplesSelection} from '../../public/selection';
+import {
+  PerfSamplesSelection,
+  ProfileType,
+  Selection,
+} from '../../public/selection';
 import {
   QueryFlamegraph,
   QueryFlamegraphAttrs,
@@ -122,12 +126,39 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
       const track = new TrackNode({uri, title, sortOrder: -50});
       group.addChildInOrder(track);
     }
-    ctx.registerDetailsPanel(new PerfSamplesFlamegraphDetailsPanel(ctx.engine));
+    ctx.tabs.registerDetailsPanel(
+      new PerfSamplesFlamegraphDetailsPanel(ctx.engine),
+    );
+
+    await selectPerfSample(ctx);
   }
 }
 
-class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
-  readonly panelType = 'LegacyDetailsPanel';
+async function selectPerfSample(ctx: Trace) {
+  const profile = await assertExists(ctx.engine).query(`
+    select upid
+    from perf_sample
+    join thread using (utid)
+    where callsite_id is not null
+    order by ts desc
+    limit 1
+  `);
+  if (profile.numRows() !== 1) return;
+  const row = profile.firstRow({upid: NUM});
+  const upid = row.upid;
+  const leftTs = ctx.traceInfo.start;
+  const rightTs = ctx.traceInfo.end;
+  ctx.selection.selectLegacy({
+    kind: 'PERF_SAMPLES',
+    id: 0,
+    upid,
+    leftTs,
+    rightTs,
+    type: ProfileType.PERF_SAMPLE,
+  });
+}
+
+class PerfSamplesFlamegraphDetailsPanel implements DetailsPanel {
   private sel?: PerfSamplesSelection;
   private selMonitor = new Monitor([
     () => this.sel?.leftTs,
@@ -140,14 +171,20 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
 
   constructor(private engine: Engine) {}
 
-  render(sel: LegacySelection) {
-    if (sel.kind !== 'PERF_SAMPLES') {
+  render(sel: Selection) {
+    if (sel.kind !== 'legacy') {
+      this.sel = undefined;
+      return;
+    }
+
+    const legacySel = sel.legacySelection;
+    if (legacySel.kind !== 'PERF_SAMPLES') {
       this.sel = undefined;
       return undefined;
     }
 
-    const {leftTs, rightTs, upid, utid} = sel;
-    this.sel = sel;
+    const {leftTs, rightTs, upid, utid} = legacySel;
+    this.sel = legacySel;
     if (this.selMonitor.ifStateChanged()) {
       this.flamegraphAttrs = {
         engine: this.engine,
@@ -203,8 +240,16 @@ class PerfSamplesFlamegraphDetailsPanel implements LegacyDetailsPanel {
             'include perfetto module linux.perf.samples',
             [{name: 'mapping_name', displayName: 'Mapping'}],
             [
-              {name: 'source_file', displayName: 'Source File'},
-              {name: 'line_number', displayName: 'Line Number'},
+              {
+                name: 'source_file',
+                displayName: 'Source File',
+                mergeAggregation: 'ONE_OR_NULL',
+              },
+              {
+                name: 'line_number',
+                displayName: 'Line Number',
+                mergeAggregation: 'ONE_OR_NULL',
+              },
             ],
           ),
         ],

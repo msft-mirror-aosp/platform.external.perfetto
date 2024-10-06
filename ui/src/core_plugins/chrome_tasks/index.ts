@@ -14,7 +14,7 @@
 
 import {uuidv4} from '../../base/uuid';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {addSqlTableTab} from '../../frontend/sql_table_tab_command';
+import {addSqlTableTab} from '../../frontend/sql_table_tab_interface';
 import {asUtid} from '../../trace_processor/sql_utils/core_types';
 import {BottomTabToSCSAdapter} from '../../public/utils';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
@@ -109,7 +109,7 @@ class ChromeTasksPlugin implements PerfettoPlugin {
       ctx.workspace.addChildInOrder(group);
     }
 
-    ctx.registerDetailsPanel(
+    ctx.tabs.registerDetailsPanel(
       new BottomTabToSCSAdapter({
         tabFactory: (selection) => {
           if (

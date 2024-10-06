@@ -24,11 +24,16 @@ import {TrackNode} from '../../public/workspace';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../../trace_processor/query_result';
 import {ActualFramesTrack} from './actual_frames_track';
 import {ExpectedFramesTrack} from './expected_frames_track';
+import {FrameSelectionAggregator} from './frame_selection_aggregator';
+import {ThreadSliceDetailsPanel} from '../../frontend/thread_slice_details_tab';
 
 class FramesPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
     this.addExpectedFrames(ctx);
     this.addActualFrames(ctx);
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new FrameSelectionAggregator(),
+    );
   }
 
   async addExpectedFrames(ctx: Trace): Promise<void> {
@@ -41,7 +46,7 @@ class FramesPlugin implements PerfettoPlugin {
         process.name as processName,
         process.pid as pid,
         __max_layout_depth(t.track_count, t.track_ids) as maxDepth
-      from _process_track_summary_by_upid_and_name t
+      from _process_track_summary_by_upid_and_parent_id_and_name t
       join process using(upid)
       where t.name = "Expected Timeline"
     `);
@@ -82,6 +87,7 @@ class FramesPlugin implements PerfettoPlugin {
           upid,
           kind: EXPECTED_FRAMES_SLICE_TRACK_KIND,
         },
+        detailsPanel: new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
       const group = getOrCreateGroupForProcess(ctx.workspace, upid);
       const track = new TrackNode({uri, title, sortOrder: -50});
@@ -99,7 +105,7 @@ class FramesPlugin implements PerfettoPlugin {
         process.name as processName,
         process.pid as pid,
         __max_layout_depth(t.track_count, t.track_ids) as maxDepth
-      from _process_track_summary_by_upid_and_name t
+      from _process_track_summary_by_upid_and_parent_id_and_name t
       join process using(upid)
       where t.name = "Actual Timeline"
     `);
@@ -145,6 +151,7 @@ class FramesPlugin implements PerfettoPlugin {
           trackIds,
           kind: ACTUAL_FRAMES_SLICE_TRACK_KIND,
         },
+        detailsPanel: new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
       const group = getOrCreateGroupForProcess(ctx.workspace, upid);
       const track = new TrackNode({uri, title, sortOrder: -50});

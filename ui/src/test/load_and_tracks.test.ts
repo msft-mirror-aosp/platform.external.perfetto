@@ -38,14 +38,7 @@ test('info and stats', async () => {
 });
 
 test('omnibox search', async () => {
-  const omnibox = page.locator('input[ref=omnibox]');
-  await omnibox.focus();
-  await omnibox.fill('composite 572441');
-  await pth.waitForPerfettoIdle();
-
-  await omnibox.press('Enter');
-  await pth.waitForPerfettoIdle();
-
+  await pth.searchSlice('composite 572441');
   await pth.resetFocus();
   await page.keyboard.press('f');
   await pth.waitForPerfettoIdle();
@@ -93,14 +86,13 @@ test('track expand and collapse', async () => {
 
 test('pin tracks', async () => {
   const trackGroup = pth.locateTrackGroup('traced 1055');
-  await trackGroup.locator('.pf-track-title').click();
-  await pth.waitForPerfettoIdle();
-  let track = pth.locateTrack('mem.rss', trackGroup);
+  await pth.toggleTrackGroup(trackGroup);
+  let track = pth.locateTrack('traced 1055/mem.rss', trackGroup);
   await pth.pinTrackUsingShellBtn(track);
   await pth.waitForPerfettoIdle();
   await pth.waitForIdleAndScreenshot('one_track_pinned.png');
 
-  track = pth.locateTrack('traced 1055', trackGroup);
+  track = pth.locateTrack('traced 1055/traced 1055', trackGroup);
   await pth.pinTrackUsingShellBtn(track);
   await pth.waitForPerfettoIdle();
   await pth.waitForIdleAndScreenshot('two_tracks_pinned.png');

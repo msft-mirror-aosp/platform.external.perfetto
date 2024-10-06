@@ -14,9 +14,8 @@
 
 import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {duration, Time, time} from '../base/time';
+import {time} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
-import {AggregateData} from '../common/aggregation_data';
 import {CommandManagerImpl} from '../core/command_manager';
 import {
   ConversionJobName,
@@ -24,65 +23,22 @@ import {
 } from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
 import {EngineConfig, State} from '../common/state';
-import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
 import {EngineBase} from '../trace_processor/engine';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import type {Analytics} from './analytics';
-import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
 import {SerializedAppState} from '../common/state_serialization_schema';
 import {getServingRoot} from '../base/http_utils';
 import {Workspace} from '../public/workspace';
 import {ratelimit} from './rate_limiters';
-import {
-  AppImpl,
-  setRerunControllersFunction,
-  TraceImpl,
-} from '../core/app_trace_impl';
+import {setRerunControllersFunction, TraceImpl} from '../core/trace_impl';
+import {AppImpl} from '../core/app_impl';
 import {createFakeTraceImpl} from '../common/fake_trace_impl';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
-type AggregateDataStore = Map<string, AggregateData>;
-
-export interface FlowPoint {
-  trackId: number;
-
-  sliceName: string;
-  sliceCategory: string;
-  sliceId: SliceSqlId;
-  sliceStartTs: time;
-  sliceEndTs: time;
-  // Thread and process info. Only set in sliceSelected not in areaSelected as
-  // the latter doesn't display per-flow info and it'd be a waste to join
-  // additional tables for undisplayed info in that case. Nothing precludes
-  // adding this in a future iteration however.
-  threadName: string;
-  processName: string;
-
-  depth: number;
-
-  // TODO(altimin): Ideally we should have a generic mechanism for allowing to
-  // customise the name here, but for now we are hardcording a few
-  // Chrome-specific bits in the query here.
-  sliceChromeCustomName?: string;
-}
-
-export interface Flow {
-  id: number;
-
-  begin: FlowPoint;
-  end: FlowPoint;
-  dur: duration;
-
-  // Whether this flow connects a slice with its descendant.
-  flowToDescendant: boolean;
-
-  category?: string;
-  name?: string;
-}
 
 export interface QuantizedLoad {
   start: time;
@@ -128,15 +84,9 @@ class Globals {
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;
   private _overviewStore?: OverviewStore = undefined;
-  private _aggregateDataStore?: AggregateDataStore = undefined;
   private _threadMap?: ThreadMap = undefined;
-  private _connectedFlows?: Flow[] = undefined;
-  private _selectedFlows?: Flow[] = undefined;
-  private _visibleFlowCategories?: Map<string, boolean> = undefined;
-  private _numQueriesQueued = 0;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
-  private _traceErrors?: number = undefined;
   private _metricError?: string = undefined;
   private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
   private _embeddedMode?: boolean = undefined;
@@ -146,7 +96,6 @@ class Globals {
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
   permalinkHash?: string;
-  showTraceErrorPopup = true;
   extraSqlPackages: SqlPackage[] = [];
 
   get workspace(): Workspace {
@@ -223,11 +172,7 @@ class Globals {
     // entire file soon).
     this._trackDataStore = new Map<string, {}>();
     this._overviewStore = new Map<string, QuantizedLoad[]>();
-    this._aggregateDataStore = new Map<string, AggregateData>();
     this._threadMap = new Map<number, ThreadDesc>();
-    this._connectedFlows = [];
-    this._selectedFlows = [];
-    this._visibleFlowCategories = new Map<string, boolean>();
     this.engines.clear();
   }
 
@@ -296,56 +241,12 @@ class Globals {
     return assertExists(this._threadMap);
   }
 
-  get connectedFlows() {
-    return assertExists(this._connectedFlows);
-  }
-
-  set connectedFlows(connectedFlows: Flow[]) {
-    this._connectedFlows = assertExists(connectedFlows);
-  }
-
-  get selectedFlows() {
-    return assertExists(this._selectedFlows);
-  }
-
-  set selectedFlows(selectedFlows: Flow[]) {
-    this._selectedFlows = assertExists(selectedFlows);
-  }
-
-  get visibleFlowCategories() {
-    return assertExists(this._visibleFlowCategories);
-  }
-
-  set visibleFlowCategories(visibleFlowCategories: Map<string, boolean>) {
-    this._visibleFlowCategories = assertExists(visibleFlowCategories);
-  }
-
-  get aggregateDataStore(): AggregateDataStore {
-    return assertExists(this._aggregateDataStore);
-  }
-
-  get traceErrors() {
-    return this._traceErrors;
-  }
-
-  setTraceErrors(arg: number) {
-    this._traceErrors = arg;
-  }
-
   get metricError() {
     return this._metricError;
   }
 
   setMetricError(arg: string) {
     this._metricError = arg;
-  }
-
-  set numQueuedQueries(value: number) {
-    this._numQueriesQueued = value;
-  }
-
-  get numQueuedQueries() {
-    return this._numQueriesQueued;
   }
 
   get bufferUsage() {
@@ -416,10 +317,6 @@ class Globals {
     this._recordingLog = recordingLog;
   }
 
-  setAggregateData(kind: string, data: AggregateData) {
-    this.aggregateDataStore.set(kind, data);
-  }
-
   getCurrentEngine(): EngineConfig | undefined {
     return this.state.engine;
   }
@@ -473,33 +370,6 @@ class Globals {
 
   get noteManager() {
     return this._trace.notes;
-  }
-
-  // Offset between t=0 and the configured time domain.
-  timestampOffset(): time {
-    const fmt = timestampFormat();
-    switch (fmt) {
-      case TimestampFormat.Timecode:
-      case TimestampFormat.Seconds:
-      case TimestampFormat.Milliseoncds:
-      case TimestampFormat.Microseconds:
-        return this._trace.traceInfo.start;
-      case TimestampFormat.TraceNs:
-      case TimestampFormat.TraceNsLocale:
-        return Time.ZERO;
-      case TimestampFormat.UTC:
-        return this._trace.traceInfo.utcOffset;
-      case TimestampFormat.TraceTz:
-        return this._trace.traceInfo.traceTzOffset;
-      default:
-        const x: never = fmt;
-        throw new Error(`Unsupported format ${x}`);
-    }
-  }
-
-  // Convert absolute time to domain time.
-  toDomainTime(ts: time): time {
-    return Time.sub(ts, this.timestampOffset());
   }
 }
 

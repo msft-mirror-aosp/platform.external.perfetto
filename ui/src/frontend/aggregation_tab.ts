@@ -14,8 +14,7 @@
 
 import m from 'mithril';
 import {AggregationPanel} from './aggregation_panel';
-import {globals} from './globals';
-import {isEmptyData} from '../common/aggregation_data';
+import {isEmptyData} from '../public/aggregation';
 import {DetailsShell} from '../widgets/details_shell';
 import {Button, ButtonBar} from '../widgets/button';
 import {raf} from '../core/raf_scheduler';
@@ -36,7 +35,8 @@ import {
 } from '../core/query_flamegraph';
 import {DisposableStack} from '../base/disposable_stack';
 import {assertExists} from '../base/logging';
-import {Trace, TraceAttrs} from '../public/trace';
+import {TraceImpl} from '../core/trace_impl';
+import {Trace} from '../public/trace';
 
 interface View {
   key: string;
@@ -44,19 +44,23 @@ interface View {
   content: m.Children;
 }
 
-export type AreaDetailsPanelAttrs = TraceAttrs;
+export type AreaDetailsPanelAttrs = {trace: TraceImpl};
 
 class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
-  private readonly monitor = new Monitor([
-    () => globals.selectionManager.selection,
-  ]);
+  private trace: TraceImpl;
+  private monitor: Monitor;
   private currentTab: string | undefined = undefined;
   private cpuProfileFlamegraphAttrs?: QueryFlamegraphAttrs;
   private perfSampleFlamegraphAttrs?: QueryFlamegraphAttrs;
   private sliceFlamegraphAttrs?: QueryFlamegraphAttrs;
 
-  private getCurrentView(trace: Trace): string | undefined {
-    const types = this.getViews(trace).map(({key}) => key);
+  constructor({attrs}: m.CVnode<AreaDetailsPanelAttrs>) {
+    this.trace = attrs.trace;
+    this.monitor = new Monitor([() => this.trace.selection.selection]);
+  }
+
+  private getCurrentView(): string | undefined {
+    const types = this.getViews().map(({key}) => key);
 
     if (types.length === 0) {
       return undefined;
@@ -73,20 +77,27 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
     return this.currentTab;
   }
 
-  private getViews(trace: Trace): View[] {
+  private getViews(): View[] {
     const views: View[] = [];
 
-    for (const [key, value] of globals.aggregateDataStore.entries()) {
-      if (!isEmptyData(value)) {
+    for (const aggregator of this.trace.selection.aggregation.aggregators) {
+      const aggregatorId = aggregator.id;
+      const value =
+        this.trace.selection.aggregation.getAggregatedData(aggregatorId);
+      if (value !== undefined && !isEmptyData(value)) {
         views.push({
           key: value.tabName,
           name: value.tabName,
-          content: m(AggregationPanel, {kind: key, key, data: value}),
+          content: m(AggregationPanel, {
+            aggregatorId,
+            data: value,
+            trace: this.trace,
+          }),
         });
       }
     }
 
-    const pivotTableState = globals.state.nonSerializableState.pivotTable;
+    const pivotTableState = this.trace.pivotTable.state;
     const tree = pivotTableState.queryResult?.tree;
     if (
       pivotTableState.selectionArea != undefined &&
@@ -96,29 +107,29 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
         key: 'pivot_table',
         name: 'Pivot Table',
         content: m(PivotTable, {
-          trace,
+          trace: this.trace,
           selectionArea: pivotTableState.selectionArea,
         }),
       });
     }
 
-    this.addFlamegraphView(trace, this.monitor.ifStateChanged(), views);
+    this.addFlamegraphView(this.trace, this.monitor.ifStateChanged(), views);
 
     // Add this after all aggregation panels, to make it appear after 'Slices'
-    if (globals.selectedFlows.length > 0) {
+    if (this.trace.flows.selectedFlows.length > 0) {
       views.push({
         key: 'selected_flows',
         name: 'Flow Events',
-        content: m(FlowEventsAreaSelectedPanel),
+        content: m(FlowEventsAreaSelectedPanel, {trace: this.trace}),
       });
     }
 
     return views;
   }
 
-  view({attrs}: m.CVnode<AreaDetailsPanelAttrs>): m.Children {
-    const views = this.getViews(attrs.trace);
-    const currentViewKey = this.getCurrentView(attrs.trace);
+  view(): m.Children {
+    const views = this.getViews();
+    const currentViewKey = this.getCurrentView();
 
     const aggregationButtons = views.map(({key, name}) => {
       return m(Button, {
@@ -199,7 +210,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
   }
 
   private computeCpuProfileFlamegraphAttrs(trace: Trace, isChanged: boolean) {
-    const currentSelection = globals.selectionManager.selection;
+    const currentSelection = trace.selection.selection;
     if (currentSelection.kind !== 'area') {
       return undefined;
     }
@@ -209,8 +220,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
       return this.cpuProfileFlamegraphAttrs;
     }
     const utids = [];
-    for (const trackUri of currentSelection.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of currentSelection.tracks) {
       if (trackInfo?.tags?.kind === CPU_PROFILE_TRACK_KIND) {
         utids.push(trackInfo.tags?.utid);
       }
@@ -251,8 +261,16 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
           'include perfetto module callstacks.stack_profile',
           [{name: 'mapping_name', displayName: 'Mapping'}],
           [
-            {name: 'source_file', displayName: 'Source File'},
-            {name: 'line_number', displayName: 'Line Number'},
+            {
+              name: 'source_file',
+              displayName: 'Source File',
+              mergeAggregation: 'ONE_OR_NULL',
+            },
+            {
+              name: 'line_number',
+              displayName: 'Line Number',
+              mergeAggregation: 'ONE_OR_NULL',
+            },
           ],
         ),
       ],
@@ -260,7 +278,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
   }
 
   private computePerfSampleFlamegraphAttrs(trace: Trace, isChanged: boolean) {
-    const currentSelection = globals.selectionManager.selection;
+    const currentSelection = trace.selection.selection;
     if (currentSelection.kind !== 'area') {
       return undefined;
     }
@@ -308,7 +326,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
   }
 
   private computeSliceFlamegraphAttrs(trace: Trace, isChanged: boolean) {
-    const currentSelection = globals.selectionManager.selection;
+    const currentSelection = trace.selection.selection;
     if (currentSelection.kind !== 'area') {
       return undefined;
     }
@@ -318,8 +336,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
       return this.sliceFlamegraphAttrs;
     }
     const trackIds = [];
-    for (const trackUri of currentSelection.trackUris) {
-      const trackInfo = globals.trackManager.getTrack(trackUri);
+    for (const trackInfo of currentSelection.tracks) {
       if (trackInfo?.tags?.kind !== THREAD_SLICE_TRACK_KIND) {
         continue;
       }
@@ -369,9 +386,8 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
 export class AggregationsTabs implements Disposable {
   private trash = new DisposableStack();
 
-  constructor(trace: Trace) {
-    const unregister = globals.tabManager.registerDetailsPanel({
-      panelType: 'DetailsPanel',
+  constructor(trace: TraceImpl) {
+    const unregister = trace.tabs.registerDetailsPanel({
       render(selection) {
         if (selection.kind === 'area') {
           return m(AreaDetailsPanel, {trace});
@@ -391,8 +407,7 @@ export class AggregationsTabs implements Disposable {
 
 function getUpidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
   const upids = [];
-  for (const trackUri of currentSelection.trackUris) {
-    const trackInfo = globals.trackManager.getTrack(trackUri);
+  for (const trackInfo of currentSelection.tracks) {
     if (
       trackInfo?.tags?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND &&
       trackInfo.tags?.utid === undefined
@@ -405,8 +420,7 @@ function getUpidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
 
 function getUtidsFromPerfSampleAreaSelection(currentSelection: AreaSelection) {
   const utids = [];
-  for (const trackUri of currentSelection.trackUris) {
-    const trackInfo = globals.trackManager.getTrack(trackUri);
+  for (const trackInfo of currentSelection.tracks) {
     if (
       trackInfo?.tags?.kind === PERF_SAMPLES_PROFILE_TRACK_KIND &&
       trackInfo.tags?.utid !== undefined

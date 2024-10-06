@@ -162,17 +162,12 @@ class QueryTableRow implements m.ClassComponent<QueryTableRowAttrs> {
 
   private selectSlice(
     sliceId: number,
-    trackUuid: string,
+    _trackUuid: string,
     switchToCurrentSelectionTab: boolean,
   ) {
-    globals.selectionManager.setLegacySlice(
-      {
-        id: sliceId,
-        trackUri: trackUuid,
-        table: 'slice',
-      },
-      {switchToCurrentSelectionTab},
-    );
+    globals.selectionManager.selectSqlEvent('slice', sliceId, {
+      switchToCurrentSelectionTab,
+    });
   }
 }
 

@@ -17,9 +17,10 @@ import {
   Selection,
   LegacySelection,
   Area,
-  ProfileType,
   SelectionOpts,
   SelectionManager,
+  AreaSelectionAggregator,
+  SqlSelectionResolver,
 } from '../public/selection';
 import {duration, Time, time, TimeSpan} from '../base/time';
 import {
@@ -29,12 +30,11 @@ import {
 import {raf} from './raf_scheduler';
 import {exists, Optional} from '../base/utils';
 import {TrackManagerImpl} from './track_manager';
-import {SelectionResolver} from './selection_resolver';
 import {Engine} from '../trace_processor/engine';
 import {ScrollHelper} from './scroll_helper';
 import {NoteManagerImpl} from './note_manager';
-import {AsyncLimiter} from '../base/async_limiter';
 import {SearchResult} from '../public/search';
+import {SelectionAggregationManager} from './selection_aggregation_manager';
 
 const INSTANT_FOCUS_DURATION = 1n;
 const INCOMPLETE_SLICE_DURATION = 30_000n;
@@ -50,11 +50,9 @@ const INCOMPLETE_SLICE_DURATION = 30_000n;
 export class SelectionManagerImpl implements SelectionManager {
   private _selection: Selection = {kind: 'empty'};
   private _selectedDetails?: LegacySelectionDetails;
-  private _selectionResolver: SelectionResolver;
-  private _pendingScrollId?: number;
+  private _aggregationManager: SelectionAggregationManager;
   // Incremented every time _selection changes.
-  private _selectionGeneration = 0;
-  private _limiter = new AsyncLimiter();
+  private readonly selectionResolvers = new Array<SqlSelectionResolver>();
 
   constructor(
     engine: Engine,
@@ -63,35 +61,76 @@ export class SelectionManagerImpl implements SelectionManager {
     private scrollHelper: ScrollHelper,
     private onSelectionChange: (s: Selection, opts: SelectionOpts) => void,
   ) {
-    this._selectionResolver = new SelectionResolver(engine);
+    this._aggregationManager = new SelectionAggregationManager(
+      engine.getProxy('SelectionAggregationManager'),
+    );
+  }
+
+  registerAreaSelectionAggreagtor(aggr: AreaSelectionAggregator): void {
+    this._aggregationManager.registerAggregator(aggr);
   }
 
   clear(): void {
     this.setSelection({kind: 'empty'});
   }
 
-  setEvent(trackUri: string, eventId: number) {
-    this.setSelection({
-      kind: 'single',
-      trackUri,
-      eventId,
-    });
+  async selectTrackEvent(
+    trackUri: string,
+    eventId: number,
+    opts?: SelectionOpts,
+  ) {
+    const details = await this.trackManager
+      .getTrack(trackUri)
+      ?.track.getSelectionDetails?.(eventId);
+
+    if (!details) {
+      throw new Error('Unable to resolve selection details');
+    }
+
+    this.setSelection(
+      {
+        ...details,
+        kind: 'single',
+        trackUri,
+        eventId,
+      },
+      opts,
+    );
   }
 
-  setNote(args: {id: string}) {
-    this.setSelection({
-      kind: 'note',
-      id: args.id,
-    });
+  selectNote(args: {id: string}, opts?: SelectionOpts) {
+    this.setSelection(
+      {
+        kind: 'note',
+        id: args.id,
+      },
+      opts,
+    );
   }
 
-  setArea(args: Area): void {
-    const {start, end} = args;
+  selectArea(area: Area, opts?: SelectionOpts): void {
+    const {start, end} = area;
     assertTrue(start <= end);
-    this.setSelection({
-      kind: 'area',
-      ...args,
-    });
+
+    // In the case of area selection, the caller provides a list of trackUris.
+    // However, all the consumer want to access the resolved TrackDescriptor.
+    // Rather than delegating this to the various consumers, we resolve them
+    // now once and for all and place them in the selection object.
+    const tracks = [];
+    for (const uri of area.trackUris) {
+      const trackDescr = this.trackManager.getTrack(uri);
+      if (trackDescr === undefined) continue;
+      tracks.push(trackDescr);
+    }
+
+    this.setSelection(
+      {
+        kind: 'area',
+        tracks,
+        ...area,
+      },
+      opts,
+    );
   }
 
   toggleTrackAreaSelection(trackUri: string) {
@@ -140,7 +179,7 @@ export class SelectionManagerImpl implements SelectionManager {
 
   // There is no matching addLegacy as we did not support multi-single
   // selection with the legacy selection system.
-  setLegacy(legacySelection: LegacySelection, opts?: SelectionOpts): void {
+  selectLegacy(legacySelection: LegacySelection, opts?: SelectionOpts): void {
     this.setSelection(
       {
         kind: 'legacy',
@@ -150,93 +189,7 @@ export class SelectionManagerImpl implements SelectionManager {
     );
   }
 
-  setHeapProfile(args: {
-    id: number;
-    upid: number;
-    ts: time;
-    type: ProfileType;
-  }): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'HEAP_PROFILE',
-        id: args.id,
-        upid: args.upid,
-        ts: args.ts,
-        type: args.type,
-      },
-    });
-  }
-
-  setPerfSamples(args: {
-    id: number;
-    utid?: number;
-    upid?: number;
-    leftTs: time;
-    rightTs: time;
-    type: ProfileType;
-  }) {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'PERF_SAMPLES',
-        id: args.id,
-        utid: args.utid,
-        upid: args.upid,
-        leftTs: args.leftTs,
-        rightTs: args.rightTs,
-        type: args.type,
-      },
-    });
-  }
-
-  setCpuProfileSample(args: {id: number; utid: number; ts: time}): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'CPU_PROFILE_SAMPLE',
-        id: args.id,
-        utid: args.utid,
-        ts: args.ts,
-      },
-    });
-  }
-
-  setSchedSlice(args: {id: number; trackUri?: string}): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'SCHED_SLICE',
-        id: args.id,
-        trackUri: args.trackUri,
-      },
-    });
-  }
-
-  setLegacySlice(
-    args: {
-      id: number;
-      trackUri?: string;
-      table?: string;
-      scroll?: boolean;
-    },
-    opts?: SelectionOpts,
-  ): void {
-    this.setSelection(
-      {
-        kind: 'legacy',
-        legacySelection: {
-          kind: 'SLICE',
-          id: args.id,
-          table: args.table,
-          trackUri: args.trackUri,
-        },
-      },
-      opts,
-    );
-  }
-
-  setGenericSlice(args: {
+  selectGenericSlice(args: {
     id: number;
     sqlTableName: string;
     start: time;
@@ -268,17 +221,6 @@ export class SelectionManagerImpl implements SelectionManager {
     });
   }
 
-  setThreadState(args: {id: number; trackUri?: string}): void {
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'THREAD_STATE',
-        id: args.id,
-        trackUri: args.trackUri,
-      },
-    });
-  }
-
   get selection(): Selection {
     return this._selection;
   }
@@ -291,46 +233,52 @@ export class SelectionManagerImpl implements SelectionManager {
     return this._selectedDetails;
   }
 
+  registerSqlSelectionResolver(resolver: SqlSelectionResolver): void {
+    this.selectionResolvers.push(resolver);
+  }
+
+  async resolveSqlEvent(
+    sqlTableName: string,
+    id: number,
+  ): Promise<{eventId: number; trackUri: string} | undefined> {
+    const matchingResolvers = this.selectionResolvers.filter(
+      (r) => r.sqlTableName === sqlTableName,
+    );
+
+    for (const resolver of matchingResolvers) {
+      const result = await resolver.callback(id, sqlTableName);
+      if (result) {
+        // If we have multiple resolvers for the same table, just return the first one.
+        return result;
+      }
+    }
+
+    return undefined;
+  }
+
+  selectSqlEvent(sqlTableName: string, id: number, opts?: SelectionOpts): void {
+    this.resolveSqlEvent(sqlTableName, id).then((selection) => {
+      selection &&
+        this.selectTrackEvent(selection.trackUri, selection.eventId, opts);
+    });
+  }
+
   private setSelection(selection: Selection, opts?: SelectionOpts) {
     this._selection = selection;
-    this._pendingScrollId = opts?.pendingScrollId;
+
     this.onSelectionChange(selection, opts ?? {});
-    const generation = ++this._selectionGeneration;
+
     raf.scheduleFullRedraw();
 
-    // The code below is to avoid flickering while switching selection. There
-    // are three cases here:
-    // 1. The async code resolves the selection quickly. In this case we
-    //    "atomically" switch the _selectedSlice in one animation frame, without
-    //    flashing white. The continuation below will clear the timeout.
-    // 2. The async code resolves the selection but takes time. The timeout
-    //    below will kick in and clear the selection; later the async
-    //    continuation will set it to the current slice.
-    // 3. The async code below fails to resolve the seleciton. We just clear
-    //    the selection.
-    const clearOnTimeout = setTimeout(() => {
-      if (this._selectionGeneration !== generation) return;
-      this._selectedDetails = undefined;
-      raf.scheduleFullRedraw();
-    }, 50);
+    if (opts?.scrollToSelection) {
+      this.scrollToCurrentSelection();
+    }
 
-    const legacySel = this.legacySelection;
-    if (!exists(legacySel)) return;
-
-    this._limiter.schedule(async () => {
-      const details =
-        await this._selectionResolver?.resolveSelection(legacySel);
-      raf.scheduleFullRedraw();
-      clearTimeout(clearOnTimeout);
-      this._selectedDetails = undefined;
-      if (details == undefined) return;
-      if (this._selectionGeneration !== generation) return;
-      this._selectedDetails = details;
-      if (exists(legacySel.id) && legacySel.id === this._pendingScrollId) {
-        this._pendingScrollId = undefined;
-        this.scrollToCurrentSelection();
-      }
-    });
+    if (this._selection.kind === 'area') {
+      this._aggregationManager.aggregateArea(this._selection);
+    } else {
+      this._aggregationManager.clear();
+    }
   }
 
   selectSearchResult(searchResult: SearchResult) {
@@ -345,21 +293,14 @@ export class SelectionManagerImpl implements SelectionManager {
         });
         break;
       case 'cpu':
-        this.setLegacy(
-          {
-            kind: 'SCHED_SLICE',
-            id: eventId,
-            trackUri,
-          },
-          {
-            clearSearch: false,
-            pendingScrollId: eventId,
-            switchToCurrentSelectionTab: true,
-          },
-        );
+        this.selectSqlEvent('sched_slice', eventId, {
+          clearSearch: false,
+          scrollToSelection: true,
+          switchToCurrentSelectionTab: true,
+        });
         break;
       case 'log':
-        this.setLegacy(
+        this.selectLegacy(
           {
             kind: 'LOG',
             id: eventId,
@@ -374,19 +315,11 @@ export class SelectionManagerImpl implements SelectionManager {
       case 'slice':
         // Search results only include slices from the slice table for now.
         // When we include annotations we need to pass the correct table.
-        this.setLegacy(
-          {
-            kind: 'SLICE',
-            id: eventId,
-            trackUri,
-            table: 'slice',
-          },
-          {
-            clearSearch: false,
-            pendingScrollId: eventId,
-            switchToCurrentSelectionTab: true,
-          },
-        );
+        this.selectSqlEvent('slice', eventId, {
+          clearSearch: false,
+          scrollToSelection: true,
+          switchToCurrentSelectionTab: true,
+        });
         break;
       default:
         assertUnreachable(source);
@@ -394,20 +327,24 @@ export class SelectionManagerImpl implements SelectionManager {
   }
 
   scrollToCurrentSelection() {
-    const selection = this.legacySelection;
-    if (!exists(selection)) return;
-    const uri = selection.trackUri;
-    this.findTimeRangeOfSelection().then((range) => {
-      // The selection changed meanwhile.
-      if (this.legacySelection !== selection) return;
-      this.scrollHelper.scrollTo({
-        time: range ? {...range} : undefined,
-        track: uri ? {uri: uri, expandGroup: true} : undefined,
-      });
+    const uri = (() => {
+      switch (this.selection.kind) {
+        case 'single':
+          return this.selection.trackUri;
+        case 'legacy':
+          return this.selection.legacySelection.trackUri;
+        default:
+          return undefined;
+      }
+    })();
+    const range = this.findTimeRangeOfSelection();
+    this.scrollHelper.scrollTo({
+      time: range ? {...range} : undefined,
+      track: uri ? {uri: uri, expandGroup: true} : undefined,
     });
   }
 
-  async findTimeRangeOfSelection(): Promise<Optional<TimeSpan>> {
+  findTimeRangeOfSelection(): Optional<TimeSpan> {
     const sel = this.selection;
     if (sel.kind === 'area') {
       return new TimeSpan(sel.start, sel.end);
@@ -428,14 +365,7 @@ export class SelectionManagerImpl implements SelectionManager {
         }
       }
     } else if (sel.kind === 'single') {
-      const uri = sel.trackUri;
-      const bounds = await this.trackManager
-        .getTrack(uri)
-        ?.getEventBounds?.(sel.eventId);
-      if (bounds) {
-        return TimeSpan.fromTimeAndDuration(bounds.ts, bounds.dur);
-      }
-      return undefined;
+      return TimeSpan.fromTimeAndDuration(sel.ts, sel.dur);
     }
 
     const legacySel = this.legacySelection;
@@ -443,13 +373,7 @@ export class SelectionManagerImpl implements SelectionManager {
       return undefined;
     }
 
-    if (
-      legacySel.kind === 'SCHED_SLICE' ||
-      legacySel.kind === 'SLICE' ||
-      legacySel.kind === 'THREAD_STATE'
-    ) {
-      return findTimeRangeOfSlice(this._selectedDetails ?? {});
-    } else if (legacySel.kind === 'LOG') {
+    if (legacySel.kind === 'LOG') {
       // TODO(hjd): Make focus selection work for logs.
     } else if (legacySel.kind === 'GENERIC_SLICE') {
       return findTimeRangeOfSlice({
@@ -459,6 +383,10 @@ export class SelectionManagerImpl implements SelectionManager {
     }
 
     return undefined;
+  }
+
+  get aggregation() {
+    return this._aggregationManager;
   }
 }
 

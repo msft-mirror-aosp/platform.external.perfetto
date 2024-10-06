@@ -234,6 +234,8 @@ perfetto_cc_library(
         ":src_trace_processor_importers_fuchsia_fuchsia_record",
         ":src_trace_processor_importers_fuchsia_full",
         ":src_trace_processor_importers_fuchsia_minimal",
+        ":src_trace_processor_importers_gecko_gecko",
+        ":src_trace_processor_importers_gecko_gecko_event",
         ":src_trace_processor_importers_gzip_full",
         ":src_trace_processor_importers_i2c_full",
         ":src_trace_processor_importers_instruments_instruments",
@@ -1703,6 +1705,25 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/importers/gecko:gecko
+perfetto_filegroup(
+    name = "src_trace_processor_importers_gecko_gecko",
+    srcs = [
+        "src/trace_processor/importers/gecko/gecko_trace_parser_impl.cc",
+        "src/trace_processor/importers/gecko/gecko_trace_parser_impl.h",
+        "src/trace_processor/importers/gecko/gecko_trace_tokenizer.cc",
+        "src/trace_processor/importers/gecko/gecko_trace_tokenizer.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/gecko:gecko_event
+perfetto_filegroup(
+    name = "src_trace_processor_importers_gecko_gecko_event",
+    srcs = [
+        "src/trace_processor/importers/gecko/gecko_event.h",
+    ],
+)
+
 # GN target: //src/trace_processor/importers/gzip:full
 perfetto_filegroup(
     name = "src_trace_processor_importers_gzip_full",
@@ -1803,6 +1824,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/perf/etm_tokenizer.h",
         "src/trace_processor/importers/perf/features.cc",
         "src/trace_processor/importers/perf/features.h",
+        "src/trace_processor/importers/perf/itrace_start_record.cc",
+        "src/trace_processor/importers/perf/itrace_start_record.h",
         "src/trace_processor/importers/perf/mmap_record.cc",
         "src/trace_processor/importers/perf/mmap_record.h",
         "src/trace_processor/importers/perf/perf_data_tokenizer.cc",
@@ -1814,6 +1837,12 @@ perfetto_filegroup(
         "src/trace_processor/importers/perf/sample.h",
         "src/trace_processor/importers/perf/sample_id.cc",
         "src/trace_processor/importers/perf/sample_id.h",
+        "src/trace_processor/importers/perf/spe.h",
+        "src/trace_processor/importers/perf/spe_record_parser.cc",
+        "src/trace_processor/importers/perf/spe_record_parser.h",
+        "src/trace_processor/importers/perf/spe_tokenizer.cc",
+        "src/trace_processor/importers/perf/spe_tokenizer.h",
+        "src/trace_processor/importers/perf/time_conv_record.h",
         "src/trace_processor/importers/perf/util.h",
     ],
 )
@@ -2828,6 +2857,7 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/general.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/process.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/slice.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/system.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/utilization/thread.sql",
     ],
@@ -2859,6 +2889,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_perf_perf",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/linux/perf/samples.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/perf/spe.sql",
     ],
 )
 
@@ -2923,6 +2954,14 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_stack_trace_stack_trace",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/stack_trace/jit.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/stacks:stacks
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_stacks_stacks",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/stacks/cpu_profiling.sql",
     ],
 )
 
@@ -3015,6 +3054,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_sched_sched",
         ":src_trace_processor_perfetto_sql_stdlib_slices_slices",
         ":src_trace_processor_perfetto_sql_stdlib_stack_trace_stack_trace",
+        ":src_trace_processor_perfetto_sql_stdlib_stacks_stacks",
         ":src_trace_processor_perfetto_sql_stdlib_time_time",
         ":src_trace_processor_perfetto_sql_stdlib_v8_v8",
         ":src_trace_processor_perfetto_sql_stdlib_viz_summary_summary",
@@ -3153,6 +3193,7 @@ perfetto_cc_tp_tables(
         "src/trace_processor/tables/jit_tables.py",
         "src/trace_processor/tables/memory_tables.py",
         "src/trace_processor/tables/metadata_tables.py",
+        "src/trace_processor/tables/perf_tables.py",
         "src/trace_processor/tables/profiler_tables.py",
         "src/trace_processor/tables/sched_tables.py",
         "src/trace_processor/tables/slice_tables.py",
@@ -3168,6 +3209,7 @@ perfetto_cc_tp_tables(
         "src/trace_processor/tables/jit_tables_py.h",
         "src/trace_processor/tables/memory_tables_py.h",
         "src/trace_processor/tables/metadata_tables_py.h",
+        "src/trace_processor/tables/perf_tables_py.h",
         "src/trace_processor/tables/profiler_tables_py.h",
         "src/trace_processor/tables/sched_tables_py.h",
         "src/trace_processor/tables/slice_tables_py.h",
@@ -6323,6 +6365,8 @@ perfetto_cc_library(
         ":src_trace_processor_importers_fuchsia_fuchsia_record",
         ":src_trace_processor_importers_fuchsia_full",
         ":src_trace_processor_importers_fuchsia_minimal",
+        ":src_trace_processor_importers_gecko_gecko",
+        ":src_trace_processor_importers_gecko_gecko_event",
         ":src_trace_processor_importers_gzip_full",
         ":src_trace_processor_importers_i2c_full",
         ":src_trace_processor_importers_instruments_instruments",
@@ -6520,6 +6564,8 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_fuchsia_fuchsia_record",
         ":src_trace_processor_importers_fuchsia_full",
         ":src_trace_processor_importers_fuchsia_minimal",
+        ":src_trace_processor_importers_gecko_gecko",
+        ":src_trace_processor_importers_gecko_gecko_event",
         ":src_trace_processor_importers_gzip_full",
         ":src_trace_processor_importers_i2c_full",
         ":src_trace_processor_importers_instruments_instruments",
@@ -6774,6 +6820,8 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_fuchsia_fuchsia_record",
         ":src_trace_processor_importers_fuchsia_full",
         ":src_trace_processor_importers_fuchsia_minimal",
+        ":src_trace_processor_importers_gecko_gecko",
+        ":src_trace_processor_importers_gecko_gecko_event",
         ":src_trace_processor_importers_gzip_full",
         ":src_trace_processor_importers_i2c_full",
         ":src_trace_processor_importers_instruments_instruments",

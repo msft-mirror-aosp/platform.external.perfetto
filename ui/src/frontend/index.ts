@@ -23,7 +23,7 @@ import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
 import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
-import {flattenArgs, traceEvent} from '../common/metatracing';
+import {traceEvent} from '../common/metatracing';
 import {pluginManager} from '../common/plugins';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
@@ -61,7 +61,9 @@ import {initAnalytics} from './analytics';
 import {IdleDetector} from './idle_detector';
 import {IdleDetectorWindow} from './idle_detector_interface';
 import {pageWithTrace} from './pages';
-import {AppImpl} from '../core/app_trace_impl';
+import {AppImpl} from '../core/app_impl';
+import {setAddSqlTableTabImplFunction} from './sql_table_tab_interface';
+import {addSqlTableTabImpl} from './sql_table_tab';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -374,8 +376,20 @@ function onCssLoaded() {
   // Force one initial render to get everything in place
   m.render(document.body, m(UiMain, router.resolve()));
 
+  // TODO(primiano): this injection is to break a cirular dependency. See
+  // comment in sql_table_tab_interface.ts. Remove once we add an extension
+  // point for context menus.
+  setAddSqlTableTabImplFunction(addSqlTableTabImpl);
+
   // Initialize plugins, now that we are ready to go
   pluginManager.initialize();
+
+  const route = Router.parseUrl(window.location.href);
+  for (const pluginId of (route.args.enablePlugins ?? '').split(',')) {
+    if (pluginManager.hasPlugin(pluginId)) {
+      pluginManager.activatePlugin(pluginId);
+    }
+  }
 }
 
 // If the URL is /#!?rpc_port=1234, change the default RPC port.
@@ -412,18 +426,12 @@ function maybeChangeRpcPortFromFragment() {
 
 function stateActionDispatcher(actions: DeferredAction[]) {
   const edits = actions.map((action) => {
-    return traceEvent(
-      `action.${action.type}`,
-      () => {
-        return (draft: Draft<State>) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (StateActions as any)[action.type](draft, action.args);
-        };
-      },
-      {
-        args: flattenArgs(action.args),
-      },
-    );
+    return traceEvent(`action.${action.type}`, () => {
+      return (draft: Draft<State>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (StateActions as any)[action.type](draft, action.args);
+      };
+    });
   });
   globals.store.edit(edits);
 }

@@ -13,21 +13,8 @@
 // limitations under the License.
 
 import {Draft} from 'immer';
-import {SortDirection} from '../base/comparison_utils';
 import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
-import {
-  Aggregation,
-  AggregationFunction,
-  TableColumn,
-  tableColumnEquals,
-  toggleEnabled,
-} from '../frontend/pivot_table_types';
-import {
-  computeIntervals,
-  DropDirection,
-  performReordering,
-} from './dragndrop_logic';
 import {createEmptyState} from './empty_state';
 import {
   MetatraceTrackId,
@@ -41,12 +28,10 @@ import {
   LoadedConfig,
   NewEngineMode,
   PendingDeeplinkState,
-  PivotTableResult,
   RecordingTarget,
   State,
   Status,
 } from './state';
-import {Area} from '../public/selection';
 
 type StateDraft = Draft<State>;
 
@@ -144,39 +129,6 @@ export const StateActions = {
       ready: false,
       source: {type: 'HTTP_RPC'},
     };
-  },
-
-  setTraceUuid(state: StateDraft, args: {traceUuid: string}) {
-    state.traceUuid = args.traceUuid;
-  },
-
-  updateAggregateSorting(
-    state: StateDraft,
-    args: {id: string; column: string},
-  ) {
-    let prefs = state.aggregatePreferences[args.id];
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-    if (!prefs) {
-      prefs = {id: args.id};
-      state.aggregatePreferences[args.id] = prefs;
-    }
-
-    if (!prefs.sorting || prefs.sorting.column !== args.column) {
-      // No sorting set for current column.
-      state.aggregatePreferences[args.id].sorting = {
-        column: args.column,
-        direction: 'DESC',
-      };
-    } else if (prefs.sorting.direction === 'DESC') {
-      // Toggle the direction if the column is currently sorted.
-      state.aggregatePreferences[args.id].sorting = {
-        column: args.column,
-        direction: 'ASC',
-      };
-    } else {
-      // If direction is currently 'ASC' toggle to no sorting.
-      state.aggregatePreferences[args.id].sorting = undefined;
-    }
   },
 
   requestTrackReload(state: StateDraft, _: {}) {
@@ -325,130 +277,12 @@ export const StateActions = {
     state.highlightedSliceId = args.sliceId;
   },
 
-  setHighlightedFlowLeftId(state: StateDraft, args: {flowId: number}) {
-    state.focusedFlowIdLeft = args.flowId;
-  },
-
-  setHighlightedFlowRightId(state: StateDraft, args: {flowId: number}) {
-    state.focusedFlowIdRight = args.flowId;
-  },
-
-  setHoverCursorTimestamp(state: StateDraft, args: {ts: time}) {
-    state.hoverCursorTimestamp = args.ts;
-  },
-
   setHoveredNoteTimestamp(state: StateDraft, args: {ts: time}) {
     state.hoveredNoteTimestamp = args.ts;
   },
 
-  togglePivotTable(state: StateDraft, args: {area?: Area}) {
-    state.nonSerializableState.pivotTable.selectionArea = args.area;
-    state.nonSerializableState.pivotTable.queryResult = null;
-  },
-
-  setPivotStateQueryResult(
-    state: StateDraft,
-    args: {queryResult: PivotTableResult | null},
-  ) {
-    state.nonSerializableState.pivotTable.queryResult = args.queryResult;
-  },
-
-  setPivotTableConstrainToArea(state: StateDraft, args: {constrain: boolean}) {
-    state.nonSerializableState.pivotTable.constrainToArea = args.constrain;
-  },
-
   dismissFlamegraphModal(state: StateDraft, _: {}) {
     state.flamegraphModalDismissed = true;
-  },
-
-  addPivotTableAggregation(
-    state: StateDraft,
-    args: {aggregation: Aggregation; after: number},
-  ) {
-    state.nonSerializableState.pivotTable.selectedAggregations.splice(
-      args.after,
-      0,
-      args.aggregation,
-    );
-  },
-
-  removePivotTableAggregation(state: StateDraft, args: {index: number}) {
-    state.nonSerializableState.pivotTable.selectedAggregations.splice(
-      args.index,
-      1,
-    );
-  },
-
-  setPivotTableQueryRequested(
-    state: StateDraft,
-    args: {queryRequested: boolean},
-  ) {
-    state.nonSerializableState.pivotTable.queryRequested = args.queryRequested;
-  },
-
-  setPivotTablePivotSelected(
-    state: StateDraft,
-    args: {column: TableColumn; selected: boolean},
-  ) {
-    toggleEnabled(
-      tableColumnEquals,
-      state.nonSerializableState.pivotTable.selectedPivots,
-      args.column,
-      args.selected,
-    );
-  },
-
-  setPivotTableAggregationFunction(
-    state: StateDraft,
-    args: {index: number; function: AggregationFunction},
-  ) {
-    state.nonSerializableState.pivotTable.selectedAggregations[
-      args.index
-    ].aggregationFunction = args.function;
-  },
-
-  setPivotTableSortColumn(
-    state: StateDraft,
-    args: {aggregationIndex: number; order: SortDirection},
-  ) {
-    state.nonSerializableState.pivotTable.selectedAggregations =
-      state.nonSerializableState.pivotTable.selectedAggregations.map(
-        (agg, index) => ({
-          column: agg.column,
-          aggregationFunction: agg.aggregationFunction,
-          sortDirection:
-            index === args.aggregationIndex ? args.order : undefined,
-        }),
-      );
-  },
-
-  changePivotTablePivotOrder(
-    state: StateDraft,
-    args: {from: number; to: number; direction: DropDirection},
-  ) {
-    const pivots = state.nonSerializableState.pivotTable.selectedPivots;
-    state.nonSerializableState.pivotTable.selectedPivots = performReordering(
-      computeIntervals(pivots.length, args.from, args.to, args.direction),
-      pivots,
-    );
-  },
-
-  changePivotTableAggregationOrder(
-    state: StateDraft,
-    args: {from: number; to: number; direction: DropDirection},
-  ) {
-    const aggregations =
-      state.nonSerializableState.pivotTable.selectedAggregations;
-    state.nonSerializableState.pivotTable.selectedAggregations =
-      performReordering(
-        computeIntervals(
-          aggregations.length,
-          args.from,
-          args.to,
-          args.direction,
-        ),
-        aggregations,
-      );
   },
 
   setTrackFilterTerm(

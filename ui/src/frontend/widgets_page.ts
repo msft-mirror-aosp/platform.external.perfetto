@@ -775,7 +775,7 @@ export class WidgetsPage implements m.ClassComponent<PageAttrs> {
               href: 'https://perfetto.dev/docs/',
               target: '_blank',
             },
-            'Docs',
+            'This is some really long text and it will probably overflow the container',
           ),
         initialOpts: {
           icon: true,
@@ -1380,7 +1380,7 @@ export class WidgetsPage implements m.ClassComponent<PageAttrs> {
           indentationLevel: 3,
           collapsible: true,
           collapsed: true,
-          isContainer: false,
+          isSummary: false,
           highlight: false,
           error: false,
           multipleTracks: false,

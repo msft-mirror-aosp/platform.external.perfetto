@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {uuidv4} from '../../base/uuid';
 import {THREAD_SLICE_TRACK_KIND} from '../../public/track_kinds';
-import {ThreadSliceDetailsTab} from '../../frontend/thread_slice_details_tab';
-import {BottomTabToSCSAdapter} from '../../public/utils';
+import {ThreadSliceDetailsPanel} from '../../frontend/thread_slice_details_tab';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {getThreadUriPrefix, getTrackName} from '../../public/utils';
@@ -25,9 +23,18 @@ import {removeFalsyValues} from '../../base/array_utils';
 import {getOrCreateGroupForThread} from '../../public/standard_groups';
 import {TrackNode} from '../../public/workspace';
 
+function uriForSliceTrack(
+  upid: number | null,
+  utid: number,
+  trackId: number,
+): string {
+  return `${getThreadUriPrefix(upid, utid)}_slice_${trackId}`;
+}
+
 class ThreadSlicesPlugin implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
     const {engine} = ctx;
+    const tableName = 'slice';
 
     const result = await engine.query(`
       include perfetto module viz.summary.slices;
@@ -86,7 +93,7 @@ class ThreadSlicesPlugin implements PerfettoPlugin {
         kind: 'Slices',
       });
 
-      const uri = `${getThreadUriPrefix(upid, utid)}_slice_${trackId}`;
+      const uri = uriForSliceTrack(upid, utid, trackId);
       ctx.tracks.registerTrack({
         uri,
         title,
@@ -108,30 +115,46 @@ class ThreadSlicesPlugin implements PerfettoPlugin {
           },
           trackId,
           maxDepth,
+          tableName,
         ),
+        detailsPanel: new ThreadSliceDetailsPanel(ctx, tableName),
       });
       const group = getOrCreateGroupForThread(ctx.workspace, utid);
       const track = new TrackNode({uri, title, sortOrder: 20});
       group.addChildInOrder(track);
     }
 
-    ctx.registerDetailsPanel(
-      new BottomTabToSCSAdapter({
-        tabFactory: (sel) => {
-          if (sel.kind !== 'SLICE') {
-            return undefined;
-          }
-          return new ThreadSliceDetailsTab({
-            config: {
-              table: sel.table ?? 'slice',
-              id: sel.id,
-            },
-            trace: ctx,
-            uuid: uuidv4(),
-          });
-        },
-      }),
-    );
+    ctx.selection.registerSqlSelectionResolver({
+      sqlTableName: tableName,
+      callback: async (id: number) => {
+        const result = await ctx.engine.query(`
+          select
+            tt.utid as utid,
+            t.upid as upid,
+            track_id as trackId
+          from
+            slice
+            join thread_track tt on slice.track_id = tt.id
+            join _threads_with_kernel_flag t using(utid)
+          where slice.id = ${id}
+        `);
+
+        if (result.numRows() === 0) {
+          return undefined;
+        }
+
+        const {upid, utid, trackId} = result.firstRow({
+          upid: NUM_NULL,
+          utid: NUM,
+          trackId: NUM,
+        });
+
+        return {
+          eventId: id,
+          trackUri: uriForSliceTrack(upid, utid, trackId),
+        };
+      },
+    });
   }
 }
 

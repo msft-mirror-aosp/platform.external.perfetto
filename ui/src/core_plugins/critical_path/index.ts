@@ -80,8 +80,7 @@ const sliceColumnNames = ['id', 'utid', 'ts', 'dur', 'name', 'table_name'];
 function getFirstUtidOfSelectionOrVisibleWindow(trace: Trace): number {
   const selection = trace.selection.selection;
   if (selection.kind === 'area') {
-    for (const trackUri of selection.trackUris) {
-      const trackDesc = trace.tracks.getTrack(trackUri);
+    for (const trackDesc of selection.tracks) {
       if (
         trackDesc?.tags?.kind === THREAD_STATE_TRACK_KIND &&
         trackDesc?.tags?.utid !== undefined
@@ -116,18 +115,14 @@ async function getThreadInfoForUtidOrSelection(
   utid?: Utid,
 ): Promise<Optional<ThreadInfo>> {
   if (utid === undefined) {
-    if (
-      trace.selection.selection.kind !== 'legacy' ||
-      trace.selection.selection.legacySelection.kind !== 'THREAD_STATE'
-    ) {
-      return undefined;
+    const selection = trace.selection.selection;
+    if (selection.kind === 'single') {
+      if (selection.utid !== undefined) {
+        utid = asUtid(selection.utid);
+      }
     }
-    const trackUri = trace.selection.selection.legacySelection.trackUri;
-    if (trackUri === undefined) return undefined;
-    const track = trace.tracks.getTrack(trackUri);
-    utid = asUtid(track?.tags?.utid);
-    if (utid === undefined) return undefined;
   }
+  if (utid === undefined) return undefined;
   return getThreadInfo(trace.engine, utid);
 }
 
