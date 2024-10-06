@@ -22,7 +22,6 @@ import {assertExists} from '../base/logging';
 import {clamp} from '../base/math_utils';
 import {Time, TimeSpan} from '../base/time';
 import {TimeScale} from '../base/time_scale';
-import {exists} from '../base/utils';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {TrackNode} from '../public/workspace';
@@ -355,7 +354,9 @@ function renderOverlay(
   using _ = canvasSave(ctx);
   ctx.translate(TRACK_SHELL_WIDTH, 0);
   canvasClip(ctx, 0, 0, size.width, size.height);
-  renderFlows(ctx, size, panels);
+
+  // TODO(primiano): plumb the TraceImpl obj throughout the viwer page.
+  renderFlows(globals.trace, ctx, size, panels);
 
   const timewindow = globals.timeline.visibleWindow;
   const timescale = new TimeScale(timewindow, {left: 0, right: size.width});
@@ -439,7 +440,7 @@ export function drawGridLines(
 
   if (size.width > 0 && timespan.duration > 0n) {
     const maxMajorTicks = getMaxMajorTicks(size.width);
-    const offset = globals.timestampOffset();
+    const offset = globals.trace.timeline.timestampOffset();
     for (const {type, time} of generateTicks(timespan, maxMajorTicks, offset)) {
       const px = Math.floor(timescale.timeToPx(time));
       if (type === TickType.MAJOR) {
@@ -457,11 +458,11 @@ export function renderHoveredCursorVertical(
   timescale: TimeScale,
   size: Size2D,
 ) {
-  if (globals.state.hoverCursorTimestamp !== -1n) {
+  if (globals.trace.timeline.hoverCursorTimestamp !== undefined) {
     drawVerticalLineAtTime(
       ctx,
       timescale,
-      globals.state.hoverCursorTimestamp,
+      globals.trace.timeline.hoverCursorTimestamp,
       size.height,
       `#344596`,
     );
@@ -489,22 +490,15 @@ export function renderWakeupVertical(
   timescale: TimeScale,
   size: Size2D,
 ) {
-  const currentSelection = globals.selectionManager.legacySelection;
-  const sliceDetails = globals.selectionManager.legacySelectionDetails;
-  if (currentSelection !== null) {
-    if (
-      currentSelection.kind === 'SCHED_SLICE' &&
-      exists(sliceDetails) &&
-      sliceDetails.wakeupTs !== undefined
-    ) {
-      drawVerticalLineAtTime(
-        ctx,
-        timescale,
-        sliceDetails.wakeupTs,
-        size.height,
-        `black`,
-      );
-    }
+  const selection = globals.selectionManager.selection;
+  if (selection.kind === 'track_event' && selection.wakeupTs) {
+    drawVerticalLineAtTime(
+      ctx,
+      timescale,
+      selection.wakeupTs,
+      size.height,
+      `black`,
+    );
   }
 }
 
