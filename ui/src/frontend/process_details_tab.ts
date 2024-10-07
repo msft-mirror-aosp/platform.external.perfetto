@@ -13,17 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {Engine, Tab} from '../public';
+import {Tab} from '../public/tab';
 import {Upid} from '../trace_processor/sql_utils/core_types';
 import {DetailsShell} from '../widgets/details_shell';
 import {GridLayout, GridLayoutColumn} from '../widgets/grid_layout';
 import {Section} from '../widgets/section';
-
 import {Details, DetailsSchema} from './widgets/sql/details/details';
-import {wellKnownTypes} from './widgets/sql/details/well_known_types';
-
 import d = DetailsSchema;
+import {Trace} from '../public/trace';
 
 export class ProcessDetailsTab implements Tab {
   private data: Details;
@@ -34,27 +31,21 @@ export class ProcessDetailsTab implements Tab {
   // However, the only place which creates `ProcessDetailsTab` currently is `renderProcessRef`,
   // which already has `pid` available (note that Details is already fetching the data, including
   // the `pid` from the trace processor, but it doesn't expose it for now).
-  constructor(private args: {engine: Engine; upid: Upid; pid?: number}) {
-    this.data = new Details(
-      args.engine,
-      'process',
-      args.upid,
-      {
-        'pid': d.Value('pid'),
-        'Name': d.Value('name'),
-        'Start time': d.Timestamp('start_ts', {skipIfNull: true}),
-        'End time': d.Timestamp('end_ts', {skipIfNull: true}),
-        'Parent process': d.SqlIdRef('process', 'parent_upid', {
-          skipIfNull: true,
-        }),
-        'User ID': d.Value('uid', {skipIfNull: true}),
-        'Android app ID': d.Value('android_appid', {skipIfNull: true}),
-        'Command line': d.Value('cmdline', {skipIfNull: true}),
-        'Machine id': d.Value('machine_id', {skipIfNull: true}),
-        'Args': d.ArgSetId('arg_set_id'),
-      },
-      wellKnownTypes,
-    );
+  constructor(private args: {trace: Trace; upid: Upid; pid?: number}) {
+    this.data = new Details(args.trace, 'process', args.upid, {
+      'pid': d.Value('pid'),
+      'Name': d.Value('name'),
+      'Start time': d.Timestamp('start_ts', {skipIfNull: true}),
+      'End time': d.Timestamp('end_ts', {skipIfNull: true}),
+      'Parent process': d.SqlIdRef('process', 'parent_upid', {
+        skipIfNull: true,
+      }),
+      'User ID': d.Value('uid', {skipIfNull: true}),
+      'Android app ID': d.Value('android_appid', {skipIfNull: true}),
+      'Command line': d.Value('cmdline', {skipIfNull: true}),
+      'Machine id': d.Value('machine_id', {skipIfNull: true}),
+      'Args': d.ArgSetId('arg_set_id'),
+    });
   }
 
   render() {

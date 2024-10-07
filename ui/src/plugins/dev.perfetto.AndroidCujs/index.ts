@@ -13,19 +13,21 @@
 // limitations under the License.
 
 import {SimpleSliceTrackConfig} from '../../frontend/simple_slice_track';
-import {addDebugSliceTrack} from '../../public';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {addAndPinSliceTrack} from './trackUtils';
+import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
 
 /**
  * Adds the Debug Slice Track for given Jank CUJ name
  *
- * @param {PluginContextTrace} ctx For properties and methods of trace viewer
+ * @param {Trace} ctx For properties and methods of trace viewer
  * @param {string} trackName Display Name of the track
  * @param {string | string[]} cujNames List of Jank CUJs to pin
  */
 export function addJankCUJDebugTrack(
-  ctx: PluginContextTrace,
+  ctx: Trace,
   trackName: string,
   cujNames?: string | string[],
 ) {
@@ -106,7 +108,7 @@ const JANK_CUJ_QUERY = `
                   )
             )
           THEN ' ✅ '
-        ELSE NULL
+        ELSE ' ❓ '
         END || cuj.name AS name,
       total_frames,
       missed_app_frames,
@@ -158,7 +160,7 @@ const LATENCY_CUJ_QUERY = `
                 cuj_state_marker.ts >= cuj.ts
                 AND cuj_state_marker.ts + cuj_state_marker.dur <= cuj.ts + cuj.dur
                 AND marker_track.name = cuj.name AND (
-                    cuj_state_marker.name GLOB 'cancel' 
+                    cuj_state_marker.name GLOB 'cancel'
                     OR cuj_state_marker.name GLOB 'timeout')
             )
           THEN ' ❌ '
@@ -213,9 +215,9 @@ const BLOCKING_CALLS_DURING_CUJS_COLUMNS = [
   'table_name',
 ];
 
-class AndroidCujs implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.registerCommand({
+class AndroidCujs implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinJankCUJs',
       name: 'Add track: Android jank CUJs',
       callback: () => {
@@ -225,17 +227,20 @@ class AndroidCujs implements Plugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#ListJankCUJs',
       name: 'Run query: Android jank CUJs',
       callback: () => {
-        ctx.engine
-          .query(JANK_CUJ_QUERY_PRECONDITIONS)
-          .then(() => ctx.tabs.openQuery(JANK_CUJ_QUERY, 'Android Jank CUJs'));
+        ctx.engine.query(JANK_CUJ_QUERY_PRECONDITIONS).then(() =>
+          addQueryResultsTab(ctx, {
+            query: JANK_CUJ_QUERY,
+            title: 'Android Jank CUJs',
+          }),
+        );
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinLatencyCUJs',
       name: 'Add track: Android latency CUJs',
       callback: () => {
@@ -252,14 +257,17 @@ class AndroidCujs implements Plugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#ListLatencyCUJs',
       name: 'Run query: Android Latency CUJs',
       callback: () =>
-        ctx.tabs.openQuery(LATENCY_CUJ_QUERY, 'Android Latency CUJs'),
+        addQueryResultsTab(ctx, {
+          query: LATENCY_CUJ_QUERY,
+          title: 'Android Latency CUJs',
+        }),
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinBlockingCalls',
       name: 'Add track: Android Blocking calls during CUJs',
       callback: () => {

@@ -13,17 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {Engine, Tab} from '../public';
+import {Tab} from '../public/tab';
 import {Utid} from '../trace_processor/sql_utils/core_types';
 import {DetailsShell} from '../widgets/details_shell';
 import {GridLayout, GridLayoutColumn} from '../widgets/grid_layout';
 import {Section} from '../widgets/section';
-
 import {Details, DetailsSchema} from './widgets/sql/details/details';
-import {wellKnownTypes} from './widgets/sql/details/well_known_types';
-
 import d = DetailsSchema;
+import {Trace} from '../public/trace';
 
 export class ThreadDetailsTab implements Tab {
   private data: Details;
@@ -31,22 +28,16 @@ export class ThreadDetailsTab implements Tab {
   // TODO(altimin): Ideally, we would not require the tid to be passed in, but
   // fetch it from the underlying data instead. See comment in ProcessDetailsTab
   // for more details.
-  constructor(private args: {engine: Engine; utid: Utid; tid?: number}) {
-    this.data = new Details(
-      args.engine,
-      'thread',
-      args.utid,
-      {
-        'tid': d.Value('tid'),
-        'Name': d.Value('name'),
-        'Process': d.SqlIdRef('process', 'upid'),
-        'Is main thread': d.Boolean('is_main_thread'),
-        'Start time': d.Timestamp('start_ts', {skipIfNull: true}),
-        'End time': d.Timestamp('end_ts', {skipIfNull: true}),
-        'Machine id': d.Value('machine_id', {skipIfNull: true}),
-      },
-      wellKnownTypes,
-    );
+  constructor(private args: {trace: Trace; utid: Utid; tid?: number}) {
+    this.data = new Details(args.trace, 'thread', args.utid, {
+      'tid': d.Value('tid'),
+      'Name': d.Value('name'),
+      'Process': d.SqlIdRef('process', 'upid'),
+      'Is main thread': d.Boolean('is_main_thread'),
+      'Start time': d.Timestamp('start_ts', {skipIfNull: true}),
+      'End time': d.Timestamp('end_ts', {skipIfNull: true}),
+      'Machine id': d.Value('machine_id', {skipIfNull: true}),
+    });
   }
 
   render() {

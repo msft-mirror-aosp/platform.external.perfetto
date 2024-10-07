@@ -17,24 +17,30 @@ import {search, searchEq, searchSegment} from '../../base/binary_search';
 import {assertExists, assertTrue} from '../../base/logging';
 import {Duration, duration, Time, time} from '../../base/time';
 import {Actions} from '../../common/actions';
-import {getLegacySelection} from '../../common/state';
 import {
   drawDoubleHeadedArrow,
   drawIncompleteSlice,
   drawTrackHoverTooltip,
-} from '../../common/canvas_utils';
+} from '../../base/canvas_utils';
 import {cropText} from '../../base/string_utils';
-import {Color} from '../../core/color';
+import {Color} from '../../public/color';
 import {colorForThread} from '../../core/colorizer';
 import {TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
-import {Vector} from '../../base/geom';
-import {Engine, Track} from '../../public';
+import {Point2D} from '../../base/geom';
+import {Track} from '../../public/track';
 import {LONG, NUM} from '../../trace_processor/query_result';
 import {uuidv4Sql} from '../../base/uuid';
-import {TrackMouseEvent, TrackRenderContext} from '../../public/tracks';
+import {TrackMouseEvent, TrackRenderContext} from '../../public/track';
+import {TrackEventDetails} from '../../public/selection';
+import {asSchedSqlId} from '../../trace_processor/sql_utils/core_types';
+import {
+  getSched,
+  getSchedWakeupInfo,
+} from '../../trace_processor/sql_utils/sched';
+import {Trace} from '../../public/trace';
 
 export interface Data extends TrackData {
   // Slices are stored in a columnar fashion. All fields have the same length.
@@ -54,24 +60,24 @@ const CPU_SLICE_FLAGS_INCOMPLETE = 1;
 const CPU_SLICE_FLAGS_REALTIME = 2;
 
 export class CpuSliceTrack implements Track {
-  private mousePos?: Vector;
+  private mousePos?: Point2D;
   private utidHoveredInThisTrack = -1;
   private fetcher = new TimelineFetcher<Data>(this.onBoundsChange.bind(this));
 
   private lastRowId = -1;
-  private engine: Engine;
+  private trace: Trace;
   private cpu: number;
-  private trackKey: string;
+  private uri: string;
   private trackUuid = uuidv4Sql();
 
-  constructor(engine: Engine, trackKey: string, cpu: number) {
-    this.engine = engine;
-    this.trackKey = trackKey;
+  constructor(trace: Trace, uri: string, cpu: number) {
+    this.trace = trace;
+    this.uri = uri;
     this.cpu = cpu;
   }
 
   async onCreate() {
-    await this.engine.query(`
+    await this.trace.engine.query(`
       create virtual table cpu_slice_${this.trackUuid}
       using __intrinsic_slice_mipmap((
         select
@@ -83,7 +89,7 @@ export class CpuSliceTrack implements Track {
         where cpu = ${this.cpu} and utid != 0
       ));
     `);
-    const it = await this.engine.query(`
+    const it = await this.trace.engine.query(`
       select coalesce(max(id), -1) as lastRowId
       from sched
       where cpu = ${this.cpu} and utid != 0
@@ -105,7 +111,7 @@ export class CpuSliceTrack implements Track {
   ): Promise<Data> {
     assertTrue(BIMath.popcount(resolution) === 1, `${resolution} not pow of 2`);
 
-    const queryRes = await this.engine.query(`
+    const queryRes = await this.trace.engine.query(`
       select
         (z.ts / ${resolution}) * ${resolution} as tsQ,
         (((z.ts + z.dur) / ${resolution}) + 1) * ${resolution} as tsEndQ,
@@ -157,7 +163,7 @@ export class CpuSliceTrack implements Track {
   }
 
   async onDestroy() {
-    await this.engine.tryQuery(
+    await this.trace.engine.tryQuery(
       `drop table if exists cpu_slice_${this.trackUuid}`,
     );
     this.fetcher[Symbol.dispose]();
@@ -307,62 +313,68 @@ export class CpuSliceTrack implements Track {
       ctx.fillText(subTitle, rectXCenter, MARGIN_TOP + RECT_HEIGHT / 2 + 9);
     }
 
-    const selection = getLegacySelection(globals.state);
-    const details = globals.sliceDetails;
-    if (selection !== null && selection.kind === 'SCHED_SLICE') {
-      const [startIndex, endIndex] = searchEq(data.ids, selection.id);
-      if (startIndex !== endIndex) {
-        const tStart = Time.fromRaw(data.startQs[startIndex]);
-        const tEnd = Time.fromRaw(data.endQs[startIndex]);
-        const utid = data.utids[startIndex];
-        const color = colorForThread(globals.threads.get(utid));
-        const rectStart = timescale.timeToPx(tStart);
-        const rectEnd = timescale.timeToPx(tEnd);
-        const rectWidth = Math.max(1, rectEnd - rectStart);
+    const selection = globals.selectionManager.selection;
+    if (selection.kind === 'track_event') {
+      if (selection.trackUri === this.uri) {
+        const [startIndex, endIndex] = searchEq(data.ids, selection.eventId);
+        if (startIndex !== endIndex) {
+          const tStart = Time.fromRaw(data.startQs[startIndex]);
+          const tEnd = Time.fromRaw(data.endQs[startIndex]);
+          const utid = data.utids[startIndex];
+          const color = colorForThread(globals.threads.get(utid));
+          const rectStart = timescale.timeToPx(tStart);
+          const rectEnd = timescale.timeToPx(tEnd);
+          const rectWidth = Math.max(1, rectEnd - rectStart);
 
-        // Draw a rectangle around the slice that is currently selected.
-        ctx.strokeStyle = color.base.setHSL({l: 30}).cssString;
-        ctx.beginPath();
-        ctx.lineWidth = 3;
-        ctx.strokeRect(rectStart, MARGIN_TOP - 1.5, rectWidth, RECT_HEIGHT + 3);
-        ctx.closePath();
-        // Draw arrow from wakeup time of current slice.
-        if (details.wakeupTs) {
-          const wakeupPos = timescale.timeToPx(details.wakeupTs);
-          const latencyWidth = rectStart - wakeupPos;
-          drawDoubleHeadedArrow(
-            ctx,
-            wakeupPos,
-            MARGIN_TOP + RECT_HEIGHT,
-            latencyWidth,
-            latencyWidth >= 20,
+          // Draw a rectangle around the slice that is currently selected.
+          ctx.strokeStyle = color.base.setHSL({l: 30}).cssString;
+          ctx.beginPath();
+          ctx.lineWidth = 3;
+          ctx.strokeRect(
+            rectStart,
+            MARGIN_TOP - 1.5,
+            rectWidth,
+            RECT_HEIGHT + 3,
           );
-          // Latency time with a white semi-transparent background.
-          const latency = tStart - details.wakeupTs;
-          const displayText = Duration.humanise(latency);
-          const measured = ctx.measureText(displayText);
-          if (latencyWidth >= measured.width + 2) {
-            ctx.fillStyle = 'rgba(255,255,255,0.7)';
-            ctx.fillRect(
-              wakeupPos + latencyWidth / 2 - measured.width / 2 - 1,
-              MARGIN_TOP + RECT_HEIGHT - 12,
-              measured.width + 2,
-              11,
+          ctx.closePath();
+          // Draw arrow from wakeup time of current slice.
+          if (selection.wakeupTs) {
+            const wakeupPos = timescale.timeToPx(selection.wakeupTs);
+            const latencyWidth = rectStart - wakeupPos;
+            drawDoubleHeadedArrow(
+              ctx,
+              wakeupPos,
+              MARGIN_TOP + RECT_HEIGHT,
+              latencyWidth,
+              latencyWidth >= 20,
             );
-            ctx.textBaseline = 'bottom';
-            ctx.fillStyle = 'black';
-            ctx.fillText(
-              displayText,
-              wakeupPos + latencyWidth / 2,
-              MARGIN_TOP + RECT_HEIGHT - 1,
-            );
+            // Latency time with a white semi-transparent background.
+            const latency = tStart - selection.wakeupTs;
+            const displayText = Duration.humanise(latency);
+            const measured = ctx.measureText(displayText);
+            if (latencyWidth >= measured.width + 2) {
+              ctx.fillStyle = 'rgba(255,255,255,0.7)';
+              ctx.fillRect(
+                wakeupPos + latencyWidth / 2 - measured.width / 2 - 1,
+                MARGIN_TOP + RECT_HEIGHT - 12,
+                measured.width + 2,
+                11,
+              );
+              ctx.textBaseline = 'bottom';
+              ctx.fillStyle = 'black';
+              ctx.fillText(
+                displayText,
+                wakeupPos + latencyWidth / 2,
+                MARGIN_TOP + RECT_HEIGHT - 1,
+              );
+            }
           }
         }
       }
 
       // Draw diamond if the track being drawn is the cpu of the waker.
-      if (this.cpu === details.wakerCpu && details.wakeupTs) {
-        const wakeupPos = Math.floor(timescale.timeToPx(details.wakeupTs));
+      if (this.cpu === selection.wakerCpu && selection.wakeupTs) {
+        const wakeupPos = Math.floor(timescale.timeToPx(selection.wakeupTs));
         ctx.beginPath();
         ctx.moveTo(wakeupPos, MARGIN_TOP + RECT_HEIGHT / 2 + 8);
         ctx.fillStyle = 'black';
@@ -372,19 +384,19 @@ export class CpuSliceTrack implements Track {
         ctx.fill();
         ctx.closePath();
       }
-    }
 
-    const hoveredThread = globals.threads.get(this.utidHoveredInThisTrack);
-    if (hoveredThread !== undefined && this.mousePos !== undefined) {
-      const tidText = `T: ${hoveredThread.threadName}
+      const hoveredThread = globals.threads.get(this.utidHoveredInThisTrack);
+      if (hoveredThread !== undefined && this.mousePos !== undefined) {
+        const tidText = `T: ${hoveredThread.threadName}
       [${hoveredThread.tid}]`;
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-      if (hoveredThread.pid) {
-        const pidText = `P: ${hoveredThread.procName}
+        // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+        if (hoveredThread.pid) {
+          const pidText = `P: ${hoveredThread.procName}
         [${hoveredThread.pid}]`;
-        drawTrackHoverTooltip(ctx, this.mousePos, size, pidText, tidText);
-      } else {
-        drawTrackHoverTooltip(ctx, this.mousePos, size, tidText);
+          drawTrackHoverTooltip(ctx, this.mousePos, size, pidText, tidText);
+        } else {
+          drawTrackHoverTooltip(ctx, this.mousePos, size, tidText);
+        }
       }
     }
   }
@@ -434,20 +446,24 @@ export class CpuSliceTrack implements Track {
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     if (!id || this.utidHoveredInThisTrack === -1) return false;
 
-    globals.setLegacySelection(
-      {
-        kind: 'SCHED_SLICE',
-        id,
-        trackKey: this.trackKey,
-      },
-      {
-        clearSearch: true,
-        pendingScrollId: undefined,
-        switchToCurrentSelectionTab: true,
-      },
-    );
-
+    this.trace.selection.selectTrackEvent(this.uri, id);
     return true;
+  }
+
+  async getSelectionDetails?(
+    eventId: number,
+  ): Promise<TrackEventDetails | undefined> {
+    const sched = await getSched(this.trace.engine, asSchedSqlId(eventId));
+    if (sched === undefined) {
+      return undefined;
+    }
+    const wakeup = await getSchedWakeupInfo(this.trace.engine, sched);
+    return {
+      ts: sched.ts,
+      dur: sched.dur,
+      wakeupTs: wakeup?.wakeupTs,
+      wakerCpu: wakeup?.wakerCpu,
+    };
   }
 }
 

@@ -13,41 +13,56 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../base/clipboard';
 import {Icons} from '../base/semantic_icons';
 import {exists} from '../base/utils';
 import {uuidv4} from '../base/uuid';
-import {addBottomTab} from '../common/addEphemeralTab';
+import {addBottomTab} from '../common/add_ephemeral_tab';
 import {Button} from '../widgets/button';
 import {DetailsShell} from '../widgets/details_shell';
 import {Popup, PopupPosition} from '../widgets/popup';
-
-import {BottomTab, NewBottomTabArgs} from './bottom_tab';
-import {AddDebugTrackMenu} from './debug_tracks/add_debug_track_menu';
-import {getEngine} from './get_engine';
+import {BottomTab, NewBottomTabArgs} from '../public/lib/bottom_tab';
+import {AddDebugTrackMenu} from '../public/lib/debug_tracks/add_debug_track_menu';
 import {Filter} from './widgets/sql/table/column';
 import {SqlTableState} from './widgets/sql/table/state';
 import {SqlTable} from './widgets/sql/table/table';
 import {SqlTableDescription} from './widgets/sql/table/table_description';
+import {Trace} from '../public/trace';
+import {MenuItem, PopupMenu2} from '../widgets/menu';
 
-interface SqlTableTabConfig {
+export interface AddSqlTableTabParams {
   table: SqlTableDescription;
   filters?: Filter[];
   imports?: string[];
 }
 
-export function addSqlTableTab(config: SqlTableTabConfig): void {
+export function addSqlTableTabImpl(
+  trace: Trace,
+  config: AddSqlTableTabParams,
+): void {
+  addSqlTableTabWithState(
+    new SqlTableState(trace, config.table, {
+      filters: config.filters,
+      imports: config.imports,
+    }),
+  );
+}
+
+function addSqlTableTabWithState(state: SqlTableState) {
   const queryResultsTab = new SqlTableTab({
-    config,
-    engine: getEngine('QueryResult'),
+    config: {state},
+    trace: state.trace,
     uuid: uuidv4(),
   });
 
   addBottomTab(queryResultsTab, 'sqlTable');
 }
 
-export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
+interface SqlTableTabConfig {
+  state: SqlTableState;
+}
+
+class SqlTableTab extends BottomTab<SqlTableTabConfig> {
   static readonly kind = 'dev.perfetto.SqlTableTab';
 
   private state: SqlTableState;
@@ -55,14 +70,7 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
   constructor(args: NewBottomTabArgs<SqlTableTabConfig>) {
     super(args);
 
-    this.state = new SqlTableState(this.engine, this.config.table, {
-      filters: this.config.filters,
-      imports: this.config.imports,
-    });
-  }
-
-  static create(args: NewBottomTabArgs<SqlTableTabConfig>): SqlTableTab {
-    return new SqlTableTab(args);
+    this.state = args.config.state;
   }
 
   viewTab() {
@@ -84,6 +92,9 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
       }),
     ];
     const {selectStatement, columns} = this.state.getCurrentRequest();
+    const debugTrackColumns = Object.values(columns).filter(
+      (c) => !c.startsWith('__'),
+    );
     const addDebugTrack = m(
       Popup,
       {
@@ -91,11 +102,11 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
         position: PopupPosition.Top,
       },
       m(AddDebugTrackMenu, {
+        trace: this.state.trace,
         dataSource: {
-          sqlSource: selectStatement,
-          columns: Object.values(columns).filter((c) => !c.startsWith('__')),
+          sqlSource: `SELECT ${debugTrackColumns.join(', ')} FROM (${selectStatement})`,
+          columns: debugTrackColumns,
         },
-        engine: this.engine,
       }),
     );
 
@@ -107,11 +118,25 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
         buttons: [
           ...navigation,
           addDebugTrack,
-          m(Button, {
-            label: 'Copy SQL query',
-            onclick: () =>
-              copyToClipboard(this.state.getNonPaginatedSQLQuery()),
-          }),
+          m(
+            PopupMenu2,
+            {
+              trigger: m(Button, {
+                icon: Icons.Menu,
+              }),
+            },
+            m(MenuItem, {
+              label: 'Duplicate',
+              icon: 'tab_duplicate',
+              onclick: () => addSqlTableTabWithState(this.state.clone()),
+            }),
+            m(MenuItem, {
+              label: 'Copy SQL query',
+              icon: Icons.Copy,
+              onclick: () =>
+                copyToClipboard(this.state.getNonPaginatedSQLQuery()),
+            }),
+          ),
         ],
       },
       m(SqlTable, {
@@ -127,7 +152,7 @@ export class SqlTableTab extends BottomTab<SqlTableTabConfig> {
   }
 
   private getDisplayName(): string {
-    return this.config.table.displayName ?? this.config.table.name;
+    return this.state.config.displayName ?? this.state.config.name;
   }
 
   isLoading(): boolean {

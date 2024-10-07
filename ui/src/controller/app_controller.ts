@@ -14,7 +14,6 @@
 
 import {RECORDING_V2_FLAG} from '../core/feature_flags';
 import {globals} from '../frontend/globals';
-
 import {Child, Controller, ControllerInitializerAny} from './controller';
 import {RecordController} from './record_controller';
 import {TraceController} from './trace_controller';
@@ -47,7 +46,7 @@ export class AppController extends Controller<'main'> {
     }
     if (globals.state.engine !== undefined) {
       const engineCfg = globals.state.engine;
-      childControllers.push(Child(engineCfg.id, TraceController, engineCfg.id));
+      childControllers.push(Child(engineCfg.id, TraceController, engineCfg));
     }
     return childControllers;
   }

@@ -13,21 +13,30 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {CpuProfileDetailsPanel} from '../../frontend/cpu_profile_panel';
-import {
-  CPU_PROFILE_TRACK_KIND,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {CPU_PROFILE_TRACK_KIND} from '../../public/track_kinds';
+import {Engine} from '../../trace_processor/engine';
+import {TrackEventDetailsPanel} from '../../public/details_panel';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {CpuProfileTrack} from './cpu_profile_track';
 import {getThreadUriPrefix} from '../../public/utils';
 import {exists} from '../../base/utils';
+import {
+  metricsFromTableOrSubquery,
+  QueryFlamegraph,
+  QueryFlamegraphAttrs,
+} from '../../core/query_flamegraph';
+import {Timestamp} from '../../frontend/widgets/timestamp';
+import {assertExists} from '../../base/logging';
+import {DetailsShell} from '../../widgets/details_shell';
+import {TrackEventSelection} from '../../public/selection';
+import {getOrCreateGroupForThread} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
+import {time} from '../../base/time';
 
-class CpuProfile implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class CpuProfile implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const result = await ctx.engine.query(`
       with thread_cpu_sample as (
         select distinct utid
@@ -40,7 +49,8 @@ class CpuProfile implements Plugin {
         upid,
         thread.name as threadName
       from thread_cpu_sample
-      join thread using(utid)`);
+      join thread using(utid)
+    `);
 
     const it = result.iter({
       utid: NUM,
@@ -52,27 +62,109 @@ class CpuProfile implements Plugin {
       const utid = it.utid;
       const upid = it.upid;
       const threadName = it.threadName;
-      ctx.registerTrack({
-        uri: `${getThreadUriPrefix(upid, utid)}_cpu_samples`,
-        title: `${threadName} (CPU Stack Samples)`,
+      const uri = `${getThreadUriPrefix(upid, utid)}_cpu_samples`;
+      const title = `${threadName} (CPU Stack Samples)`;
+      ctx.tracks.registerTrack({
+        uri,
+        title,
         tags: {
           kind: CPU_PROFILE_TRACK_KIND,
           utid,
           ...(exists(upid) && {upid}),
         },
-        trackFactory: () => new CpuProfileTrack(ctx.engine, utid),
-      });
-    }
+        track: new CpuProfileTrack(
+          {
+            trace: ctx,
+            uri,
+          },
+          utid,
+        ),
+        detailsPanel: (selection: TrackEventSelection) => {
+          const {ts, utid} = selection;
 
-    ctx.registerDetailsPanel({
-      render: (sel) => {
-        if (sel.kind === 'CPU_PROFILE_SAMPLE') {
-          return m(CpuProfileDetailsPanel);
-        } else {
-          return undefined;
-        }
-      },
-    });
+          return new CpuProfileSampleFlamegraphDetailsPanel(
+            ctx.engine,
+            ts,
+            assertExists(utid),
+          );
+        },
+      });
+      const group = getOrCreateGroupForThread(ctx.workspace, utid);
+      const track = new TrackNode({uri, title, sortOrder: -40});
+      group.addChildInOrder(track);
+    }
+  }
+}
+
+class CpuProfileSampleFlamegraphDetailsPanel implements TrackEventDetailsPanel {
+  private readonly flamegraphAttrs: QueryFlamegraphAttrs;
+
+  constructor(
+    private engine: Engine,
+    private ts: time,
+    utid: number,
+  ) {
+    this.flamegraphAttrs = {
+      engine: this.engine,
+      metrics: [
+        ...metricsFromTableOrSubquery(
+          `
+            (
+              select
+                id,
+                parent_id as parentId,
+                name,
+                mapping_name,
+                source_file,
+                cast(line_number AS text) as line_number,
+                self_count
+              from _callstacks_for_cpu_profile_stack_samples!((
+                select p.callsite_id
+                from cpu_profile_stack_sample p
+                where p.ts = ${ts} and p.utid = ${utid}
+              ))
+            )
+          `,
+          [
+            {
+              name: 'CPU Profile Samples',
+              unit: '',
+              columnName: 'self_count',
+            },
+          ],
+          'include perfetto module callstacks.stack_profile',
+          [{name: 'mapping_name', displayName: 'Mapping'}],
+          [
+            {
+              name: 'source_file',
+              displayName: 'Source File',
+              mergeAggregation: 'ONE_OR_NULL',
+            },
+            {
+              name: 'line_number',
+              displayName: 'Line Number',
+              mergeAggregation: 'ONE_OR_NULL',
+            },
+          ],
+        ),
+      ],
+    };
+  }
+
+  render() {
+    return m(
+      '.flamegraph-profile',
+      m(
+        DetailsShell,
+        {
+          fillParent: true,
+          title: m('.title', 'CPU Profile Samples'),
+          description: [],
+          buttons: [m('div.time', `Timestamp: `, m(Timestamp, {ts: this.ts}))],
+        },
+        m(QueryFlamegraph, this.flamegraphAttrs),
+      ),
+    );
   }
 }
 

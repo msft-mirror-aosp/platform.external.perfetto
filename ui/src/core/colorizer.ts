@@ -13,11 +13,11 @@
 // limitations under the License.
 
 import {hsl} from 'color-convert';
-
 import {hash} from './hash';
 import {featureFlags} from './feature_flags';
-
-import {Color, HSLColor, HSLuvColor} from './color';
+import {Color, HSLColor, HSLuvColor} from '../public/color';
+import {ColorScheme} from '../public/color_scheme';
+import {RandState, pseudoRand} from '../base/rand';
 
 // 128 would provide equal weighting between dark and light text.
 // However, we want to prefer light text for stylistic reasons.
@@ -43,24 +43,7 @@ const USE_CONSISTENT_COLORS = featureFlags.register({
   defaultValue: false,
 });
 
-// |ColorScheme| defines a collection of colors which can be used for various UI
-// elements. In the future we would expand this interface to include light and
-// dark variants.
-export interface ColorScheme {
-  // The base color to be used for the bulk of the element.
-  readonly base: Color;
-
-  // A variant on the base color, commonly used for highlighting.
-  readonly variant: Color;
-
-  // Grayed out color to represent a disabled state.
-  readonly disabled: Color;
-
-  // Appropriate colors for text to be displayed on top of the above colors.
-  readonly textBase: Color;
-  readonly textVariant: Color;
-  readonly textDisabled: Color;
-}
+const randColourState: RandState = {seed: 0};
 
 const MD_PALETTE_RAW: Color[] = [
   new HSLColor({h: 4, s: 90, l: 58}),
@@ -215,7 +198,7 @@ export function colorForCpu(cpu: number): Color {
 }
 
 export function randomColor(): string {
-  const rand = Math.random();
+  const rand = pseudoRand(randColourState);
   if (USE_CONSISTENT_COLORS.get()) {
     return materialColorScheme(rand.toString()).base.cssString;
   } else {
@@ -238,13 +221,10 @@ export function colorForFtrace(name: string): ColorScheme {
   return materialColorScheme(name);
 }
 
-export function colorForSample(callsiteId: number, isHovered: boolean): string {
-  let colorScheme;
+export function getColorForSample(callsiteId: number): ColorScheme {
   if (USE_CONSISTENT_COLORS.get()) {
-    colorScheme = materialColorScheme(String(callsiteId));
+    return materialColorScheme(String(callsiteId));
   } else {
-    colorScheme = proceduralColorScheme(String(callsiteId));
+    return proceduralColorScheme(String(callsiteId));
   }
-
-  return isHovered ? colorScheme.variant.cssString : colorScheme.base.cssString;
 }

@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  NUM,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-  STR_NULL,
-} from '../../public';
+import {NUM, STR_NULL} from '../../trace_processor/query_result';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {AsyncSliceTrack} from '../../core_plugins/async_slices/async_slice_track';
-import {ASYNC_SLICE_TRACK_KIND} from '../../public';
+import {ASYNC_SLICE_TRACK_KIND} from '../../public/track_kinds';
+import {TrackNode} from '../../public/workspace';
 
 // This plugin renders visualizations of runtime power state transitions for
 // Linux kernel devices (devices managed by Linux drivers).
-class LinuxKernelDevices implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class LinuxKernelDevices implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const result = await ctx.engine.query(`
       select
         t.id as trackId,
@@ -42,27 +39,33 @@ class LinuxKernelDevices implements Plugin {
 
     for (; it.valid(); it.next()) {
       const trackId = it.trackId;
-      const displayName = it.name ?? `${trackId}`;
+      const title = it.name ?? `${trackId}`;
 
-      ctx.registerStaticTrack({
-        uri: `/kernel_devices/${displayName}`,
-        title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new AsyncSliceTrack(
-            {
-              engine: ctx.engine,
-              trackKey,
-            },
-            0,
-            [trackId],
-          );
-        },
+      const uri = `/kernel_devices/${title}`;
+      ctx.tracks.registerTrack({
+        uri,
+        title,
+        track: new AsyncSliceTrack(
+          {
+            trace: ctx,
+            uri,
+          },
+          0,
+          [trackId],
+        ),
         tags: {
           kind: ASYNC_SLICE_TRACK_KIND,
           trackIds: [trackId],
+          groupName: `Linux Kernel Devices`,
         },
-        groupName: `Linux Kernel Devices`,
       });
+      const group = new TrackNode({
+        title: 'Linux Kernel Devices',
+        isSummary: true,
+      });
+      const track = new TrackNode({uri, title});
+      group.addChildInOrder(track);
+      ctx.workspace.addChildInOrder(group);
     }
   }
 }

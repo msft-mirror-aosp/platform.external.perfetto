@@ -34,6 +34,7 @@
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/stack_profile_tracker.h"
 #include "src/trace_processor/importers/common/virtual_memory_mapping.h"
+#include "src/trace_processor/importers/perf/itrace_start_record.h"
 #include "src/trace_processor/importers/perf/mmap_record.h"
 #include "src/trace_processor/importers/perf/perf_counter.h"
 #include "src/trace_processor/importers/perf/perf_event.h"
@@ -97,9 +98,8 @@ RecordParser::~RecordParser() = default;
 
 void RecordParser::ParsePerfRecord(int64_t ts, Record record) {
   if (base::Status status = ParseRecord(ts, std::move(record)); !status.ok()) {
-    context_->storage->IncrementStats(record.header.type == PERF_RECORD_SAMPLE
-                                          ? stats::perf_samples_skipped
-                                          : stats::perf_record_skipped);
+    context_->storage->IncrementIndexedStats(
+        stats::perf_record_skipped, static_cast<int>(record.header.type));
   }
 }
 
@@ -116,6 +116,9 @@ base::Status RecordParser::ParseRecord(int64_t ts, Record record) {
 
     case PERF_RECORD_MMAP2:
       return ParseMmap2(std::move(record));
+
+    case PERF_RECORD_ITRACE_START:
+      return ParseItraceStart(std::move(record));
 
     case PERF_RECORD_AUX:
     case PERF_RECORD_AUXTRACE:
@@ -225,7 +228,7 @@ std::optional<CallsiteId> RecordParser::InternCallchain(
       context_->storage->IncrementStats(stats::perf_dummy_mapping_used);
       // Simpleperf will not create mappings for anonymous executable mappings
       // which are used by JITted code (e.g. V8 JavaScript).
-      mapping = mapping_tracker_->GetDummyMapping();
+      mapping = GetDummyMapping(upid);
     }
 
     const FrameId frame_id =
@@ -294,6 +297,13 @@ base::Status RecordParser::ParseMmap2(Record record) {
   return base::OkStatus();
 }
 
+base::Status RecordParser::ParseItraceStart(Record record) {
+  ItraceStartRecord start;
+  RETURN_IF_ERROR(start.Parse(record));
+  context_->process_tracker->UpdateThread(start.tid, start.pid);
+  return base::OkStatus();
+}
+
 UniquePid RecordParser::GetUpid(const CommonMmapRecordFields& fields) const {
   UniqueTid utid =
       context_->process_tracker->UpdateThread(fields.tid, fields.pid);
@@ -344,6 +354,16 @@ base::Status RecordParser::UpdateCountersInReadGroups(const Sample& sample) {
         .AddCount(sample.trace_ts, static_cast<double>(entry.value));
   }
   return base::OkStatus();
+}
+
+DummyMemoryMapping* RecordParser::GetDummyMapping(UniquePid upid) {
+  if (auto it = dummy_mappings_.Find(upid); it) {
+    return *it;
+  }
+
+  DummyMemoryMapping* mapping = &mapping_tracker_->CreateDummyMapping("");
+  dummy_mappings_.Insert(upid, mapping);
+  return mapping;
 }
 
 }  // namespace perfetto::trace_processor::perf_importer

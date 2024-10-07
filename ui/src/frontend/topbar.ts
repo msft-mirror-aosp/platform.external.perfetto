@@ -13,30 +13,27 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {raf} from '../core/raf_scheduler';
-
 import {globals} from './globals';
 import {taskTracker} from './task_tracker';
 import {Popup, PopupPosition} from '../widgets/popup';
 import {assertFalse} from '../base/logging';
+import {OmniboxMode} from '../core/omnibox_manager';
+import {AppImpl} from '../core/app_impl';
+import {Trace, TraceAttrs} from '../public/trace';
 
 export const DISMISSED_PANNING_HINT_KEY = 'dismissedPanningHint';
 
-class Progress implements m.ClassComponent {
-  view(_vnode: m.Vnode): m.Children {
-    const classes = classNames(this.isLoading() && 'progress-anim');
+class Progress implements m.ClassComponent<TraceAttrs> {
+  view({attrs}: m.CVnode<TraceAttrs>): m.Children {
+    const engine = attrs.trace.engine;
+    const isLoading =
+      AppImpl.instance.isLoadingTrace ||
+      engine.numRequestsPending > 0 ||
+      taskTracker.hasPendingTasks();
+    const classes = classNames(isLoading && 'progress-anim');
     return m('.progress', {class: classes});
-  }
-
-  private isLoading(): boolean {
-    const engine = globals.getCurrentEngine();
-    return (
-      (engine && !engine.ready) ||
-      globals.numQueuedQueries > 0 ||
-      taskTracker.hasPendingTasks()
-    );
   }
 }
 
@@ -75,13 +72,19 @@ class HelpPanningNotification implements m.ClassComponent {
   }
 }
 
-class TraceErrorIcon implements m.ClassComponent {
-  view() {
+class TraceErrorIcon implements m.ClassComponent<TraceAttrs> {
+  private tracePopupErrorDismissed = false;
+
+  view({attrs}: m.CVnode<TraceAttrs>) {
+    const trace = attrs.trace;
     if (globals.embeddedMode) return;
 
-    const mode = globals.state.omniboxState.mode;
-    const errors = globals.traceErrors;
-    if ((!Boolean(errors) && !globals.metricError) || mode === 'COMMAND') {
+    const mode = AppImpl.instance.omnibox.mode;
+    const errors = trace.traceInfo.importErrors;
+    if (
+      (!Boolean(errors) && !globals.metricError) ||
+      mode === OmniboxMode.Command
+    ) {
       return;
     }
     const message = Boolean(errors)
@@ -93,11 +96,11 @@ class TraceErrorIcon implements m.ClassComponent {
         Popup,
         {
           trigger: m('.popup-trigger'),
-          isOpen: globals.showTraceErrorPopup,
+          isOpen: !this.tracePopupErrorDismissed,
           position: PopupPosition.Left,
           onChange: (shouldOpen: boolean) => {
             assertFalse(shouldOpen);
-            globals.showTraceErrorPopup = false;
+            this.tracePopupErrorDismissed = true;
           },
         },
         m('.error-popup', 'Data-loss/import error. Click for more info.'),
@@ -119,6 +122,7 @@ class TraceErrorIcon implements m.ClassComponent {
 
 export interface TopbarAttrs {
   omnibox: m.Children;
+  trace?: Trace;
 }
 
 export class Topbar implements m.ClassComponent<TopbarAttrs> {
@@ -128,9 +132,9 @@ export class Topbar implements m.ClassComponent<TopbarAttrs> {
       '.topbar',
       {class: globals.state.sidebarVisible ? '' : 'hide-sidebar'},
       omnibox,
-      m(Progress),
+      attrs.trace && m(Progress, {trace: attrs.trace}),
       m(HelpPanningNotification),
-      m(TraceErrorIcon),
+      attrs.trace && m(TraceErrorIcon, {trace: attrs.trace}),
     );
   }
 }

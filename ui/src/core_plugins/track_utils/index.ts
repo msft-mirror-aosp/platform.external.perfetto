@@ -12,41 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Actions} from '../../common/actions';
-import {
-  getTimeSpanOfSelectionOrVisibleWindow,
-  globals,
-} from '../../frontend/globals';
-import {OmniboxMode} from '../../frontend/omnibox_manager';
-import {verticalScrollToTrack} from '../../frontend/scroll_helper';
-import {
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-  PromptOption,
-} from '../../public';
+import {OmniboxMode} from '../../core/omnibox_manager';
+import {Trace} from '../../public/trace';
+import {PromptOption} from '../../public/omnibox';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {AppImpl} from '../../core/app_impl';
+import {getTimeSpanOfSelectionOrVisibleWindow} from '../../public/utils';
 
-class TrackUtilsPlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.registerCommand({
+class TrackUtilsPlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    ctx.commands.registerCommand({
       id: 'perfetto.RunQueryInSelectedTimeWindow',
       name: `Run query in selected time window`,
       callback: async () => {
-        const window = await getTimeSpanOfSelectionOrVisibleWindow();
-        globals.omnibox.setMode(OmniboxMode.Query);
-        globals.omnibox.setText(
+        const window = await getTimeSpanOfSelectionOrVisibleWindow(ctx);
+        const omnibox = AppImpl.instance.omnibox;
+        omnibox.setMode(OmniboxMode.Query);
+        omnibox.setText(
           `select  where ts >= ${window.start} and ts < ${window.end}`,
         );
-        globals.omnibox.focusOmnibox(7);
+        omnibox.focus(/* cursorPlacement= */ 7);
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       // Selects & reveals the first track on the timeline with a given URI.
       id: 'perfetto.FindTrack',
       name: 'Find track by URI',
       callback: async () => {
-        const tracks = globals.trackManager.getAllTracks();
+        const tracks = ctx.tracks.getAllTracks();
         const options = tracks.map(({uri}): PromptOption => {
           return {key: uri, displayName: uri};
         });
@@ -60,33 +54,17 @@ class TrackUtilsPlugin implements Plugin {
           return collator.compare(a.displayName, b.displayName);
         });
 
-        try {
-          const selectedUri = await ctx.prompt(
-            'Choose a track...',
-            sortedOptions,
-          );
-
-          // Find the first track with this URI
-          const firstTrack = Object.values(globals.state.tracks).find(
-            ({uri}) => uri === selectedUri,
-          );
-          if (firstTrack) {
-            console.log(firstTrack);
-            verticalScrollToTrack(firstTrack.key, true);
-            const traceTime = globals.traceContext;
-            globals.makeSelection(
-              Actions.selectArea({
-                start: traceTime.start,
-                end: traceTime.end,
-                tracks: [firstTrack.key],
-              }),
-            );
-          } else {
-            alert(`No tracks with uri ${selectedUri} on the timeline`);
-          }
-        } catch {
-          // Prompt was probably cancelled - do nothing.
-        }
+        const selectedUri = await ctx.omnibox.prompt(
+          'Choose a track...',
+          sortedOptions,
+        );
+        if (selectedUri === undefined) return; // Prompt cancelled.
+        ctx.scrollTo({track: {uri: selectedUri, expandGroup: true}});
+        ctx.selection.selectArea({
+          start: ctx.traceInfo.start,
+          end: ctx.traceInfo.end,
+          trackUris: [selectedUri],
+        });
       },
     });
   }

@@ -26,10 +26,13 @@
 #include "perfetto/base/compiler.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/public/compiler.h"
+#include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
+#include "src/trace_processor/importers/gecko/gecko_event.h"
+#include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/sorter/trace_token_buffer.h"
@@ -62,27 +65,44 @@ TraceSorter::~TraceSorter() {
   }
 }
 
-void TraceSorter::Queue::Sort() {
+void TraceSorter::Queue::Sort(TraceTokenBuffer& buffer, bool use_slow_sorting) {
   PERFETTO_DCHECK(needs_sorting());
   PERFETTO_DCHECK(sort_start_idx_ < events_.size());
 
   // If sort_min_ts_ has been set, it will no long be max_int, and so will be
   // smaller than max_ts_.
-  PERFETTO_DCHECK(sort_min_ts_ < max_ts_);
+  PERFETTO_DCHECK(sort_min_ts_ < std::numeric_limits<int64_t>::max());
 
   // We know that all events between [0, sort_start_idx_] are sorted. Within
   // this range, perform a bound search and find the iterator for the min
   // timestamp that broke the monotonicity. Re-sort from there to the end.
   auto sort_end = events_.begin() + static_cast<ssize_t>(sort_start_idx_);
-  PERFETTO_DCHECK(std::is_sorted(events_.begin(), sort_end));
+  if (use_slow_sorting) {
+    PERFETTO_DCHECK(sort_min_ts_ <= max_ts_);
+    PERFETTO_DCHECK(std::is_sorted(events_.begin(), sort_end,
+                                   TimestampedEvent::SlowOperatorLess{buffer}));
+  } else {
+    PERFETTO_DCHECK(sort_min_ts_ < max_ts_);
+    PERFETTO_DCHECK(std::is_sorted(events_.begin(), sort_end));
+  }
   auto sort_begin = std::lower_bound(events_.begin(), sort_end, sort_min_ts_,
                                      &TimestampedEvent::Compare);
-  std::sort(sort_begin, events_.end());
+  if (use_slow_sorting) {
+    std::sort(sort_begin, events_.end(),
+              TimestampedEvent::SlowOperatorLess{buffer});
+  } else {
+    std::sort(sort_begin, events_.end());
+  }
   sort_start_idx_ = 0;
   sort_min_ts_ = 0;
 
   // At this point |events_| must be fully sorted
-  PERFETTO_DCHECK(std::is_sorted(events_.begin(), events_.end()));
+  if (use_slow_sorting) {
+    PERFETTO_DCHECK(std::is_sorted(events_.begin(), events_.end(),
+                                   TimestampedEvent::SlowOperatorLess{buffer}));
+  } else {
+    PERFETTO_DCHECK(std::is_sorted(events_.begin(), events_.end()));
+  }
 }
 
 // Removes all the events in |queues_| that are earlier than the given
@@ -148,7 +168,7 @@ void TraceSorter::SortAndExtractEventsUntilAllocId(
     auto& queue = sorter_data.queues[min_queue_idx];
     auto& events = queue.events_;
     if (queue.needs_sorting())
-      queue.Sort();
+      queue.Sort(token_buffer_, use_slow_sorting_);
     PERFETTO_DCHECK(queue.min_ts_ == events.front().ts);
 
     // Now that we identified the min-queue, extract all events from it until
@@ -197,10 +217,14 @@ void TraceSorter::SortAndExtractEventsUntilAllocId(
 void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
                                    const TimestampedEvent& event) {
   TraceTokenBuffer::Id id = GetTokenBufferId(event);
-  switch (static_cast<TimestampedEvent::Type>(event.event_type)) {
+  switch (event.type()) {
     case TimestampedEvent::Type::kPerfRecord:
       context.perf_record_parser->ParsePerfRecord(
           event.ts, token_buffer_.Extract<perf_importer::Record>(id));
+      return;
+    case TimestampedEvent::Type::kInstrumentsRow:
+      context.instruments_row_parser->ParseInstrumentsRow(
+          event.ts, token_buffer_.Extract<instruments_importer::Row>(id));
       return;
     case TimestampedEvent::Type::kTracePacket:
       context.proto_trace_parser->ParseTracePacket(
@@ -218,6 +242,15 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
       context.json_trace_parser->ParseJsonPacket(
           event.ts, std::move(token_buffer_.Extract<JsonEvent>(id).value));
       return;
+    case TimestampedEvent::Type::kJsonValueWithDur:
+      context.json_trace_parser->ParseJsonPacket(
+          event.ts,
+          std::move(token_buffer_.Extract<JsonWithDurEvent>(id).value));
+      return;
+    case TimestampedEvent::Type::kSpeRecord:
+      context.spe_record_parser->ParseSpeRecord(
+          event.ts, token_buffer_.Extract<TraceBlobView>(id));
+      return;
     case TimestampedEvent::Type::kSystraceLine:
       context.json_trace_parser->ParseSystraceLine(
           event.ts, token_buffer_.Extract<SystraceLine>(id));
@@ -225,6 +258,14 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kAndroidLogEvent:
       context.android_log_event_parser->ParseAndroidLogEvent(
           event.ts, token_buffer_.Extract<AndroidLogEvent>(id));
+      return;
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+      context.proto_trace_parser->ParseLegacyV8ProfileEvent(
+          event.ts, token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
+      return;
+    case TimestampedEvent::Type::kGeckoEvent:
+      context.gecko_trace_parser->ParseGeckoEvent(
+          event.ts, token_buffer_.Extract<gecko_importer::GeckoEvent>(id));
       return;
     case TimestampedEvent::Type::kInlineSchedSwitch:
     case TimestampedEvent::Type::kInlineSchedWaking:
@@ -248,12 +289,17 @@ void TraceSorter::ParseEtwPacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kInlineSchedWaking:
     case TimestampedEvent::Type::kFtraceEvent:
     case TimestampedEvent::Type::kTrackEvent:
+    case TimestampedEvent::Type::kSpeRecord:
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
     case TimestampedEvent::Type::kPerfRecord:
+    case TimestampedEvent::Type::kInstrumentsRow:
     case TimestampedEvent::Type::kJsonValue:
+    case TimestampedEvent::Type::kJsonValueWithDur:
     case TimestampedEvent::Type::kFuchsiaRecord:
     case TimestampedEvent::Type::kAndroidLogEvent:
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+    case TimestampedEvent::Type::kGeckoEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -278,12 +324,17 @@ void TraceSorter::ParseFtracePacket(TraceProcessorContext& context,
       return;
     case TimestampedEvent::Type::kEtwEvent:
     case TimestampedEvent::Type::kTrackEvent:
+    case TimestampedEvent::Type::kSpeRecord:
     case TimestampedEvent::Type::kSystraceLine:
     case TimestampedEvent::Type::kTracePacket:
     case TimestampedEvent::Type::kPerfRecord:
+    case TimestampedEvent::Type::kInstrumentsRow:
     case TimestampedEvent::Type::kJsonValue:
+    case TimestampedEvent::Type::kJsonValueWithDur:
     case TimestampedEvent::Type::kFuchsiaRecord:
     case TimestampedEvent::Type::kAndroidLogEvent:
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+    case TimestampedEvent::Type::kGeckoEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -307,6 +358,12 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
     case TimestampedEvent::Type::kJsonValue:
       base::ignore_result(token_buffer_.Extract<JsonEvent>(id));
       return;
+    case TimestampedEvent::Type::kJsonValueWithDur:
+      base::ignore_result(token_buffer_.Extract<JsonWithDurEvent>(id));
+      return;
+    case TimestampedEvent::Type::kSpeRecord:
+      base::ignore_result(token_buffer_.Extract<TraceBlobView>(id));
+      return;
     case TimestampedEvent::Type::kSystraceLine:
       base::ignore_result(token_buffer_.Extract<SystraceLine>(id));
       return;
@@ -319,8 +376,18 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
     case TimestampedEvent::Type::kPerfRecord:
       base::ignore_result(token_buffer_.Extract<perf_importer::Record>(id));
       return;
+    case TimestampedEvent::Type::kInstrumentsRow:
+      base::ignore_result(token_buffer_.Extract<instruments_importer::Row>(id));
+      return;
     case TimestampedEvent::Type::kAndroidLogEvent:
       base::ignore_result(token_buffer_.Extract<AndroidLogEvent>(id));
+      return;
+    case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
+      base::ignore_result(token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
+      return;
+    case TimestampedEvent::Type::kGeckoEvent:
+      base::ignore_result(
+          token_buffer_.Extract<gecko_importer::GeckoEvent>(id));
       return;
   }
   PERFETTO_FATAL("For GCC");

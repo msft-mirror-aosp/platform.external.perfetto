@@ -13,20 +13,12 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {raf} from '../core/raf_scheduler';
-import {Engine} from '../trace_processor/engine';
-
+import {Engine, EngineAttrs} from '../trace_processor/engine';
 import {globals} from './globals';
-import {createPage} from './pages';
+import {PageWithTraceAttrs} from './pages';
 import {QueryResult, UNKNOWN} from '../trace_processor/query_result';
-
-function getEngine(name: string): Engine | undefined {
-  const currentEngine = globals.getCurrentEngine();
-  if (currentEngine === undefined) return undefined;
-  const engineId = currentEngine.id;
-  return globals.engines.get(engineId)?.getProxy(name);
-}
+import {assertExists} from '../base/logging';
 
 /**
  * Extracts and copies fields from a source object based on the keys present in
@@ -61,6 +53,7 @@ function pickFields<S extends Record<string, unknown>, T extends S>(
 }
 
 interface StatsSectionAttrs {
+  engine: Engine;
   title: string;
   subTitle: string;
   sqlConstraints: string;
@@ -86,7 +79,7 @@ class StatsSection implements m.ClassComponent<StatsSectionAttrs> {
   private data?: StatsSectionRow[];
 
   constructor({attrs}: m.CVnode<StatsSectionAttrs>) {
-    const engine = getEngine('StatsSection');
+    const engine = attrs.engine;
     if (engine === undefined) {
       return;
     }
@@ -163,34 +156,31 @@ const traceMetadataRowSpec = {name: UNKNOWN, value: UNKNOWN};
 
 type TraceMetadataRow = typeof traceMetadataRowSpec;
 
-class TraceMetadata implements m.ClassComponent {
+class TraceMetadata implements m.ClassComponent<EngineAttrs> {
   private data?: TraceMetadataRow[];
 
-  constructor() {
-    const engine = getEngine('StatsSection');
-    if (engine === undefined) {
-      return;
-    }
+  oncreate({attrs}: m.CVnodeDOM<EngineAttrs>) {
+    const engine = attrs.engine;
     const query = `
       with metadata_with_priorities as (
         select
           name,
           ifnull(str_value, cast(int_value as text)) as value,
           name in (
-            "trace_size_bytes", 
+            "trace_size_bytes",
             "cr-os-arch",
             "cr-os-name",
             "cr-os-version",
             "cr-physical-memory",
             "cr-product-version",
             "cr-hardware-class"
-          ) as priority 
+          ) as priority
         from metadata
       )
       select
         name,
         value
-      from metadata_with_priorities 
+      from metadata_with_priorities
       order by
         priority desc,
         name
@@ -249,14 +239,11 @@ const androidGameInterventionRowSpec = {
 
 type AndroidGameInterventionRow = typeof androidGameInterventionRowSpec;
 
-class AndroidGameInterventionList implements m.ClassComponent {
+class AndroidGameInterventionList implements m.ClassComponent<EngineAttrs> {
   private data?: AndroidGameInterventionRow[];
 
-  constructor() {
-    const engine = getEngine('StatsSection');
-    if (engine === undefined) {
-      return;
-    }
+  oncreate({attrs}: m.CVnodeDOM<EngineAttrs>) {
+    const engine = attrs.engine;
     const query = `
       select
         package_name,
@@ -372,14 +359,11 @@ const packageDataSpec = {
 
 type PackageData = typeof packageDataSpec;
 
-class PackageListSection implements m.ClassComponent {
+class PackageListSection implements m.ClassComponent<EngineAttrs> {
   private packageList?: PackageData[];
 
-  constructor() {
-    const engine = getEngine('StatsSection');
-    if (engine === undefined) {
-      return;
-    }
+  oncreate({attrs}: m.CVnodeDOM<EngineAttrs>) {
+    const engine = attrs.engine;
     this.loadData(engine);
   }
 
@@ -441,33 +425,43 @@ class PackageListSection implements m.ClassComponent {
   }
 }
 
-export const TraceInfoPage = createPage({
+export class TraceInfoPage implements m.ClassComponent<PageWithTraceAttrs> {
+  private engine?: Engine;
+
+  oninit({attrs}: m.CVnode<PageWithTraceAttrs>) {
+    this.engine = attrs.trace.engine.getProxy('TraceInfoPage');
+  }
+
   view() {
+    const engine = assertExists(this.engine);
     return m(
       '.trace-info-page',
       m(MetricErrors),
       m(StatsSection, {
+        engine,
         queryId: 'info_errors',
         title: 'Import errors',
         cssClass: '.errors',
-        subTitle: `The following errors have been encountered while importing the
-               trace. These errors are usually non-fatal but indicate that one
-               or more tracks might be missing or showing erroneous data.`,
+        subTitle: `The following errors have been encountered while importing
+               the trace. These errors are usually non-fatal but indicate that
+               one or more tracks might be missing or showing erroneous data.`,
         sqlConstraints: `severity = 'error' and value > 0`,
       }),
       m(StatsSection, {
+        engine,
         queryId: 'info_data_losses',
         title: 'Data losses',
         cssClass: '.errors',
-        subTitle: `These counters are collected at trace recording time. The trace
-               data for one or more data sources was dropped and hence some
-               track contents will be incomplete.`,
+        subTitle: `These counters are collected at trace recording time. The
+               trace data for one or more data sources was dropped and hence
+               some track contents will be incomplete.`,
         sqlConstraints: `severity = 'data_loss' and value > 0`,
       }),
-      m(TraceMetadata),
-      m(PackageListSection),
-      m(AndroidGameInterventionList),
+      m(TraceMetadata, {engine}),
+      m(PackageListSection, {engine}),
+      m(AndroidGameInterventionList, {engine}),
       m(StatsSection, {
+        engine,
         queryId: 'info_all',
         title: 'Debugging stats',
         cssClass: '',
@@ -476,5 +470,5 @@ export const TraceInfoPage = createPage({
         sqlConstraints: '',
       }),
     );
-  },
-});
+  }
+}

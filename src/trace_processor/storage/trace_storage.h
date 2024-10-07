@@ -48,6 +48,7 @@
 #include "src/trace_processor/tables/jit_tables_py.h"
 #include "src/trace_processor/tables/memory_tables_py.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
+#include "src/trace_processor/tables/perf_tables_py.h"
 #include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/tables/sched_tables_py.h"
 #include "src/trace_processor/tables/slice_tables_py.h"
@@ -637,13 +638,6 @@ class TraceStorage {
     return &trace_file_table_;
   }
 
-  const tables::StackSampleTable& stack_sample_table() const {
-    return stack_sample_table_;
-  }
-  tables::StackSampleTable* mutable_stack_sample_table() {
-    return &stack_sample_table_;
-  }
-
   const tables::CpuProfileStackSampleTable& cpu_profile_stack_sample_table()
       const {
     return cpu_profile_stack_sample_table_;
@@ -664,6 +658,13 @@ class TraceStorage {
   }
   tables::PerfSampleTable* mutable_perf_sample_table() {
     return &perf_sample_table_;
+  }
+
+  const tables::InstrumentsSampleTable& instruments_sample_table() const {
+    return instruments_sample_table_;
+  }
+  tables::InstrumentsSampleTable* mutable_instruments_sample_table() {
+    return &instruments_sample_table_;
   }
 
   const tables::SymbolTable& symbol_table() const { return symbol_table_; }
@@ -845,6 +846,13 @@ class TraceStorage {
     return jit_frame_table_;
   }
   tables::JitFrameTable* mutable_jit_frame_table() { return &jit_frame_table_; }
+
+  const tables::SpeRecordTable& spe_record_table() const {
+    return spe_record_table_;
+  }
+  tables::SpeRecordTable* mutable_spe_record_table() {
+    return &spe_record_table_;
+  }
 
   const tables::InputMethodClientsTable& inputmethod_clients_table() const {
     return inputmethod_clients_table_;
@@ -1152,13 +1160,13 @@ class TraceStorage {
   tables::StackProfileFrameTable stack_profile_frame_table_{&string_pool_};
   tables::StackProfileCallsiteTable stack_profile_callsite_table_{
       &string_pool_};
-  tables::StackSampleTable stack_sample_table_{&string_pool_};
   tables::HeapProfileAllocationTable heap_profile_allocation_table_{
       &string_pool_};
   tables::CpuProfileStackSampleTable cpu_profile_stack_sample_table_{
-      &string_pool_, &stack_sample_table_};
+      &string_pool_};
   tables::PerfSessionTable perf_session_table_{&string_pool_};
   tables::PerfSampleTable perf_sample_table_{&string_pool_};
+  tables::InstrumentsSampleTable instruments_sample_table_{&string_pool_};
   tables::PackageListTable package_list_table_{&string_pool_};
   tables::AndroidGameInterventionListTable
       android_game_intervention_list_table_{&string_pool_};
@@ -1208,6 +1216,9 @@ class TraceStorage {
   // Jit tables
   tables::JitCodeTable jit_code_table_{&string_pool_};
   tables::JitFrameTable jit_frame_table_{&string_pool_};
+
+  // Perf tables
+  tables::SpeRecordTable spe_record_table_{&string_pool_};
 
   // Winscope tables
   tables::InputMethodClientsTable inputmethod_clients_table_{&string_pool_};

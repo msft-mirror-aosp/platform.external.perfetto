@@ -17,21 +17,22 @@ import {
   STR_NULL,
   LONG_NULL,
   NUM,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-  PrimaryTrackSortKey,
   STR,
-  LONG,
-  Engine,
-  COUNTER_TRACK_KIND,
-} from '../../public';
+} from '../../trace_processor/query_result';
+import {Trace} from '../../public/trace';
+import {COUNTER_TRACK_KIND} from '../../public/track_kinds';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {CounterOptions} from '../../frontend/base_counter_track';
 import {TraceProcessorCounterTrack} from './trace_processor_counter_track';
 import {CounterDetailsPanel} from './counter_details_panel';
-import {Time, duration, time} from '../../base/time';
-import {exists, Optional} from '../../base/utils';
+import {exists} from '../../base/utils';
+import {TrackNode} from '../../public/workspace';
+import {
+  getOrCreateGroupForProcess,
+  getOrCreateGroupForThread,
+} from '../../public/standard_groups';
+import {CounterSelectionAggregator} from './counter_selection_aggregator';
 
 const NETWORK_TRACK_REGEX = new RegExp('^.* (Received|Transmitted)( KB)?$');
 const ENTITY_RESIDENCY_REGEX = new RegExp('^Entity residency:');
@@ -110,45 +111,22 @@ function getDefaultCounterOptions(name: string): Partial<CounterOptions> {
   return options;
 }
 
-async function getCounterEventBounds(
-  engine: Engine,
-  trackId: number,
-  id: number,
-): Promise<Optional<{ts: time; dur: duration}>> {
-  const query = `
-    WITH CTE AS (
-      SELECT
-        id,
-        ts as leftTs,
-        LEAD(ts) OVER (ORDER BY ts) AS rightTs
-      FROM counter
-      WHERE track_id = ${trackId}
-    )
-    SELECT * FROM CTE WHERE id = ${id}
-  `;
-
-  const counter = await engine.query(query);
-  const row = counter.iter({
-    leftTs: LONG,
-    rightTs: LONG_NULL,
-  });
-  const leftTs = Time.fromRaw(row.leftTs);
-  const rightTs = row.rightTs !== null ? Time.fromRaw(row.rightTs) : leftTs;
-  const duration = rightTs - leftTs;
-  return {ts: leftTs, dur: duration};
-}
-
-class CounterPlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class CounterPlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     await this.addCounterTracks(ctx);
     await this.addGpuFrequencyTracks(ctx);
     await this.addCpuFreqLimitCounterTracks(ctx);
+    await this.addCpuTimeCounterTracks(ctx);
     await this.addCpuPerfCounterTracks(ctx);
     await this.addThreadCounterTracks(ctx);
     await this.addProcessCounterTracks(ctx);
+
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new CounterSelectionAggregator(),
+    );
   }
 
-  private async addCounterTracks(ctx: PluginContextTrace) {
+  private async addCounterTracks(ctx: Trace) {
     const result = await ctx.engine.query(`
       select name, id, unit
       from (
@@ -174,36 +152,34 @@ class CounterPlugin implements Plugin {
 
     for (; it.valid(); it.next()) {
       const trackId = it.id;
-      const displayName = it.name;
+      const title = it.name;
       const unit = it.unit ?? undefined;
-      ctx.registerStaticTrack({
-        uri: `/counter_${trackId}`,
-        title: displayName,
+
+      const uri = `/counter_${trackId}`;
+      ctx.tracks.registerTrack({
+        uri,
+        title,
         tags: {
           kind: COUNTER_TRACK_KIND,
           trackIds: [trackId],
         },
-        trackFactory: (trackCtx) => {
-          return new TraceProcessorCounterTrack({
-            engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
-            trackId,
-            options: {
-              ...getDefaultCounterOptions(displayName),
-              unit,
-            },
-          });
-        },
-        sortKey: PrimaryTrackSortKey.COUNTER_TRACK,
-        detailsPanel: new CounterDetailsPanel(ctx.engine, trackId, displayName),
-        getEventBounds: async (id) => {
-          return await getCounterEventBounds(ctx.engine, trackId, id);
-        },
+        track: new TraceProcessorCounterTrack({
+          trace: ctx,
+          uri,
+          trackId,
+          options: {
+            ...getDefaultCounterOptions(title),
+            unit,
+          },
+        }),
+        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, title),
       });
+      const track = new TrackNode({uri, title});
+      ctx.workspace.addChildInOrder(track);
     }
   }
 
-  async addCpuFreqLimitCounterTracks(ctx: PluginContextTrace): Promise<void> {
+  async addCpuFreqLimitCounterTracks(ctx: Trace): Promise<void> {
     const cpuFreqLimitCounterTracksSql = `
       select name, id
       from cpu_counter_track
@@ -215,7 +191,18 @@ class CounterPlugin implements Plugin {
     this.addCpuCounterTracks(ctx, cpuFreqLimitCounterTracksSql, 'cpuFreqLimit');
   }
 
-  async addCpuPerfCounterTracks(ctx: PluginContextTrace): Promise<void> {
+  async addCpuTimeCounterTracks(ctx: Trace): Promise<void> {
+    const cpuTimeCounterTracksSql = `
+      select name, id
+      from cpu_counter_track
+      join _counter_track_summary using (id)
+      where name glob "cpu.times.*"
+      order by name asc
+    `;
+    this.addCpuCounterTracks(ctx, cpuTimeCounterTracksSql, 'cpuTime');
+  }
+
+  async addCpuPerfCounterTracks(ctx: Trace): Promise<void> {
     // Perf counter tracks are bound to CPUs, follow the scheduling and
     // frequency track naming convention ("Cpu N ...").
     // Note: we might not have a track for a given cpu if no data was seen from
@@ -232,7 +219,7 @@ class CounterPlugin implements Plugin {
   }
 
   async addCpuCounterTracks(
-    ctx: PluginContextTrace,
+    ctx: Trace,
     sql: string,
     scope: string,
   ): Promise<void> {
@@ -246,31 +233,29 @@ class CounterPlugin implements Plugin {
     for (; it.valid(); it.next()) {
       const name = it.name;
       const trackId = it.id;
-      ctx.registerTrack({
-        uri: `counter.cpu.${trackId}`,
+      const uri = `counter.cpu.${trackId}`;
+      ctx.tracks.registerTrack({
+        uri,
         title: name,
         tags: {
           kind: COUNTER_TRACK_KIND,
           trackIds: [trackId],
           scope,
         },
-        trackFactory: (trackCtx) => {
-          return new TraceProcessorCounterTrack({
-            engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
-            trackId: trackId,
-            options: getDefaultCounterOptions(name),
-          });
-        },
-        detailsPanel: new CounterDetailsPanel(ctx.engine, trackId, name),
-        getEventBounds: async (id) => {
-          return await getCounterEventBounds(ctx.engine, trackId, id);
-        },
+        track: new TraceProcessorCounterTrack({
+          trace: ctx,
+          uri,
+          trackId: trackId,
+          options: getDefaultCounterOptions(name),
+        }),
+        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
       });
+      const trackNode = new TrackNode({uri, title: name, sortOrder: -20});
+      ctx.workspace.addChildInOrder(trackNode);
     }
   }
 
-  async addThreadCounterTracks(ctx: PluginContextTrace): Promise<void> {
+  async addThreadCounterTracks(ctx: Trace): Promise<void> {
     const result = await ctx.engine.query(`
       select
         thread_counter_track.name as trackName,
@@ -313,8 +298,9 @@ class CounterPlugin implements Plugin {
         threadName,
         threadTrack: true,
       });
-      ctx.registerTrack({
-        uri: `${getThreadUriPrefix(upid, utid)}_counter_${trackId}`,
+      const uri = `${getThreadUriPrefix(upid, utid)}_counter_${trackId}`;
+      ctx.tracks.registerTrack({
+        uri,
         title: name,
         tags: {
           kind,
@@ -323,23 +309,21 @@ class CounterPlugin implements Plugin {
           upid: upid ?? undefined,
           scope: 'thread',
         },
-        trackFactory: (trackCtx) => {
-          return new TraceProcessorCounterTrack({
-            engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
-            trackId: trackId,
-            options: getDefaultCounterOptions(name),
-          });
-        },
-        detailsPanel: new CounterDetailsPanel(ctx.engine, trackId, name),
-        getEventBounds: async (id) => {
-          return await getCounterEventBounds(ctx.engine, trackId, id);
-        },
+        track: new TraceProcessorCounterTrack({
+          trace: ctx,
+          uri,
+          trackId: trackId,
+          options: getDefaultCounterOptions(name),
+        }),
+        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
       });
+      const group = getOrCreateGroupForThread(ctx.workspace, utid);
+      const track = new TrackNode({uri, title: name, sortOrder: 30});
+      group.addChildInOrder(track);
     }
   }
 
-  async addProcessCounterTracks(ctx: PluginContextTrace): Promise<void> {
+  async addProcessCounterTracks(ctx: Trace): Promise<void> {
     const result = await ctx.engine.query(`
     select
       process_counter_track.id as trackId,
@@ -373,8 +357,9 @@ class CounterPlugin implements Plugin {
         processName,
         ...(exists(trackName) && {trackName}),
       });
-      ctx.registerTrack({
-        uri: `/process_${upid}/counter_${trackId}`,
+      const uri = `/process_${upid}/counter_${trackId}`;
+      ctx.tracks.registerTrack({
+        uri,
         title: name,
         tags: {
           kind,
@@ -382,25 +367,23 @@ class CounterPlugin implements Plugin {
           upid,
           scope: 'process',
         },
-        trackFactory: (trackCtx) => {
-          return new TraceProcessorCounterTrack({
-            engine: ctx.engine,
-            trackKey: trackCtx.trackKey,
-            trackId: trackId,
-            options: getDefaultCounterOptions(name),
-          });
-        },
-        detailsPanel: new CounterDetailsPanel(ctx.engine, trackId, name),
-        getEventBounds: async (id) => {
-          return await getCounterEventBounds(ctx.engine, trackId, id);
-        },
+        track: new TraceProcessorCounterTrack({
+          trace: ctx,
+          uri,
+          trackId: trackId,
+          options: getDefaultCounterOptions(name),
+        }),
+        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
       });
+      const group = getOrCreateGroupForProcess(ctx.workspace, upid);
+      const track = new TrackNode({uri, title: name, sortOrder: 20});
+      group.addChildInOrder(track);
     }
   }
 
-  private async addGpuFrequencyTracks(ctx: PluginContextTrace) {
+  private async addGpuFrequencyTracks(ctx: Trace) {
     const engine = ctx.engine;
-    const numGpus = ctx.trace.gpuCount;
+    const numGpus = ctx.traceInfo.gpuCount;
 
     for (let gpu = 0; gpu < numGpus; gpu++) {
       // Only add a gpu freq track if we have
@@ -416,7 +399,7 @@ class CounterPlugin implements Plugin {
         const trackId = freqExistsResult.firstRow({id: NUM}).id;
         const uri = `/gpu_frequency_${gpu}`;
         const name = `Gpu ${gpu} Frequency`;
-        ctx.registerTrack({
+        ctx.tracks.registerTrack({
           uri,
           title: name,
           tags: {
@@ -424,19 +407,16 @@ class CounterPlugin implements Plugin {
             trackIds: [trackId],
             scope: 'gpuFreq',
           },
-          trackFactory: (trackCtx) => {
-            return new TraceProcessorCounterTrack({
-              engine: ctx.engine,
-              trackKey: trackCtx.trackKey,
-              trackId: trackId,
-              options: getDefaultCounterOptions(name),
-            });
-          },
-          detailsPanel: new CounterDetailsPanel(ctx.engine, trackId, name),
-          getEventBounds: async (id) => {
-            return await getCounterEventBounds(ctx.engine, trackId, id);
-          },
+          track: new TraceProcessorCounterTrack({
+            trace: ctx,
+            uri,
+            trackId: trackId,
+            options: getDefaultCounterOptions(name),
+          }),
+          detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
         });
+        const track = new TrackNode({uri, title: name, sortOrder: -20});
+        ctx.workspace.addChildInOrder(track);
       }
     }
   }

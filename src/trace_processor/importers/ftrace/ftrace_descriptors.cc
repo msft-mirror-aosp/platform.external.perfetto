@@ -24,7 +24,7 @@ namespace perfetto {
 namespace trace_processor {
 namespace {
 
-std::array<FtraceMessageDescriptor, 538> descriptors{{
+std::array<FtraceMessageDescriptor, 542> descriptors{{
     {nullptr, 0, {}},
     {nullptr, 0, {}},
     {nullptr, 0, {}},
@@ -5353,26 +5353,32 @@ std::array<FtraceMessageDescriptor, 538> descriptors{{
     },
     {
         "sched_switch_with_ctrs",
-        17,
+        23,
         {
             {},
             {"old_pid", ProtoSchemaType::kInt32},
             {"new_pid", ProtoSchemaType::kInt32},
-            {"cctr", ProtoSchemaType::kUint32},
-            {"ctr0", ProtoSchemaType::kUint32},
-            {"ctr1", ProtoSchemaType::kUint32},
-            {"ctr2", ProtoSchemaType::kUint32},
-            {"ctr3", ProtoSchemaType::kUint32},
+            {"cctr", ProtoSchemaType::kUint64},
+            {"ctr0", ProtoSchemaType::kUint64},
+            {"ctr1", ProtoSchemaType::kUint64},
+            {"ctr2", ProtoSchemaType::kUint64},
+            {"ctr3", ProtoSchemaType::kUint64},
             {"lctr0", ProtoSchemaType::kUint32},
             {"lctr1", ProtoSchemaType::kUint32},
-            {"ctr4", ProtoSchemaType::kUint32},
-            {"ctr5", ProtoSchemaType::kUint32},
+            {"ctr4", ProtoSchemaType::kUint64},
+            {"ctr5", ProtoSchemaType::kUint64},
             {"prev_comm", ProtoSchemaType::kString},
             {"prev_pid", ProtoSchemaType::kInt32},
             {"cyc", ProtoSchemaType::kUint32},
             {"inst", ProtoSchemaType::kUint32},
             {"stallbm", ProtoSchemaType::kUint32},
             {"l3dm", ProtoSchemaType::kUint32},
+            {"next_pid", ProtoSchemaType::kInt32},
+            {"next_comm", ProtoSchemaType::kString},
+            {"prev_state", ProtoSchemaType::kInt64},
+            {"amu0", ProtoSchemaType::kUint64},
+            {"amu1", ProtoSchemaType::kUint64},
+            {"amu2", ProtoSchemaType::kUint64},
         },
     },
     {
@@ -5948,6 +5954,47 @@ std::array<FtraceMessageDescriptor, 538> descriptors{{
             {"submitted_to_rb", ProtoSchemaType::kUint64},
             {"retired_on_gmu", ProtoSchemaType::kUint64},
             {"active", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "pixel_mm_kswapd_wake",
+        1,
+        {
+            {},
+            {"whatever", ProtoSchemaType::kInt32},
+        },
+    },
+    {
+        "pixel_mm_kswapd_done",
+        2,
+        {
+            {},
+            {"delta_nr_scanned", ProtoSchemaType::kUint64},
+            {"delta_nr_reclaimed", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "sched_wakeup_task_attr",
+        5,
+        {
+            {},
+            {"pid", ProtoSchemaType::kInt32},
+            {"cpu_affinity", ProtoSchemaType::kUint64},
+            {"task_util", ProtoSchemaType::kUint64},
+            {"uclamp_min", ProtoSchemaType::kUint64},
+            {"vruntime", ProtoSchemaType::kUint64},
+        },
+    },
+    {
+        "devfreq_frequency",
+        5,
+        {
+            {},
+            {"dev_name", ProtoSchemaType::kString},
+            {"freq", ProtoSchemaType::kUint64},
+            {"prev_freq", ProtoSchemaType::kUint64},
+            {"busy_time", ProtoSchemaType::kUint64},
+            {"total_time", ProtoSchemaType::kUint64},
         },
     },
 }};

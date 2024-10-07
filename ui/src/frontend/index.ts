@@ -15,18 +15,15 @@
 // Keep this import first.
 import '../base/disposable_polyfill';
 import '../base/static_initializers';
-import '../gen/all_plugins';
-import '../gen/all_core_plugins';
-
+import NON_CORE_PLUGINS from '../gen/all_plugins';
+import CORE_PLUGINS from '../gen/all_core_plugins';
 import {Draft} from 'immer';
 import m from 'mithril';
-
 import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
 import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
-import {flattenArgs, traceEvent} from '../common/metatracing';
-import {pluginManager} from '../common/plugins';
+import {traceEvent} from '../common/metatracing';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
 import {isGetCategoriesResponse} from '../controller/chrome_proxy_record_controller';
@@ -35,8 +32,7 @@ import {initLiveReload} from '../core/live_reload';
 import {raf} from '../core/raf_scheduler';
 import {initWasm} from '../trace_processor/wasm_engine_proxy';
 import {setScheduleFullRedraw} from '../widgets/raf';
-
-import {App} from './app';
+import {UiMain} from './ui_main';
 import {initCssConstants} from './css_constants';
 import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
@@ -60,6 +56,13 @@ import {VizPage} from './viz_page';
 import {WidgetsPage} from './widgets_page';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {showModal} from '../widgets/modal';
+import {initAnalytics} from './analytics';
+import {IdleDetector} from './idle_detector';
+import {IdleDetectorWindow} from './idle_detector_interface';
+import {pageWithTrace} from './pages';
+import {AppImpl} from '../core/app_impl';
+import {setAddSqlTableTabImplFunction} from './sql_table_tab_interface';
+import {addSqlTableTabImpl} from './sql_table_tab';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -159,6 +162,47 @@ function setupContentSecurityPolicy() {
   document.head.appendChild(meta);
 }
 
+function setupExtentionPort(extensionLocalChannel: MessageChannel) {
+  // We proxy messages between the extension and the controller because the
+  // controller's worker can't access chrome.runtime.
+  const extensionPort =
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+    window.chrome && chrome.runtime
+      ? chrome.runtime.connect(EXTENSION_ID)
+      : undefined;
+
+  setExtensionAvailability(extensionPort !== undefined);
+
+  if (extensionPort) {
+    // Send messages to keep-alive the extension port.
+    const interval = setInterval(() => {
+      extensionPort.postMessage({
+        method: 'ExtensionVersion',
+      });
+    }, 25000);
+    extensionPort.onDisconnect.addListener((_) => {
+      setExtensionAvailability(false);
+      clearInterval(interval);
+      void chrome.runtime.lastError; // Needed to not receive an error log.
+    });
+    // This forwards the messages from the extension to the controller.
+    extensionPort.onMessage.addListener(
+      (message: object, _port: chrome.runtime.Port) => {
+        if (isGetCategoriesResponse(message)) {
+          globals.dispatch(Actions.setChromeCategories(message));
+          return;
+        }
+        extensionLocalChannel.port2.postMessage(message);
+      },
+    );
+  }
+
+  // This forwards the messages from the controller to the extension
+  extensionLocalChannel.port2.onmessage = ({data}) => {
+    if (extensionPort) extensionPort.postMessage(data);
+  };
+}
+
 function main() {
   // Wire up raf for widgets.
   setScheduleFullRedraw(() => raf.scheduleFullRedraw());
@@ -208,44 +252,14 @@ function main() {
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  globals.initialize(stateActionDispatcher);
+  globals.initialize(stateActionDispatcher, initAnalytics);
 
   globals.serviceWorkerController.install();
 
   globals.store.subscribe(scheduleRafAndRunControllersOnStateChange);
   globals.publishRedraw = () => raf.scheduleFullRedraw();
 
-  // We proxy messages between the extension and the controller because the
-  // controller's worker can't access chrome.runtime.
-  const extensionPort =
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-    window.chrome && chrome.runtime
-      ? chrome.runtime.connect(EXTENSION_ID)
-      : undefined;
-
-  setExtensionAvailability(extensionPort !== undefined);
-
-  if (extensionPort) {
-    extensionPort.onDisconnect.addListener((_) => {
-      setExtensionAvailability(false);
-      void chrome.runtime.lastError; // Needed to not receive an error log.
-    });
-    // This forwards the messages from the extension to the controller.
-    extensionPort.onMessage.addListener(
-      (message: object, _port: chrome.runtime.Port) => {
-        if (isGetCategoriesResponse(message)) {
-          globals.dispatch(Actions.setChromeCategories(message));
-          return;
-        }
-        extensionLocalChannel.port2.postMessage(message);
-      },
-    );
-  }
-
-  // This forwards the messages from the controller to the extension
-  extensionLocalChannel.port2.onmessage = ({data}) => {
-    if (extensionPort) extensionPort.postMessage(data);
-  };
+  setupExtentionPort(extensionLocalChannel);
 
   // Put debug variables in the global scope for better debugging.
   registerDebugGlobals();
@@ -264,6 +278,10 @@ function main() {
   if (globals.testing) {
     document.body.classList.add('testing');
   }
+
+  (window as {} as IdleDetectorWindow).waitForPerfettoIdle = (ms?: number) => {
+    return new IdleDetector().waitForPerfettoIdle(ms);
+  };
 }
 
 function onCssLoaded() {
@@ -274,21 +292,21 @@ function onCssLoaded() {
 
   const router = new Router({
     '/': HomePage,
-    '/viewer': ViewerPage,
-    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
-    '/query': QueryPage,
-    '/insights': InsightsPage,
     '/flags': FlagsPage,
-    '/metrics': MetricsPage,
-    '/info': TraceInfoPage,
-    '/widgets': WidgetsPage,
-    '/viz': VizPage,
+    '/info': pageWithTrace(TraceInfoPage),
+    '/insights': pageWithTrace(InsightsPage),
+    '/metrics': pageWithTrace(MetricsPage),
     '/plugins': PluginsPage,
+    '/query': pageWithTrace(QueryPage),
+    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
+    '/viewer': pageWithTrace(ViewerPage),
+    '/viz': pageWithTrace(VizPage),
+    '/widgets': WidgetsPage,
   });
   router.onRouteChanged = routeChange;
 
   raf.domRedraw = () => {
-    m.render(document.body, m(App, router.resolve()));
+    m.render(document.body, m(UiMain, router.resolve()));
   };
 
   if (
@@ -323,26 +341,15 @@ function onCssLoaded() {
   maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-    globals.dispatch(
-      Actions.maybeSetPendingDeeplink({
-        ts: route.args.ts,
-        tid: route.args.tid,
-        dur: route.args.dur,
-        pid: route.args.pid,
-        query: route.args.query,
-        visStart: route.args.visStart,
-        visEnd: route.args.visEnd,
-      }),
-    );
-
+    AppImpl.instance.setInitialRouteArgs(route.args);
     if (!globals.embeddedMode) {
       installFileDropHandler();
     }
 
     // Don't allow postMessage or opening trace from route when the user says
     // that they want to reuse the already loaded trace in trace processor.
-    const engine = globals.getCurrentEngine();
-    if (engine && engine.source.type === 'HTTP_RPC') {
+    const traceSource = AppImpl.instance.trace?.traceInfo.source;
+    if (traceSource && traceSource.type === 'HTTP_RPC') {
       return;
     }
 
@@ -355,10 +362,24 @@ function onCssLoaded() {
   });
 
   // Force one initial render to get everything in place
-  m.render(document.body, m(App, router.resolve()));
+  m.render(document.body, m(UiMain, router.resolve()));
 
-  // Initialize plugins, now that we are ready to go
+  // TODO(primiano): this injection is to break a cirular dependency. See
+  // comment in sql_table_tab_interface.ts. Remove once we add an extension
+  // point for context menus.
+  setAddSqlTableTabImplFunction(addSqlTableTabImpl);
+
+  // Initialize plugins, now that we are ready to go.
+  const pluginManager = AppImpl.instance.plugins;
+  CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
+  NON_CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
   pluginManager.initialize();
+  const route = Router.parseUrl(window.location.href);
+  for (const pluginId of (route.args.enablePlugins ?? '').split(',')) {
+    if (pluginManager.hasPlugin(pluginId)) {
+      pluginManager.activatePlugin(pluginId);
+    }
+  }
 }
 
 // If the URL is /#!?rpc_port=1234, change the default RPC port.
@@ -395,18 +416,12 @@ function maybeChangeRpcPortFromFragment() {
 
 function stateActionDispatcher(actions: DeferredAction[]) {
   const edits = actions.map((action) => {
-    return traceEvent(
-      `action.${action.type}`,
-      () => {
-        return (draft: Draft<State>) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (StateActions as any)[action.type](draft, action.args);
-        };
-      },
-      {
-        args: flattenArgs(action.args),
-      },
-    );
+    return traceEvent(`action.${action.type}`, () => {
+      return (draft: Draft<State>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (StateActions as any)[action.type](draft, action.args);
+      };
+    });
   });
   globals.store.edit(edits);
 }

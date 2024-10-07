@@ -13,10 +13,8 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {findRef, toHTMLElement} from '../base/dom_utils';
 import {assertExists, assertFalse} from '../base/logging';
-import {time} from '../base/time';
 import {
   PerfStatsSource,
   RunningStatistics,
@@ -26,24 +24,21 @@ import {
   runningStatStr,
 } from '../core/perf';
 import {raf} from '../core/raf_scheduler';
-import {SliceRect} from '../public';
-
 import {SimpleResizeObserver} from '../base/resize_observer';
-import {canvasClip} from '../common/canvas_utils';
+import {canvasClip} from '../base/canvas_utils';
 import {
   SELECTION_STROKE_COLOR,
   TOPBAR_HEIGHT,
   TRACK_SHELL_WIDTH,
 } from './css_constants';
-import {
-  FlowEventsRenderer,
-  FlowEventsRendererArgs,
-} from './flow_events_renderer';
 import {globals} from './globals';
-import {Size} from '../base/geom';
+import {Bounds2D, Size2D, VerticalBounds} from '../base/geom';
 import {VirtualCanvas} from './virtual_canvas';
 import {DisposableStack} from '../base/disposable_stack';
-import {PxSpan, TimeScale} from './time_scale';
+import {TimeScale} from '../base/time_scale';
+import {Optional} from '../base/utils';
+import {TrackNode} from '../public/workspace';
+import {HTMLAttrs} from '../widgets/common';
 
 const CANVAS_OVERDRAW_PX = 100;
 
@@ -51,17 +46,20 @@ export interface Panel {
   readonly kind: 'panel';
   render(): m.Children;
   readonly selectable: boolean;
-  readonly trackKey?: string; // Defined if this panel represents are track
-  readonly groupKey?: string; // Defined if this panel represents a group - i.e. a group summary track
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size): void;
-  getSliceRect?(tStart: time, tDur: time, depth: number): SliceRect | undefined;
+  // TODO(stevegolton): Remove this - panel container should know nothing of
+  // tracks!
+  readonly trackNode?: TrackNode;
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D): void;
+  getSliceVerticalBounds?(depth: number): Optional<VerticalBounds>;
 }
 
 export interface PanelGroup {
   readonly kind: 'group';
   readonly collapsed: boolean;
-  readonly header: Panel;
-  readonly childPanels: Panel[];
+  readonly header?: Panel;
+  readonly topOffsetPx: number;
+  readonly sticky: boolean;
+  readonly childPanels: PanelOrGroup[];
 }
 
 export type PanelOrGroup = Panel | PanelGroup;
@@ -70,15 +68,31 @@ export interface PanelContainerAttrs {
   panels: PanelOrGroup[];
   className?: string;
   onPanelStackResize?: (width: number, height: number) => void;
+
+  // Called after all panels have been rendered to the canvas, to give the
+  // caller the opportunity to render an overlay on top of the panels.
+  renderOverlay?(
+    ctx: CanvasRenderingContext2D,
+    size: Size2D,
+    panels: ReadonlyArray<RenderedPanelInfo>,
+  ): void;
+
+  // Called before the panels are rendered
+  renderUnderlay?(ctx: CanvasRenderingContext2D, size: Size2D): void;
 }
 
 interface PanelInfo {
-  trackOrGroupKey: string; // Can be == '' for singleton panels.
+  trackNode?: TrackNode; // Can be undefined for singleton panels.
   panel: Panel;
   height: number;
   width: number;
   clientX: number;
   clientY: number;
+}
+
+export interface RenderedPanelInfo {
+  panel: Panel;
+  rect: Bounds2D;
 }
 
 export class PanelContainer
@@ -165,10 +179,10 @@ export class PanelContainer
     // right now, that's a job for our parent, but we can put one together so we
     // don't have to refactor this entire bit right now...
 
-    const visibleTimeScale = new TimeScale(
-      globals.timeline.visibleWindow,
-      new PxSpan(0, this.virtualCanvas!.size.width - TRACK_SHELL_WIDTH),
-    );
+    const visibleTimeScale = new TimeScale(globals.timeline.visibleWindow, {
+      left: 0,
+      right: this.virtualCanvas!.size.width - TRACK_SHELL_WIDTH,
+    });
 
     // The Y value is given from the top of the pan and zoom region, we want it
     // from the top of the panel container. The parent offset corrects that.
@@ -179,28 +193,27 @@ export class PanelContainer
       globals.timeline.areaY.end + TOPBAR_HEIGHT,
     );
     // Get the track ids from the panels.
-    const tracks = [];
+    const trackUris: string[] = [];
     for (const panel of panels) {
-      if (panel.trackKey !== undefined) {
-        tracks.push(panel.trackKey);
-        continue;
-      }
-      if (panel.groupKey !== undefined) {
-        const trackGroup = globals.state.trackGroups[panel.groupKey];
-        // Only select a track group and all child tracks if it is closed.
-        if (trackGroup.collapsed) {
-          tracks.push(panel.groupKey);
-          for (const track of trackGroup.tracks) {
-            tracks.push(track);
+      if (panel.trackNode) {
+        if (panel.trackNode.hasChildren) {
+          const groupNode = panel.trackNode;
+          // Select a track group and all child tracks if it is collapsed
+          if (groupNode.collapsed) {
+            for (const track of groupNode.flatTracks) {
+              track.uri && trackUris.push(track.uri);
+            }
           }
+        } else {
+          panel.trackNode.uri && trackUris.push(panel.trackNode.uri);
         }
       }
     }
-    globals.timeline.selectArea(area.start, area.end, tracks);
+    globals.timeline.selectArea(area.start, area.end, trackUris);
   }
 
-  constructor() {
-    const onRedraw = () => this.renderCanvas();
+  constructor({attrs}: m.CVnode<PanelContainerAttrs>) {
+    const onRedraw = () => this.renderCanvas(attrs);
     raf.addRedrawCallback(onRedraw);
     this.trash.defer(() => {
       raf.removeRedrawCallback(onRedraw);
@@ -240,7 +253,7 @@ export class PanelContainer
     });
 
     virtualCanvas.setLayoutShiftListener(() => {
-      this.renderCanvas();
+      this.renderCanvas(vnode.attrs);
     });
 
     this.onupdate(vnode);
@@ -264,12 +277,12 @@ export class PanelContainer
     this.trash.dispose();
   }
 
-  renderPanel(node: Panel, panelId: string, extraClass = ''): m.Vnode {
+  renderPanel(node: Panel, panelId: string, htmlAttrs?: HTMLAttrs): m.Vnode {
     assertFalse(this.panelById.has(panelId));
     this.panelById.set(panelId, node);
     return m(
-      `.pf-panel${extraClass}`,
-      {'data-panel-id': panelId},
+      `.pf-panel`,
+      {...htmlAttrs, 'data-panel-id': panelId},
       node.render(),
     );
   }
@@ -279,13 +292,17 @@ export class PanelContainer
   // will complain about keyed and non-keyed vnodes mixed together.
   renderTree(node: PanelOrGroup, panelId: string): m.Vnode {
     if (node.kind === 'group') {
+      const style = {
+        position: 'sticky',
+        top: `${node.topOffsetPx}px`,
+        zIndex: `${2000 - node.topOffsetPx}`,
+      };
       return m(
         'div.pf-panel-group',
-        this.renderPanel(
-          node.header,
-          `${panelId}-header`,
-          node.collapsed ? '' : '.pf-sticky',
-        ),
+        node.header &&
+          this.renderPanel(node.header, `${panelId}-header`, {
+            style: !node.collapsed && node.sticky ? style : {},
+          }),
         ...node.childPanels.map((child, index) =>
           this.renderTree(child, `${panelId}-${index}`),
         ),
@@ -330,10 +347,9 @@ export class PanelContainer
       const panel = assertExists(this.panelById.get(panelId));
 
       // NOTE: the id can be undefined for singletons like overview timeline.
-      const key = panel.trackKey || panel.groupKey || '';
       const rect = panelElement.getBoundingClientRect();
       this.panelInfos.push({
-        trackOrGroupKey: key,
+        trackNode: panel.trackNode,
         height: rect.height,
         width: rect.width,
         clientX: rect.x,
@@ -343,7 +359,7 @@ export class PanelContainer
     });
   }
 
-  private renderCanvas() {
+  private renderCanvas(attrs: PanelContainerAttrs) {
     if (!this.ctx) return;
     if (!this.virtualCanvas) return;
 
@@ -360,7 +376,7 @@ export class PanelContainer
 
     this.handleAreaSelection();
 
-    const totalRenderedPanels = this.renderPanels(ctx, vc);
+    const totalRenderedPanels = this.renderPanels(ctx, vc, attrs);
 
     this.drawTopLayerOnCanvas(ctx, vc);
 
@@ -376,11 +392,14 @@ export class PanelContainer
   private renderPanels(
     ctx: CanvasRenderingContext2D,
     vc: VirtualCanvas,
+    attrs: PanelContainerAttrs,
   ): number {
+    attrs.renderUnderlay?.(ctx, vc.size);
+
     let panelTop = 0;
     let totalOnCanvas = 0;
 
-    const flowEventsRendererArgs = new FlowEventsRendererArgs();
+    const renderedPanels = Array<RenderedPanelInfo>();
 
     for (let i = 0; i < this.panelInfos.length; i++) {
       const {
@@ -396,8 +415,6 @@ export class PanelContainer
         right: panelWidth,
       };
       const panelSize = {width: panelWidth, height: panelHeight};
-
-      flowEventsRendererArgs.registerPanel(panel, panelTop, panelHeight);
 
       if (vc.overlapsCanvas(panelRect)) {
         totalOnCanvas++;
@@ -417,20 +434,20 @@ export class PanelContainer
         ctx.restore();
       }
 
+      renderedPanels.push({
+        panel,
+        rect: {
+          top: panelTop,
+          bottom: panelTop + panelHeight,
+          left: 0,
+          right: panelWidth,
+        },
+      });
+
       panelTop += panelHeight;
     }
 
-    const flowEventsRenderer = new FlowEventsRenderer();
-
-    ctx.save();
-    ctx.translate(TRACK_SHELL_WIDTH, 0);
-    const trackSize = {
-      width: vc.size.width - TRACK_SHELL_WIDTH,
-      height: vc.size.height,
-    };
-    canvasClip(ctx, 0, 0, trackSize.width, trackSize.height);
-    flowEventsRenderer.render(ctx, flowEventsRendererArgs, trackSize);
-    ctx.restore();
+    attrs.renderOverlay?.(ctx, vc.size, renderedPanels);
 
     return totalOnCanvas;
   }
@@ -449,14 +466,15 @@ export class PanelContainer
     ) {
       return;
     }
-    if (this.panelInfos.length === 0 || area.tracks.length === 0) return;
+    if (this.panelInfos.length === 0 || area.trackUris.length === 0) return;
 
     // Find the minY and maxY of the selected tracks in this panel container.
     let selectedTracksMinY = this.panelContainerHeight + this.panelContainerTop;
     let selectedTracksMaxY = this.panelContainerTop;
     let trackFromCurrentContainerSelected = false;
     for (let i = 0; i < this.panelInfos.length; i++) {
-      if (area.tracks.includes(this.panelInfos[i].trackOrGroupKey)) {
+      const trackUri = this.panelInfos[i].trackNode?.uri;
+      if (trackUri && area.trackUris.includes(trackUri)) {
         trackFromCurrentContainerSelected = true;
         selectedTracksMinY = Math.min(
           selectedTracksMinY,
@@ -479,10 +497,10 @@ export class PanelContainer
     // right now, that's a job for our parent, but we can put one together so we
     // don't have to refactor this entire bit right now...
 
-    const visibleTimeScale = new TimeScale(
-      globals.timeline.visibleWindow,
-      new PxSpan(0, vc.size.width - TRACK_SHELL_WIDTH),
-    );
+    const visibleTimeScale = new TimeScale(globals.timeline.visibleWindow, {
+      left: 0,
+      right: vc.size.width - TRACK_SHELL_WIDTH,
+    });
 
     const startX = visibleTimeScale.timeToPx(area.start);
     const endX = visibleTimeScale.timeToPx(area.end);
@@ -512,7 +530,7 @@ export class PanelContainer
     panel: Panel,
     renderTime: number,
     ctx: CanvasRenderingContext2D,
-    size: Size,
+    size: Size2D,
   ) {
     if (!perfDebug()) return;
     let renderStats = this.panelPerfStats.get(panel);

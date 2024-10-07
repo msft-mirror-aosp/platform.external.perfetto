@@ -12,48 +12,70 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import m from 'mithril';
-
-import {CPU_SLICE_TRACK_KIND} from '../../public';
-import {SliceDetailsPanel} from '../../frontend/slice_details_panel';
-import {
-  Engine,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
+import {CPU_SLICE_TRACK_KIND} from '../../public/track_kinds';
+import {SchedSliceDetailsPanel} from './sched_details_tab';
+import {Engine} from '../../trace_processor/engine';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {NUM, STR_NULL} from '../../trace_processor/query_result';
 import {CpuSliceTrack} from './cpu_slice_track';
+import {TrackNode} from '../../public/workspace';
+import {CpuSliceSelectionAggregator} from './cpu_slice_selection_aggregator';
+import {CpuSliceByProcessSelectionAggregator} from './cpu_slice_by_process_selection_aggregator';
 
-class CpuSlices implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    const cpus = ctx.trace.cpus;
+function uriForSchedTrack(cpu: number): string {
+  return `/sched_cpu${cpu}`;
+}
+
+class CpuSlices implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new CpuSliceSelectionAggregator(),
+    );
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new CpuSliceByProcessSelectionAggregator(),
+    );
+
+    const cpus = ctx.traceInfo.cpus;
     const cpuToClusterType = await this.getAndroidCpuClusterTypes(ctx.engine);
 
     for (const cpu of cpus) {
       const size = cpuToClusterType.get(cpu);
-      const uri = `/sched_cpu${cpu}`;
+      const uri = uriForSchedTrack(cpu);
 
       const name = size === undefined ? `Cpu ${cpu}` : `Cpu ${cpu} (${size})`;
-      ctx.registerTrack({
+      ctx.tracks.registerTrack({
         uri,
         title: name,
         tags: {
           kind: CPU_SLICE_TRACK_KIND,
           cpu,
         },
-        trackFactory: ({trackKey}) => {
-          return new CpuSliceTrack(ctx.engine, trackKey, cpu);
-        },
+        track: new CpuSliceTrack(ctx, uri, cpu),
+        detailsPanel: () => new SchedSliceDetailsPanel(ctx),
       });
+      const trackNode = new TrackNode({uri, title: name, sortOrder: -50});
+      ctx.workspace.addChildInOrder(trackNode);
     }
 
-    ctx.registerDetailsPanel({
-      render: (sel) => {
-        if (sel.kind === 'SCHED_SLICE') {
-          return m(SliceDetailsPanel);
-        }
-        return undefined;
+    ctx.selection.registerSqlSelectionResolver({
+      sqlTableName: 'sched_slice',
+      callback: async (id: number) => {
+        const result = await ctx.engine.query(`
+          select
+            cpu
+          from sched_slice
+          where id = ${id}
+        `);
+
+        const cpu = result.firstRow({
+          cpu: NUM,
+        }).cpu;
+
+        return {
+          eventId: id,
+          trackUri: uriForSchedTrack(cpu),
+        };
       },
     });
   }

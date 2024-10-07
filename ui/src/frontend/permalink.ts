@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {ConversionJobStatus} from '../common/conversion_jobs';
@@ -38,9 +37,10 @@ import {Optional} from '../base/utils';
 import {
   SERIALIZED_STATE_VERSION,
   SerializedAppState,
-} from '../common/state_serialization_schema';
+} from '../public/state_serialization_schema';
 import {z} from 'zod';
 import {showModal} from '../widgets/modal';
+import {AppImpl} from '../core/app_impl';
 
 // Permalink serialization has two layers:
 // 1. Serialization of the app state (state_serialization.ts):
@@ -106,18 +106,19 @@ async function createPermalinkInternal(
     // Check if we need to upload the trace file, before serializing the app
     // state.
     let alreadyUploadedUrl = '';
-    const engine = assertExists(globals.getCurrentEngine());
+    const traceInfo = assertExists(AppImpl.instance.trace?.traceInfo);
+    const traceSource = traceInfo.source;
     let dataToUpload: File | ArrayBuffer | undefined = undefined;
-    let traceName = `trace ${engine.id}`;
-    if (engine.source.type === 'FILE') {
-      dataToUpload = engine.source.file;
+    let traceName = traceInfo.traceTitle || 'trace';
+    if (traceSource.type === 'FILE') {
+      dataToUpload = traceSource.file;
       traceName = dataToUpload.name;
-    } else if (engine.source.type === 'ARRAY_BUFFER') {
-      dataToUpload = engine.source.buffer;
-    } else if (engine.source.type === 'URL') {
-      alreadyUploadedUrl = engine.source.url;
+    } else if (traceSource.type === 'ARRAY_BUFFER') {
+      dataToUpload = traceSource.buffer;
+    } else if (traceSource.type === 'URL') {
+      alreadyUploadedUrl = traceSource.url;
     } else {
-      throw new Error(`Cannot share trace ${JSON.stringify(engine.source)}`);
+      throw new Error(`Cannot share trace ${JSON.stringify(traceSource)}`);
     }
 
     // Upload the trace file, unless it's already uploaded (type == 'URL').
@@ -193,19 +194,21 @@ export async function loadPermalink(gcsFileName: string): Promise<void> {
     Router.navigate('#!/record');
     return;
   }
+  let serializedAppState: Optional<SerializedAppState> = undefined;
   if (permalink.appState !== undefined) {
     // This is the most common case where the permalink contains the app state
-    // (and optionally a traceUrl, below). globals.restoreAppStateAfterTraceLoad
-    // will be processed by trace_controller.ts after the trace has loaded.
+    // (and optionally a traceUrl, below).
     const parseRes = parseAppState(permalink.appState);
     if (parseRes.success) {
-      globals.restoreAppStateAfterTraceLoad = parseRes.data;
+      serializedAppState = parseRes.data;
     } else {
       error = parseRes.error;
     }
   }
   if (permalink.traceUrl) {
-    globals.dispatch(Actions.openTraceFromUrl({url: permalink.traceUrl}));
+    globals.dispatch(
+      Actions.openTraceFromUrl({url: permalink.traceUrl, serializedAppState}),
+    );
   }
 
   if (error) {
@@ -282,11 +285,5 @@ function reportUpdateProgress(uploader: GcsUploader) {
 }
 
 function updateStatus(msg: string): void {
-  // TODO(hjd): Unify loading updates.
-  globals.dispatch(
-    Actions.updateStatus({
-      msg,
-      timestamp: Date.now() / 1000,
-    }),
-  );
+  AppImpl.instance.omnibox.showStatusMessage(msg);
 }

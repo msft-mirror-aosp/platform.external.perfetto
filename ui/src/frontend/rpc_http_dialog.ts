@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {VERSION} from '../gen/perfetto_version';
@@ -21,9 +20,9 @@ import {StatusResult, TraceProcessorApiVersion} from '../protos';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {showModal} from '../widgets/modal';
 import {Router} from './router';
-
 import {globals} from './globals';
 import {publishHttpRpcState} from './publish';
+import {AppImpl} from '../core/app_impl';
 
 const CURRENT_API_VERSION =
   TraceProcessorApiVersion.TRACE_PROCESSOR_CURRENT_API_VERSION;
@@ -163,7 +162,7 @@ export async function CheckHttpRpcConnection(): Promise<void> {
   const tpStatus = assertExists(state.status);
 
   function forceWasm() {
-    globals.dispatch(Actions.setNewEngineMode({mode: 'FORCE_BUILTIN_WASM'}));
+    AppImpl.instance.newEngineMode = 'FORCE_BUILTIN_WASM';
   }
 
   // Check short version:

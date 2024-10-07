@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {Hotkey, Platform} from '../base/hotkeys';
 import {isString} from '../base/object_utils';
@@ -37,15 +36,14 @@ import {
 } from '../widgets/multiselect';
 import {Popup, PopupPosition} from '../widgets/popup';
 import {Portal} from '../widgets/portal';
-import {FilterableSelect, Select} from '../widgets/select';
+import {Select} from '../widgets/select';
 import {Spinner} from '../widgets/spinner';
 import {Switch} from '../widgets/switch';
 import {TextInput} from '../widgets/text_input';
 import {MultiParagraphText, TextParagraph} from '../widgets/text_paragraph';
 import {LazyTreeNode, Tree, TreeNode} from '../widgets/tree';
 import {VegaView} from '../widgets/vega_view';
-
-import {createPage} from './pages';
+import {PageAttrs} from './pages';
 import {PopupMenuButton} from './popup_menu';
 import {TableShowcase} from './tables/table_showcase';
 import {TreeTable, TreeTableAttrs} from './widgets/treetable';
@@ -57,6 +55,9 @@ import {
 } from '../widgets/virtual_table';
 import {TagInput} from '../widgets/tag_input';
 import {SegmentedButtons} from '../widgets/segmented_buttons';
+import {MiddleEllipsis} from '../widgets/middle_ellipsis';
+import {Chip, ChipBar} from '../widgets/chip';
+import {TrackWidget} from '../widgets/track_widget';
 
 const DATA_ENGLISH_LETTER_FREQUENCY = {
   table: [
@@ -370,7 +371,7 @@ function ControlledPopup() {
 }
 
 type Options = {
-  [key: string]: EnumOption | boolean | string;
+  [key: string]: EnumOption | boolean | string | number;
 };
 
 class EnumOption {
@@ -435,9 +436,7 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
           const option = opts[key];
           if (option instanceof EnumOption) {
             this.optValues[key] = option.initial;
-          } else if (typeof option === 'boolean') {
-            this.optValues[key] = option;
-          } else if (isString(option)) {
+          } else {
             this.optValues[key] = option;
           }
         }
@@ -486,6 +485,8 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       return this.renderBooleanOption(key);
     } else if (isString(value)) {
       return this.renderStringOption(key);
+    } else if (typeof value === 'number') {
+      return this.renderNumberOption(key);
     } else {
       return null;
     }
@@ -503,14 +504,36 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
   }
 
   private renderStringOption(key: string) {
-    return m(TextInput, {
-      placeholder: key,
-      value: this.optValues[key],
-      oninput: (e: Event) => {
-        this.optValues[key] = (e.target as HTMLInputElement).value;
-        raf.scheduleFullRedraw();
-      },
-    });
+    return m(
+      'label',
+      `${key}:`,
+      m(TextInput, {
+        placeholder: key,
+        value: this.optValues[key],
+        oninput: (e: Event) => {
+          this.optValues[key] = (e.target as HTMLInputElement).value;
+          raf.scheduleFullRedraw();
+        },
+      }),
+    );
+  }
+
+  private renderNumberOption(key: string) {
+    return m(
+      'label',
+      `${key}:`,
+      m(TextInput, {
+        type: 'number',
+        placeholder: key,
+        value: this.optValues[key],
+        oninput: (e: Event) => {
+          this.optValues[key] = Number.parseInt(
+            (e.target as HTMLInputElement).value,
+          );
+          raf.scheduleFullRedraw();
+        },
+      }),
+    );
   }
 
   private renderEnumOption(key: string, opt: EnumOption) {
@@ -518,16 +541,20 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       return m('option', {value: option}, option);
     });
     return m(
-      Select,
-      {
-        value: this.optValues[key],
-        onchange: (e: Event) => {
-          const el = e.target as HTMLSelectElement;
-          this.optValues[key] = el.value;
-          raf.scheduleFullRedraw();
+      'label',
+      `${key}:`,
+      m(
+        Select,
+        {
+          value: this.optValues[key],
+          onchange: (e: Event) => {
+            const el = e.target as HTMLSelectElement;
+            this.optValues[key] = el.value;
+            raf.scheduleFullRedraw();
+          },
         },
-      },
-      optionElements,
+        optionElements,
+      ),
     );
   }
 }
@@ -646,7 +673,7 @@ function SegmentedButtonsDemo({attrs}: {attrs: {}}) {
   };
 }
 
-export const WidgetsPage = createPage({
+export class WidgetsPage implements m.ClassComponent<PageAttrs> {
   view() {
     return m(
       '.widgets-page',
@@ -724,14 +751,6 @@ export const WidgetsPage = createPage({
         },
       }),
       m(WidgetShowcase, {
-        label: 'Filterable Select',
-        renderWidget: () =>
-          m(FilterableSelect, {
-            values: ['foo', 'bar', 'baz'],
-            onSelected: () => {},
-          }),
-      }),
-      m(WidgetShowcase, {
         label: 'Empty State',
         renderWidget: ({header, content}) =>
           m(
@@ -756,7 +775,7 @@ export const WidgetsPage = createPage({
               href: 'https://perfetto.dev/docs/',
               target: '_blank',
             },
-            'Docs',
+            'This is some really long text and it will probably overflow the container',
           ),
         initialOpts: {
           icon: true,
@@ -1281,9 +1300,96 @@ export const WidgetsPage = createPage({
           Clicking anywhere on the container will focus the text input.`,
         renderWidget: () => m(TagInputDemo),
       }),
+      m(WidgetShowcase, {
+        label: 'Middle Ellipsis',
+        description: `
+          Sometimes the start and end of a bit of text are more important than
+          the middle. This element puts the ellipsis in the midde if the content
+          is too wide for its container.`,
+        renderWidget: (opts) =>
+          m(
+            'div',
+            {style: {width: Boolean(opts.squeeze) ? '150px' : '450px'}},
+            m(MiddleEllipsis, {
+              text: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit',
+            }),
+          ),
+        initialOpts: {
+          squeeze: false,
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Chip',
+        description: `A little chip or tag`,
+        renderWidget: (opts) => {
+          const {icon, ...rest} = opts;
+          return m(
+            ChipBar,
+            m(Chip, {
+              label: 'Foo',
+              icon: icon === true ? 'info' : undefined,
+              ...rest,
+            }),
+            m(Chip, {label: 'Bar', ...rest}),
+            m(Chip, {label: 'Baz', ...rest}),
+          );
+        },
+        initialOpts: {
+          intent: new EnumOption(Intent.None, Object.values(Intent)),
+          icon: true,
+          compact: false,
+          rounded: false,
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Track',
+        description: `A track`,
+        renderWidget: (opts) => {
+          const {error, buttons, chips, multipleTracks, ...rest} = opts;
+          const dummyButtons = () => [
+            m(Button, {icon: 'info', compact: true}),
+            m(Button, {icon: 'settings', compact: true}),
+          ];
+          const dummyChips = () => ['foo', 'bar'];
+
+          const renderTrack = () =>
+            m(TrackWidget, {
+              error: Boolean(error)
+                ? new Error('Something went wrong')
+                : undefined,
+              buttons: Boolean(buttons) ? dummyButtons() : undefined,
+              chips: Boolean(chips) ? dummyChips() : undefined,
+              ...rest,
+            });
+
+          return m(
+            '',
+            {
+              style: {width: '500px', boxShadow: '0px 0px 1px 1px lightgray'},
+            },
+            Boolean(multipleTracks)
+              ? [renderTrack(), renderTrack(), renderTrack()]
+              : renderTrack(),
+          );
+        },
+        initialOpts: {
+          title: 'This is the title of the track',
+          buttons: true,
+          chips: true,
+          heightPx: 32,
+          indentationLevel: 3,
+          collapsible: true,
+          collapsed: true,
+          isSummary: false,
+          highlight: false,
+          error: false,
+          multipleTracks: false,
+        },
+      }),
     );
-  },
-});
+  }
+}
+
 class ModalShowcase implements m.ClassComponent {
   private static counter = 0;
 

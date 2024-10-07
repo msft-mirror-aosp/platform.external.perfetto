@@ -13,11 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Time, TimeSpan, time} from '../base/time';
 import {colorForCpu} from '../core/colorizer';
 import {timestampFormat, TimestampFormat} from '../core/timestamp_format';
-
 import {
   OVERVIEW_TIMELINE_NON_VISIBLE_COLOR,
   TRACK_SHELL_WIDTH,
@@ -26,7 +24,7 @@ import {BorderDragStrategy} from './drag/border_drag_strategy';
 import {DragStrategy} from './drag/drag_strategy';
 import {InnerDragStrategy} from './drag/inner_drag_strategy';
 import {OuterDragStrategy} from './drag/outer_drag_strategy';
-import {DragGestureHandler} from './drag_gesture_handler';
+import {DragGestureHandler} from '../base/drag_gesture_handler';
 import {globals} from './globals';
 import {
   getMaxMajorTicks,
@@ -34,10 +32,10 @@ import {
   generateTicks,
   TickType,
 } from './gridline_helper';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
-import {PxSpan, TimeScale} from './time_scale';
-import {HighPrecisionTimeSpan} from '../common/high_precision_time_span';
+import {TimeScale} from '../base/time_scale';
+import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
 
 export class OverviewTimelinePanel implements Panel {
   private static HANDLE_SIZE_PX = 5;
@@ -56,12 +54,12 @@ export class OverviewTimelinePanel implements Panel {
     this.width = dom.getBoundingClientRect().width;
     const traceTime = globals.traceContext;
     if (this.width > TRACK_SHELL_WIDTH) {
-      const pxSpan = new PxSpan(TRACK_SHELL_WIDTH, this.width);
+      const pxBounds = {left: TRACK_SHELL_WIDTH, right: this.width};
       const hpTraceTime = HighPrecisionTimeSpan.fromTime(
         traceTime.start,
         traceTime.end,
       );
-      this.timeScale = new TimeScale(hpTraceTime, pxSpan);
+      this.timeScale = new TimeScale(hpTraceTime, pxBounds);
       if (this.gesture === undefined) {
         this.gesture = new DragGestureHandler(
           dom as HTMLElement,
@@ -102,7 +100,7 @@ export class OverviewTimelinePanel implements Panel {
     });
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size) {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {
     if (this.width === undefined) return;
     if (this.timeScale === undefined) return;
     const headerHeight = 20;
@@ -114,7 +112,7 @@ export class OverviewTimelinePanel implements Panel {
 
     if (size.width > TRACK_SHELL_WIDTH && traceContext.duration > 0n) {
       const maxMajorTicks = getMaxMajorTicks(this.width - TRACK_SHELL_WIDTH);
-      const offset = globals.timestampOffset();
+      const offset = globals.trace.timeline.timestampOffset();
       const tickGen = generateTicks(traceContext, maxMajorTicks, offset);
 
       // Draw time labels
@@ -126,7 +124,7 @@ export class OverviewTimelinePanel implements Panel {
         if (xPos > this.width) break;
         if (type === TickType.MAJOR) {
           ctx.fillRect(xPos - 1, 0, 1, headerHeight - 5);
-          const domainTime = globals.toDomainTime(time);
+          const domainTime = globals.trace.timeline.toDomainTime(time);
           renderTimestamp(ctx, domainTime, xPos + 5, 18, MIN_PX_PER_STEP);
         } else if (type == TickType.MEDIUM) {
           ctx.fillRect(xPos - 1, 0, 1, 8);
@@ -275,14 +273,20 @@ function renderTimestamp(
     case TimestampFormat.Timecode:
       renderTimecode(ctx, time, x, y, minWidth);
       break;
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       ctx.fillText(time.toString(), x, y, minWidth);
       break;
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       ctx.fillText(time.toLocaleString(), x, y, minWidth);
       break;
     case TimestampFormat.Seconds:
       ctx.fillText(Time.formatSeconds(time), x, y, minWidth);
+      break;
+    case TimestampFormat.Milliseoncds:
+      ctx.fillText(Time.formatMilliseconds(time), x, y, minWidth);
+      break;
+    case TimestampFormat.Microseconds:
+      ctx.fillText(Time.formatMicroseconds(time), x, y, minWidth);
       break;
     default:
       const z: never = fmt;

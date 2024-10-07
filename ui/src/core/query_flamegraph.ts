@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {AsyncLimiter} from '../base/async_limiter';
 import {AsyncDisposableStack} from '../base/disposable_stack';
 import {assertExists} from '../base/logging';
@@ -24,7 +23,13 @@ import {
   createPerfettoIndex,
   createPerfettoTable,
 } from '../trace_processor/sql_utils';
-import {NUM, NUM_NULL, STR, STR_NULL} from '../trace_processor/query_result';
+import {
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+  UNKNOWN,
+} from '../trace_processor/query_result';
 import {
   Flamegraph,
   FlamegraphFilters,
@@ -32,14 +37,19 @@ import {
   FlamegraphView,
 } from '../widgets/flamegraph';
 
-import {featureFlags} from './feature_flags';
-
 export interface QueryFlamegraphColumn {
   // The name of the column in SQL.
   readonly name: string;
 
   // The human readable name describing the contents of the column.
   readonly displayName: string;
+}
+
+export interface AggQueryFlamegraphColumn extends QueryFlamegraphColumn {
+  // The aggregation to be run when nodes are merged together in the flamegraph.
+  //
+  // TODO(lalitm): consider adding extra functions here (e.g. a top 5 or similar).
+  readonly mergeAggregation: 'ONE_OR_NULL' | 'SUM';
 }
 
 export interface QueryFlamegraphMetric {
@@ -74,10 +84,7 @@ export interface QueryFlamegraphMetric {
   // will not be shown.
   //
   // Examples include the source file and line number.
-  //
-  // TODO(lalitm): reconsider the decision to show nothing, instead maybe show
-  // the top 5 options etc.
-  readonly aggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>;
+  readonly aggregatableProperties?: ReadonlyArray<AggQueryFlamegraphColumn>;
 }
 
 // Given a table and columns on those table (corresponding to metrics),
@@ -92,7 +99,7 @@ export function metricsFromTableOrSubquery(
   tableMetrics: ReadonlyArray<{name: string; unit: string; columnName: string}>,
   dependencySql?: string,
   unaggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>,
-  aggregatableProperties?: ReadonlyArray<QueryFlamegraphColumn>,
+  aggregatableProperties?: ReadonlyArray<AggQueryFlamegraphColumn>,
 ): QueryFlamegraphMetric[] {
   const metrics = [];
   for (const {name, unit, columnName} of tableMetrics) {
@@ -193,27 +200,35 @@ async function computeFlamegraphTree(
     showStackAndPivot.length === 0
       ? '0'
       : showStackAndPivot
-          .map((x, i) => `((name like '${makeSqlFilter(x)}') << ${i})`)
+          .map(
+            (x, i) => `((name like '${makeSqlFilter(x)}' escape '\\') << ${i})`,
+          )
           .join(' | ');
   const showStackBits = (1 << showStackAndPivot.length) - 1;
 
   const hideStackFilter =
     hideStack.length === 0
       ? 'false'
-      : hideStack.map((x) => `name like '${makeSqlFilter(x)}'`).join(' OR ');
+      : hideStack
+          .map((x) => `name like '${makeSqlFilter(x)}' escape '\\'`)
+          .join(' OR ');
 
   const showFromFrameFilter =
     showFromFrame.length === 0
       ? '0'
       : showFromFrame
-          .map((x, i) => `((name like '${makeSqlFilter(x)}') << ${i})`)
+          .map(
+            (x, i) => `((name like '${makeSqlFilter(x)}' escape '\\') << ${i})`,
+          )
           .join(' | ');
   const showFromFrameBits = (1 << showFromFrame.length) - 1;
 
   const hideFrameFilter =
     hideFrame.length === 0
       ? 'false'
-      : hideFrame.map((x) => `name like '${makeSqlFilter(x)}'`).join(' OR ');
+      : hideFrame
+          .map((x) => `name like '${makeSqlFilter(x)}' escape '\\'`)
+          .join(' OR ');
 
   const pivotFilter = getPivotFilter(view);
 
@@ -349,7 +364,7 @@ async function computeFlamegraphTree(
         from _viz_flamegraph_merge_hashes!(
           _flamegraph_hash_${uuid},
           ${groupingColumns},
-          ${groupedColumns}
+          ${computeGroupedAggExprs(agg)}
         )
       `,
     ),
@@ -387,7 +402,7 @@ async function computeFlamegraphTree(
     xStart: NUM,
     xEnd: NUM,
     ...Object.fromEntries(unaggCols.map((m) => [m, STR_NULL])),
-    ...Object.fromEntries(aggCols.map((m) => [m, STR_NULL])),
+    ...Object.fromEntries(aggCols.map((m) => [m, UNKNOWN])),
   });
   let postiveRootsValue = 0;
   let negativeRootsValue = 0;
@@ -453,9 +468,14 @@ function getPivotFilter(view: FlamegraphView) {
   return '0';
 }
 
-export const USE_NEW_FLAMEGRAPH_IMPL = featureFlags.register({
-  id: 'useNewFlamegraphImpl',
-  name: 'Use new flamegraph implementation',
-  description: 'Use new flamgraph implementation in details panels.',
-  defaultValue: true,
-});
+function computeGroupedAggExprs(agg: ReadonlyArray<AggQueryFlamegraphColumn>) {
+  const aggFor = (x: AggQueryFlamegraphColumn) => {
+    switch (x.mergeAggregation) {
+      case 'ONE_OR_NULL':
+        return `IIF(COUNT() = 1, ${x.name}, NULL) AS ${x.name}`;
+      case 'SUM':
+        return `SUM(${x.name}) AS ${x.name}`;
+    }
+  };
+  return `(${agg.length === 0 ? 'groupedColumn' : agg.map((x) => aggFor(x)).join(',')})`;
+}

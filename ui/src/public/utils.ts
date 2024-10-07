@@ -13,12 +13,13 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {LegacySelection} from '../common/state';
-import {BottomTab} from '../frontend/bottom_tab';
-
-import {LegacyDetailsPanel, Tab} from '.';
+import {LegacySelection, Selection} from '../public/selection';
+import {BottomTab} from './lib/bottom_tab';
+import {Tab} from './tab';
 import {exists} from '../base/utils';
+import {DetailsPanel} from './details_panel';
+import {Trace} from './trace';
+import {TimeSpan} from '../base/time';
 
 export function getTrackName(
   args: Partial<{
@@ -115,7 +116,7 @@ export interface BottomTabAdapterAttrs {
  * @example
  * new BottomTabAdapter({
       tabFactory: (sel) => {
-        if (sel.kind !== 'SLICE') {
+        if (sel.kind !== 'SCHED_SLICE') {
           return undefined;
         }
         return new ChromeSliceDetailsTab({
@@ -123,14 +124,14 @@ export interface BottomTabAdapterAttrs {
             table: sel.table ?? 'slice',
             id: sel.id,
           },
-          engine: ctx.engine,
+          trace: ctx,
           uuid: uuidv4(),
         });
       },
     })
  */
-export class BottomTabToSCSAdapter implements LegacyDetailsPanel {
-  private oldSelection?: LegacySelection;
+export class BottomTabToSCSAdapter implements DetailsPanel {
+  private oldSelection?: Selection;
   private bottomTab?: BottomTab;
   private attrs: BottomTabAdapterAttrs;
 
@@ -138,11 +139,15 @@ export class BottomTabToSCSAdapter implements LegacyDetailsPanel {
     this.attrs = attrs;
   }
 
-  render(selection: LegacySelection): m.Children {
+  render(selection: Selection): m.Children {
     // Detect selection changes, assuming selection is immutable
     if (selection !== this.oldSelection) {
       this.oldSelection = selection;
-      this.bottomTab = this.attrs.tabFactory(selection);
+      if (selection.kind === 'legacy') {
+        this.bottomTab = this.attrs.tabFactory(selection.legacySelection);
+      } else {
+        this.bottomTab = undefined;
+      }
     }
 
     return this.bottomTab?.renderPanel();
@@ -187,5 +192,18 @@ export function getThreadUriPrefix(upid: number | null, utid: number): string {
     return `/process_${upid}/thread_${utid}`;
   } else {
     return `/thread_${utid}`;
+  }
+}
+
+// Returns the time span of the current selection, or the visible window if
+// there is no current selection.
+export async function getTimeSpanOfSelectionOrVisibleWindow(
+  trace: Trace,
+): Promise<TimeSpan> {
+  const range = await trace.selection.findTimeRangeOfSelection();
+  if (exists(range)) {
+    return new TimeSpan(range.start, range.end);
+  } else {
+    return trace.timeline.visibleWindow.toTimeSpan();
   }
 }

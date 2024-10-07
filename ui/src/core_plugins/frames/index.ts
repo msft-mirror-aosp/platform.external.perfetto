@@ -15,21 +15,28 @@
 import {
   ACTUAL_FRAMES_SLICE_TRACK_KIND,
   EXPECTED_FRAMES_SLICE_TRACK_KIND,
-} from '../../public';
-import {Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+} from '../../public/track_kinds';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {getOrCreateGroupForProcess} from '../../public/standard_groups';
 import {getTrackName} from '../../public/utils';
+import {TrackNode} from '../../public/workspace';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../../trace_processor/query_result';
-
 import {ActualFramesTrack} from './actual_frames_track';
 import {ExpectedFramesTrack} from './expected_frames_track';
+import {FrameSelectionAggregator} from './frame_selection_aggregator';
+import {ThreadSliceDetailsPanel} from '../../frontend/thread_slice_details_tab';
 
-class FramesPlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class FramesPlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     this.addExpectedFrames(ctx);
     this.addActualFrames(ctx);
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new FrameSelectionAggregator(),
+    );
   }
 
-  async addExpectedFrames(ctx: PluginContextTrace): Promise<void> {
+  async addExpectedFrames(ctx: Trace): Promise<void> {
     const {engine} = ctx;
     const result = await engine.query(`
       select
@@ -39,7 +46,7 @@ class FramesPlugin implements Plugin {
         process.name as processName,
         process.pid as pid,
         __max_layout_depth(t.track_count, t.track_ids) as maxDepth
-      from _process_track_summary_by_upid_and_name t
+      from _process_track_summary_by_upid_and_parent_id_and_name t
       join process using(upid)
       where t.name = "Expected Timeline"
     `);
@@ -62,7 +69,7 @@ class FramesPlugin implements Plugin {
       const pid = it.pid;
       const maxDepth = it.maxDepth;
 
-      const displayName = getTrackName({
+      const title = getTrackName({
         name: trackName,
         upid,
         pid,
@@ -70,22 +77,25 @@ class FramesPlugin implements Plugin {
         kind: 'ExpectedFrames',
       });
 
-      ctx.registerTrack({
-        uri: `/process_${upid}/expected_frames`,
-        title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new ExpectedFramesTrack(engine, maxDepth, trackKey, trackIds);
-        },
+      const uri = `/process_${upid}/expected_frames`;
+      ctx.tracks.registerTrack({
+        uri,
+        title,
+        track: new ExpectedFramesTrack(ctx, maxDepth, uri, trackIds),
         tags: {
           trackIds,
           upid,
           kind: EXPECTED_FRAMES_SLICE_TRACK_KIND,
         },
+        detailsPanel: () => new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
+      const group = getOrCreateGroupForProcess(ctx.workspace, upid);
+      const track = new TrackNode({uri, title, sortOrder: -50});
+      group.addChildInOrder(track);
     }
   }
 
-  async addActualFrames(ctx: PluginContextTrace): Promise<void> {
+  async addActualFrames(ctx: Trace): Promise<void> {
     const {engine} = ctx;
     const result = await engine.query(`
       select
@@ -95,7 +105,7 @@ class FramesPlugin implements Plugin {
         process.name as processName,
         process.pid as pid,
         __max_layout_depth(t.track_count, t.track_ids) as maxDepth
-      from _process_track_summary_by_upid_and_name t
+      from _process_track_summary_by_upid_and_parent_id_and_name t
       join process using(upid)
       where t.name = "Actual Timeline"
     `);
@@ -123,7 +133,7 @@ class FramesPlugin implements Plugin {
       }
 
       const kind = 'ActualFrames';
-      const displayName = getTrackName({
+      const title = getTrackName({
         name: trackName,
         upid,
         pid,
@@ -131,18 +141,21 @@ class FramesPlugin implements Plugin {
         kind,
       });
 
-      ctx.registerTrack({
-        uri: `/process_${upid}/actual_frames`,
-        title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new ActualFramesTrack(engine, maxDepth, trackKey, trackIds);
-        },
+      const uri = `/process_${upid}/actual_frames`;
+      ctx.tracks.registerTrack({
+        uri,
+        title,
+        track: new ActualFramesTrack(ctx, maxDepth, uri, trackIds),
         tags: {
           upid,
           trackIds,
           kind: ACTUAL_FRAMES_SLICE_TRACK_KIND,
         },
+        detailsPanel: () => new ThreadSliceDetailsPanel(ctx, 'slice'),
       });
+      const group = getOrCreateGroupForProcess(ctx.workspace, upid);
+      const track = new TrackNode({uri, title, sortOrder: -50});
+      group.addChildInOrder(track);
     }
   }
 }

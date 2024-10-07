@@ -24,6 +24,7 @@ from python.generators.trace_processor_table.public import Table
 from python.generators.trace_processor_table.public import TableDoc
 from python.generators.trace_processor_table.public import CppTableId
 from python.generators.trace_processor_table.public import CppUint32
+from python.generators.trace_processor_table.public import WrappingSqlView
 
 from src.trace_processor.tables.track_tables import TRACK_TABLE, COUNTER_TRACK_TABLE
 
@@ -209,39 +210,22 @@ STACK_PROFILE_CALLSITE_TABLE = Table(
                 '''Frame at this position in the callstack.'''
         }))
 
-STACK_SAMPLE_TABLE = Table(
-    python_module=__file__,
-    class_name='StackSampleTable',
-    sql_name='stack_sample',
-    columns=[
-        C('ts', CppInt64(), flags=ColumnFlag.SORTED),
-        C('callsite_id', CppTableId(STACK_PROFILE_CALLSITE_TABLE)),
-    ],
-    tabledoc=TableDoc(
-        doc='''
-          Root table for timestamped stack samples.
-        ''',
-        group='Callstack profilers',
-        columns={
-            'ts': '''timestamp of the sample.''',
-            'callsite_id': '''unwound callstack.'''
-        }))
-
 CPU_PROFILE_STACK_SAMPLE_TABLE = Table(
     python_module=__file__,
     class_name='CpuProfileStackSampleTable',
     sql_name='cpu_profile_stack_sample',
     columns=[
+        C('ts', CppInt64(), flags=ColumnFlag.SORTED),
+        C('callsite_id', CppTableId(STACK_PROFILE_CALLSITE_TABLE)),
         C('utid', CppUint32()),
         C('process_priority', CppInt32()),
     ],
-    parent=STACK_SAMPLE_TABLE,
     tabledoc=TableDoc(
-        doc='''
-          Samples from the Chromium stack sampler.
-        ''',
+        doc='Table containing stack samples from CPU profiling.',
         group='Callstack profilers',
         columns={
+            'ts': '''timestamp of the sample.''',
+            'callsite_id': '''unwound callstack.''',
             'utid': '''thread that was active when the sample was taken.''',
             'process_priority': ''''''
         }))
@@ -253,10 +237,9 @@ PERF_SESSION_TABLE = Table(
     columns=[
         C('cmdline', CppOptional(CppString())),
     ],
+    wrapping_sql_view=WrappingSqlView('perf_session'),
     tabledoc=TableDoc(
-        doc='''
-          Perf sessions.
-        ''',
+        doc='''Perf sessions.''',
         group='Callstack profilers',
         columns={
             'cmdline': '''Command line used to collect the data.''',
@@ -276,9 +259,7 @@ PERF_SAMPLE_TABLE = Table(
         C('perf_session_id', CppTableId(PERF_SESSION_TABLE)),
     ],
     tabledoc=TableDoc(
-        doc='''
-          Samples from the traced_perf profiler.
-        ''',
+        doc='''Samples from the traced_perf profiler.''',
         group='Callstack profilers',
         columns={
             'ts':
@@ -300,6 +281,32 @@ PERF_SAMPLE_TABLE = Table(
             'perf_session_id':
                 '''Distinguishes samples from different profiling
                 streams (i.e. multiple data sources).'''
+        }))
+
+INSTRUMENTS_SAMPLE_TABLE = Table(
+    python_module=__file__,
+    class_name='InstrumentsSampleTable',
+    sql_name='instruments_sample',
+    columns=[
+        C('ts', CppInt64(), flags=ColumnFlag.SORTED),
+        C('utid', CppUint32()),
+        C('cpu', CppOptional(CppUint32())),
+        C('callsite_id', CppOptional(CppTableId(STACK_PROFILE_CALLSITE_TABLE))),
+    ],
+    tabledoc=TableDoc(
+        doc='''
+          Samples from MacOS Instruments.
+        ''',
+        group='Callstack profilers',
+        columns={
+            'ts':
+                '''Timestamp of the sample.''',
+            'utid':
+                '''Sampled thread.''',
+            'cpu':
+                '''Core the sampled thread was running on.''',
+            'callsite_id':
+                '''If set, unwound callstack of the sampled thread.''',
         }))
 
 SYMBOL_TABLE = Table(
@@ -659,6 +666,7 @@ ALL_TABLES = [
     HEAP_GRAPH_CLASS_TABLE,
     HEAP_GRAPH_OBJECT_TABLE,
     HEAP_GRAPH_REFERENCE_TABLE,
+    INSTRUMENTS_SAMPLE_TABLE,
     HEAP_PROFILE_ALLOCATION_TABLE,
     PACKAGE_LIST_TABLE,
     PERF_SAMPLE_TABLE,
@@ -667,7 +675,6 @@ ALL_TABLES = [
     STACK_PROFILE_CALLSITE_TABLE,
     STACK_PROFILE_FRAME_TABLE,
     STACK_PROFILE_MAPPING_TABLE,
-    STACK_SAMPLE_TABLE,
     SYMBOL_TABLE,
     VULKAN_MEMORY_ALLOCATIONS_TABLE,
     PERF_COUNTER_TRACK_TABLE,

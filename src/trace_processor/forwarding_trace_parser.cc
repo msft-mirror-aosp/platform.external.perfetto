@@ -18,21 +18,23 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/status_or.h"
+#include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/importers/common/chunked_trace_reader.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/proto/proto_trace_reader.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
+#include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/trace_reader_registry.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/util/status_macros.h"
 #include "src/trace_processor/util/trace_type.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 namespace {
 
 TraceSorter::SortingMode ConvertSortingMode(SortingMode sorting_mode) {
@@ -57,6 +59,7 @@ std::optional<TraceSorter::SortingMode> GetMinimumSortingMode(
       return std::nullopt;
 
     case kPerfDataTraceType:
+    case kInstrumentsXmlTraceType:
       return TraceSorter::SortingMode::kDefault;
 
     case kUnknownTraceType:
@@ -64,6 +67,7 @@ std::optional<TraceSorter::SortingMode> GetMinimumSortingMode(
     case kFuchsiaTraceType:
     case kZipFile:
     case kAndroidLogcatTraceType:
+    case kGeckoTraceType:
       return TraceSorter::SortingMode::kFullSort;
 
     case kProtoTraceType:
@@ -153,5 +157,4 @@ base::Status ForwardingTraceParser::NotifyEndOfFile() {
   return reader_ ? reader_->NotifyEndOfFile() : base::OkStatus();
 }
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

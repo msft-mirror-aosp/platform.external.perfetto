@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Actions} from '../common/actions';
 import {
   AdbRecordingTarget,
@@ -37,9 +36,8 @@ import {
 } from '../controller/record_config_types';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
-
 import {globals} from './globals';
-import {createPage, PageAttrs} from './pages';
+import {PageAttrs} from './pages';
 import {
   autosaveConfigStore,
   recordConfigStore,
@@ -887,8 +885,8 @@ export function maybeGetActiveCss(routePage: string, section: string): string {
   return routePage === section ? '.active' : '';
 }
 
-export const RecordPage = createPage({
-  view({attrs}: m.Vnode<PageAttrs>) {
+export class RecordPage implements m.ClassComponent<PageAttrs> {
+  view({attrs}: m.CVnode<PageAttrs>) {
     const pages: m.Children = [];
     // we need to remove the `/` character from the route
     let routePage = attrs.subpage ? attrs.subpage.substr(1) : '';
@@ -939,5 +937,5 @@ export const RecordPage = createPage({
         m('.record-container-content', recordMenu(routePage), pages),
       ),
     );
-  },
-});
+  }
+}

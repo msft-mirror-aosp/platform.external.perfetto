@@ -386,7 +386,15 @@ std::optional<int> PerfettoCmd::ParseCmdlineAndMaybeDaemonize(int argc,
         trace_config_raw = snapshot_config_;
       } else {
         if (!base::ReadFile(optarg, &trace_config_raw)) {
+#if PERFETTO_BUILDFLAG(PERFETTO_ANDROID_BUILD)
+          PERFETTO_PLOG(
+              "Could not open %s. If this is a permission denied error, try "
+              "placing the config in /data/misc/perfetto-configs: Perfetto "
+              "should always be able to access this directory.",
+              optarg);
+#else
           PERFETTO_PLOG("Could not open %s", optarg);
+#endif
           return 1;
         }
       }
@@ -1004,9 +1012,9 @@ int PerfettoCmd::ConnectToServiceAndRun() {
 
   if (clone_tsid_) {
     if (snapshot_trigger_name_.empty()) {
-      LogUploadEvent(PerfettoStatsdAtom::kCloneTraceBegin);
+      LogUploadEvent(PerfettoStatsdAtom::kCmdCloneTraceBegin);
     } else {
-      LogUploadEvent(PerfettoStatsdAtom::kCloneTriggerTraceBegin,
+      LogUploadEvent(PerfettoStatsdAtom::kCmdCloneTriggerTraceBegin,
                      snapshot_trigger_name_);
     }
   } else if (trace_config_->trigger_config().trigger_timeout_ms() == 0) {
@@ -1392,6 +1400,14 @@ void PerfettoCmd::OnSessionCloned(const OnSessionClonedArgs& args) {
   // Kick off the readback and file finalization (as if we started tracing and
   // reached the duration_ms timeout).
   uuid_ = args.uuid.ToString();
+
+  // Log the new UUID with the clone tag.
+  if (snapshot_trigger_name_.empty()) {
+    LogUploadEvent(PerfettoStatsdAtom::kCmdOnSessionClone);
+  } else {
+    LogUploadEvent(PerfettoStatsdAtom::kCmdOnTriggerSessionClone,
+                   snapshot_trigger_name_);
+  }
   ReadbackTraceDataAndQuit(full_error);
 }
 

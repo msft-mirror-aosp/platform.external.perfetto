@@ -14,26 +14,19 @@
 
 import {assertExists} from '../base/logging';
 import {clamp, floatEqual} from '../base/math_utils';
-import {Time, time} from '../base/time';
-import {exists} from '../base/utils';
+import {Duration, Time, time} from '../base/time';
+import {exists, Optional} from '../base/utils';
 import {Actions} from '../common/actions';
-import {
-  drawIncompleteSlice,
-  drawTrackHoverTooltip,
-} from '../common/canvas_utils';
+import {drawIncompleteSlice, drawTrackHoverTooltip} from '../base/canvas_utils';
 import {cropText} from '../base/string_utils';
-import {colorCompare} from '../core/color';
+import {colorCompare} from '../public/color';
 import {UNEXPECTED_PINK} from '../core/colorizer';
-import {
-  LegacySelection,
-  SelectionKind,
-  getLegacySelection,
-} from '../common/state';
+import {LegacySelection, TrackEventDetails} from '../public/selection';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
-import {Engine, Slice, SliceRect, Track} from '../public';
+import {Track} from '../public/track';
+import {Slice} from '../public/track';
 import {LONG, NUM} from '../trace_processor/query_result';
-
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
@@ -41,8 +34,9 @@ import {NewTrackArgs} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey} from '../core/timeline_cache';
 import {uuidv4Sql} from '../base/uuid';
 import {AsyncDisposableStack} from '../base/disposable_stack';
-import {TrackMouseEvent, TrackRenderContext} from '../public/tracks';
-import {Vector} from '../base/geom';
+import {TrackMouseEvent, TrackRenderContext} from '../public/track';
+import {Point2D, VerticalBounds} from '../base/geom';
+import {Trace} from '../public/trace';
 
 // The common class that underpins all tracks drawing slices.
 
@@ -170,8 +164,8 @@ export abstract class BaseSliceTrack<
 > implements Track
 {
   protected sliceLayout: SliceLayout = {...DEFAULT_SLICE_LAYOUT};
-  protected engine: Engine;
-  protected trackKey: string;
+  protected trace: Trace;
+  protected uri: string;
   protected trackUuid = uuidv4Sql();
 
   // This is the over-skirted cached bounds:
@@ -194,7 +188,7 @@ export abstract class BaseSliceTrack<
   private extraSqlColumns: string[];
 
   private charWidth = -1;
-  private hoverPos?: Vector;
+  private hoverPos?: Point2D;
   protected hoveredSlice?: SliceT;
   private hoverTooltip: string[] = [];
   private maxDataDepth = 0;
@@ -248,8 +242,8 @@ export abstract class BaseSliceTrack<
   ): void {}
 
   constructor(args: NewTrackArgs) {
-    this.engine = args.engine;
-    this.trackKey = args.trackKey;
+    this.trace = args.trace;
+    this.uri = args.uri;
     // Work out the extra columns.
     // This is the union of the embedder-defined columns and the base columns
     // we know about (ts, dur, ...).
@@ -283,14 +277,8 @@ export abstract class BaseSliceTrack<
     }
   }
 
-  protected isSelectionHandled(selection: LegacySelection): boolean {
-    // TODO(hjd): Remove when updating selection.
-    // We shouldn't know here about THREAD_SLICE. Maybe should be set by
-    // whatever deals with that. Dunno the namespace of selection is weird. For
-    // most cases in non-ambiguous (because most things are a 'slice'). But some
-    // others (e.g. THREAD_SLICE) have their own ID namespace so we need this.
-    const supportedSelectionKinds: SelectionKind[] = ['SCHED_SLICE', 'SLICE'];
-    return supportedSelectionKinds.includes(selection.kind);
+  protected isSelectionHandled(_selection: LegacySelection): boolean {
+    return false;
   }
 
   private getTitleFont(): string {
@@ -409,11 +397,22 @@ export abstract class BaseSliceTrack<
       visibleWindow.end.toTime('ceil'),
     );
 
-    let selection = getLegacySelection(globals.state);
-    if (!selection || !this.isSelectionHandled(selection)) {
-      selection = null;
+    let selectedId: number | undefined = undefined;
+    const selection = globals.selectionManager.selection;
+    switch (selection.kind) {
+      case 'track_event':
+        if (selection.trackUri === this.uri) {
+          selectedId = selection.eventId;
+        }
+        break;
+      case 'legacy':
+        const legacySelection = selection.legacySelection;
+        if (this.isSelectionHandled(legacySelection)) {
+          selectedId = (legacySelection as {id: number}).id;
+        }
+        break;
     }
-    const selectedId = selection ? (selection as {id: number}).id : undefined;
+
     if (selectedId === undefined) {
       this.selectedSlice = undefined;
     }
@@ -954,29 +953,42 @@ export abstract class BaseSliceTrack<
     return this.computedTrackHeight;
   }
 
-  getSliceRect(
-    {visibleWindow, timescale, size}: TrackRenderContext,
-    tStart: time,
-    tEnd: time,
-    depth: number,
-  ): SliceRect | undefined {
+  getSliceVerticalBounds(depth: number): Optional<VerticalBounds> {
     this.updateSliceAndTrackHeight();
 
-    const pxEnd = size.width;
-    const left = Math.max(timescale.timeToPx(tStart), 0);
-    const right = Math.min(timescale.timeToPx(tEnd), pxEnd);
-
-    const visible = visibleWindow.overlaps(tStart, tEnd);
-
     const totalSliceHeight = this.computedRowSpacing + this.computedSliceHeight;
+    const top = this.sliceLayout.padding + depth * totalSliceHeight;
 
     return {
-      left,
-      width: Math.max(right - left, 1),
-      top: this.sliceLayout.padding + depth * totalSliceHeight,
-      height: this.computedSliceHeight,
-      visible,
+      top,
+      bottom: top + this.computedSliceHeight,
     };
+  }
+
+  protected get engine() {
+    return this.trace.engine;
+  }
+
+  async getSelectionDetails(
+    id: number,
+  ): Promise<TrackEventDetails | undefined> {
+    const query = `
+      SELECT
+        ts,
+        dur
+      FROM (${this.getSqlSource()})
+      WHERE id = ${id}
+    `;
+
+    const result = await this.engine.query(query);
+    if (result.numRows() === 0) {
+      return undefined;
+    }
+    const row = result.iter({
+      ts: LONG,
+      dur: LONG,
+    });
+    return {ts: Time.fromRaw(row.ts), dur: Duration.fromRaw(row.dur)};
   }
 }
 

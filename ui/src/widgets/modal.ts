@@ -13,10 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {defer} from '../base/deferred';
-
 import {scheduleFullRedraw} from './raf';
+import {Icon} from './icon';
 
 // This module deals with modal dialogs. Unlike most components, here we want to
 // render the DOM elements outside of the corresponding vdom tree. For instance
@@ -156,7 +155,7 @@ export class Modal implements m.ClassComponent<ModalAttrs> {
           m(
             'button[aria-label=Close Modal]',
             {onclick: () => closeModal(attrs.key)},
-            m.trust('&#x2715'),
+            m(Icon, {icon: 'close'}),
           ),
         ),
         m('main', vnode.children),

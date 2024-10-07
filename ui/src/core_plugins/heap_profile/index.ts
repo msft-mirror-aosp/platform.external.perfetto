@@ -13,36 +13,19 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertFalse} from '../../base/logging';
-import {Monitor} from '../../base/monitor';
-import {LegacyFlamegraphCache} from '../../core/legacy_flamegraph_cache';
-import {
-  HeapProfileSelection,
-  LegacySelection,
-  ProfileType,
-} from '../../core/selection_manager';
-import {
-  LegacyFlamegraphDetailsPanel,
-  profileType,
-} from '../../frontend/legacy_flamegraph_panel';
+import {ProfileType, TrackEventSelection} from '../../public/selection';
 import {Timestamp} from '../../frontend/widgets/timestamp';
-import {
-  Engine,
-  HEAP_PROFILE_TRACK_KIND,
-  LegacyDetailsPanel,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
-import {NUM} from '../../trace_processor/query_result';
+import {Engine} from '../../trace_processor/engine';
+import {HEAP_PROFILE_TRACK_KIND} from '../../public/track_kinds';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {LONG, NUM, STR} from '../../trace_processor/query_result';
 import {DetailsShell} from '../../widgets/details_shell';
-
 import {HeapProfileTrack} from './heap_profile_track';
 import {
   QueryFlamegraph,
   QueryFlamegraphAttrs,
-  USE_NEW_FLAMEGRAPH_IMPL,
   metricsFromTableOrSubquery,
 } from '../../core/query_flamegraph';
 import {time} from '../../base/time';
@@ -57,10 +40,23 @@ import {globals} from '../../frontend/globals';
 import {Modal} from '../../widgets/modal';
 import {Router} from '../../frontend/router';
 import {Actions} from '../../common/actions';
-import {SHOW_HEAP_GRAPH_DOMINATOR_TREE_FLAG} from '../../common/legacy_flamegraph_util';
+import {getOrCreateGroupForProcess} from '../../public/standard_groups';
+import {TrackNode} from '../../public/workspace';
+import {createPerfettoTable} from '../../trace_processor/sql_utils';
+import {TrackEventDetailsPanel} from '../../public/details_panel';
 
-class HeapProfilePlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+function getUriForTrack(upid: number): string {
+  return `/process_${upid}/heap_profile`;
+}
+
+class HeapProfilePlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    const it = await ctx.engine.query(`
+      select value from stats
+      where name = 'heap_graph_non_finalized_graph'
+    `);
+    const incomplete = it.firstRow({value: NUM}).value > 0;
+
     const result = await ctx.engine.query(`
       select distinct upid from heap_profile_allocation
       union
@@ -68,73 +64,137 @@ class HeapProfilePlugin implements Plugin {
     `);
     for (const it = result.iter({upid: NUM}); it.valid(); it.next()) {
       const upid = it.upid;
-      ctx.registerTrack({
-        uri: `/process_${upid}/heap_profile`,
-        title: 'Heap Profile',
+      const uri = getUriForTrack(upid);
+      const title = 'Heap Profile';
+      const tableName = `_heap_profile_${upid}`;
+
+      createPerfettoTable(
+        ctx.engine,
+        tableName,
+        `
+          with
+            heaps as (select group_concat(distinct heap_name) h from heap_profile_allocation where upid = ${upid}),
+            allocation_tses as (select distinct ts from heap_profile_allocation where upid = ${upid}),
+            graph_tses as (select distinct graph_sample_ts from heap_graph_object where upid = ${upid})
+          select
+            *,
+            0 AS dur,
+            0 AS depth
+          from (
+            select
+              (
+                select a.id
+                from heap_profile_allocation a
+                where a.ts = t.ts
+                order by a.id
+                limit 1
+              ) as id,
+              ts,
+              'heap_profile:' || (select h from heaps) AS type
+            from allocation_tses t
+            union all
+            select
+              (
+                select o.id
+                from heap_graph_object o
+                where o.graph_sample_ts = g.graph_sample_ts
+                order by o.id
+                limit 1
+              ) as id,
+              graph_sample_ts AS ts,
+              'graph' AS type
+            from graph_tses g
+          )
+        `,
+      );
+
+      ctx.tracks.registerTrack({
+        uri,
+        title,
         tags: {
           kind: HEAP_PROFILE_TRACK_KIND,
           upid,
         },
-        trackFactory: ({trackKey}) => {
-          return new HeapProfileTrack(
-            {
-              engine: ctx.engine,
-              trackKey,
-            },
-            upid,
-          );
-        },
+        track: new HeapProfileTrack(
+          {
+            trace: ctx,
+            uri,
+          },
+          tableName,
+        ),
+        detailsPanel: () =>
+          new HeapProfileFlamegraphDetailsPanel(ctx, incomplete, upid),
       });
+      const group = getOrCreateGroupForProcess(ctx.workspace, upid);
+      const track = new TrackNode({uri, title, sortOrder: -30});
+      group.addChildInOrder(track);
     }
-    const it = await ctx.engine.query(`
-      select value from stats
-      where name = 'heap_graph_non_finalized_graph'
-    `);
-    const incomplete = it.firstRow({value: NUM}).value > 0;
-    ctx.registerDetailsPanel(
-      new HeapProfileFlamegraphDetailsPanel(ctx.engine, incomplete),
-    );
+  }
+
+  async onTraceReady(ctx: Trace): Promise<void> {
+    await selectFirstHeapProfile(ctx);
   }
 }
 
-class HeapProfileFlamegraphDetailsPanel implements LegacyDetailsPanel {
-  private sel?: HeapProfileSelection;
-  private selMonitor = new Monitor([
-    () => this.sel?.ts,
-    () => this.sel?.upid,
-    () => this.sel?.type,
-  ]);
+async function selectFirstHeapProfile(ctx: Trace) {
+  const query = `
+    select * from (
+      select
+        min(ts) AS ts,
+        'heap_profile:' || group_concat(distinct heap_name) AS type,
+        upid
+      from heap_profile_allocation
+      group by upid
+      union
+      select distinct graph_sample_ts as ts, 'graph' as type, upid
+      from heap_graph_object
+    )
+    order by ts
+    limit 1
+  `;
+  const profile = await ctx.engine.query(query);
+  if (profile.numRows() !== 1) return;
+  const row = profile.firstRow({ts: LONG, type: STR, upid: NUM});
+  const upid = row.upid;
+
+  ctx.selection.selectTrackEvent(getUriForTrack(upid), 0);
+}
+
+interface Props {
+  ts: time;
+  type: ProfileType;
+}
+
+class HeapProfileFlamegraphDetailsPanel implements TrackEventDetailsPanel {
   private flamegraphAttrs?: QueryFlamegraphAttrs;
-  private cache = new LegacyFlamegraphCache('heap_profile');
+  private props?: Props;
 
   constructor(
-    private engine: Engine,
+    private trace: Trace,
     private heapGraphIncomplete: boolean,
+    private upid: number,
   ) {}
 
-  render(sel: LegacySelection) {
-    if (sel.kind !== 'HEAP_PROFILE') {
-      this.sel = undefined;
+  async load(sel: TrackEventSelection) {
+    const {profileType, ts} = sel;
+
+    this.flamegraphAttrs = flamegraphAttrs(
+      this.trace.engine,
+      ts,
+      this.upid,
+      assertExists(profileType),
+    );
+
+    this.props = {ts, type: assertExists(profileType)};
+  }
+
+  render() {
+    if (!this.props) {
       return undefined;
     }
-    if (!USE_NEW_FLAMEGRAPH_IMPL.get()) {
-      this.sel = undefined;
-      return m(LegacyFlamegraphDetailsPanel, {
-        cache: this.cache,
-        selection: {
-          profileType: profileType(sel.type),
-          start: sel.ts,
-          end: sel.ts,
-          upids: [sel.upid],
-        },
-      });
-    }
 
-    const {ts, upid, type} = sel;
-    this.sel = sel;
-    if (this.selMonitor.ifStateChanged()) {
-      this.flamegraphAttrs = flamegraphAttrs(this.engine, ts, upid, type);
-    }
+    const {type, ts} = this.props;
+
     return m(
       '.flamegraph-profile',
       maybeShowModal(type, this.heapGraphIncomplete),
@@ -145,7 +205,7 @@ class HeapProfileFlamegraphDetailsPanel implements LegacyDetailsPanel {
           title: m(
             '.title',
             getFlamegraphTitle(type),
-            sel.type === ProfileType.MIXED_HEAP_PROFILE &&
+            type === ProfileType.MIXED_HEAP_PROFILE &&
               m(
                 Popup,
                 {
@@ -161,13 +221,13 @@ class HeapProfileFlamegraphDetailsPanel implements LegacyDetailsPanel {
           description: [],
           buttons: [
             m('.time', `Snapshot time: `, m(Timestamp, {ts})),
-            (sel.type === ProfileType.NATIVE_HEAP_PROFILE ||
-              sel.type === ProfileType.JAVA_HEAP_SAMPLES) &&
+            (type === ProfileType.NATIVE_HEAP_PROFILE ||
+              type === ProfileType.JAVA_HEAP_SAMPLES) &&
               m(Button, {
                 icon: 'file_download',
                 intent: Intent.Primary,
                 onclick: () => {
-                  downloadPprof(this.engine, upid, ts);
+                  downloadPprof(this.trace.engine, this.upid, ts);
                   raf.scheduleFullRedraw();
                 },
               }),
@@ -178,11 +238,6 @@ class HeapProfileFlamegraphDetailsPanel implements LegacyDetailsPanel {
     );
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'perfetto.HeapProfile',
-  plugin: HeapProfilePlugin,
-};
 
 function flamegraphAttrs(
   engine: Engine,
@@ -310,79 +365,124 @@ function flamegraphAttrsForHeapProfile(
         'include perfetto module android.memory.heap_profile.callstacks',
         [{name: 'mapping_name', displayName: 'Mapping'}],
         [
-          {name: 'source_file', displayName: 'Source File'},
-          {name: 'line_number', displayName: 'Line Number'},
+          {
+            name: 'source_file',
+            displayName: 'Source File',
+            mergeAggregation: 'ONE_OR_NULL',
+          },
+          {
+            name: 'line_number',
+            displayName: 'Line Number',
+            mergeAggregation: 'ONE_OR_NULL',
+          },
         ],
       ),
     ],
   };
 }
 
-function flamegraphAttrsForHeapGraph(engine: Engine, ts: time, upid: number) {
-  const dominator = SHOW_HEAP_GRAPH_DOMINATOR_TREE_FLAG.get()
-    ? metricsFromTableOrSubquery(
-        `
-          (
-            select
-              id,
-              parent_id as parentId,
-              name,
-              root_type,
-              self_size,
-              self_count
-            from _heap_graph_dominator_class_tree
-            where graph_sample_ts = ${ts} and upid = ${upid}
-          )
-        `,
-        [
-          {
-            name: 'Dominated Object Size',
-            unit: 'B',
-            columnName: 'self_size',
-          },
-          {
-            name: 'Dominated Object Count',
-            unit: '',
-            columnName: 'self_count',
-          },
-        ],
-        'include perfetto module android.memory.heap_graph.dominator_class_tree;',
-        [{name: 'root_type', displayName: 'Root Type'}],
-      )
-    : [];
+function flamegraphAttrsForHeapGraph(
+  engine: Engine,
+  ts: time,
+  upid: number,
+): QueryFlamegraphAttrs {
   return {
     engine,
     metrics: [
-      ...metricsFromTableOrSubquery(
-        `
-          (
-            select
-              id,
-              parent_id as parentId,
-              name,
-              root_type,
-              self_size,
-              self_count
-            from _heap_graph_class_tree
-            where graph_sample_ts = ${ts} and upid = ${upid}
-          )
+      {
+        name: 'Object Size',
+        unit: 'B',
+        dependencySql:
+          'include perfetto module android.memory.heap_graph.class_tree;',
+        statement: `
+          select
+            id,
+            parent_id as parentId,
+            ifnull(name, '[Unknown]') as name,
+            root_type,
+            self_size as value,
+            self_count
+          from _heap_graph_class_tree
+          where graph_sample_ts = ${ts} and upid = ${upid}
         `,
-        [
+        unaggregatableProperties: [
+          {name: 'root_type', displayName: 'Root Type'},
+        ],
+        aggregatableProperties: [
           {
-            name: 'Object Size',
-            unit: 'B',
-            columnName: 'self_size',
-          },
-          {
-            name: 'Object Count',
-            unit: '',
-            columnName: 'self_count',
+            name: 'self_count',
+            displayName: 'Self Count',
+            mergeAggregation: 'SUM',
           },
         ],
-        'include perfetto module android.memory.heap_graph.class_tree;',
-        [{name: 'root_type', displayName: 'Root Type'}],
-      ),
-      ...dominator,
+      },
+      {
+        name: 'Object Count',
+        unit: '',
+        dependencySql:
+          'include perfetto module android.memory.heap_graph.class_tree;',
+        statement: `
+          select
+            id,
+            parent_id as parentId,
+            ifnull(name, '[Unknown]') as name,
+            root_type,
+            self_size,
+            self_count as value
+          from _heap_graph_class_tree
+          where graph_sample_ts = ${ts} and upid = ${upid}
+        `,
+        unaggregatableProperties: [
+          {name: 'root_type', displayName: 'Root Type'},
+        ],
+      },
+      {
+        name: 'Dominated Object Size',
+        unit: 'B',
+        dependencySql:
+          'include perfetto module android.memory.heap_graph.dominator_class_tree;',
+        statement: `
+          select
+            id,
+            parent_id as parentId,
+            ifnull(name, '[Unknown]') as name,
+            root_type,
+            self_size as value,
+            self_count
+          from _heap_graph_dominator_class_tree
+          where graph_sample_ts = ${ts} and upid = ${upid}
+        `,
+        unaggregatableProperties: [
+          {name: 'root_type', displayName: 'Root Type'},
+        ],
+        aggregatableProperties: [
+          {
+            name: 'self_count',
+            displayName: 'Self Count',
+            mergeAggregation: 'SUM',
+          },
+        ],
+      },
+      {
+        name: 'Dominated Object Count',
+        unit: '',
+        dependencySql:
+          'include perfetto module android.memory.heap_graph.dominator_class_tree;',
+        statement: `
+          select
+            id,
+            parent_id as parentId,
+            ifnull(name, '[Unknown]') as name,
+            root_type,
+            self_size,
+            self_count as value
+          from _heap_graph_class_tree
+          where graph_sample_ts = ${ts} and upid = ${upid}
+        `,
+        unaggregatableProperties: [
+          {name: 'root_type', displayName: 'Root Type'},
+        ],
+      },
     ],
   };
 }
@@ -454,3 +554,8 @@ function maybeShowModal(type: ProfileType, heapGraphIncomplete: boolean) {
     ],
   });
 }
+
+export const plugin: PluginDescriptor = {
+  pluginId: 'perfetto.HeapProfile',
+  plugin: HeapProfilePlugin,
+};

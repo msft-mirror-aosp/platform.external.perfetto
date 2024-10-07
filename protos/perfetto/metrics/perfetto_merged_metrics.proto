@@ -621,6 +621,8 @@ message AndroidBatteryMetric {
     optional int64 sleep_screen_off_ns = 6;
     optional int64 sleep_screen_on_ns = 7;
     optional int64 sleep_screen_doze_ns = 8;
+    // Average power over the duration of the trace.
+    optional double avg_power_mw = 9;
   }
 
   // Period of time during the trace that the device went to sleep completely.
@@ -861,6 +863,8 @@ message AndroidCodecMetrics {
     optional int64 total_cpu_ns = 2;
     // CPU time ( time 'Running' on cpu)
     optional int64 running_cpu_ns = 3;
+    // CPU cycles
+    optional int64 cpu_cycles = 4;
   }
 
   // These are traces and could indicate framework queue latency
@@ -894,8 +898,27 @@ message AndroidCodecMetrics {
     repeated AndroidCpuMetric.CoreTypeData core_data = 5;
   }
 
+  // Shows energy breakdown base on subsystem
+  message EnergyBreakdown {
+    // name of subsystem
+    optional string subsystem = 1;
+    // energy consumed by this system
+    optional double energy = 2;
+  }
+
+  // have the energy usage for the codec running time
+  message EnergyUsage {
+    // total energy taken by the system during this time
+    optional double total_energy = 1;
+    // total time for this energy is calculated
+    optional int64 duration = 2;
+    // enery breakdown by subsystem
+    repeated EnergyBreakdown subsystem = 3;
+  }
+
   repeated CpuUsage cpu_usage = 1;
   repeated CodecFunction codec_function = 2;
+  optional EnergyUsage energy_usage = 3;
 
 }
 
@@ -2574,18 +2597,22 @@ message AndroidStartupMetric {
 
     optional int64 end_timestamp = 2;
 
+    // Deprecated as of 09/2024
     optional uint32 thread_utid = 3;
 
     optional string thread_name = 4;
   }
 
-  // Next id: 25
+  // Next id: 26
   message Startup {
     // Random id uniquely identifying an app startup in this trace.
     optional uint32 startup_id = 1;
 
     // Startup type (cold / warm / hot)
     optional string startup_type = 16;
+
+    // Number of CPUs the device has
+    optional uint32 cpu_count = 25;
 
     // Name of the package launched
     optional string package_name = 2;
@@ -2895,7 +2922,7 @@ message AndroidWattsonEstimateInfo {
 
 message AndroidWattsonCpuSubsystemEstimate {
   // estimates and estimates of subrails
-  optional float estimate_mw = 1;
+  optional float estimated_mw = 1;
   optional AndroidWattsonPolicyEstimate policy0 = 2;
   optional AndroidWattsonPolicyEstimate policy1 = 3;
   optional AndroidWattsonPolicyEstimate policy2 = 4;
@@ -2908,7 +2935,7 @@ message AndroidWattsonCpuSubsystemEstimate {
 }
 
 message AndroidWattsonPolicyEstimate {
-  optional float estimate_mw = 1;
+  optional float estimated_mw = 1;
   optional AndroidWattsonCpuEstimate cpu0 = 2;
   optional AndroidWattsonCpuEstimate cpu1 = 3;
   optional AndroidWattsonCpuEstimate cpu2 = 4;
@@ -2920,11 +2947,11 @@ message AndroidWattsonPolicyEstimate {
 }
 
 message AndroidWattsonCpuEstimate {
-  optional float estimate_mw = 1;
+  optional float estimated_mw = 1;
 }
 
 message AndroidWattsonDsuScuEstimate {
-  optional float estimate_mw = 1;
+  optional float estimated_mw = 1;
 }
 
 // End of protos/perfetto/metrics/android/wattson_in_time_period.proto
@@ -2939,9 +2966,9 @@ message AndroidWattsonTasksAttributionMetric {
 
 message AndroidWattsonTaskInfo {
   // Average estimated power for wall duration in mW
-  optional float estimate_mw = 1;
+  optional float estimated_mw = 1;
   // Total energy over wall duration across CPUs in mWs
-  optional float estimate_mws = 2;
+  optional float estimated_mws = 2;
   optional string thread_name = 3;
   optional string process_name = 4;
   optional string package_name = 5;
@@ -2966,6 +2993,10 @@ message TraceMetadata {
   optional string trace_config_pbtxt = 9;
   optional int64 sched_duration_ns = 10;
   optional int64 tracing_started_ns = 11;
+  optional int64 android_sdk_version = 12;
+  optional int64 suspend_count = 13;
+  optional int64 data_loss_count = 14;
+  optional int64 error_count = 15;
 }
 
 // Stats counters for the trace.

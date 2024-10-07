@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Actions} from '../../common/actions';
 import {colorForState} from '../../core/colorizer';
-import {LegacySelection} from '../../common/state';
-import {translateState} from '../../common/thread_state';
 import {
   BASE_ROW,
   BaseSliceTrack,
   OnSliceClickArgs,
 } from '../../frontend/base_slice_track';
-import {globals} from '../../frontend/globals';
 import {
   SLICE_LAYOUT_FLAT_DEFAULTS,
   SliceLayout,
 } from '../../frontend/slice_layout';
 import {NewTrackArgs} from '../../frontend/track';
 import {NUM_NULL, STR} from '../../trace_processor/query_result';
-import {Slice} from '../../public';
+import {Slice} from '../../public/track';
+import {translateState} from '../../trace_processor/sql_utils/thread_state';
+import {TrackEventDetails} from '../../public/selection';
 
 export const THREAD_STATE_ROW = {
   ...BASE_ROW,
@@ -86,15 +84,14 @@ export class ThreadStateTrack extends BaseSliceTrack<Slice, ThreadStateRow> {
   }
 
   onSliceClick(args: OnSliceClickArgs<Slice>) {
-    globals.makeSelection(
-      Actions.selectThreadState({
-        id: args.slice.id,
-        trackKey: this.trackKey,
-      }),
-    );
+    this.trace.selection.selectTrackEvent(this.uri, args.slice.id);
   }
 
-  protected isSelectionHandled(selection: LegacySelection): boolean {
-    return selection.kind === 'THREAD_STATE';
+  // Add utid to selection details
+  override async getSelectionDetails(
+    id: number,
+  ): Promise<TrackEventDetails | undefined> {
+    const details = await super.getSelectionDetails(id);
+    return details && {...details, utid: this.utid};
   }
 }

@@ -13,25 +13,46 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {TRACK_SHELL_WIDTH} from './css_constants';
 import {globals} from './globals';
 import {getMaxMajorTicks, generateTicks, TickType} from './gridline_helper';
-import {Size} from '../base/geom';
+import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
-import {PxSpan, TimeScale} from './time_scale';
-import {canvasClip} from '../common/canvas_utils';
+import {TimeScale} from '../base/time_scale';
+import {canvasClip} from '../base/canvas_utils';
+import {
+  createSearchOverviewTrack,
+  SearchOverviewTrack,
+} from './search_overview_track';
+import {TraceImpl} from '../core/trace_impl';
+
+// We want to create the overview track only once per trace, but this
+// class can be delete and re-instantiated when switching between pages via
+// the sidebar. So we cache the overview track and bind it to the lifetime of
+// the TraceImpl object.
+const trackTraceMap = new WeakMap<TraceImpl, SearchOverviewTrack>();
 
 // This is used to display the summary of search results.
 export class TickmarkPanel implements Panel {
   readonly kind = 'panel';
   readonly selectable = false;
+  private searchOverviewTrack?: SearchOverviewTrack;
+
+  constructor(trace: TraceImpl) {
+    this.searchOverviewTrack = trackTraceMap.get(trace);
+    if (this.searchOverviewTrack === undefined) {
+      createSearchOverviewTrack(trace).then((track) => {
+        trackTraceMap.set(trace, track);
+        this.searchOverviewTrack = track;
+      });
+    }
+  }
 
   render(): m.Children {
     return m('.tickbar');
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D, size: Size): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D): void {
     ctx.fillStyle = '#999';
     ctx.fillRect(TRACK_SHELL_WIDTH - 2, 0, 2, size.height);
 
@@ -43,15 +64,18 @@ export class TickmarkPanel implements Panel {
     ctx.restore();
   }
 
-  private renderTrack(ctx: CanvasRenderingContext2D, size: Size): void {
+  private renderTrack(ctx: CanvasRenderingContext2D, size: Size2D): void {
     const visibleWindow = globals.timeline.visibleWindow;
-    const timescale = new TimeScale(visibleWindow, new PxSpan(0, size.width));
+    const timescale = new TimeScale(visibleWindow, {
+      left: 0,
+      right: size.width,
+    });
     const timespan = visibleWindow.toTimeSpan();
 
     if (size.width > 0 && timespan.duration > 0n) {
       const maxMajorTicks = getMaxMajorTicks(size.width);
 
-      const offset = globals.timestampOffset();
+      const offset = globals.trace.timeline.timestampOffset();
       const tickGen = generateTicks(timespan, maxMajorTicks, offset);
       for (const {type, time} of tickGen) {
         const px = Math.floor(timescale.timeToPx(time));
@@ -61,9 +85,8 @@ export class TickmarkPanel implements Panel {
       }
     }
 
-    const searchOverviewRenderer = globals.searchOverviewTrack;
-    if (searchOverviewRenderer) {
-      searchOverviewRenderer.render(ctx, size);
+    if (this.searchOverviewTrack) {
+      this.searchOverviewTrack.render(ctx, size);
     }
   }
 }

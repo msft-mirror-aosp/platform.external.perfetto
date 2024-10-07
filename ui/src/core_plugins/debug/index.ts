@@ -16,21 +16,17 @@ import {uuidv4} from '../../base/uuid';
 import {
   addDebugCounterTrack,
   addDebugSliceTrack,
-} from '../../frontend/debug_tracks/debug_tracks';
-import {
-  BottomTabToSCSAdapter,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
-
-import {DebugSliceDetailsTab} from '../../frontend/debug_tracks/details_tab';
+} from '../../public/lib/debug_tracks/debug_tracks';
+import {BottomTabToSCSAdapter} from '../../public/utils';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {DebugSliceDetailsTab} from '../../public/lib/debug_tracks/details_tab';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
 import {Optional, exists} from '../../base/utils';
 
-class DebugTracksPlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
-    ctx.registerCommand({
+class DebugTracksPlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    ctx.commands.registerCommand({
       id: 'perfetto.DebugTracks#addDebugSliceTrack',
       name: 'Add debug slice track',
       callback: async (arg: unknown) => {
@@ -52,7 +48,7 @@ class DebugTracksPlugin implements Plugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'perfetto.DebugTracks#addDebugCounterTrack',
       name: 'Add debug counter track',
       callback: async (arg: unknown) => {
@@ -73,7 +69,7 @@ class DebugTracksPlugin implements Plugin {
     // TODO(stevegolton): While debug tracks are in their current state, we rely
     // on this plugin to provide the details panel for them. In the future, this
     // details panel will become part of the debug track's definition.
-    ctx.registerDetailsPanel(
+    ctx.tabs.registerDetailsPanel(
       new BottomTabToSCSAdapter({
         tabFactory: (selection) => {
           if (
@@ -83,7 +79,7 @@ class DebugTracksPlugin implements Plugin {
             const config = selection.detailsPanelConfig.config;
             return new DebugSliceDetailsTab({
               config: config as GenericSliceDetailsTabConfig,
-              engine: ctx.engine,
+              trace: ctx,
               uuid: uuidv4(),
             });
           }
@@ -98,18 +94,13 @@ class DebugTracksPlugin implements Plugin {
 // exception is thrown if the prompt is cancelled, so this function handles this
 // and returns undefined in this case.
 async function getStringFromArgOrPrompt(
-  ctx: PluginContextTrace,
+  ctx: Trace,
   arg: unknown,
 ): Promise<Optional<string>> {
   if (typeof arg === 'string') {
     return arg;
   } else {
-    try {
-      return await ctx.prompt('Enter a query...');
-    } catch {
-      // Prompt was ignored
-      return undefined;
-    }
+    return await ctx.omnibox.prompt('Enter a query...');
   }
 }
 

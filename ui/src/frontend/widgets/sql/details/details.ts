@@ -13,26 +13,27 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Brand} from '../../../../base/brand';
 import {Time} from '../../../../base/time';
 import {exists} from '../../../../base/utils';
 import {raf} from '../../../../core/raf_scheduler';
-import {Engine} from '../../../../public';
+import {Engine} from '../../../../trace_processor/engine';
 import {Row} from '../../../../trace_processor/query_result';
 import {
   SqlValue,
   sqlValueToReadableString,
 } from '../../../../trace_processor/sql_utils';
+import {Arg, getArgs} from '../../../../trace_processor/sql_utils/args';
+import {asArgSetId} from '../../../../trace_processor/sql_utils/core_types';
 import {Anchor} from '../../../../widgets/anchor';
 import {renderError} from '../../../../widgets/error';
 import {SqlRef} from '../../../../widgets/sql_ref';
 import {Tree, TreeNode} from '../../../../widgets/tree';
 import {hasArgs, renderArguments} from '../../../slice_args';
-import {asArgSetId} from '../../../../trace_processor/sql_utils/core_types';
 import {DurationWidget} from '../../../widgets/duration';
 import {Timestamp as TimestampWidget} from '../../../widgets/timestamp';
-import {Arg, getArgs} from '../../../../trace_processor/sql_utils/args';
+import {sqlIdRegistry} from './sql_ref_renderer_registry';
+import {Trace} from '../../../../public/trace';
 
 // This file contains the helper to render the details tree (based on Tree
 // widget) for an object represented by a SQL row in some table. The user passes
@@ -212,17 +213,16 @@ export type ValueDesc =
 // Class responsible for fetching the data and rendering the data.
 export class Details {
   constructor(
-    private engine: Engine,
+    private trace: Trace,
     private sqlTable: string,
     private id: number,
     schema: {[key: string]: ValueDesc},
-    sqlIdTypesRenderers: {[key: string]: SqlIdRefRenderer} = {},
   ) {
     this.dataController = new DataController(
-      engine,
+      trace,
       sqlTable,
       id,
-      sqlIdTypesRenderers,
+      sqlIdRegistry,
     );
 
     this.resolvedSchema = {
@@ -249,7 +249,7 @@ export class Details {
     for (const [key, value] of Object.entries(this.resolvedSchema.data)) {
       nodes.push(
         renderValue(
-          this.engine,
+          this.trace,
           key,
           value,
           this.dataController.data,
@@ -291,15 +291,6 @@ export type SqlIdRefRenderer = {
   fetch: (engine: Engine, id: bigint) => Promise<{} | undefined>;
   render: (data: {}) => RenderedValue;
 };
-
-// Type-safe helper to create a SqlIdRefRenderer, which ensures that the
-// type returned from the fetch is the same type that renderer takes.
-export function createSqlIdRefRenderer<Data extends {}>(
-  fetch: (engine: Engine, id: bigint) => Promise<Data>,
-  render: (data: Data) => RenderedValue,
-): SqlIdRefRenderer {
-  return {fetch, render: render as (data: {}) => RenderedValue};
-}
 
 // === Impl details ===
 
@@ -476,7 +467,7 @@ class DataController {
   data?: Data;
 
   constructor(
-    private engine: Engine,
+    private trace: Trace,
     private sqlTable: string,
     private id: number,
     public sqlIdRefRenderers: {[table: string]: SqlIdRefRenderer},
@@ -502,7 +493,7 @@ class DataController {
 
     // Fetch the scalar values for the basic expressions.
     const row: Row = (
-      await this.engine.query(`
+      await this.trace.engine.query(`
       SELECT
         ${this.expressions
           .map((value, index) => `${value} as ${label(index)}`)
@@ -530,7 +521,7 @@ class DataController {
         );
       } else {
         data.argSets.push(
-          await getArgs(this.engine, asArgSetId(Number(argSetId))),
+          await getArgs(this.trace.engine, asArgSetId(Number(argSetId))),
         );
       }
     }
@@ -556,7 +547,7 @@ class DataController {
         );
         continue;
       }
-      const refData = await renderer.fetch(this.engine, id);
+      const refData = await renderer.fetch(this.trace.engine, id);
       if (refData === undefined) {
         data.sqlIdRefData.push(
           new Err(
@@ -682,7 +673,7 @@ function resolve(schema: ValueDesc, data: DataController): ResolvedValue {
 
 // Generate the vdom for a given value using the fetched `data`.
 function renderValue(
-  engine: Engine,
+  trace: Trace,
   key: string,
   value: ResolvedValue,
   data: Data,
@@ -820,14 +811,14 @@ function renderValue(
           {
             left: key,
           },
-          renderArguments(engine, args),
+          renderArguments(trace, args),
         )
       );
     case 'array': {
       const children: m.Children[] = [];
       for (const child of value.data) {
         const renderedChild = renderValue(
-          engine,
+          trace,
           `[${children.length}]`,
           child,
           data,
@@ -851,7 +842,7 @@ function renderValue(
     case 'dict': {
       const children: m.Children[] = [];
       for (const [key, val] of Object.entries(value.data)) {
-        const child = renderValue(engine, key, val, data, sqlIdRefRenderers);
+        const child = renderValue(trace, key, val, data, sqlIdRefRenderers);
         if (exists(child)) {
           children.push(child);
         }

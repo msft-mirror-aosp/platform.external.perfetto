@@ -13,25 +13,17 @@
 // limitations under the License.
 
 import {uuidv4} from '../../base/uuid';
-import {AddTrackArgs} from '../../common/actions';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
-import {
-  BottomTabToSCSAdapter,
-  NUM,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-} from '../../public';
-
+import {TrackNode} from '../../public/workspace';
+import {BottomTabToSCSAdapter} from '../../public/utils';
+import {NUM} from '../../trace_processor/query_result';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {ScreenshotTab} from './screenshot_panel';
 import {ScreenshotsTrack} from './screenshots_track';
 
-export type DecideTracksResult = {
-  tracksToAdd: AddTrackArgs[];
-};
-
-class ScreenshotsPlugin implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+class ScreenshotsPlugin implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const res = await ctx.engine.query(`
       INCLUDE PERFETTO MODULE android.screenshots;
       select
@@ -41,23 +33,23 @@ class ScreenshotsPlugin implements Plugin {
     const {count} = res.firstRow({count: NUM});
 
     if (count > 0) {
-      const displayName = 'Screenshots';
+      const title = 'Screenshots';
       const uri = '/screenshots';
-      ctx.registerTrack({
+      ctx.tracks.registerTrack({
         uri,
-        title: displayName,
-        trackFactory: ({trackKey}) => {
-          return new ScreenshotsTrack({
-            engine: ctx.engine,
-            trackKey,
-          });
-        },
+        title,
+        track: new ScreenshotsTrack({
+          trace: ctx,
+          uri,
+        }),
         tags: {
           kind: ScreenshotsTrack.kind,
         },
       });
+      const trackNode = new TrackNode({uri, title, sortOrder: -60});
+      ctx.workspace.addChildInOrder(trackNode);
 
-      ctx.registerDetailsPanel(
+      ctx.tabs.registerDetailsPanel(
         new BottomTabToSCSAdapter({
           tabFactory: (selection) => {
             if (
@@ -67,7 +59,7 @@ class ScreenshotsPlugin implements Plugin {
               const config = selection.detailsPanelConfig.config;
               return new ScreenshotTab({
                 config: config as GenericSliceDetailsTabConfig,
-                engine: ctx.engine,
+                trace: ctx,
                 uuid: uuidv4(),
               });
             }

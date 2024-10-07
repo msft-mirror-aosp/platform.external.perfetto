@@ -13,10 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Duration, duration, time} from '../../base/time';
 import {raf} from '../../core/raf_scheduler';
-import {BottomTab, NewBottomTabArgs} from '../../frontend/bottom_tab';
+import {BottomTab, NewBottomTabArgs} from '../../public/lib/bottom_tab';
 import {GenericSliceDetailsTabConfig} from '../../frontend/generic_slice_details_tab';
 import {hasArgs, renderArguments} from '../../frontend/slice_args';
 import {renderDetails} from '../../frontend/slice_details';
@@ -44,7 +43,6 @@ import {GridLayout, GridLayoutColumn} from '../../widgets/grid_layout';
 import {Section} from '../../widgets/section';
 import {MultiParagraphText, TextParagraph} from '../../widgets/text_paragraph';
 import {Tree, TreeNode} from '../../widgets/tree';
-
 import {
   EventLatencyCauseThreadTracks,
   EventLatencyStage,
@@ -59,7 +57,7 @@ import {
   ScrollJankSlice,
 } from './scroll_jank_slice';
 import {sliceRef} from '../../frontend/widgets/slice';
-import {SCROLL_JANK_V3_TRACK_KIND} from '../../public';
+import {SCROLL_JANK_V3_TRACK_KIND} from '../../public/track_kinds';
 
 // Given a node in the slice tree, return a path from root to it.
 function getPath(slice: SliceTreeNode): string[] {
@@ -132,6 +130,8 @@ export class EventLatencySliceDetailsPanel extends BottomTab<GenericSliceDetails
   // Stages tree for the prev EventLatency.
   private prevEventLatencyBreakdown?: SliceTreeNode;
 
+  private tracksByTrackId: Map<number, string>;
+
   static create(
     args: NewBottomTabArgs<GenericSliceDetailsTabConfig>,
   ): EventLatencySliceDetailsPanel {
@@ -140,6 +140,13 @@ export class EventLatencySliceDetailsPanel extends BottomTab<GenericSliceDetails
 
   constructor(args: NewBottomTabArgs<GenericSliceDetailsTabConfig>) {
     super(args);
+
+    this.tracksByTrackId = new Map<number, string>();
+    this.trace.tracks.getAllTracks().forEach((td) => {
+      td.tags?.trackIds?.forEach((trackId) => {
+        this.tracksByTrackId.set(trackId, td.uri);
+      });
+    });
 
     this.loadData();
   }
@@ -326,7 +333,7 @@ export class EventLatencySliceDetailsPanel extends BottomTab<GenericSliceDetails
 
     const columns: ColumnDescriptor<RelevantThreadRow>[] = [
       widgetColumn<RelevantThreadRow>('Relevant Thread', (x) =>
-        getCauseLink(x.tracks, x.ts, x.dur),
+        getCauseLink(this.trace, x.tracks, this.tracksByTrackId, x.ts, x.dur),
       ),
       widgetColumn<RelevantThreadRow>('Description', (x) => {
         if (x.description === '') {
@@ -522,12 +529,12 @@ export class EventLatencySliceDetailsPanel extends BottomTab<GenericSliceDetails
           GridLayout,
           m(
             GridLayoutColumn,
-            renderDetails(slice),
+            renderDetails(this.trace, slice),
             hasArgs(slice.args) &&
               m(
                 Section,
                 {title: 'Arguments'},
-                m(Tree, renderArguments(this.engine, slice.args)),
+                m(Tree, renderArguments(this.trace, slice.args)),
               ),
           ),
           m(GridLayoutColumn, rightSideWidgets),

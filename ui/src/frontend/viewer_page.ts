@@ -12,39 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {hex} from 'color-convert';
 import m from 'mithril';
-
+import {removeFalsyValues} from '../base/array_utils';
+import {canvasClip, canvasSave} from '../base/canvas_utils';
 import {findRef, toHTMLElement} from '../base/dom_utils';
+import {Size2D} from '../base/geom';
+import {assertExists} from '../base/logging';
 import {clamp} from '../base/math_utils';
-import {Time} from '../base/time';
-import {Actions} from '../common/actions';
-import {TrackCacheEntry} from '../common/track_cache';
+import {Time, TimeSpan} from '../base/time';
+import {TimeScale} from '../base/time_scale';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
-import {TrackTags} from '../public';
-
-import {TRACK_SHELL_WIDTH} from './css_constants';
+import {TrackNode} from '../public/workspace';
+import {EmptyState} from '../widgets/empty_state';
+import {TRACK_BORDER_COLOR, TRACK_SHELL_WIDTH} from './css_constants';
+import {renderFlows} from './flow_events_renderer';
 import {globals} from './globals';
+import {generateTicks, getMaxMajorTicks, TickType} from './gridline_helper';
 import {NotesPanel} from './notes_panel';
 import {OverviewTimelinePanel} from './overview_timeline_panel';
-import {createPage} from './pages';
 import {PanAndZoomHandler} from './pan_and_zoom_handler';
-import {Panel, PanelContainer, PanelOrGroup} from './panel_container';
+import {
+  PanelContainer,
+  PanelOrGroup,
+  RenderedPanelInfo,
+} from './panel_container';
 import {publishShowPanningHint} from './publish';
 import {TabPanel} from './tab_panel';
 import {TickmarkPanel} from './tickmark_panel';
 import {TimeAxisPanel} from './time_axis_panel';
 import {TimeSelectionPanel} from './time_selection_panel';
 import {DISMISSED_PANNING_HINT_KEY} from './topbar';
-import {TrackGroupPanel} from './track_group_panel';
-import {TrackPanel, getTitleFontSize} from './track_panel';
-import {assertExists} from '../base/logging';
-import {PxSpan, TimeScale} from './time_scale';
-import {TrackGroupState} from '../common/state';
-import {FuzzyFinder, fuzzyMatch, FuzzySegment} from '../base/fuzzy';
-import {exists} from '../base/utils';
-import {EmptyState} from '../widgets/empty_state';
-import {removeFalsyValues} from '../base/array_utils';
+import {TrackPanel} from './track_panel';
+import {drawVerticalLineAtTime} from './vertical_line_helper';
+import {PageWithTraceAttrs} from './pages';
 
 const OVERVIEW_PANEL_FLAG = featureFlags.register({
   id: 'overviewVisible',
@@ -59,7 +61,7 @@ function onTimeRangeBoundary(
   timescale: TimeScale,
   mousePos: number,
 ): 'START' | 'END' | null {
-  const selection = globals.state.selection;
+  const selection = globals.selectionManager.selection;
   if (selection.kind === 'area') {
     // If frontend selectedArea exists then we are in the process of editing the
     // time range and need to use that value instead.
@@ -84,7 +86,7 @@ function onTimeRangeBoundary(
  * Top-most level component for the viewer page. Holds tracks, brush timeline,
  * panels, and everything else that's part of the main trace viewer page.
  */
-class TraceViewer implements m.ClassComponent {
+export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
   private zoomContent?: PanAndZoomHandler;
   // Used to prevent global deselection if a pan/drag select occurred.
   private keepCurrentSelection = false;
@@ -93,12 +95,16 @@ class TraceViewer implements m.ClassComponent {
   private timeAxisPanel = new TimeAxisPanel();
   private timeSelectionPanel = new TimeSelectionPanel();
   private notesPanel = new NotesPanel();
-  private tickmarkPanel = new TickmarkPanel();
+  private tickmarkPanel: TickmarkPanel;
   private timelineWidthPx?: number;
 
   private readonly PAN_ZOOM_CONTENT_REF = 'pan-and-zoom-content';
 
-  oncreate(vnode: m.CVnodeDOM) {
+  constructor(vnode: m.CVnode<PageWithTraceAttrs>) {
+    this.tickmarkPanel = new TickmarkPanel(vnode.attrs.trace);
+  }
+
+  oncreate(vnode: m.CVnodeDOM<PageWithTraceAttrs>) {
     const panZoomElRaw = findRef(vnode.dom, this.PAN_ZOOM_CONTENT_REF);
     const panZoomEl = toHTMLElement(assertExists(panZoomElRaw));
 
@@ -110,10 +116,10 @@ class TraceViewer implements m.ClassComponent {
         if (this.timelineWidthPx === undefined) return;
 
         this.keepCurrentSelection = true;
-        const timescale = new TimeScale(
-          timeline.visibleWindow,
-          new PxSpan(0, this.timelineWidthPx),
-        );
+        const timescale = new TimeScale(timeline.visibleWindow, {
+          left: 0,
+          right: this.timelineWidthPx,
+        });
         const tDelta = timescale.pxToDuration(pannedPx);
         timeline.panVisibleWindow(tDelta);
 
@@ -133,10 +139,10 @@ class TraceViewer implements m.ClassComponent {
       },
       editSelection: (currentPx: number) => {
         if (this.timelineWidthPx === undefined) return false;
-        const timescale = new TimeScale(
-          globals.timeline.visibleWindow,
-          new PxSpan(0, this.timelineWidthPx),
-        );
+        const timescale = new TimeScale(globals.timeline.visibleWindow, {
+          left: 0,
+          right: this.timelineWidthPx,
+        });
         return onTimeRangeBoundary(timescale, currentPx) !== null;
       },
       onSelection: (
@@ -158,13 +164,13 @@ class TraceViewer implements m.ClassComponent {
         const timespan = visibleWindow.toTimeSpan();
         this.keepCurrentSelection = true;
 
-        const timescale = new TimeScale(
-          timeline.visibleWindow,
-          new PxSpan(0, this.timelineWidthPx),
-        );
+        const timescale = new TimeScale(timeline.visibleWindow, {
+          left: 0,
+          right: this.timelineWidthPx,
+        });
 
         if (editing) {
-          const selection = globals.state.selection;
+          const selection = globals.selectionManager.selection;
           if (selection.kind === 'area') {
             const area = globals.timeline.selectedArea
               ? globals.timeline.selectedArea
@@ -187,7 +193,7 @@ class TraceViewer implements m.ClassComponent {
             timeline.selectArea(
               Time.max(Time.min(keepTime, newTime), traceTime.start),
               Time.min(Time.max(keepTime, newTime), traceTime.end),
-              selection.tracks,
+              selection.trackUris,
             );
           }
         } else {
@@ -213,12 +219,12 @@ class TraceViewer implements m.ClassComponent {
         // If we are editing we need to pass the current id through to ensure
         // the marked area with that id is also updated.
         if (edit) {
-          const selection = globals.state.selection;
+          const selection = globals.selectionManager.selection;
           if (selection.kind === 'area' && area) {
-            globals.dispatch(Actions.selectArea({...area}));
+            globals.selectionManager.selectArea({...area});
           }
         } else if (area) {
-          globals.makeSelection(Actions.selectArea({...area}));
+          globals.selectionManager.selectArea({...area});
         }
         // Now the selection has ended we stored the final selected area in the
         // global state and can remove the in progress selection from the
@@ -235,7 +241,7 @@ class TraceViewer implements m.ClassComponent {
   }
 
   view() {
-    const scrollingPanels = renderToplevelPanels(globals.state.trackFilterTerm);
+    const scrollingPanels = renderToplevelPanels();
 
     const result = m(
       '.page.viewer-page',
@@ -249,7 +255,7 @@ class TraceViewer implements m.ClassComponent {
               this.keepCurrentSelection = false;
               return;
             }
-            globals.clearSelection();
+            globals.selectionManager.clear();
           },
         },
         m(
@@ -268,19 +274,27 @@ class TraceViewer implements m.ClassComponent {
         ),
         m(PanelContainer, {
           className: 'pinned-panel-container',
-          panels: globals.state.pinnedTracks.map((key) => {
-            const trackBundle = resolveTrack(key);
-            return new TrackPanel({
-              trackKey: key,
-              title: trackBundle.title,
-              tags: trackBundle.tags,
-              trackFSM: trackBundle.trackFSM,
-              revealOnCreate: true,
-              closeable: trackBundle.closeable,
-              chips: trackBundle.chips,
-              pluginId: trackBundle.pluginId,
-            });
+          panels: globals.workspace.pinnedTracks.map((trackNode) => {
+            if (trackNode.uri) {
+              const tr = globals.trackManager.getTrackRenderer(trackNode.uri);
+              return new TrackPanel({
+                node: trackNode,
+                trackRenderer: tr,
+                revealOnCreate: true,
+                indentationLevel: 0,
+                topOffsetPx: 0,
+              });
+            } else {
+              return new TrackPanel({
+                node: trackNode,
+                revealOnCreate: true,
+                indentationLevel: 0,
+                topOffsetPx: 0,
+              });
+            }
           }),
+          renderUnderlay,
+          renderOverlay,
         }),
         scrollingPanels.length === 0 &&
           filterTermIsValid(globals.state.trackFilterTerm)
@@ -296,6 +310,8 @@ class TraceViewer implements m.ClassComponent {
                 const timelineWidth = width - TRACK_SHELL_WIDTH;
                 this.timelineWidthPx = timelineWidth;
               },
+              renderUnderlay,
+              renderOverlay,
             }),
       ),
       m(TabPanel),
@@ -306,11 +322,49 @@ class TraceViewer implements m.ClassComponent {
   }
 }
 
-// Given a set of fuzzy matched results, render the matching segments in bold
-function renderFuzzyMatchedTrackTitle(title: FuzzySegment[]): m.Children {
-  return title.map(({matching, value}) => {
-    return matching ? m('b', value) : value;
-  });
+function renderUnderlay(
+  ctx: CanvasRenderingContext2D,
+  canvasSize: Size2D,
+): void {
+  const size = {
+    width: canvasSize.width - TRACK_SHELL_WIDTH,
+    height: canvasSize.height,
+  };
+
+  using _ = canvasSave(ctx);
+  ctx.translate(TRACK_SHELL_WIDTH, 0);
+
+  const timewindow = globals.timeline.visibleWindow;
+  const timescale = new TimeScale(timewindow, {left: 0, right: size.width});
+
+  // Just render the gridlines - these should appear underneath all tracks
+  drawGridLines(ctx, timewindow.toTimeSpan(), timescale, size);
+}
+
+function renderOverlay(
+  ctx: CanvasRenderingContext2D,
+  canvasSize: Size2D,
+  panels: ReadonlyArray<RenderedPanelInfo>,
+): void {
+  const size = {
+    width: canvasSize.width - TRACK_SHELL_WIDTH,
+    height: canvasSize.height,
+  };
+
+  using _ = canvasSave(ctx);
+  ctx.translate(TRACK_SHELL_WIDTH, 0);
+  canvasClip(ctx, 0, 0, size.width, size.height);
+
+  // TODO(primiano): plumb the TraceImpl obj throughout the viwer page.
+  renderFlows(globals.trace, ctx, size, panels);
+
+  const timewindow = globals.timeline.visibleWindow;
+  const timescale = new TimeScale(timewindow, {left: 0, right: size.width});
+
+  renderHoveredNoteVertical(ctx, timescale, size);
+  renderHoveredCursorVertical(ctx, timescale, size);
+  renderWakeupVertical(ctx, timescale, size);
+  renderNoteVerticals(ctx, timescale, size);
 }
 
 function filterTermIsValid(
@@ -320,172 +374,169 @@ function filterTermIsValid(
   return filterTerm !== undefined && filterTerm !== '';
 }
 
-// Split filter term on commas into a list of tokens, cleaning up any whitespace
-// before and after the token and removing any blank tokens
-function tokenizeFilterTerm(term: string): ReadonlyArray<string> {
-  return term
-    .split(',')
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-}
-
 // Render the toplevel "scrolling" tracks and track groups
-function renderToplevelPanels(filterTerm: string | undefined): PanelOrGroup[] {
-  const scrollingPanels: PanelOrGroup[] = renderTrackPanels(
-    globals.state.scrollingTracks,
-    filterTerm,
-  );
-
-  for (const group of Object.values(globals.state.trackGroups)) {
-    if (filterTermIsValid(filterTerm)) {
-      const tokens = tokenizeFilterTerm(filterTerm);
-      // Match group names that match any of the tokens
-      const result = fuzzyMatch(group.name, ...tokens);
-      if (result.matches) {
-        // If the group name matches, render the entire group as normal
-        const title = renderFuzzyMatchedTrackTitle(result.segments);
-        scrollingPanels.push({
-          kind: 'group',
-          collapsed: group.collapsed,
-          childPanels: group.collapsed ? [] : renderTrackPanels(group.tracks),
-          header: renderTrackGroupPanel(group, true, group.collapsed, title),
-        });
-      } else {
-        // If we are filtering, render the group header only if it contains
-        // matching tracks
-        const childPanels = renderTrackPanels(group.tracks, filterTerm);
-        if (childPanels.length === 0) continue;
-        scrollingPanels.push({
-          kind: 'group',
-          collapsed: false,
-          childPanels,
-          header: renderTrackGroupPanel(group, false, false),
-        });
-      }
-    } else {
-      // Always render the group header, but only render child tracks if not
-      // collapsed
-      scrollingPanels.push({
-        kind: 'group',
-        collapsed: group.collapsed,
-        childPanels: group.collapsed ? [] : renderTrackPanels(group.tracks),
-        header: renderTrackGroupPanel(group, true, group.collapsed),
-      });
-    }
-  }
-
-  return scrollingPanels;
+function renderToplevelPanels(): PanelOrGroup[] {
+  return renderNodes(globals.workspace.children, 0, 0);
 }
 
 // Given a list of tracks and a filter term, return a list pf panels filtered by
 // the filter term
-function renderTrackPanels(trackKeys: string[], filterTerm?: string): Panel[] {
-  if (filterTermIsValid(filterTerm)) {
-    const tokens = tokenizeFilterTerm(filterTerm);
-    const matcher = new FuzzyFinder(trackKeys, (key) => {
-      return globals.state.tracks[key].name;
-    });
-    // Filter tracks which match any of the tokens
-    const filtered = matcher.find(...tokens);
-    return filtered.map(({item: key, segments}) => {
-      return renderTrackPanel(key, renderFuzzyMatchedTrackTitle(segments));
-    });
-  } else {
-    // No point in applying any filtering...
-    return trackKeys.map((key) => {
-      return renderTrackPanel(key);
-    });
-  }
-}
-
-function renderTrackPanel(key: string, title?: m.Children) {
-  const trackBundle = resolveTrack(key);
-  return new TrackPanel({
-    trackKey: key,
-    title: m(
-      'span',
-      {
-        style: {
-          'font-size': getTitleFontSize(trackBundle.title),
-        },
-      },
-      Boolean(title) ? title : trackBundle.title,
-    ),
-    tags: trackBundle.tags,
-    trackFSM: trackBundle.trackFSM,
-    closeable: trackBundle.closeable,
-    chips: trackBundle.chips,
-    pluginId: trackBundle.pluginId,
+function renderNodes(
+  nodes: ReadonlyArray<TrackNode>,
+  indent: number,
+  topOffsetPx: number,
+): PanelOrGroup[] {
+  return nodes.flatMap((node) => {
+    if (node.headless) {
+      // Render children as if this node doesn't exist
+      return renderNodes(node.children, indent, topOffsetPx);
+    } else if (node.children.length === 0) {
+      return renderTrackPanel(node, indent, topOffsetPx);
+    } else {
+      const headerPanel = renderTrackPanel(node, indent, topOffsetPx);
+      const isSticky = node.isSummary;
+      const nextTopOffsetPx = isSticky
+        ? topOffsetPx + headerPanel.heightPx ?? 0
+        : topOffsetPx;
+      return {
+        kind: 'group',
+        collapsed: node.collapsed,
+        header: headerPanel,
+        sticky: isSticky, // && node.collapsed??
+        topOffsetPx,
+        childPanels: node.collapsed
+          ? []
+          : renderNodes(node.children, indent + 1, nextTopOffsetPx),
+      };
+    }
   });
 }
 
-function renderTrackGroupPanel(
-  group: TrackGroupState,
-  collapsable: boolean,
-  collapsed: boolean,
-  title?: m.Children,
-): TrackGroupPanel {
-  const summaryTrackKey = group.summaryTrack;
+function renderTrackPanel(
+  trackNode: TrackNode,
+  indent: number,
+  topOffsetPx: number,
+) {
+  let tr = undefined;
+  if (trackNode.uri) {
+    tr = globals.trackManager.getTrackRenderer(trackNode.uri);
+  }
+  return new TrackPanel({
+    node: trackNode,
+    trackRenderer: tr,
+    indentationLevel: indent,
+    topOffsetPx,
+  });
+}
 
-  if (exists(summaryTrackKey)) {
-    const trackBundle = resolveTrack(summaryTrackKey);
-    return new TrackGroupPanel({
-      groupKey: group.key,
-      trackFSM: trackBundle.trackFSM,
-      subtitle: trackBundle.subtitle,
-      tags: trackBundle.tags,
-      chips: trackBundle.chips,
-      collapsed,
-      title: exists(title) ? title : group.name,
-      tooltip: group.name,
-      collapsable,
-    });
-  } else {
-    return new TrackGroupPanel({
-      groupKey: group.key,
-      collapsed,
-      title: exists(title) ? title : group.name,
-      tooltip: group.name,
-      collapsable,
-    });
+export function drawGridLines(
+  ctx: CanvasRenderingContext2D,
+  timespan: TimeSpan,
+  timescale: TimeScale,
+  size: Size2D,
+): void {
+  ctx.strokeStyle = TRACK_BORDER_COLOR;
+  ctx.lineWidth = 1;
+
+  if (size.width > 0 && timespan.duration > 0n) {
+    const maxMajorTicks = getMaxMajorTicks(size.width);
+    const offset = globals.trace.timeline.timestampOffset();
+    for (const {type, time} of generateTicks(timespan, maxMajorTicks, offset)) {
+      const px = Math.floor(timescale.timeToPx(time));
+      if (type === TickType.MAJOR) {
+        ctx.beginPath();
+        ctx.moveTo(px + 0.5, 0);
+        ctx.lineTo(px + 0.5, size.height);
+        ctx.stroke();
+      }
+    }
   }
 }
 
-// Resolve a track and its metadata through the track cache
-function resolveTrack(key: string): TrackBundle {
-  const trackState = globals.state.tracks[key];
-  const {uri, name, closeable} = trackState;
-  const trackDesc = globals.trackManager.resolveTrackInfo(uri);
-  const trackCacheEntry =
-    trackDesc && globals.trackManager.resolveTrack(key, trackDesc);
-  const trackFSM = trackCacheEntry;
-  const tags = trackCacheEntry?.desc.tags;
-  const subtitle = trackCacheEntry?.desc.subtitle;
-  const chips = trackCacheEntry?.desc.chips;
-  const plugin = trackCacheEntry?.desc.pluginId;
-  return {
-    title: name,
-    subtitle,
-    closeable: closeable ?? false,
-    tags,
-    trackFSM,
-    chips,
-    pluginId: plugin,
-  };
+export function renderHoveredCursorVertical(
+  ctx: CanvasRenderingContext2D,
+  timescale: TimeScale,
+  size: Size2D,
+) {
+  if (globals.trace.timeline.hoverCursorTimestamp !== undefined) {
+    drawVerticalLineAtTime(
+      ctx,
+      timescale,
+      globals.trace.timeline.hoverCursorTimestamp,
+      size.height,
+      `#344596`,
+    );
+  }
 }
 
-interface TrackBundle {
-  readonly title: string;
-  readonly subtitle?: string;
-  readonly closeable: boolean;
-  readonly trackFSM?: TrackCacheEntry;
-  readonly tags?: TrackTags;
-  readonly chips?: ReadonlyArray<string>;
-  readonly pluginId?: string;
+export function renderHoveredNoteVertical(
+  ctx: CanvasRenderingContext2D,
+  timescale: TimeScale,
+  size: Size2D,
+) {
+  if (globals.state.hoveredNoteTimestamp !== -1n) {
+    drawVerticalLineAtTime(
+      ctx,
+      timescale,
+      globals.state.hoveredNoteTimestamp,
+      size.height,
+      `#aaa`,
+    );
+  }
 }
 
-export const ViewerPage = createPage({
-  view() {
-    return m(TraceViewer);
-  },
-});
+export function renderWakeupVertical(
+  ctx: CanvasRenderingContext2D,
+  timescale: TimeScale,
+  size: Size2D,
+) {
+  const selection = globals.selectionManager.selection;
+  if (selection.kind === 'track_event' && selection.wakeupTs) {
+    drawVerticalLineAtTime(
+      ctx,
+      timescale,
+      selection.wakeupTs,
+      size.height,
+      `black`,
+    );
+  }
+}
+
+export function renderNoteVerticals(
+  ctx: CanvasRenderingContext2D,
+  timescale: TimeScale,
+  size: Size2D,
+) {
+  // All marked areas should have semi-transparent vertical lines
+  // marking the start and end.
+  for (const note of globals.noteManager.notes.values()) {
+    if (note.noteType === 'SPAN') {
+      const transparentNoteColor =
+        'rgba(' + hex.rgb(note.color.substr(1)).toString() + ', 0.65)';
+      drawVerticalLineAtTime(
+        ctx,
+        timescale,
+        note.start,
+        size.height,
+        transparentNoteColor,
+        1,
+      );
+      drawVerticalLineAtTime(
+        ctx,
+        timescale,
+        note.end,
+        size.height,
+        transparentNoteColor,
+        1,
+      );
+    } else if (note.noteType === 'DEFAULT') {
+      drawVerticalLineAtTime(
+        ctx,
+        timescale,
+        note.timestamp,
+        size.height,
+        note.color,
+      );
+    }
+  }
+}

@@ -16,7 +16,6 @@ import {Engine} from '../engine';
 import {NUM, NUM_NULL, STR_NULL} from '../query_result';
 import {fromNumNull} from '../sql_utils';
 import {ProcessInfo, getProcessInfo, getProcessName} from './process';
-
 import {Upid, Utid} from './core_types';
 
 // TODO(altimin): We should consider implementing some form of cache rather than querying
@@ -64,7 +63,10 @@ function getDisplayName(
   return id === undefined ? name : `${name} [${id}]`;
 }
 
-export function getThreadName(info?: ThreadInfo): string | undefined {
+export function getThreadName(info?: {
+  name?: string;
+  tid?: number;
+}): string | undefined {
   return getDisplayName(info?.name, info?.tid);
 }
 

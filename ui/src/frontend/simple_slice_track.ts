@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Engine, TrackContext} from '../public';
+import {TrackContext} from '../public/track';
 import {
   CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
 } from './tracks/custom_sql_table_slice_track';
-import {SliceColumns, SqlDataSource} from './debug_tracks/debug_tracks';
+import {
+  SliceColumns,
+  SqlDataSource,
+} from '../public/lib/debug_tracks/debug_tracks';
 import {uuidv4Sql} from '../base/uuid';
-import {ARG_PREFIX, DebugSliceDetailsTab} from './debug_tracks/details_tab';
+import {
+  ARG_PREFIX,
+  DebugSliceDetailsTab,
+} from '../public/lib/debug_tracks/details_tab';
 import {createPerfettoTable} from '../trace_processor/sql_utils';
+import {Trace} from '../public/trace';
 
 export interface SimpleSliceTrackConfig {
   data: SqlDataSource;
@@ -33,18 +40,14 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack {
   private config: SimpleSliceTrackConfig;
   private sqlTableName: string;
 
-  constructor(
-    engine: Engine,
-    ctx: TrackContext,
-    config: SimpleSliceTrackConfig,
-  ) {
+  constructor(trace: Trace, ctx: TrackContext, config: SimpleSliceTrackConfig) {
     super({
-      engine,
-      trackKey: ctx.trackKey,
+      trace,
+      uri: ctx.trackUri,
     });
 
     this.config = config;
-    this.sqlTableName = `__simple_slice_${uuidv4Sql(ctx.trackKey)}`;
+    this.sqlTableName = `__simple_slice_${uuidv4Sql(ctx.trackUri)}`;
   }
 
   async getSqlDataSource(): Promise<CustomSqlTableDefConfig> {

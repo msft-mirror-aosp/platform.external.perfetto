@@ -13,11 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {time, Time} from '../../base/time';
-import {Actions} from '../../common/actions';
 import {
   setTimestampFormat,
   TimestampFormat,
@@ -50,12 +48,10 @@ export class Timestamp implements m.ClassComponent<TimestampAttrs> {
           Anchor,
           {
             onmouseover: () => {
-              globals.dispatch(Actions.setHoverCursorTimestamp({ts}));
+              globals.trace.timeline.hoverCursorTimestamp = ts;
             },
             onmouseout: () => {
-              globals.dispatch(
-                Actions.setHoverCursorTimestamp({ts: Time.INVALID}),
-              );
+              globals.trace.timeline.hoverCursorTimestamp = undefined;
             },
           },
           attrs.display ?? renderTimestamp(ts),
@@ -77,9 +73,11 @@ export class Timestamp implements m.ClassComponent<TimestampAttrs> {
         menuItemForFormat(TimestampFormat.UTC, 'Realtime (UTC)'),
         menuItemForFormat(TimestampFormat.TraceTz, 'Realtime (Trace TZ)'),
         menuItemForFormat(TimestampFormat.Seconds, 'Seconds'),
-        menuItemForFormat(TimestampFormat.Raw, 'Raw'),
+        menuItemForFormat(TimestampFormat.Milliseoncds, 'Milliseconds'),
+        menuItemForFormat(TimestampFormat.Microseconds, 'Microseconds'),
+        menuItemForFormat(TimestampFormat.TraceNs, 'Raw'),
         menuItemForFormat(
-          TimestampFormat.RawLocale,
+          TimestampFormat.TraceNsLocale,
           'Raw (with locale-specific formatting)',
         ),
       ),
@@ -104,18 +102,22 @@ export function menuItemForFormat(
 
 function renderTimestamp(time: time): m.Children {
   const fmt = timestampFormat();
-  const domainTime = globals.toDomainTime(time);
+  const domainTime = globals.trace.timeline.toDomainTime(time);
   switch (fmt) {
     case TimestampFormat.UTC:
     case TimestampFormat.TraceTz:
     case TimestampFormat.Timecode:
       return renderTimecode(domainTime);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return domainTime.toString();
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return domainTime.toLocaleString();
     case TimestampFormat.Seconds:
       return Time.formatSeconds(domainTime);
+    case TimestampFormat.Milliseoncds:
+      return Time.formatMilliseconds(domainTime);
+    case TimestampFormat.Microseconds:
+      return Time.formatMicroseconds(domainTime);
     default:
       const x: never = fmt;
       throw new Error(`Invalid timestamp ${x}`);

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {SqlValue} from '../../../../trace_processor/query_result';
-import {Engine} from '../../../../public';
 import {SortDirection} from '../../../../base/comparison_utils';
 import {arrayEquals} from '../../../../base/array_utils';
+import {Trace} from '../../../../public/trace';
 
 // We are dealing with two types of columns here:
 // - Column, which is shown to a user in table (high-level, ColumnTable).
@@ -30,6 +29,10 @@ import {arrayEquals} from '../../../../base/array_utils';
 export type SourceTable = {
   table: string;
   joinOn: {[key: string]: SqlColumn};
+  // Whether more performant 'INNER JOIN' can be used instead of 'LEFT JOIN'.
+  // Special care should be taken to ensure that a) all rows exist in a target table, and b) the source is not null, otherwise the rows will be filtered out.
+  // false by default.
+  innerJoin?: boolean;
 };
 
 // A column in the SQL query. It can be either a column from a base table or a "lookup" column from a joined table.
@@ -40,18 +43,41 @@ export type SqlColumn =
       source: SourceTable;
     };
 
+// List of columns of args, corresponding to arg values, which cause a short-form of the ID to be generated.
+// (e.g. arg_set_id[foo].int instead of args[arg_set_id,key=foo].int_value).
+const ARG_COLUMN_TO_SUFFIX: {[key: string]: string} = {
+  display_value: '',
+  int_value: '.int',
+  string_value: '.str',
+  real_value: '.real',
+};
+
 // A unique identifier for the SQL column.
-export function sqlColumnId(column: SqlColumn) {
+export function sqlColumnId(column: SqlColumn): string {
   if (typeof column === 'string') {
     return column;
   }
-  // If the join is performed on a single column `id`, we can use a simpler representation (i.e. `table[id].column`).
+  // Special case: If the join is performed on a single column `id`, we can use a simpler representation (i.e. `table[id].column`).
   if (arrayEquals(Object.keys(column.source.joinOn), ['id'])) {
-    return `${column.source.table}[${Object.values(column.source.joinOn)[0]}].${column.column}`;
+    return `${column.source.table}[${sqlColumnId(Object.values(column.source.joinOn)[0])}].${column.column}`;
+  }
+  // Special case: args lookup. For it, we can use a simpler representation (i.e. `arg_set_id[key]`).
+  if (
+    column.column in ARG_COLUMN_TO_SUFFIX &&
+    column.source.table === 'args' &&
+    arrayEquals(Object.keys(column.source.joinOn).sort(), ['arg_set_id', 'key'])
+  ) {
+    const key = column.source.joinOn['key'];
+    const argSetId = column.source.joinOn['arg_set_id'];
+    return `${sqlColumnId(argSetId)}[${sqlColumnId(key)}]${ARG_COLUMN_TO_SUFFIX[column.column]}`;
   }
   // Otherwise, we need to list all the join constraints.
   const lookup = Object.entries(column.source.joinOn)
-    .map(([key, value]): string => `${key}=${sqlColumnId(value)}`)
+    .map(([key, value]): string => {
+      const valueStr = sqlColumnId(value);
+      if (key === valueStr) return key;
+      return `${key}=${sqlColumnId(value)}`;
+    })
     .join(', ');
   return `${column.source.table}[${lookup}].${column.column}`;
 }
@@ -71,7 +97,7 @@ function sqlColumnName(column: SqlColumn): string {
 export interface TableManager {
   addFilter(filter: Filter): void;
 
-  engine: Engine;
+  trace: Trace;
   getSqlQuery(data: {[key: string]: SqlColumn}): string;
 }
 
@@ -82,6 +108,10 @@ export interface TableColumnParams {
   alias?: string;
   // See TableColumn.startsHidden.
   startsHidden?: boolean;
+}
+
+export interface AggregationConfig {
+  dataType?: 'nominal' | 'quantitative';
 }
 
 // Class which represents a column in a table, which can be displayed to the user.
@@ -116,12 +146,20 @@ export abstract class TableColumn {
   // Sometimes to display an interactive cell more than a single value is needed (e.g. "time range" corresponds to (ts, dur) pair. While we want to show the duration, we would want to highlight the interval on hover, for which both timestamp and duration are needed.
   dependentColumns?(): {[key: string]: SqlColumn};
 
+  // The set of underlying sql columns that should be sorted when this column is sorted.
+  sortColumns?(): SqlColumn[];
+
   // Render a table cell. `value` corresponds to the fetched SQL value for the primary column, `dependentColumns` are the fetched values for the dependent columns.
   abstract renderCell(
     value: SqlValue,
     tableManager: TableManager,
     dependentColumns: {[key: string]: SqlValue},
   ): m.Children;
+
+  // Specifies how this column should be aggregated. If not set, then all
+  // numeric columns will be treated as quantitative, and all other columns as
+  // nominal.
+  aggregation?(): AggregationConfig;
 }
 
 // Returns a unique identifier for the table column.
@@ -152,8 +190,7 @@ export abstract class TableColumnSet {
   abstract discover(manager: TableManager): Promise<
     {
       key: string;
-      // TODO(altimin): This probably should allow returning TableColumnSet as well.
-      column: TableColumn;
+      column: TableColumn | TableColumnSet;
     }[]
   >;
 }

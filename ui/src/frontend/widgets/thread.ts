@@ -13,27 +13,58 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {copyToClipboard} from '../../base/clipboard';
 import {Icons} from '../../base/semantic_icons';
 import {exists} from '../../base/utils';
-import {addEphemeralTab} from '../../common/addEphemeralTab';
+import {addEphemeralTab} from '../../common/add_ephemeral_tab';
 import {
+  getThreadInfo,
   getThreadName,
   ThreadInfo,
 } from '../../trace_processor/sql_utils/thread';
 import {Anchor} from '../../widgets/anchor';
 import {MenuItem, PopupMenu2} from '../../widgets/menu';
-import {getEngine} from '../get_engine';
 import {ThreadDetailsTab} from '../thread_details_tab';
+import {
+  createSqlIdRefRenderer,
+  sqlIdRegistry,
+} from './sql/details/sql_ref_renderer_registry';
+import {asUtid} from '../../trace_processor/sql_utils/core_types';
+import {Utid} from '../../trace_processor/sql_utils/core_types';
+import {AppImpl} from '../../core/app_impl';
 
-export function renderThreadRef(info: ThreadInfo): m.Children {
-  const name = info.name;
-  return m(
-    PopupMenu2,
-    {
-      trigger: m(Anchor, getThreadName(info)),
+export function showThreadDetailsMenuItem(
+  utid: Utid,
+  tid?: number,
+): m.Children {
+  return m(MenuItem, {
+    icon: Icons.ExternalLink,
+    label: 'Show thread details',
+    onclick: () => {
+      // TODO(primiano): `trace` should be injected, but doing so would require
+      // an invasive refactoring of most classes in frontend/widgets/sql/*.
+      const trace = AppImpl.instance.trace;
+      if (trace === undefined) return;
+      addEphemeralTab(
+        'threadDetails',
+        new ThreadDetailsTab({
+          trace,
+          utid,
+          tid,
+        }),
+      );
     },
+  });
+}
+
+export function threadRefMenuItems(info: {
+  utid: Utid;
+  name?: string;
+  tid?: number;
+}): m.Children {
+  // We capture a copy to be able to pass it across async boundary to `onclick`.
+  const name = info.name;
+  return [
     exists(name) &&
       m(MenuItem, {
         icon: Icons.Copy,
@@ -51,18 +82,27 @@ export function renderThreadRef(info: ThreadInfo): m.Children {
       label: 'Copy utid',
       onclick: () => copyToClipboard(`${info.utid}`),
     }),
-    m(MenuItem, {
-      icon: Icons.ExternalLink,
-      label: 'Show thread details',
-      onclick: () =>
-        addEphemeralTab(
-          'threadDetails',
-          new ThreadDetailsTab({
-            engine: getEngine('ThreadDetails'),
-            utid: info.utid,
-            tid: info.tid,
-          }),
-        ),
-    }),
+    showThreadDetailsMenuItem(info.utid, info.tid),
+  ];
+}
+
+export function renderThreadRef(info: {
+  utid: Utid;
+  name?: string;
+  tid?: number;
+}): m.Children {
+  return m(
+    PopupMenu2,
+    {
+      trigger: m(Anchor, getThreadName(info)),
+    },
+    threadRefMenuItems(info),
   );
 }
+
+sqlIdRegistry['thread'] = createSqlIdRefRenderer<ThreadInfo>(
+  async (engine, id) => await getThreadInfo(engine, asUtid(Number(id))),
+  (data: ThreadInfo) => ({
+    value: renderThreadRef(data),
+  }),
+);

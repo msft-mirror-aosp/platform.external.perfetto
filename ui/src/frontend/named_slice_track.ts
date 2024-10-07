@@ -13,9 +13,8 @@
 // limitations under the License.
 
 import {getColorForSlice} from '../core/colorizer';
-import {Slice} from '../public';
+import {Slice} from '../public/track';
 import {STR_NULL} from '../trace_processor/query_result';
-
 import {
   BASE_ROW,
   BaseSliceTrack,
@@ -24,7 +23,6 @@ import {
   SLICE_FLAGS_INCOMPLETE,
   SLICE_FLAGS_INSTANT,
 } from './base_slice_track';
-import {globals} from './globals';
 import {NewTrackArgs} from './track';
 import {renderDuration} from './widgets/duration';
 
@@ -68,18 +66,6 @@ export abstract class NamedSliceTrack<
   }
 
   onSliceClick(args: OnSliceClickArgs<SliceType>) {
-    globals.setLegacySelection(
-      {
-        kind: 'SLICE',
-        id: args.slice.id,
-        trackKey: this.trackKey,
-        table: 'slice',
-      },
-      {
-        clearSearch: true,
-        pendingScrollId: undefined,
-        switchToCurrentSelectionTab: true,
-      },
-    );
+    this.trace.selection.selectTrackEvent(this.uri, args.slice.id);
   }
 }

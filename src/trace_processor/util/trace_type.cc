@@ -17,13 +17,14 @@
 #include "src/trace_processor/util/trace_type.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/ext/base/string_utils.h"
-#include "perfetto/ext/base/string_view.h"
+#include "perfetto/protozero/proto_utils.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event.h"
 
 #include "protos/perfetto/trace/trace.pbzero.h"
@@ -119,12 +120,16 @@ const char* TraceTypeToString(TraceType trace_type) {
       return "zip";
     case kPerfDataTraceType:
       return "perf";
+    case kInstrumentsXmlTraceType:
+      return "instruments_xml";
     case kAndroidLogcatTraceType:
       return "android_logcat";
     case kAndroidDumpstateTraceType:
       return "android_dumpstate";
     case kAndroidBugreportTraceType:
       return "android_bugreport";
+    case kGeckoTraceType:
+      return "gecko";
     case kUnknownTraceType:
       return "unknown";
   }
@@ -156,6 +161,8 @@ TraceType GuessTraceType(const uint8_t* data, size_t size) {
                     std::min<size_t>(size, kGuessTraceMaxLookahead));
 
   std::string start_minus_white_space = RemoveWhitespace(start);
+  if (base::StartsWith(start_minus_white_space, "{\"meta\""))
+    return kGeckoTraceType;
   if (base::StartsWith(start_minus_white_space, "{\""))
     return kJsonTraceType;
   if (base::StartsWith(start_minus_white_space, "[{\""))
@@ -171,6 +178,10 @@ TraceType GuessTraceType(const uint8_t* data, size_t size) {
   if (base::StartsWith(lower_start, "<!doctype html>") ||
       base::StartsWith(lower_start, "<html>"))
     return kSystraceTraceType;
+
+  // MacOS Instruments XML export.
+  if (base::StartsWith(start, "<?xml version=\"1.0\"?>\n<trace-query-result>"))
+    return kInstrumentsXmlTraceType;
 
   // Traces obtained from atrace -z (compress).
   // They all have the string "TRACE:" followed by 78 9C which is a zlib header

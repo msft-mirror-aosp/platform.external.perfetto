@@ -30,14 +30,17 @@ CREATE PERFETTO FUNCTION _get_frame_table_with_id(
     -- Utid.
     utid INT,
     -- Upid.
-    upid INT
+    upid INT,
+    -- Timestamp of the frame slice.
+    ts INT
 ) AS
 WITH all_found AS (
     SELECT
         id,
         cast_int!(STR_SPLIT(name, ' ', 1)) AS frame_id,
         utid,
-        upid
+        upid,
+        ts
     FROM thread_slice
     -- Mostly the frame slice is at depth 0. Though it could be pushed to depth 1 while users
     -- enable low layer trace e.g. atrace_app.
@@ -57,13 +60,16 @@ CREATE PERFETTO TABLE android_frames_choreographer_do_frame(
     -- Utid of the UI thread
     ui_thread_utid INT,
     -- Upid of application process
-    upid INT
+    upid INT,
+    -- Timestamp of the slice.
+    ts INT
 ) AS
 SELECT
     id,
     frame_id,
     utid AS ui_thread_utid,
-    upid
+    upid,
+    ts
 -- Some OEMs have customized `doFrame` to add more information, but we've only
 -- observed it added after the frame ID (b/303823815).
 FROM _get_frame_table_with_id('Choreographer#doFrame*');
@@ -93,21 +99,24 @@ FROM _get_frame_table_with_id('DrawFrame*');
 -- We are getting the first slice with one frame id.
 CREATE PERFETTO TABLE _distinct_from_actual_timeline_slice AS
 SELECT
-    id,
     cast_int!(name) AS frame_id,
-    ts,
-    dur
+    MIN(id) AS id,
+    MIN(ts) AS ts,
+    MAX(dur) AS dur,
+    MAX(ts + dur) AS ts_end,
+    count() AS count
 FROM actual_frame_timeline_slice
-GROUP BY 2;
+GROUP BY 1;
 
 -- `expected_frame_timeline_slice` returns the same slice on different tracks.
 -- We are getting the first slice with one frame id.
 CREATE PERFETTO TABLE _distinct_from_expected_timeline_slice AS
 SELECT
+    cast_int!(name) AS frame_id,
     id,
-    cast_int!(name) AS frame_id
+    count() AS count
 FROM expected_frame_timeline_slice
-GROUP BY 2;
+GROUP BY 1;
 
 -- All slices related to one frame. Aggregates `Choreographer#doFrame`,
 -- `DrawFrame`, `actual_frame_timeline_slice` and
@@ -135,7 +144,11 @@ CREATE PERFETTO TABLE android_frames(
     -- `utid` of the render thread.
     render_thread_utid INT,
     -- `utid` of the UI thread.
-    ui_thread_utid INT
+    ui_thread_utid INT,
+    -- Count of slices in `actual_frame_timeline_slice` related to this frame.
+    actual_frame_timeline_count INT,
+    -- Count of slices in `expected_frame_timeline_slice` related to this frame.
+    expected_frame_timeline_count INT
 ) AS
 WITH fallback AS MATERIALIZED (
     SELECT
@@ -159,7 +172,9 @@ SELECT
     do_frame.ui_thread_utid,
     "after_28" AS sdk,
     act.id AS actual_frame_timeline_id,
-    exp.id AS expected_frame_timeline_id
+    exp.id AS expected_frame_timeline_id,
+    act.count AS actual_frame_timeline_count,
+    exp.count AS expected_frame_timeline_count
 FROM android_frames_choreographer_do_frame do_frame
 JOIN android_frames_draw_frame draw_frame USING (frame_id, upid)
 JOIN fallback USING (frame_id)
@@ -173,7 +188,9 @@ all_frames AS (
     SELECT
         *,
         NULL AS actual_frame_timeline_id,
-        NULL AS expected_frame_timeline_id
+        NULL AS expected_frame_timeline_id,
+        NULL AS actual_frame_timeline_count,
+        NULL AS expected_frame_timeline_count
     FROM _frames_maxsdk_28
 )
 SELECT
@@ -185,7 +202,9 @@ SELECT
     actual_frame_timeline_id,
     expected_frame_timeline_id,
     render_thread_utid,
-    ui_thread_utid
+    ui_thread_utid,
+    actual_frame_timeline_count,
+    expected_frame_timeline_count
 FROM all_frames
 WHERE sdk = IIF(
     (SELECT COUNT(1) FROM actual_frame_timeline_slice) > 0,
@@ -216,7 +235,17 @@ RETURNS TABLE (
     -- `utid` of the UI thread.
     ui_thread_utid INT
 ) AS
-SELECT * FROM android_frames
+SELECT
+    frame_id,
+    ts,
+    dur,
+    do_frame_id,
+    draw_frame_id,
+    actual_frame_timeline_id,
+    expected_frame_timeline_id,
+    render_thread_utid,
+    ui_thread_utid
+FROM android_frames
 WHERE ts > $ts
 ORDER BY ts
 LIMIT 1;

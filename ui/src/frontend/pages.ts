@@ -13,14 +13,30 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-// Wrap component with common UI elements (nav bar etc).
-export function createPage(
-  component: m.Component<PageAttrs>,
-): m.Component<PageAttrs> {
-  return component;
-}
+import {TraceImpl} from '../core/trace_impl';
+import {AppImpl} from '../core/app_impl';
+import {HomePage} from './home_page';
 
 export interface PageAttrs {
   subpage?: string;
+}
+
+export interface PageWithTraceAttrs extends PageAttrs {
+  trace: TraceImpl;
+}
+
+export function pageWithTrace(
+  component: m.ComponentTypes<PageWithTraceAttrs>,
+): m.Component<PageAttrs> {
+  return {
+    view(vnode: m.Vnode<PageAttrs>) {
+      const trace = AppImpl.instance.trace;
+      if (trace !== undefined) {
+        return m(component, {...vnode.attrs, trace});
+      }
+      // Fallback on homepage if trying to open a page that requires a trace
+      // while no trace is loaded.
+      return m(HomePage);
+    },
+  };
 }

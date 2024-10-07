@@ -340,6 +340,7 @@ enum BuiltinClock {
   BUILTIN_CLOCK_MONOTONIC_RAW = 5;
   BUILTIN_CLOCK_BOOTTIME = 6;
   BUILTIN_CLOCK_TSC = 9;
+  BUILTIN_CLOCK_PERF = 10;
   BUILTIN_CLOCK_MAX_ID = 63;
 
   reserved 7, 8;
@@ -926,7 +927,7 @@ message EtwConfig {
 
 // Begin of protos/perfetto/config/ftrace/ftrace_config.proto
 
-// Next id: 29
+// Next id: 30
 message FtraceConfig {
   // Ftrace events to record, example: "sched/sched_switch".
   repeated string ftrace_events = 1;
@@ -953,9 +954,9 @@ message FtraceConfig {
   // of 50 means that a read pass is triggered as soon as any per-cpu buffer is
   // half-full. Not guaranteed if there are multiple concurrent tracing
   // sessions.
-  // Currently does nothing on Linux kernels below v6.1.
-  // Introduced in: perfetto v43.
-  optional uint32 drain_buffer_percent = 26;
+  // Currently does nothing on Linux kernels below v6.9.
+  // Introduced in: perfetto v48.
+  optional uint32 drain_buffer_percent = 29;
 
   // Configuration for compact encoding of scheduler events. When enabled (and
   // recording the relevant ftrace events), specific high-volume events are
@@ -1145,6 +1146,9 @@ message FtraceConfig {
   // the recording in the kernel.
   // Introduced in: perfetto v43.
   optional bool buffer_size_lower_bound = 27;
+
+  // Previously drain_buffer_percent, perfetto v43-v47.
+  reserved 26;
 }
 
 // End of protos/perfetto/config/ftrace/ftrace_config.proto
@@ -1739,6 +1743,19 @@ message PerfEvents {
   }
 }
 
+// Additional events associated with a leader.
+// Configuration is similar to Timebase event. Because data acquisition is
+// driven by the leader there is no option to configure the clock or the
+// frequency.
+message FollowerEvent {
+  oneof event {
+    PerfEvents.Counter counter = 1;
+    PerfEvents.Tracepoint tracepoint = 2;
+    PerfEvents.RawEvent raw_event = 3;
+  }
+  optional string name = 4;
+}
+
 // End of protos/perfetto/common/perf_events.proto
 
 // Begin of protos/perfetto/config/profiling/perf_event_config.proto
@@ -1759,11 +1776,14 @@ message PerfEvents {
 //     }
 //   }
 //
-// Next id: 19
+// Next id: 20
 message PerfEventConfig {
   // What event to sample on, and how often.
   // Defined in common/perf_events.proto.
   optional PerfEvents.Timebase timebase = 15;
+
+  // Other events associated with the leader described in the timebase.
+  repeated FollowerEvent followers = 19;
 
   // If set, the profiler will sample userspace processes' callstacks at the
   // interval specified by the |timebase|.
@@ -3173,6 +3193,10 @@ message SysStatsConfig {
   // Polls /sys/devices/system/cpu/cpu*/cpuidle/state* every X ms, if non-zero.
   // This is required to be > 10ms to avoid excessive CPU usage.
   optional uint32 cpuidle_period_ms = 13;
+
+  // Polls device-specific GPU frequency info every X ms, if non-zero.
+  // This is required to be > 10ms to avoid excessive CPU usage.
+  optional uint32 gpufreq_period_ms = 14;
 }
 
 // End of protos/perfetto/config/sys_stats/sys_stats_config.proto
@@ -7327,6 +7351,18 @@ message DcvshFreqFtraceEvent {
 
 // End of protos/perfetto/trace/ftrace/dcvsh.proto
 
+// Begin of protos/perfetto/trace/ftrace/devfreq.proto
+
+message DevfreqFrequencyFtraceEvent {
+  optional string dev_name = 1;
+  optional uint64 freq = 2;
+  optional uint64 prev_freq = 3;
+  optional uint64 busy_time = 4;
+  optional uint64 total_time = 5;
+}
+
+// End of protos/perfetto/trace/ftrace/devfreq.proto
+
 // Begin of protos/perfetto/trace/ftrace/dma_fence.proto
 
 message DmaFenceInitFtraceEvent {
@@ -9662,24 +9698,42 @@ message PanelWriteGenericFtraceEvent {
 message SchedSwitchWithCtrsFtraceEvent {
   optional int32 old_pid = 1;
   optional int32 new_pid = 2;
-  optional uint32 cctr = 3;
-  optional uint32 ctr0 = 4;
-  optional uint32 ctr1 = 5;
-  optional uint32 ctr2 = 6;
-  optional uint32 ctr3 = 7;
+  optional uint64 cctr = 3;
+  optional uint64 ctr0 = 4;
+  optional uint64 ctr1 = 5;
+  optional uint64 ctr2 = 6;
+  optional uint64 ctr3 = 7;
   optional uint32 lctr0 = 8;
   optional uint32 lctr1 = 9;
-  optional uint32 ctr4 = 10;
-  optional uint32 ctr5 = 11;
+  optional uint64 ctr4 = 10;
+  optional uint64 ctr5 = 11;
   optional string prev_comm = 12;
   optional int32 prev_pid = 13;
   optional uint32 cyc = 14;
   optional uint32 inst = 15;
   optional uint32 stallbm = 16;
   optional uint32 l3dm = 17;
+  optional int32 next_pid = 18;
+  optional string next_comm = 19;
+  optional int64 prev_state = 20;
+  optional uint64 amu0 = 21;
+  optional uint64 amu1 = 22;
+  optional uint64 amu2 = 23;
 }
 
 // End of protos/perfetto/trace/ftrace/perf_trace_counters.proto
+
+// Begin of protos/perfetto/trace/ftrace/pixel_mm.proto
+
+message PixelMmKswapdWakeFtraceEvent {
+  optional int32 whatever = 1;
+}
+message PixelMmKswapdDoneFtraceEvent {
+  optional uint64 delta_nr_scanned = 1;
+  optional uint64 delta_nr_reclaimed = 2;
+}
+
+// End of protos/perfetto/trace/ftrace/pixel_mm.proto
 
 // Begin of protos/perfetto/trace/ftrace/power.proto
 
@@ -9925,6 +9979,13 @@ message SchedMigrateTaskFtraceEvent {
   optional int32 dest_cpu = 5;
   optional int32 running = 6;
   optional uint32 load = 7;
+}
+message SchedWakeupTaskAttrFtraceEvent {
+  optional int32 pid = 1;
+  optional uint64 cpu_affinity = 2;
+  optional uint64 task_util = 3;
+  optional uint64 uclamp_min = 4;
+  optional uint64 vruntime = 5;
 }
 
 // End of protos/perfetto/trace/ftrace/sched.proto
@@ -11092,6 +11153,10 @@ message FtraceEvent {
     KgslAdrenoCmdbatchSubmittedFtraceEvent kgsl_adreno_cmdbatch_submitted = 535;
     KgslAdrenoCmdbatchSyncFtraceEvent kgsl_adreno_cmdbatch_sync = 536;
     KgslAdrenoCmdbatchRetiredFtraceEvent kgsl_adreno_cmdbatch_retired = 537;
+    PixelMmKswapdWakeFtraceEvent pixel_mm_kswapd_wake = 538;
+    PixelMmKswapdDoneFtraceEvent pixel_mm_kswapd_done = 539;
+    SchedWakeupTaskAttrFtraceEvent sched_wakeup_task_attr = 540;
+    DevfreqFrequencyFtraceEvent devfreq_frequency = 541;
   }
 }
 
@@ -11316,15 +11381,22 @@ message FtraceEventBundle {
   }
   repeated FtraceError error = 8;
 
-  // The timestamp (ftrace clock) of the last event consumed from this per-cpu
-  // kernel buffer prior to starting this bundle. In other words: the last
-  // event in the previous bundle.
+  // Superseded by |previous_bundle_end_timestamp| in perfetto v47+. The
+  // primary difference is that this field tracked the last timestamp read from
+  // the per-cpu buffer, while the newer field tracks events that get
+  // serialised into the trace.
+  // Added in: perfetto v44.
+  optional uint64 last_read_event_timestamp = 9;
+
+  // The timestamp (using ftrace clock) of the last event written into this
+  // data source on this cpu. In other words: the last event in the previous
+  // bundle.
   // Lets the trace processing find an initial timestamp after which ftrace
   // data is known to be valid across all cpus. Of particular importance when
   // the perfetto trace buffer is a ring buffer as well, as the overwriting of
   // oldest bundles can skew the first valid timestamp per cpu significantly.
-  // Added in: perfetto v44.
-  optional uint64 last_read_event_timestamp = 9;
+  // Added in: perfetto v47.
+  optional uint64 previous_bundle_end_timestamp = 10;
 }
 
 enum FtraceClock {
@@ -13344,6 +13416,13 @@ message PerfettoMetatrace {
 
 // Events emitted by the tracing service.
 message TracingServiceEvent {
+  message DataSources {
+    message DataSource {
+      optional string producer_name = 1;
+      optional string data_source_name = 2;
+    }
+    repeated DataSource data_source = 1;
+  }
   oneof event_type {
     // When each of the following booleans are set to true, they report the
     // point in time (through TracePacket's timestamp) where the condition
@@ -13387,6 +13466,14 @@ message TracingServiceEvent {
     // Deprecated since Android U, where --save-for-bugreport uses
     // non-destructive cloning.
     bool seized_for_bugreport = 6;
+
+    // Emitted when not all data sources in all producers reply to a start
+    // request after some time.
+    DataSources slow_starting_data_sources = 7;
+
+    // Emitted when the last flush request has failed. Lists data sources that
+    // did not reply on time.
+    DataSources last_flush_slow_data_sources = 8;
   }
 }
 
@@ -14007,6 +14094,9 @@ message PerfSample {
   // Value of the timebase counter (since the event was configured, no deltas).
   optional uint64 timebase_count = 6;
 
+  // Value of the followers counter (since the event was configured, no deltas).
+  repeated uint64 follower_counts = 7;
+
   // Unwound callstack. Might be partial, in which case a synthetic "error"
   // frame is appended, and |unwind_error| is set accordingly.
   optional uint64 callstack_iid = 4;
@@ -14059,6 +14149,9 @@ message PerfSampleDefaults {
   // The sampling timebase. Might not be identical to the data source config if
   // the implementation decided to default/override some parameters.
   optional PerfEvents.Timebase timebase = 1;
+
+  // Description of followers event
+  repeated FollowerEvent followers = 4;
 
   // If the config requested process sharding, report back the count and which
   // of those bins was selected. Never changes for the duration of a trace.
@@ -14466,7 +14559,11 @@ message SysStats {
     repeated CpuIdleStateEntry cpuidle_state_entry = 2;
   }
   repeated CpuIdleState cpuidle_state = 16;
+
+  // Read GPU frequency info on Intel/AMD devices.
+  repeated uint64 gpufreq_mhz = 17;
 }
+
 // End of protos/perfetto/trace/sys_stats/sys_stats.proto
 
 // Begin of protos/perfetto/trace/system_info.proto
@@ -14487,6 +14584,15 @@ message SystemInfo {
 
   // The hardware reversion from android device
   optional string android_hardware_revision = 10;
+
+  // The storage component from android_device. This field has been introduced
+  // after Android W in Aug 2024 and is not supported on older versions.
+  optional string android_storage_model = 11;
+
+  // The RAM component information from android device. This field has been
+  // introduced after Android W in Aug 2024 and is not supported on older
+  // versions.
+  optional string android_ram_model = 12;
 
   // The version of traced (the same returned by `traced --version`).
   // This is a human readable string with and its format varies depending on
@@ -14521,6 +14627,23 @@ message SystemInfo {
 
 // Information about CPUs from procfs and sysfs.
 message CpuInfo {
+  message ArmCpuIdentifier {
+    // Implementer code
+    optional uint32 implementer = 1;
+
+    // Architecture code
+    optional uint32 architecture = 2;
+
+    // CPU variant
+    optional uint32 variant = 3;
+
+    // CPU part
+    optional uint32 part = 4;
+
+    // CPU revision
+    optional uint32 revision = 5;
+  }
+
   // Information about a single CPU.
   message Cpu {
     // Value of "Processor" field from /proc/cpuinfo for this CPU.
@@ -14535,6 +14658,11 @@ message CpuInfo {
     // Cpu capacity from /sys/devices/system/cpu/cpuX/cpu_capacity where X is
     // the index of this CPU.
     optional uint32 capacity = 3;
+
+    // Code to identify the CPU
+    oneof identifier {
+      ArmCpuIdentifier arm_identifier = 4;
+    }
   }
 
   // Describes available CPUs, one entry per CPU.

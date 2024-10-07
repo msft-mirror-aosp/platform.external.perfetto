@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {ErrorDetails} from '../base/logging';
 import {EXTENSION_URL} from '../common/recordingV2/recording_utils';
 import {GcsUploader} from '../common/gcs_uploader';
@@ -23,6 +22,7 @@ import {VERSION} from '../gen/perfetto_version';
 import {getCurrentModalKey, showModal} from '../widgets/modal';
 import {globals} from './globals';
 import {Router} from './router';
+import {AppImpl} from '../core/app_impl';
 
 const MODAL_KEY = 'crash_modal';
 
@@ -75,6 +75,11 @@ export function maybeShowErrorDialog(err: ErrorDetails) {
     return;
   }
 
+  if (err.message.includes('(ERR:ws)')) {
+    showWebsocketConnectionIssue(err.message);
+    return;
+  }
+
   // This is only for older version of the UI and for ease of tracking across
   // cherry-picks. Newer versions don't have this exception anymore.
   if (err.message.includes('State hash does not match')) {
@@ -118,13 +123,13 @@ class ErrorDialogComponent implements m.ClassComponent<ErrorDetails> {
 
   constructor() {
     this.traceState = 'NOT_AVAILABLE';
-    const engine = globals.getCurrentEngine();
-    if (engine === undefined) return;
-    this.traceType = engine.source.type;
+    const traceSource = AppImpl.instance.trace?.traceInfo.source;
+    if (traceSource === undefined) return;
+    this.traceType = traceSource.type;
     // If the trace is either already uploaded, or comes from a postmessage+url
     // we don't need any re-upload.
-    if ('url' in engine.source && engine.source.url !== undefined) {
-      this.traceUrl = engine.source.url;
+    if ('url' in traceSource && traceSource.url !== undefined) {
+      this.traceUrl = traceSource.url;
       this.traceState = 'UPLOADED';
       // The trace is already uploaded, so assume the user is fine attaching to
       // the bugreport (this make the checkbox ticked by default).
@@ -135,12 +140,12 @@ class ErrorDialogComponent implements m.ClassComponent<ErrorDetails> {
     // If the user is not a googler, don't even offer the option to upload it.
     if (!globals.isInternalUser) return;
 
-    if (engine.source.type === 'FILE') {
+    if (traceSource.type === 'FILE') {
       this.traceState = 'NOT_UPLOADED';
-      this.traceData = engine.source.file;
+      this.traceData = traceSource.file;
       // this.traceSize = this.traceData.size;
-    } else if (engine.source.type === 'ARRAY_BUFFER') {
-      this.traceData = engine.source.buffer;
+    } else if (traceSource.type === 'ARRAY_BUFFER') {
+      this.traceData = traceSource.buffer;
       // this.traceSize = this.traceData.byteLength;
     } else {
       return; // Can't upload HTTP+RPC.
@@ -443,7 +448,11 @@ export function showExtensionNotInstalled(): void {
 export function showWebsocketConnectionIssue(message: string): void {
   showModal({
     title: 'Unable to connect to the device via websocket',
-    content: m('div', m('span', message), m('br')),
+    content: m(
+      'div',
+      m('div', 'trace_processor_shell --httpd is unreachable or crashed.'),
+      m('pre', message),
+    ),
   });
 }
 
