@@ -223,6 +223,8 @@ perfetto_cc_library(
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
         ":src_trace_processor_importers_android_bugreport_android_log_event",
+        ":src_trace_processor_importers_art_method_art_method",
+        ":src_trace_processor_importers_art_method_art_method_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -1512,6 +1514,25 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/importers/android_bugreport/android_log_event.cc",
         "src/trace_processor/importers/android_bugreport/android_log_event.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/art_method:art_method
+perfetto_filegroup(
+    name = "src_trace_processor_importers_art_method_art_method",
+    srcs = [
+        "src/trace_processor/importers/art_method/art_method_parser_impl.cc",
+        "src/trace_processor/importers/art_method/art_method_parser_impl.h",
+        "src/trace_processor/importers/art_method/art_method_tokenizer.cc",
+        "src/trace_processor/importers/art_method/art_method_tokenizer.h",
+    ],
+)
+
+# GN target: //src/trace_processor/importers/art_method:art_method_event
+perfetto_filegroup(
+    name = "src_trace_processor_importers_art_method_art_method_event",
+    srcs = [
+        "src/trace_processor/importers/art_method/art_method_event.h",
     ],
 )
 
@@ -5068,6 +5089,7 @@ perfetto_proto_descriptor(
     name = "protos_perfetto_trace_android_android_track_event_descriptor",
     deps = [
         ":protos_perfetto_trace_android_android_track_event_protos",
+        ":protos_perfetto_trace_track_event_protos",
     ],
     outs = [
         "protos_perfetto_trace_android_android_track_event_descriptor.bin",
@@ -6357,6 +6379,8 @@ perfetto_cc_library(
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
         ":src_trace_processor_importers_android_bugreport_android_log_event",
+        ":src_trace_processor_importers_art_method_art_method",
+        ":src_trace_processor_importers_art_method_art_method_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -6556,6 +6580,8 @@ perfetto_cc_binary(
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
         ":src_trace_processor_importers_android_bugreport_android_log_event",
+        ":src_trace_processor_importers_art_method_art_method",
+        ":src_trace_processor_importers_art_method_art_method_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
@@ -6812,6 +6838,8 @@ perfetto_cc_binary(
         ":src_trace_processor_export_json",
         ":src_trace_processor_importers_android_bugreport_android_bugreport",
         ":src_trace_processor_importers_android_bugreport_android_log_event",
+        ":src_trace_processor_importers_art_method_art_method",
+        ":src_trace_processor_importers_art_method_art_method_event",
         ":src_trace_processor_importers_common_common",
         ":src_trace_processor_importers_common_parser_types",
         ":src_trace_processor_importers_common_trace_parser_hdr",
