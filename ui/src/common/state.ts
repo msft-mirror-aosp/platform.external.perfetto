@@ -103,15 +103,8 @@ export const STATE_VERSION = 61;
 
 export const SCROLLING_TRACK_GROUP = 'ScrollingTracks';
 
-export type EngineMode = 'WASM' | 'HTTP_RPC';
-
-export type NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE' | 'FORCE_BUILTIN_WASM';
-
 export interface EngineConfig {
   id: string;
-  mode?: EngineMode; // Is undefined until |ready| is true.
-  ready: boolean;
-  failed?: string; // If defined the engine has crashed with the given message.
   source: TraceSource;
 }
 
@@ -119,11 +112,6 @@ export interface QueryConfig {
   id: string;
   engineId?: string;
   query: string;
-}
-
-export interface Status {
-  msg: string;
-  timestamp: number; // Epoch in seconds (Date.now() / 1000).
 }
 
 export interface Pagination {
@@ -182,14 +170,10 @@ export interface State {
   /**
    * Open traces.
    */
-  newEngineMode: NewEngineMode;
   engine?: EngineConfig;
 
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
-  queries: ObjectById<QueryConfig>;
-  status: Status;
-  traceConversionInProgress: boolean;
   flamegraphModalDismissed: boolean;
 
   // Show track perf debugging overlay
@@ -217,10 +201,6 @@ export interface State {
 
   fetchChromeCategories: boolean;
   chromeCategories: string[] | undefined;
-
-  // Pending deeplink which will happen when we first finish opening a
-  // trace.
-  pendingDeeplink?: PendingDeeplinkState;
 
   trackFilterTerm: string | undefined;
 

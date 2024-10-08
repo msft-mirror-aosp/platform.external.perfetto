@@ -15,8 +15,8 @@
 // Keep this import first.
 import '../base/disposable_polyfill';
 import '../base/static_initializers';
-import '../gen/all_plugins';
-import '../gen/all_core_plugins';
+import NON_CORE_PLUGINS from '../gen/all_plugins';
+import CORE_PLUGINS from '../gen/all_core_plugins';
 import {Draft} from 'immer';
 import m from 'mithril';
 import {defer} from '../base/deferred';
@@ -24,7 +24,6 @@ import {addErrorHandler, reportError} from '../base/logging';
 import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
 import {traceEvent} from '../common/metatracing';
-import {pluginManager} from '../common/plugins';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
 import {isGetCategoriesResponse} from '../controller/chrome_proxy_record_controller';
@@ -64,6 +63,7 @@ import {pageWithTrace} from './pages';
 import {AppImpl} from '../core/app_impl';
 import {setAddSqlTableTabImplFunction} from './sql_table_tab_interface';
 import {addSqlTableTabImpl} from './sql_table_tab';
+import {getServingRoot} from '../base/http_utils';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -205,10 +205,17 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
 }
 
 function main() {
+  // Setup content security policy before anything else.
+  setupContentSecurityPolicy();
+
+  AppImpl.initialize({
+    rootUrl: getServingRoot(),
+    initialRouteArgs: Router.parseUrl(window.location.href).args,
+    clearState: () => globals.dispatch(Actions.clearState({})),
+  });
+
   // Wire up raf for widgets.
   setScheduleFullRedraw(() => raf.scheduleFullRedraw());
-
-  setupContentSecurityPolicy();
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
   // appendChild returns.
@@ -342,18 +349,6 @@ function onCssLoaded() {
   maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-    globals.dispatch(
-      Actions.maybeSetPendingDeeplink({
-        ts: route.args.ts,
-        tid: route.args.tid,
-        dur: route.args.dur,
-        pid: route.args.pid,
-        query: route.args.query,
-        visStart: route.args.visStart,
-        visEnd: route.args.visEnd,
-      }),
-    );
-
     if (!globals.embeddedMode) {
       installFileDropHandler();
     }
@@ -381,9 +376,11 @@ function onCssLoaded() {
   // point for context menus.
   setAddSqlTableTabImplFunction(addSqlTableTabImpl);
 
-  // Initialize plugins, now that we are ready to go
+  // Initialize plugins, now that we are ready to go.
+  const pluginManager = AppImpl.instance.plugins;
+  CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
+  NON_CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
   pluginManager.initialize();
-
   const route = Router.parseUrl(window.location.href);
   for (const pluginId of (route.args.enablePlugins ?? '').split(',')) {
     if (pluginManager.hasPlugin(pluginId)) {

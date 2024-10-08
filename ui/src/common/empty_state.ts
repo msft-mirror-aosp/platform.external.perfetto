@@ -47,17 +47,12 @@ export function createEmptyState(): State {
   return {
     version: STATE_VERSION,
     nextId: '-1',
-    newEngineMode: 'USE_HTTP_RPC_IF_AVAILABLE',
-    queries: {},
 
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get()
       ? autosaveConfigStore.get()
       : createEmptyRecordConfig(),
     displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
-
-    status: {msg: '', timestamp: 0},
-    traceConversionInProgress: false,
 
     perfDebug: false,
     sidebarVisible: true,

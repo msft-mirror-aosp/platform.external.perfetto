@@ -25,6 +25,7 @@ import {
   SimpleCounterTrackConfig,
 } from '../../frontend/simple_counter_track';
 import {TrackNode} from '../../public/workspace';
+import {DebugSliceDetailsPanel} from '../../public/lib/debug_tracks/details_tab';
 
 interface ContainedTrace {
   uuid: string;
@@ -1184,13 +1185,16 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     };
 
     const uri = `/long_battery_tracing_${name}`;
+    const track = new SimpleSliceTrack(ctx, {trackUri: uri}, config);
     ctx.tracks.registerTrack({
       uri,
       title: name,
-      track: new SimpleSliceTrack(ctx, {trackUri: uri}, config),
+      track,
+      detailsPanel: ({eventId}) =>
+        new DebugSliceDetailsPanel(ctx, track.sqlTableName, eventId),
     });
-    const track = new TrackNode({uri, title: name});
-    this.addTrack(ctx, track, groupName);
+    const trackNode = new TrackNode({uri, title: name});
+    this.addTrack(ctx, trackNode, groupName);
   }
 
   addCounterTrack(
@@ -1416,14 +1420,14 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   async addModemDetail(ctx: Trace, features: Set<string>): Promise<void> {
-    if (!features.has('atom.modem_activity_info')) {
-      return;
-    }
     const groupName = 'Modem Detail';
-    await this.addModemActivityInfo(ctx, groupName);
+    if (features.has('atom.modem_activity_info')) {
+      await this.addModemActivityInfo(ctx, groupName);
+    }
     if (features.has('track.ril')) {
       await this.addModemRil(ctx, groupName);
     }
+    await this.addModemTeaData(ctx, groupName);
   }
 
   async addModemActivityInfo(ctx: Trace, groupName: string): Promise<void> {
@@ -1458,43 +1462,6 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
 
     const e = ctx.engine;
 
-    let thrown = false;
-    try {
-      await e.query(
-        `INCLUDE PERFETTO MODULE
-            google3.wireless.android.telemetry.trace_extractor.modules.modem_tea_metrics`,
-      );
-    } catch {
-      thrown = true;
-    }
-    if (!thrown) {
-      const counters = await e.query(
-        `select distinct name from pixel_modem_counters`,
-      );
-      const countersIt = counters.iter({name: 'str'});
-      for (; countersIt.valid(); countersIt.next()) {
-        this.addCounterTrack(
-          ctx,
-          countersIt.name,
-          `select ts, value from pixel_modem_counters where name = '${countersIt.name}'`,
-          groupName,
-        );
-      }
-      const slices = await e.query(
-        `select distinct track_name from pixel_modem_slices`,
-      );
-      const slicesIt = slices.iter({track_name: 'str'});
-      for (; slicesIt.valid(); slicesIt.next()) {
-        this.addSliceTrack(
-          ctx,
-          it.name,
-          `select ts dur, slice_name as name from pixel_modem_counters
-              where track_name = '${slicesIt.track_name}'`,
-          groupName,
-        );
-      }
-    }
-
     await e.query(MODEM_RIL_STRENGTH);
     await e.query(MODEM_RIL_CHANNELS_PREAMBLE);
 
@@ -1517,6 +1484,45 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
       groupName,
       ['raw_ril'],
     );
+  }
+
+  async addModemTeaData(ctx: Trace, groupName: string): Promise<void> {
+    const e = ctx.engine;
+
+    try {
+      await e.query(
+        `INCLUDE PERFETTO MODULE
+            google3.wireless.android.telemetry.trace_extractor.modules.modem_tea_metrics`,
+      );
+    } catch {
+      return;
+    }
+
+    const counters = await e.query(
+      `select distinct name from pixel_modem_counters`,
+    );
+    const countersIt = counters.iter({name: 'str'});
+    for (; countersIt.valid(); countersIt.next()) {
+      this.addCounterTrack(
+        ctx,
+        countersIt.name,
+        `select ts, value from pixel_modem_counters where name = '${countersIt.name}'`,
+        groupName,
+      );
+    }
+    const slices = await e.query(
+      `select distinct track_name from pixel_modem_slices`,
+    );
+    const slicesIt = slices.iter({track_name: 'str'});
+    for (; slicesIt.valid(); slicesIt.next()) {
+      this.addSliceTrack(
+        ctx,
+        slicesIt.track_name,
+        `select ts, dur, slice_name as name from pixel_modem_slices
+            where track_name = '${slicesIt.track_name}'`,
+        groupName,
+      );
+    }
   }
 
   async addKernelWakelocks(ctx: Trace, features: Set<string>): Promise<void> {

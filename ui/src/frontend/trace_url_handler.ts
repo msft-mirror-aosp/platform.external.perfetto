@@ -121,11 +121,12 @@ async function maybeOpenCachedTrace(traceUuid: string) {
   // This early out prevents to re-trigger the openTraceFromXXX() action if the
   // URL changes (e.g. if the user navigates back/fwd) while the new trace is
   // being loaded.
-  if (globals.state.engine !== undefined) {
-    const eng = globals.state.engine;
-    if (eng.source.type === 'ARRAY_BUFFER' && eng.source.uuid === traceUuid) {
-      return;
-    }
+  if (
+    curTrace !== undefined &&
+    curTrace.source.type === 'ARRAY_BUFFER' &&
+    curTrace.source.uuid === traceUuid
+  ) {
+    return;
   }
 
   // Fetch the trace from the cache storage. If available load it. If not, show
@@ -243,15 +244,10 @@ function loadTraceFromUrl(url: string) {
 }
 
 function openTraceFromAndroidBugTool() {
-  // TODO(hjd): Unify updateStatus and TaskTracker
-  globals.dispatch(
-    Actions.updateStatus({
-      msg: 'Loading trace from ABT extension',
-      timestamp: Date.now() / 1000,
-    }),
-  );
+  const msg = 'Loading trace from ABT extension';
+  AppImpl.instance.omnibox.showStatusMessage(msg);
   const loadInfo = loadAndroidBugToolInfo();
-  taskTracker.trackPromise(loadInfo, 'Loading trace from ABT extension');
+  taskTracker.trackPromise(loadInfo, msg);
   loadInfo
     .then((info) => {
       globals.dispatch(
