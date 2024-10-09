@@ -39,6 +39,8 @@ import {PivotTableManager} from './pivot_table_manager';
 import {FlowManager} from './flow_manager';
 import {AppContext, AppImpl, CORE_PLUGIN_ID} from './app_impl';
 import {PluginManager} from './plugin_manager';
+import {ThreadDesc, ThreadMap} from '../public/threads';
+import {RouteArgs} from '../public/route_schema';
 
 /**
  * Handles the per-trace state of the UI
@@ -64,7 +66,13 @@ class TraceContext implements Disposable {
   readonly pluginSerializableState = createStore<{[key: string]: {}}>({});
   readonly scrollHelper: ScrollHelper;
   readonly pivotTableMgr;
+  readonly threads = new Map<number, ThreadDesc>();
   readonly trash = new DisposableStack();
+
+  // List of errors that were encountered while loading the trace by the TS
+  // code. These are on top of traceInfo.importErrors, which is a summary of
+  // what TraceProcessor reports on the stats table at import time.
+  readonly loadingErrors: string[] = [];
 
   constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfo) {
     this.appCtx = gctx;
@@ -302,6 +310,23 @@ export class TraceImpl implements Trace {
     return this.traceCtx.flowMgr;
   }
 
+  get loadingErrors(): ReadonlyArray<string> {
+    return this.traceCtx.loadingErrors;
+  }
+
+  addLoadingError(err: string) {
+    this.traceCtx.loadingErrors.push(err);
+  }
+
+  get threads(): ThreadMap {
+    return this.traceCtx.threads;
+  }
+
+  setThreads(threadMap: ThreadMap) {
+    this.traceCtx.threads.clear();
+    threadMap.forEach((v, k) => this.traceCtx.threads.set(k, v));
+  }
+
   // App interface implementation.
 
   get pluginId(): string {
@@ -324,6 +349,14 @@ export class TraceImpl implements Trace {
     return this.appImpl.plugins;
   }
 
+  get initialRouteArgs(): RouteArgs {
+    return this.appImpl.initialRouteArgs;
+  }
+
+  get rootUrl(): string {
+    return this.appImpl.rootUrl;
+  }
+
   scheduleRedraw(): void {
     this.appImpl.scheduleRedraw();
   }
@@ -333,6 +366,11 @@ export class TraceImpl implements Trace {
       this.traceCtx[Symbol.dispose]();
     }
   }
+}
+
+// A convenience interface to inject the App in Mithril components.
+export interface TraceImplAttrs {
+  trace: TraceImpl;
 }
 
 // Allows to take an existing class instance (`target`) and override some of its
