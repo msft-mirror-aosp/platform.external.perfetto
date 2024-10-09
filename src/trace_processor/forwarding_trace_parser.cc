@@ -40,7 +40,6 @@ namespace {
 TraceSorter::SortingMode ConvertSortingMode(SortingMode sorting_mode) {
   switch (sorting_mode) {
     case SortingMode::kDefaultHeuristics:
-    case SortingMode::kForceFlushPeriodWindowedSort:
       return TraceSorter::SortingMode::kDefault;
     case SortingMode::kForceFullSort:
       return TraceSorter::SortingMode::kFullSort;
@@ -69,6 +68,7 @@ std::optional<TraceSorter::SortingMode> GetMinimumSortingMode(
     case kAndroidLogcatTraceType:
     case kGeckoTraceType:
     case kArtMethodTraceType:
+    case kPerfTextTraceType:
       return TraceSorter::SortingMode::kFullSort;
 
     case kProtoTraceType:
