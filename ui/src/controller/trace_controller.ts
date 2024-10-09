@@ -22,13 +22,7 @@ import {
 } from '../common/metatracing';
 import {EngineConfig} from '../common/state';
 import {featureFlags, Flag} from '../core/feature_flags';
-import {globals, ThreadDesc} from '../frontend/globals';
-import {
-  publishHasFtrace,
-  publishMetricError,
-  publishThreads,
-} from '../frontend/publish';
-import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
+import {globals} from '../frontend/globals';
 import {Router} from '../frontend/router';
 import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
@@ -60,7 +54,7 @@ import {raf} from '../core/raf_scheduler';
 import {TraceImpl} from '../core/trace_impl';
 import {SerializedAppState} from '../public/state_serialization_schema';
 import {TraceSource} from '../public/trace_source';
-import {RouteArgs} from '../core/route_schema';
+import {ThreadDesc} from '../public/threads';
 
 type States = 'init' | 'loading_trace' | 'ready';
 
@@ -318,7 +312,7 @@ async function loadTraceIntoEngine(
   Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
 
   // Make sure the helper views are available before we start adding tracks.
-  await initialiseHelperViews(engine);
+  await initialiseHelperViews(trace);
   await includeSummaryTables(engine);
 
   await defineMaxLayoutDepthSqlFunction(engine);
@@ -336,40 +330,7 @@ async function loadTraceIntoEngine(
 
   decideTabs(trace);
 
-  await listThreads(engine);
-
-  {
-    // Check if we have any ftrace events at all
-    const query = `
-        select
-          *
-        from ftrace_event
-        limit 1`;
-
-    const res = await engine.query(query);
-    publishHasFtrace(res.numRows() > 0);
-  }
-
-  const pendingDeeplink = AppImpl.instance.getAndClearInitialRouteArgs();
-  if (pendingDeeplink !== undefined) {
-    await selectInitialRouteArgs(trace, pendingDeeplink);
-    if (
-      pendingDeeplink.visStart !== undefined &&
-      pendingDeeplink.visEnd !== undefined
-    ) {
-      zoomPendingDeeplink(
-        trace,
-        pendingDeeplink.visStart,
-        pendingDeeplink.visEnd,
-      );
-    }
-    if (pendingDeeplink.query !== undefined) {
-      addQueryResultsTab(trace, {
-        query: pendingDeeplink.query,
-        title: 'Deeplink Query',
-      });
-    }
-  }
+  await listThreads(trace);
 
   // Trace Processor doesn't support the reliable range feature for JSON
   // traces.
@@ -400,53 +361,6 @@ async function loadTraceIntoEngine(
   return trace;
 }
 
-async function selectInitialRouteArgs(trace: TraceImpl, args: RouteArgs) {
-  const conditions = [];
-  const {ts, dur} = args;
-
-  if (ts !== undefined) {
-    conditions.push(`ts = ${ts}`);
-  }
-  if (dur !== undefined) {
-    conditions.push(`dur = ${dur}`);
-  }
-
-  if (conditions.length === 0) {
-    return;
-  }
-
-  const query = `
-      select
-        id,
-        track_id as traceProcessorTrackId,
-        type
-      from slice
-      where ${conditions.join(' and ')}
-    ;`;
-
-  const result = await trace.engine.query(query);
-  if (result.numRows() > 0) {
-    const row = result.firstRow({
-      id: NUM,
-      traceProcessorTrackId: NUM,
-      type: STR,
-    });
-
-    const id = row.traceProcessorTrackId;
-    const track = trace.workspace.flatTracks.find(
-      (t) =>
-        t.uri && trace.tracks.getTrack(t.uri)?.tags?.trackIds?.includes(id),
-    );
-    if (track === undefined) {
-      return;
-    }
-    trace.selection.selectSqlEvent('slice', row.id, {
-      scrollToSelection: true,
-      switchToCurrentSelectionTab: false,
-    });
-  }
-}
-
 function decideTabs(trace: TraceImpl) {
   // Show the list of default tabs, but don't make them active!
   for (const tabUri of trace.tabs.defaultTabs) {
@@ -454,7 +368,7 @@ function decideTabs(trace: TraceImpl) {
   }
 }
 
-async function listThreads(engine: Engine) {
+async function listThreads(trace: TraceImpl) {
   updateStatus('Reading thread list');
   const query = `select
         utid,
@@ -468,8 +382,8 @@ async function listThreads(engine: Engine) {
         from (select * from thread order by upid) as thread
         left join (select * from process order by upid) as process
         using(upid)`;
-  const result = await engine.query(query);
-  const threads: ThreadDesc[] = [];
+  const result = await trace.engine.query(query);
+  const threads = new Map<number, ThreadDesc>();
   const it = result.iter({
     utid: NUM,
     tid: NUM,
@@ -485,12 +399,13 @@ async function listThreads(engine: Engine) {
     const threadName = it.threadName;
     const procName = it.procName === null ? undefined : it.procName;
     const cmdline = it.cmdline === null ? undefined : it.cmdline;
-    threads.push({utid, tid, threadName, pid, procName, cmdline});
+    threads.set(utid, {utid, tid, threadName, pid, procName, cmdline});
   }
-  publishThreads(threads);
+  trace.setThreads(threads);
 }
 
-async function initialiseHelperViews(engine: Engine) {
+async function initialiseHelperViews(trace: TraceImpl) {
+  const engine = trace.engine;
   updateStatus('Creating annotation counter track table');
   // Create the helper tables for all the annotations related data.
   // NULL in min/max means "figure it out per track in the usual way".
@@ -553,13 +468,14 @@ async function initialiseHelperViews(engine: Engine) {
     }
 
     updateStatus(`Computing ${metric} metric`);
+
     try {
       // We don't care about the actual result of metric here as we are just
       // interested in the annotation tracks.
       await engine.computeMetric([metric], 'proto');
     } catch (e) {
       if (e instanceof QueryError) {
-        publishMetricError('MetricError: ' + e.message);
+        trace.addLoadingError('MetricError: ' + e.message);
         continue;
       } else {
         throw e;
@@ -655,7 +571,7 @@ async function initialiseHelperViews(engine: Engine) {
       }
     } catch (e) {
       if (e instanceof QueryError) {
-        publishMetricError('MetricError: ' + e.message);
+        trace.addLoadingError('MetricError: ' + e.message);
       } else {
         throw e;
       }
@@ -683,27 +599,6 @@ async function includeSummaryTables(engine: Engine) {
 function updateStatus(msg: string): void {
   const showUntilDismissed = 0;
   AppImpl.instance.omnibox.showStatusMessage(msg, showUntilDismissed);
-}
-
-function zoomPendingDeeplink(
-  trace: TraceImpl,
-  visStart: string,
-  visEnd: string,
-) {
-  const visualStart = Time.fromRaw(BigInt(visStart));
-  const visualEnd = Time.fromRaw(BigInt(visEnd));
-
-  if (
-    !(
-      visualStart < visualEnd &&
-      trace.traceInfo.start <= visualStart &&
-      visualEnd <= trace.traceInfo.end
-    )
-  ) {
-    return;
-  }
-
-  trace.timeline.updateVisibleTime(new TimeSpan(visualStart, visualEnd));
 }
 
 async function computeFtraceBounds(engine: Engine): Promise<TimeSpan | null> {
@@ -860,6 +755,9 @@ async function getTraceInfo(
     )
   ).firstRow({str_value: STR}).str_value;
 
+  const hasFtrace =
+    (await engine.query(`select * from ftrace_event limit 1`)).numRows() > 0;
+
   const uuidRes = await engine.query(`select str_value as uuid from metadata
     where name = 'trace_uuid'`);
   // trace_uuid can be missing from the TP tables if the trace is empty or in
@@ -879,6 +777,7 @@ async function getTraceInfo(
     importErrors: await getTraceErrors(engine),
     source: traceSource,
     traceType,
+    hasFtrace,
     uuid,
     cached,
   };
