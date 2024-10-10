@@ -14,17 +14,18 @@
 """Contains tables for tracks."""
 
 from python.generators.trace_processor_table.public import Column as C
+from python.generators.trace_processor_table.public import ColumnDoc
+from python.generators.trace_processor_table.public import ColumnFlag
 from python.generators.trace_processor_table.public import CppInt32
 from python.generators.trace_processor_table.public import CppInt64
 from python.generators.trace_processor_table.public import CppOptional
-from python.generators.trace_processor_table.public import CppString
-from python.generators.trace_processor_table.public import Table
-from python.generators.trace_processor_table.public import TableDoc
-from python.generators.trace_processor_table.public import ColumnDoc
-from python.generators.trace_processor_table.public import ColumnFlag
 from python.generators.trace_processor_table.public import CppSelfTableId
+from python.generators.trace_processor_table.public import CppString
 from python.generators.trace_processor_table.public import CppTableId
 from python.generators.trace_processor_table.public import CppUint32
+from python.generators.trace_processor_table.public import Table
+from python.generators.trace_processor_table.public import TableDoc
+from python.generators.trace_processor_table.public import WrappingSqlView
 
 from src.trace_processor.tables.metadata_tables import CPU_TABLE, MACHINE_TABLE
 
@@ -37,9 +38,10 @@ TRACK_TABLE = Table(
         C("parent_id", CppOptional(CppSelfTableId())),
         C("source_arg_set_id", CppOptional(CppUint32())),
         C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
-        C("classification", CppOptional(CppString()), flags=ColumnFlag.HIDDEN),
-        C("tags", CppOptional(CppUint32()), flags=ColumnFlag.HIDDEN),
+        C("classification", CppString(), flags=ColumnFlag.HIDDEN),
+        C("dimensions", CppOptional(CppUint32()), flags=ColumnFlag.HIDDEN),
     ],
+    wrapping_sql_view=WrappingSqlView('track'),
     tabledoc=TableDoc(
         doc='''
           Tracks are a fundamental concept in trace processor and represent a
@@ -76,9 +78,13 @@ TRACK_TABLE = Table(
                   Classification of this track. Responsible for grouping
                   similar tracks together.
                 ''',
-            'tags':
+            'dimensions':
                 ColumnDoc(
-                    doc='Additional details about the track.',
+                    doc='''
+                      Dimensions of the track classification, used to
+                      associate the track with certain properties (like CPU or
+                      thread id). Join with `args` table to recover the values.
+                    ''',
                     joinable='args.arg_set_id'),
         }))
 
@@ -130,6 +136,7 @@ CPU_TRACK_TABLE = Table(
     columns=[
         C('ucpu', CppTableId(CPU_TABLE)),
     ],
+    wrapping_sql_view=WrappingSqlView('cpu_track'),
     parent=TRACK_TABLE,
     tabledoc=TableDoc(
         doc='Tracks which are associated to a single CPU',
@@ -259,6 +266,7 @@ CPU_COUNTER_TRACK_TABLE = Table(
     columns=[
         C('ucpu', CppTableId(CPU_TABLE)),
     ],
+    wrapping_sql_view=WrappingSqlView('cpu_counter_track'),
     parent=COUNTER_TRACK_TABLE,
     tabledoc=TableDoc(
         doc='Tracks containing counter-like events associated to a CPU.',

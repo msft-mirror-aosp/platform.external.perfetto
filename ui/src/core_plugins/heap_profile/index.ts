@@ -38,12 +38,12 @@ import {convertTraceToPprofAndDownload} from '../../frontend/trace_converter';
 import {raf} from '../../core/raf_scheduler';
 import {globals} from '../../frontend/globals';
 import {Modal} from '../../widgets/modal';
-import {Router} from '../../frontend/router';
 import {Actions} from '../../common/actions';
 import {getOrCreateGroupForProcess} from '../../public/standard_groups';
 import {TrackNode} from '../../public/workspace';
 import {createPerfettoTable} from '../../trace_processor/sql_utils';
 import {TrackEventDetailsPanel} from '../../public/details_panel';
+import {Router} from '../../core/router';
 
 function getUriForTrack(upid: number): string {
   return `/process_${upid}/heap_profile`;
@@ -129,7 +129,9 @@ class HeapProfilePlugin implements PerfettoPlugin {
       const track = new TrackNode({uri, title, sortOrder: -30});
       group.addChildInOrder(track);
     }
+  }
 
+  async onTraceReady(ctx: Trace): Promise<void> {
     await selectFirstHeapProfile(ctx);
   }
 }
