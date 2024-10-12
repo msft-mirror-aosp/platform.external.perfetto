@@ -25,6 +25,7 @@ import {
   SimpleCounterTrackConfig,
 } from '../../frontend/simple_counter_track';
 import {TrackNode} from '../../public/workspace';
+import {DebugSliceDetailsPanel} from '../../public/lib/debug_tracks/details_tab';
 
 interface ContainedTrace {
   uuid: string;
@@ -1184,13 +1185,16 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     };
 
     const uri = `/long_battery_tracing_${name}`;
+    const track = new SimpleSliceTrack(ctx, {trackUri: uri}, config);
     ctx.tracks.registerTrack({
       uri,
       title: name,
-      track: new SimpleSliceTrack(ctx, {trackUri: uri}, config),
+      track,
+      detailsPanel: ({eventId}) =>
+        new DebugSliceDetailsPanel(ctx, track.sqlTableName, eventId),
     });
-    const track = new TrackNode({uri, title: name});
-    this.addTrack(ctx, track, groupName);
+    const trackNode = new TrackNode({uri, title: name});
+    this.addTrack(ctx, trackNode, groupName);
   }
 
   addCounterTrack(
@@ -1513,8 +1517,8 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     for (; slicesIt.valid(); slicesIt.next()) {
       this.addSliceTrack(
         ctx,
-        it.name,
-        `select ts dur, slice_name as name from pixel_modem_counters
+        slicesIt.track_name,
+        `select ts, dur, slice_name as name from pixel_modem_slices
             where track_name = '${slicesIt.track_name}'`,
         groupName,
       );

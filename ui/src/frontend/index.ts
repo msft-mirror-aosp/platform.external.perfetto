@@ -23,7 +23,7 @@ import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
 import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
-import {traceEvent} from '../common/metatracing';
+import {traceEvent} from '../core/metatracing';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
 import {isGetCategoriesResponse} from '../controller/chrome_proxy_record_controller';
@@ -47,7 +47,7 @@ import {postMessageHandler} from './post_message_handler';
 import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
-import {Route, Router} from './router';
+import {Route, Router} from '../core/router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
@@ -63,6 +63,7 @@ import {pageWithTrace} from './pages';
 import {AppImpl} from '../core/app_impl';
 import {setAddSqlTableTabImplFunction} from './sql_table_tab_interface';
 import {addSqlTableTabImpl} from './sql_table_tab';
+import {getServingRoot} from '../base/http_utils';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -204,10 +205,17 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
 }
 
 function main() {
+  // Setup content security policy before anything else.
+  setupContentSecurityPolicy();
+
+  AppImpl.initialize({
+    rootUrl: getServingRoot(),
+    initialRouteArgs: Router.parseUrl(window.location.href).args,
+    clearState: () => globals.dispatch(Actions.clearState({})),
+  });
+
   // Wire up raf for widgets.
   setScheduleFullRedraw(() => raf.scheduleFullRedraw());
-
-  setupContentSecurityPolicy();
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
   // appendChild returns.
@@ -341,7 +349,6 @@ function onCssLoaded() {
   maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-    AppImpl.instance.setInitialRouteArgs(route.args);
     if (!globals.embeddedMode) {
       installFileDropHandler();
     }

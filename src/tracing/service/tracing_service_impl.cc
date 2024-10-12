@@ -112,6 +112,7 @@ namespace {
 constexpr int kMaxBuffersPerConsumer = 128;
 constexpr uint32_t kDefaultSnapshotsIntervalMs = 10 * 1000;
 constexpr int kDefaultWriteIntoFilePeriodMs = 5000;
+constexpr int kMinWriteIntoFilePeriodMs = 100;
 constexpr uint32_t kAllDataSourceStartedTimeout = 20000;
 constexpr int kMaxConcurrentTracingSessions = 15;
 constexpr int kMaxConcurrentTracingSessionsPerUid = 5;
@@ -975,8 +976,8 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
     uint32_t write_period_ms = cfg.file_write_period_ms();
     if (write_period_ms == 0)
       write_period_ms = kDefaultWriteIntoFilePeriodMs;
-    if (write_period_ms < min_write_period_ms_)
-      write_period_ms = min_write_period_ms_;
+    if (write_period_ms < kMinWriteIntoFilePeriodMs)
+      write_period_ms = kMinWriteIntoFilePeriodMs;
     tracing_session->write_period_ms = write_period_ms;
     tracing_session->max_file_size_bytes = cfg.max_file_size_bytes();
     tracing_session->bytes_written_into_file = 0;
@@ -1899,6 +1900,11 @@ void TracingServiceImpl::Flush(TracingSessionID tsid,
     PERFETTO_DLOG("Flush() failed, invalid session ID %" PRIu64, tsid);
     return;
   }
+
+  SnapshotLifecyleEvent(
+      tracing_session,
+      protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
+      false /* snapshot_clocks */);
 
   std::map<ProducerID, std::vector<DataSourceInstanceID>> data_source_instances;
   for (const auto& [producer_id, ds_inst] :
@@ -4020,6 +4026,9 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
     }
   }
 
+  SnapshotLifecyleEvent(
+      session, protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
+      false /* snapshot_clocks */);
   clone_op.pending_flush_cnt = bufs_groups.size();
   for (const std::set<BufferID>& buf_group : bufs_groups) {
     FlushDataSourceInstances(
@@ -4962,11 +4971,14 @@ TracingServiceImpl::TracingSession::TracingSession(
       config(new_config),
       snapshot_periodic_task(task_runner),
       timed_stop_task(task_runner) {
-  // all_data_sources_flushed is special because we store up to 64 events of
-  // this type. Other events will go through the default case in
+  // all_data_sources_flushed (and flush_started) is special because we store up
+  // to 64 events of this type. Other events will go through the default case in
   // SnapshotLifecycleEvent() where they will be given a max history of 1.
   lifecycle_events.emplace_back(
       protos::pbzero::TracingServiceEvent::kAllDataSourcesFlushedFieldNumber,
+      64 /* max_size */);
+  lifecycle_events.emplace_back(
+      protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
       64 /* max_size */);
 }
 

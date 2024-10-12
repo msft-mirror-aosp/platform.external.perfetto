@@ -35,12 +35,14 @@
 #include "perfetto/trace_processor/ref_counted.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event.h"
+#include "src/trace_processor/importers/art_method/art_method_event.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
 #include "src/trace_processor/importers/gecko/gecko_event.h"
 #include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
+#include "src/trace_processor/importers/perf_text/perf_text_event.h"
 #include "src/trace_processor/importers/systrace/systrace_line.h"
 #include "src/trace_processor/sorter/trace_token_buffer.h"
 #include "src/trace_processor/storage/trace_storage.h"
@@ -247,9 +249,23 @@ class TraceSorter {
   }
 
   inline void PushGeckoEvent(int64_t timestamp,
-                             gecko_importer::GeckoEvent event) {
-    TraceTokenBuffer::Id id = token_buffer_.Append(std::move(event));
+                             const gecko_importer::GeckoEvent& event) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(event);
     AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kGeckoEvent, id);
+  }
+
+  inline void PushArtMethodEvent(int64_t timestamp,
+                                 const art_method::ArtMethodEvent& event) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(event);
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kArtMethodEvent,
+                         id);
+  }
+
+  inline void PushPerfTextEvent(
+      int64_t timestamp,
+      const perf_text_importer::PerfTextEvent& event) {
+    TraceTokenBuffer::Id id = token_buffer_.Append(event);
+    AppendNonFtraceEvent(timestamp, TimestampedEvent::Type::kPerfTextEvent, id);
   }
 
   inline void PushInlineFtraceEvent(
@@ -333,11 +349,13 @@ class TraceSorter {
       kTracePacket,
       kTrackEvent,
       kGeckoEvent,
-      kMax = kGeckoEvent,
+      kArtMethodEvent,
+      kPerfTextEvent,
+      kMax = kPerfTextEvent,
     };
 
     // Number of bits required to store the max element in |Type|.
-    static constexpr uint32_t kMaxTypeBits = 4;
+    static constexpr uint32_t kMaxTypeBits = 6;
     static_assert(static_cast<uint8_t>(Type::kMax) <= (1 << kMaxTypeBits),
                   "Max type does not fit inside storage");
 
