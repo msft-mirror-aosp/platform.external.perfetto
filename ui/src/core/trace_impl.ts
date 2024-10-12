@@ -37,10 +37,11 @@ import {Selection, SelectionOpts} from '../public/selection';
 import {SearchResult} from '../public/search';
 import {PivotTableManager} from './pivot_table_manager';
 import {FlowManager} from './flow_manager';
-import {AppContext, AppImpl, CORE_PLUGIN_ID} from './app_impl';
+import {AppContext, AppImpl} from './app_impl';
 import {PluginManager} from './plugin_manager';
 import {ThreadDesc, ThreadMap} from '../public/threads';
 import {RouteArgs} from '../public/route_schema';
+import {CORE_PLUGIN_ID} from './plugin_manager';
 
 /**
  * Handles the per-trace state of the UI
@@ -113,7 +114,6 @@ class TraceContext implements Disposable {
       engine.getProxy('FlowManager'),
       this.trackMgr,
       this.selectionMgr,
-      () => this.workspaceMgr.currentWorkspace,
     );
 
     this.searchMgr = new SearchManagerImpl({
@@ -175,10 +175,10 @@ export class TraceImpl implements Trace {
   // we can fork sibling instances (i.e. bound to the same TraceContext) for
   // the various plugins.
   static createInstanceForCore(
+    appImpl: AppImpl,
     engine: EngineBase,
     traceInfo: TraceInfo,
   ): TraceImpl {
-    const appImpl = AppImpl.instance;
     const traceCtx = new TraceContext(
       appImpl.__appCtxForTraceImplCtor,
       engine,
