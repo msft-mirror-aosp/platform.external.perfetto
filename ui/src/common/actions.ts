@@ -17,70 +17,15 @@ import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {createEmptyState} from './empty_state';
 import {
-  MetatraceTrackId,
-  traceEventBegin,
-  traceEventEnd,
-  TraceEventScope,
-} from './metatracing';
-import {
   AdbRecordingTarget,
-  EngineMode,
   LoadedConfig,
-  NewEngineMode,
-  PendingDeeplinkState,
   RecordingTarget,
   State,
-  Status,
 } from './state';
+import {SerializedAppState} from '../public/state_serialization_schema';
+import {PostedTrace} from '../public/trace_source';
 
 type StateDraft = Draft<State>;
-
-export interface PostedTrace {
-  buffer: ArrayBuffer;
-  title: string;
-  fileName?: string;
-  url?: string;
-  uuid?: string;
-  localOnly?: boolean;
-  keepApiOpen?: boolean;
-
-  // Allows to pass extra arguments to plugins. This can be read by plugins
-  // onTraceLoad() and can be used to trigger plugin-specific-behaviours (e.g.
-  // allow dashboards like APC to pass extra data to materialize onto tracks).
-  // The format is the following:
-  // pluginArgs: {
-  //   'dev.perfetto.PluginFoo': { 'key1': 'value1', 'key2': 1234 }
-  //   'dev.perfetto.PluginBar': { 'key3': '...', 'key4': ... }
-  // }
-  pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
-}
-
-export interface PostedScrollToRange {
-  timeStart: number;
-  timeEnd: number;
-  viewPercentage?: number;
-}
-
-function clearTraceState(state: StateDraft) {
-  const nextId = state.nextId;
-  const recordConfig = state.recordConfig;
-  const recordingTarget = state.recordingTarget;
-  const fetchChromeCategories = state.fetchChromeCategories;
-  const extensionInstalled = state.extensionInstalled;
-  const availableAdbDevices = state.availableAdbDevices;
-  const chromeCategories = state.chromeCategories;
-  const newEngineMode = state.newEngineMode;
-
-  Object.assign(state, createEmptyState());
-  state.nextId = nextId;
-  state.recordConfig = recordConfig;
-  state.recordingTarget = recordingTarget;
-  state.fetchChromeCategories = fetchChromeCategories;
-  state.extensionInstalled = extensionInstalled;
-  state.availableAdbDevices = availableAdbDevices;
-  state.chromeCategories = chromeCategories;
-  state.newEngineMode = newEngineMode;
-}
 
 function generateNextId(draft: StateDraft): string {
   const nextId = String(Number(draft.nextId) + 1);
@@ -88,45 +33,65 @@ function generateNextId(draft: StateDraft): string {
   return nextId;
 }
 
-let statusTraceEvent: TraceEventScope | undefined;
-
 export const StateActions = {
+  clearState(state: StateDraft, _args: {}) {
+    const nextId = state.nextId;
+    const recordConfig = state.recordConfig;
+    const recordingTarget = state.recordingTarget;
+    const fetchChromeCategories = state.fetchChromeCategories;
+    const extensionInstalled = state.extensionInstalled;
+    const availableAdbDevices = state.availableAdbDevices;
+    const chromeCategories = state.chromeCategories;
+
+    Object.assign(state, createEmptyState());
+    state.nextId = nextId;
+    state.recordConfig = recordConfig;
+    state.recordingTarget = recordingTarget;
+    state.fetchChromeCategories = fetchChromeCategories;
+    state.extensionInstalled = extensionInstalled;
+    state.availableAdbDevices = availableAdbDevices;
+    state.chromeCategories = chromeCategories;
+  },
+
   openTraceFromFile(state: StateDraft, args: {file: File}): void {
-    clearTraceState(state);
+    this.clearState(state, {});
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
       source: {type: 'FILE', file: args.file},
     };
   },
 
   openTraceFromBuffer(state: StateDraft, args: PostedTrace): void {
-    clearTraceState(state);
+    this.clearState(state, {});
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
       source: {type: 'ARRAY_BUFFER', ...args},
     };
   },
 
-  openTraceFromUrl(state: StateDraft, args: {url: string}): void {
-    clearTraceState(state);
+  openTraceFromUrl(
+    state: StateDraft,
+    args: {url: string; serializedAppState?: SerializedAppState},
+  ): void {
+    this.clearState(state, {});
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
-      source: {type: 'URL', url: args.url},
+      source: {
+        type: 'URL',
+        url: args.url,
+        serializedAppState: args.serializedAppState,
+      },
     };
   },
 
   openTraceFromHttpRpc(state: StateDraft, _args: {}): void {
-    clearTraceState(state);
+    this.clearState(state, {});
     const id = generateNextId(state);
     state.engine = {
       id,
-      ready: false,
       source: {type: 'HTTP_RPC'},
     };
   },
@@ -140,52 +105,6 @@ export const StateActions = {
     }
   },
 
-  maybeSetPendingDeeplink(state: StateDraft, args: PendingDeeplinkState) {
-    state.pendingDeeplink = args;
-  },
-
-  clearPendingDeeplink(state: StateDraft, _: {}) {
-    state.pendingDeeplink = undefined;
-  },
-
-  // TODO(hjd): engine.ready should be a published thing. If it's part
-  // of the state it interacts badly with permalinks.
-  setEngineReady(
-    state: StateDraft,
-    args: {engineId: string; ready: boolean; mode: EngineMode},
-  ): void {
-    const engine = state.engine;
-    if (engine === undefined || engine.id !== args.engineId) {
-      return;
-    }
-    engine.ready = args.ready;
-    engine.mode = args.mode;
-  },
-
-  setNewEngineMode(state: StateDraft, args: {mode: NewEngineMode}): void {
-    state.newEngineMode = args.mode;
-  },
-
-  // Marks all engines matching the given |mode| as failed.
-  setEngineFailed(
-    state: StateDraft,
-    args: {mode: EngineMode; failure: string},
-  ): void {
-    if (state.engine !== undefined && state.engine.mode === args.mode) {
-      state.engine.failed = args.failure;
-    }
-  },
-
-  updateStatus(state: StateDraft, args: Status): void {
-    if (statusTraceEvent) {
-      traceEventEnd(statusTraceEvent);
-    }
-    statusTraceEvent = traceEventBegin(args.msg, {
-      track: MetatraceTrackId.kOmniboxStatus,
-    });
-    state.status = args;
-  },
-
   // TODO(hjd): Remove setState - it causes problems due to reuse of ids.
   setState(state: StateDraft, args: {newState: State}): void {
     for (const key of Object.keys(state)) {
@@ -195,12 +114,6 @@ export const StateActions = {
     for (const key of Object.keys(args.newState)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (state as any)[key] = (args.newState as any)[key];
-    }
-
-    // If we're loading from a permalink then none of the engines can
-    // possibly be ready:
-    if (state.engine !== undefined) {
-      state.engine.ready = false;
     }
   },
 

@@ -30,6 +30,12 @@ struct Row;
 namespace gecko_importer {
 struct GeckoEvent;
 }
+namespace art_method {
+struct ArtMethodEvent;
+}
+namespace perf_text_importer {
+struct PerfTextEvent;
+}
 
 struct AndroidLogEvent;
 class PacketSequenceStateGeneration;
@@ -95,6 +101,19 @@ class GeckoTraceParser {
  public:
   virtual ~GeckoTraceParser();
   virtual void ParseGeckoEvent(int64_t, gecko_importer::GeckoEvent) = 0;
+};
+
+class ArtMethodParser {
+ public:
+  virtual ~ArtMethodParser();
+  virtual void ParseArtMethodEvent(int64_t, art_method::ArtMethodEvent) = 0;
+};
+
+class PerfTextTraceParser {
+ public:
+  virtual ~PerfTextTraceParser();
+  virtual void ParsePerfTextEvent(int64_t,
+                                  perf_text_importer::PerfTextEvent) = 0;
 };
 
 }  // namespace perfetto::trace_processor

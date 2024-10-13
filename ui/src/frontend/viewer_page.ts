@@ -91,7 +91,7 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
   // Used to prevent global deselection if a pan/drag select occurred.
   private keepCurrentSelection = false;
 
-  private overviewTimelinePanel = new OverviewTimelinePanel();
+  private overviewTimelinePanel: OverviewTimelinePanel;
   private timeAxisPanel = new TimeAxisPanel();
   private timeSelectionPanel = new TimeSelectionPanel();
   private notesPanel = new NotesPanel();
@@ -102,6 +102,7 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
 
   constructor(vnode: m.CVnode<PageWithTraceAttrs>) {
     this.tickmarkPanel = new TickmarkPanel(vnode.attrs.trace);
+    this.overviewTimelinePanel = new OverviewTimelinePanel(vnode.attrs.trace);
   }
 
   oncreate(vnode: m.CVnodeDOM<PageWithTraceAttrs>) {
@@ -278,6 +279,7 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
             if (trackNode.uri) {
               const tr = globals.trackManager.getTrackRenderer(trackNode.uri);
               return new TrackPanel({
+                reorderable: true,
                 node: trackNode,
                 trackRenderer: tr,
                 revealOnCreate: true,
@@ -491,7 +493,7 @@ export function renderWakeupVertical(
   size: Size2D,
 ) {
   const selection = globals.selectionManager.selection;
-  if (selection.kind === 'single' && selection.wakeupTs) {
+  if (selection.kind === 'track_event' && selection.wakeupTs) {
     drawVerticalLineAtTime(
       ctx,
       timescale,

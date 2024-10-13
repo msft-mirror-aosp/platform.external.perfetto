@@ -14,11 +14,14 @@
 
 import m from 'mithril';
 import {assertExists, assertTrue} from '../base/logging';
-import {PageAttrs} from './pages';
-import {z} from 'zod';
+import {RouteArgs, ROUTE_SCHEMA} from '../public/route_schema';
 
 export const ROUTE_PREFIX = '#!';
 const DEFAULT_ROUTE = '/';
+
+export interface PageAttrs {
+  subpage?: string;
+}
 
 // The set of args that can be set on the route via #!/page?a=1&b2.
 // Route args are orthogonal to pages (i.e. should NOT make sense only in a
@@ -35,64 +38,6 @@ const DEFAULT_ROUTE = '/';
 // location.hash = '#!/page/subpage?local_cache_key=a0b1'.
 //   This is client-only. All the routing logic in the Perfetto UI uses only
 //   this.
-
-// We use .catch(undefined) on every field below to make sure that passing an
-// invalid value doesn't invalidate the other keys which might be valid.
-// Zod default behaviour is atomic: either everything validates correctly or
-// the whole parsing fails.
-const ROUTE_SCHEMA = z
-  .object({
-    // The local_cache_key is special and is persisted across navigations.
-    local_cache_key: z.string().optional().catch(undefined),
-
-    // These are transient and are really set only on startup.
-
-    // Are we loading a trace via ABT.
-    openFromAndroidBugTool: z.boolean().optional().catch(undefined),
-
-    // For permalink hash.
-    s: z.string().optional().catch(undefined),
-
-    // DEPRECATED: for #!/record?p=cpu subpages (b/191255021).
-    p: z.string().optional().catch(undefined),
-
-    // For fetching traces from Cloud Storage or local servers
-    // as with record_android_trace.
-    url: z.string().optional().catch(undefined),
-
-    // For connecting to a trace_processor_shell --httpd instance running on a
-    // non-standard port. This requires the CSP_WS_PERMISSIVE_PORT flag to relax
-    // the Content Security Policy.
-    rpc_port: z.string().regex(/\d+/).optional().catch(undefined),
-
-    // Override the referrer. Useful for scripts such as
-    // record_android_trace to record where the trace is coming from.
-    referrer: z.string().optional().catch(undefined),
-
-    // For the 'mode' of the UI. For example when the mode is 'embedded'
-    // some features are disabled.
-    mode: z.enum(['embedded']).optional().catch(undefined),
-
-    // Should we hide the sidebar?
-    hideSidebar: z.boolean().optional().catch(undefined),
-
-    // A comma-separated list of plugins to enable for the current session.
-    enablePlugins: z.string().optional().catch(undefined),
-
-    // Deep link support
-    ts: z.string().optional().catch(undefined),
-    dur: z.string().optional().catch(undefined),
-    tid: z.string().optional().catch(undefined),
-    pid: z.string().optional().catch(undefined),
-    query: z.string().optional().catch(undefined),
-    visStart: z.string().optional().catch(undefined),
-    visEnd: z.string().optional().catch(undefined),
-  })
-  // default({}) ensures at compile-time that every entry is either optional or
-  // has a default value.
-  .default({});
-
-type RouteArgs = z.infer<typeof ROUTE_SCHEMA>;
 
 function safeParseRoute(rawRoute: unknown): RouteArgs {
   const res = ROUTE_SCHEMA.safeParse(rawRoute);
@@ -304,44 +249,5 @@ export class Router {
     if (this.recentChanges.length > EVENT_LIMIT) {
       throw new Error('History rewriting livelock');
     }
-  }
-
-  static getUrlForVersion(versionCode: string): string {
-    const url = `${window.location.origin}/${versionCode}/`;
-    return url;
-  }
-
-  static async isVersionAvailable(
-    versionCode: string,
-  ): Promise<string | undefined> {
-    if (versionCode === '') {
-      return undefined;
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1000);
-    const url = Router.getUrlForVersion(versionCode);
-    let r;
-    try {
-      r = await fetch(url, {signal: controller.signal});
-    } catch (e) {
-      console.error(
-        `No UI version for ${versionCode} at ${url}. This is an error if ${versionCode} is a released Perfetto version`,
-      );
-      return undefined;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-    if (!r.ok) {
-      return undefined;
-    }
-    return url;
-  }
-
-  static navigateToVersion(versionCode: string): void {
-    const url = Router.getUrlForVersion(versionCode);
-    if (url === undefined) {
-      throw new Error(`No URL known for UI version ${versionCode}.`);
-    }
-    window.location.replace(url);
   }
 }

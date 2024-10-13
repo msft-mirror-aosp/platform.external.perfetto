@@ -16,8 +16,7 @@
 
 #include "src/trace_processor/importers/common/trace_parser.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 AndroidLogEventParser::~AndroidLogEventParser() = default;
 FuchsiaRecordParser::~FuchsiaRecordParser() = default;
@@ -27,6 +26,7 @@ PerfRecordParser::~PerfRecordParser() = default;
 ProtoTraceParser::~ProtoTraceParser() = default;
 SpeRecordParser::~SpeRecordParser() = default;
 GeckoTraceParser::~GeckoTraceParser() = default;
+ArtMethodParser::~ArtMethodParser() = default;
+PerfTextTraceParser::~PerfTextTraceParser() = default;
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

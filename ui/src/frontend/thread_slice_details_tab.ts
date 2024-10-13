@@ -16,7 +16,6 @@ import m from 'mithril';
 import {Icons} from '../base/semantic_icons';
 import {Time, TimeSpan} from '../base/time';
 import {exists} from '../base/utils';
-import {raf} from '../core/raf_scheduler';
 import {Engine} from '../trace_processor/engine';
 import {LONG, LONG_NULL, NUM, STR_NULL} from '../trace_processor/query_result';
 import {Button} from '../widgets/button';
@@ -27,7 +26,7 @@ import {Section} from '../widgets/section';
 import {Tree} from '../widgets/tree';
 import {addDebugSliceTrack} from '../public/lib/debug_tracks/debug_tracks';
 import {globals} from './globals';
-import {Flow, FlowPoint} from 'src/core/flow_types';
+import {Flow, FlowPoint} from '../core/flow_types';
 import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
 import {hasArgs, renderArguments} from './slice_args';
 import {renderDetails} from './slice_details';
@@ -44,8 +43,8 @@ import {BasicTable} from '../widgets/basic_table';
 import {getSqlTableDescription} from './widgets/sql/table/sql_table_registry';
 import {assertExists} from '../base/logging';
 import {Trace} from '../public/trace';
-import {TrackSelectionDetailsPanel} from '../public/details_panel';
-import {AsyncLimiter} from '../base/async_limiter';
+import {TrackEventDetailsPanel} from '../public/details_panel';
+import {TrackEventSelection} from '../public/selection';
 
 interface ContextMenuItem {
   name: string;
@@ -254,33 +253,18 @@ async function getSliceDetails(
   }
 }
 
-export class ThreadSliceDetailsPanel implements TrackSelectionDetailsPanel {
-  private readonly queryLimiter = new AsyncLimiter();
+export class ThreadSliceDetailsPanel implements TrackEventDetailsPanel {
   private sliceDetails?: SliceDetails;
   private breakdownByThreadState?: BreakdownByThreadState;
-  private id?: number;
 
   constructor(
     private readonly trace: Trace,
     private readonly tableName: string,
   ) {}
 
-  render(id: number): m.Children {
-    if (id !== this.id) {
-      this.id = id;
-      this.queryLimiter.schedule(async () => {
-        await this.load(id);
-        raf.scheduleFullRedraw();
-      });
-    }
-
-    return this.renderView();
-  }
-
-  private async load(id: number) {
-    // Start loading the slice details
+  async load({eventId}: TrackEventSelection) {
     const {trace, tableName} = this;
-    const details = await getSliceDetails(trace.engine, id, tableName);
+    const details = await getSliceDetails(trace.engine, eventId, tableName);
 
     if (
       details !== undefined &&
@@ -295,10 +279,9 @@ export class ThreadSliceDetailsPanel implements TrackSelectionDetailsPanel {
     }
 
     this.sliceDetails = details;
-    raf.scheduleFullRedraw();
   }
 
-  private renderView() {
+  render() {
     if (!exists(this.sliceDetails)) {
       return m(DetailsShell, {title: 'Slice', description: 'Loading...'});
     }

@@ -31,6 +31,7 @@ namespace perfetto::trace_processor {
 class AndroidLogEventParser;
 class ArgsTracker;
 class ArgsTranslationTable;
+class ArtMethodParser;
 class AsyncTrackSetTracker;
 class ChunkedTraceReader;
 class ClockConverter;
@@ -57,6 +58,7 @@ class MultiMachineTraceManager;
 class PacketAnalyzer;
 class PerfRecordParser;
 class PerfSampleTracker;
+class PerfTextTraceParser;
 class ProcessTracker;
 class ProcessTrackTranslationTable;
 class ProtoImporterModule;
@@ -175,6 +177,8 @@ class TraceProcessorContext {
   std::unique_ptr<InstrumentsRowParser> instruments_row_parser;
   std::unique_ptr<AndroidLogEventParser> android_log_event_parser;
   std::unique_ptr<GeckoTraceParser> gecko_trace_parser;
+  std::unique_ptr<ArtMethodParser> art_method_parser;
+  std::unique_ptr<PerfTextTraceParser> perf_text_parser;
 
   // This field contains the list of proto descriptors that can be used by
   // reflection-based parsers.
