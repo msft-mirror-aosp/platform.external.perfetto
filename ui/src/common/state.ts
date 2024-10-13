@@ -158,7 +158,6 @@ export interface PendingDeeplinkState {
 
 export interface State {
   version: number;
-  nextId: string;
 
   /**
    * State of the ConfigEditor.
@@ -174,8 +173,6 @@ export interface State {
 
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
-  queries: ObjectById<QueryConfig>;
-  traceConversionInProgress: boolean;
   flamegraphModalDismissed: boolean;
 
   // Show track perf debugging overlay

@@ -12,29 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {assertTrue} from '../base/logging';
+import {assertExists, assertTrue} from '../base/logging';
 import {App} from '../public/app';
-import {TraceContext, TraceImpl} from './trace_impl';
+import {TraceImpl} from './trace_impl';
 import {CommandManagerImpl} from './command_manager';
 import {OmniboxManagerImpl} from './omnibox_manager';
 import {raf} from './raf_scheduler';
 import {SidebarManagerImpl} from './sidebar_manager';
 import {PluginManager} from './plugin_manager';
 import {NewEngineMode} from '../trace_processor/engine';
-import {RouteArgs} from './route_schema';
-import {Optional} from '../base/utils';
+import {RouteArgs} from '../public/route_schema';
+import {SqlPackage} from '../public/extra_sql_packages';
+import {SerializedAppState} from '../public/state_serialization_schema';
+import {PostedTrace, TraceSource} from '../public/trace_source';
+import {loadTrace} from './load_trace';
+import {CORE_PLUGIN_ID} from './plugin_manager';
 
-// The pseudo plugin id used for the core instance of AppImpl.
+// The args that frontend/index.ts passes when calling AppImpl.initialize().
+// This is to deal with injections that would otherwise cause circular deps.
+export interface AppInitArgs {
+  rootUrl: string;
+  initialRouteArgs: RouteArgs;
 
-export const CORE_PLUGIN_ID = '__core__';
+  // TODO(primiano): remove once State is gone.
+  // This maps to globals.dispatch(Actions.clearState({})),
+  clearState: () => void;
+}
 
 /**
  * Handles the global state of the ui, for anything that is not related to a
  * specific trace. This is always available even before a trace is loaded (in
  * contrast to TraceContext, which is bound to the lifetime of a trace).
  * There is only one instance in total of this class (see instance()).
- * This class is not exposed to anybody. Both core and plugins should access
- * this via AppImpl.
+ * This class is only exposed to TraceImpl, nobody else should refer to this
+ * and should use AppImpl instead.
  */
 export class AppContext {
   readonly commandMgr = new CommandManagerImpl();
@@ -42,19 +53,24 @@ export class AppContext {
   readonly sidebarMgr = new SidebarManagerImpl();
   readonly pluginMgr: PluginManager;
   newEngineMode: NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE';
-  initialRouteArgs?: RouteArgs = undefined;
+  initialRouteArgs: RouteArgs;
+  isLoadingTrace = false; // Set when calling openTrace().
+  readonly initArgs: AppInitArgs;
 
-  // The most recently created trace context. Can be undefined before any trace
-  // is loaded.
-  private traceCtx?: TraceContext;
+  // This is normally empty and is injected with extra google-internal packages
+  // via is_internal_user.js
+  extraSqlPackages: SqlPackage[] = [];
 
-  // There is only one global instance, lazily initialized on the first call.
-  private static _instance: AppContext;
-  static get instance() {
-    return (AppContext._instance = AppContext._instance ?? new AppContext());
-  }
+  // This constructor is invoked only once, when frontend/index.ts invokes
+  // AppMainImpl.initialize().
+  constructor(initArgs: AppInitArgs) {
+    this.initArgs = initArgs;
+    this.initialRouteArgs = initArgs.initialRouteArgs;
 
-  private constructor() {
+    // The rootUrl should point to 'https://ui.perfetto.dev/v1.2.3/'. It's
+    // allowed to be empty only in unittests, because there there is no bundle
+    // hence no concrete root.
+    assertTrue(this.initArgs.rootUrl !== '' || typeof jest !== 'undefined');
     this.pluginMgr = new PluginManager({
       forkForPlugin: (p) => AppImpl.instance.forkForPlugin(p),
       get trace() {
@@ -62,24 +78,8 @@ export class AppContext {
       },
     });
   }
-
-  get currentTraceCtx(): TraceContext | undefined {
-    return this.traceCtx;
-  }
-
-  // Called by AppImpl.newTraceInstance().
-  setActiveTrace(traceCtx: TraceContext | undefined) {
-    if (this.traceCtx !== undefined) {
-      // This will trigger the unregistration of trace-scoped commands and
-      // sidebar menuitems (and few similar things).
-      this.traceCtx[Symbol.dispose]();
-    }
-    this.traceCtx = traceCtx;
-  }
-
-  // This is set to true when calling loadTrace() and cleared when it resolves.
-  isLoadingTrace = false;
 }
+
 /*
  * Every plugin gets its own instance. This is how we keep track
  * what each plugin is doing and how we can blame issues on particular
@@ -101,10 +101,22 @@ export class AppImpl implements App {
   // NOT the only instance, as other AppImpl instance will be created for each
   // plugin.
   private static _instance: AppImpl;
+
+  // Invoked by frontend/index.ts.
+  static initialize(args: AppInitArgs) {
+    assertTrue(AppImpl._instance === undefined);
+    AppImpl._instance = new AppImpl(new AppContext(args), CORE_PLUGIN_ID);
+  }
+
+  // For testing purposes only.
+  // TODO(primiano): This is only required because today globals.ts abuses
+  // createFakeTraceImpl(). It can be removed once globals goes away.
+  static get initialized() {
+    return AppImpl._instance !== undefined;
+  }
+
   static get instance(): AppImpl {
-    AppImpl._instance =
-      AppImpl._instance ?? new AppImpl(AppContext.instance, CORE_PLUGIN_ID);
-    return AppImpl._instance;
+    return assertExists(AppImpl._instance);
   }
 
   get commands(): CommandManagerImpl {
@@ -127,18 +139,8 @@ export class AppImpl implements App {
     return this.currentTrace;
   }
 
-  closeCurrentTrace() {
-    this.currentTrace = undefined;
-    this.appCtx.setActiveTrace(undefined);
-  }
-
   scheduleRedraw(): void {
     raf.scheduleFullRedraw();
-  }
-
-  setActiveTrace(traceImpl: TraceImpl, traceCtx: TraceContext) {
-    this.appCtx.setActiveTrace(traceCtx);
-    this.currentTrace = traceImpl;
   }
 
   forkForPlugin(pluginId: string): AppImpl {
@@ -154,24 +156,96 @@ export class AppImpl implements App {
     this.appCtx.newEngineMode = mode;
   }
 
-  setInitialRouteArgs(args: RouteArgs) {
-    this.appCtx.initialRouteArgs = args;
+  get initialRouteArgs(): RouteArgs {
+    return this.appCtx.initialRouteArgs;
   }
 
-  getAndClearInitialRouteArgs(): Optional<RouteArgs> {
-    const args = this.appCtx.initialRouteArgs;
-    this.appCtx.initialRouteArgs = {};
-    return args;
+  openTraceFromFile(file: File): void {
+    this.openTrace({type: 'FILE', file});
+  }
+
+  openTraceFromUrl(url: string, serializedAppState?: SerializedAppState) {
+    this.openTrace({type: 'URL', url, serializedAppState});
+  }
+
+  openTraceFromBuffer(postMessageArgs: PostedTrace): void {
+    this.openTrace({type: 'ARRAY_BUFFER', ...postMessageArgs});
+  }
+
+  openTraceFromHttpRpc(): void {
+    this.openTrace({type: 'HTTP_RPC'});
+  }
+
+  private async openTrace(src: TraceSource) {
+    assertTrue(this.pluginId === CORE_PLUGIN_ID);
+    this.closeCurrentTrace();
+    this.appCtx.isLoadingTrace = true;
+    try {
+      // loadTrace() in trace_loader.ts will do the following:
+      // - Create a new engine.
+      // - Pump the data from the TraceSource into the engine.
+      // - Do the initial queries to build the TraceImpl object
+      // - Call AppImpl.setActiveTrace(TraceImpl)
+      // - Continue with the trace loading logic (track decider, plugins, etc)
+      // - Resolve the promise when everything is done.
+      await loadTrace(this, src);
+      this.omnibox.reset(/* focus= */ false);
+      // loadTrace() internally will call setActiveTrace() and change our
+      // _currentTrace in the middle of its ececution. We cannot wait for
+      // loadTrace to be finished before setting it because some internal
+      // implementation details of loadTrace() rely on that trace to be current
+      // to work properly (mainly the router hash uuid).
+    } catch (err) {
+      this.omnibox.showStatusMessage(`${err}`);
+      throw err;
+    } finally {
+      this.appCtx.isLoadingTrace = false;
+      raf.scheduleFullRedraw();
+    }
+  }
+
+  closeCurrentTrace() {
+    // This method should be called only on the core instance, plugins don't
+    // have access to openTrace*() methods.
+    assertTrue(this.pluginId === CORE_PLUGIN_ID);
+    this.omnibox.reset(/* focus= */ false);
+
+    if (this.currentTrace !== undefined) {
+      this.appCtx.pluginMgr.onTraceClose();
+      // This will trigger the unregistration of trace-scoped commands and
+      // sidebar menuitems (and few similar things).
+      this.currentTrace[Symbol.dispose]();
+      this.currentTrace = undefined;
+    }
+    this.appCtx.initArgs.clearState();
+  }
+
+  // Called by trace_loader.ts soon after it has created a new TraceImpl.
+  setActiveTrace(traceImpl: TraceImpl) {
+    // In 99% this closeCurrentTrace() call is not needed because the real one
+    // is performed by openTrace() in this file. However in some rare cases we
+    // might end up loading a trace while another one is still loading, and this
+    // covers races in that case.
+    this.closeCurrentTrace();
+    this.currentTrace = traceImpl;
   }
 
   get isLoadingTrace() {
     return this.appCtx.isLoadingTrace;
   }
 
-  // TODO(primiano): this is very temporary and will go away as soon as
-  // TraceController is turned into an async function.
-  setIsLoadingTrace(loading: boolean) {
-    this.appCtx.isLoadingTrace = loading;
-    raf.scheduleFullRedraw();
+  get rootUrl() {
+    return this.appCtx.initArgs.rootUrl;
+  }
+
+  get extraSqlPackages(): SqlPackage[] {
+    return this.appCtx.extraSqlPackages;
+  }
+
+  // Nothing other than TraceImpl's constructor should ever refer to this.
+  // This is necessary to avoid circular dependencies between trace_impl.ts
+  // and app_impl.ts.
+  get __appCtxForTraceImplCtor() {
+    return this.appCtx;
   }
 }

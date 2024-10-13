@@ -37,8 +37,11 @@ import {Selection, SelectionOpts} from '../public/selection';
 import {SearchResult} from '../public/search';
 import {PivotTableManager} from './pivot_table_manager';
 import {FlowManager} from './flow_manager';
-import {AppContext, AppImpl, CORE_PLUGIN_ID} from './app_impl';
+import {AppContext, AppImpl} from './app_impl';
 import {PluginManager} from './plugin_manager';
+import {ThreadDesc, ThreadMap} from '../public/threads';
+import {RouteArgs} from '../public/route_schema';
+import {CORE_PLUGIN_ID} from './plugin_manager';
 
 /**
  * Handles the per-trace state of the UI
@@ -48,7 +51,7 @@ import {PluginManager} from './plugin_manager';
  * This is the underlying storage for AppImpl, which instead has one instance
  * per trace per plugin.
  */
-export class TraceContext implements Disposable {
+class TraceContext implements Disposable {
   readonly appCtx: AppContext;
   readonly engine: EngineBase;
   readonly omniboxMgr = new OmniboxManagerImpl();
@@ -64,7 +67,13 @@ export class TraceContext implements Disposable {
   readonly pluginSerializableState = createStore<{[key: string]: {}}>({});
   readonly scrollHelper: ScrollHelper;
   readonly pivotTableMgr;
+  readonly threads = new Map<number, ThreadDesc>();
   readonly trash = new DisposableStack();
+
+  // List of errors that were encountered while loading the trace by the TS
+  // code. These are on top of traceInfo.importErrors, which is a summary of
+  // what TraceProcessor reports on the stats table at import time.
+  readonly loadingErrors: string[] = [];
 
   constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfo) {
     this.appCtx = gctx;
@@ -105,7 +114,6 @@ export class TraceContext implements Disposable {
       engine.getProxy('FlowManager'),
       this.trackMgr,
       this.selectionMgr,
-      () => this.workspaceMgr.currentWorkspace,
     );
 
     this.searchMgr = new SearchManagerImpl({
@@ -166,19 +174,21 @@ export class TraceImpl implements Trace {
   // engine has been set up. It obtains a new TraceImpl for the core. From that
   // we can fork sibling instances (i.e. bound to the same TraceContext) for
   // the various plugins.
-  static newInstance(engine: EngineBase, traceInfo: TraceInfo): TraceImpl {
-    const appCtx = AppContext.instance;
-    const appImpl = AppImpl.instance;
-    const traceCtx = new TraceContext(appCtx, engine, traceInfo);
+  static createInstanceForCore(
+    appImpl: AppImpl,
+    engine: EngineBase,
+    traceInfo: TraceInfo,
+  ): TraceImpl {
+    const traceCtx = new TraceContext(
+      appImpl.__appCtxForTraceImplCtor,
+      engine,
+      traceInfo,
+    );
     const traceImpl = new TraceImpl(appImpl, traceCtx);
-    appImpl.setActiveTrace(traceImpl, traceCtx);
-
-    // TODO(primiano): remove this injection once we plumb Trace everywhere.
-    setScrollToFunction((x: ScrollToArgs) => traceCtx.scrollHelper.scrollTo(x));
     return traceImpl;
   }
 
-  constructor(appImpl: AppImpl, ctx: TraceContext) {
+  private constructor(appImpl: AppImpl, ctx: TraceContext) {
     const pluginId = appImpl.pluginId;
     this.appImpl = appImpl;
     this.traceCtx = ctx;
@@ -215,6 +225,9 @@ export class TraceImpl implements Trace {
         return disposable;
       },
     });
+
+    // TODO(primiano): remove this injection once we plumb Trace everywhere.
+    setScrollToFunction((x: ScrollToArgs) => ctx.scrollHelper.scrollTo(x));
   }
 
   scrollTo(where: ScrollToArgs): void {
@@ -297,6 +310,23 @@ export class TraceImpl implements Trace {
     return this.traceCtx.flowMgr;
   }
 
+  get loadingErrors(): ReadonlyArray<string> {
+    return this.traceCtx.loadingErrors;
+  }
+
+  addLoadingError(err: string) {
+    this.traceCtx.loadingErrors.push(err);
+  }
+
+  get threads(): ThreadMap {
+    return this.traceCtx.threads;
+  }
+
+  setThreads(threadMap: ThreadMap) {
+    this.traceCtx.threads.clear();
+    threadMap.forEach((v, k) => this.traceCtx.threads.set(k, v));
+  }
+
   // App interface implementation.
 
   get pluginId(): string {
@@ -319,9 +349,28 @@ export class TraceImpl implements Trace {
     return this.appImpl.plugins;
   }
 
+  get initialRouteArgs(): RouteArgs {
+    return this.appImpl.initialRouteArgs;
+  }
+
+  get rootUrl(): string {
+    return this.appImpl.rootUrl;
+  }
+
   scheduleRedraw(): void {
     this.appImpl.scheduleRedraw();
   }
+
+  [Symbol.dispose]() {
+    if (this.pluginId === CORE_PLUGIN_ID) {
+      this.traceCtx[Symbol.dispose]();
+    }
+  }
+}
+
+// A convenience interface to inject the App in Mithril components.
+export interface TraceImplAttrs {
+  trace: TraceImpl;
 }
 
 // Allows to take an existing class instance (`target`) and override some of its
