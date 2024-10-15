@@ -200,7 +200,7 @@ class WattsonStdlib(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('wattson_dsu_pmu.pb'),
         query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.ungrouped;
+            INCLUDE PERFETTO MODULE wattson.curves.estimates;
               select * from _w_independent_cpus_calc
               WHERE ts > 359661672577
               ORDER by ts ASC
@@ -225,7 +225,7 @@ class WattsonStdlib(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('wattson_dsu_pmu.pb'),
         query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.ungrouped;
+            INCLUDE PERFETTO MODULE wattson.curves.estimates;
               select * from _system_state_curves
               ORDER by ts ASC
               LIMIT 5
@@ -244,7 +244,7 @@ class WattsonStdlib(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('wattson_dsu_pmu.pb'),
         query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.ungrouped;
+            INCLUDE PERFETTO MODULE wattson.curves.estimates;
               select * from _system_state_curves
               WHERE ts > 359661672577
               ORDER by ts ASC
@@ -264,7 +264,7 @@ class WattsonStdlib(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('wattson_dsu_pmu.pb'),
         query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.ungrouped;
+            INCLUDE PERFETTO MODULE wattson.curves.estimates;
               select * from _system_state_mw
               WHERE ts > 359661672577
               ORDER by ts ASC
@@ -289,7 +289,7 @@ class WattsonStdlib(TestSuite):
     return DiffTestBlueprint(
         trace=DataPath('wattson_eos_suspend.pb'),
         query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.ungrouped;
+            INCLUDE PERFETTO MODULE wattson.curves.estimates;
               select * from _system_state_curves
               WHERE ts > 24790009884888
               ORDER by ts ASC
@@ -302,57 +302,6 @@ class WattsonStdlib(TestSuite):
             24792794948689,205625,39.690000,39.690000,39.690000,39.690000,0.000000,0.000000,0.000000,0.000000,18.390000,"[NULL]","[NULL]"
             24792795154314,19531,39.690000,39.690000,39.690000,39.690000,0.000000,0.000000,0.000000,0.000000,18.390000,"[NULL]","[NULL]"
             24792795173845,50781,39.690000,39.690000,0.000000,39.690000,0.000000,0.000000,0.000000,0.000000,18.390000,"[NULL]","[NULL]"
-            """))
-
-  # Tests that device curve table is being looked up correctly
-  def test_wattson_device_curve_per_policy(self):
-    return DiffTestBlueprint(
-        trace=DataPath('wattson_dsu_pmu.pb'),
-        query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.grouped;
-              select * from wattson_estimate_per_component
-              WHERE ts > 359661672577
-              ORDER by ts ASC
-              LIMIT 10
-            """),
-        out=Csv("""
-            "ts","dur","l3","little_cpus","mid_cpus","big_cpus"
-            359661672578,75521,18051.005200,49.300000,550.550000,2064.320000
-            359661748099,2254517,840849.917600,49.440000,47.000000,2064.320000
-            359664003674,11596,2770.713600,1031.260000,1054.100000,3885.780000
-            359664015270,4720,1127.359000,1031.260000,1054.100000,2064.320000
-            359664019990,18921,4522.446400,1031.260000,550.550000,2064.320000
-            359664038911,8871,2120.319000,785.770000,550.550000,2064.320000
-            359664047782,1343,320.839600,540.280000,550.550000,2064.320000
-            359664049491,1383,514.276100,254.130000,47.000000,2064.320000
-            359664050874,2409912,898807.333300,49.440000,47.000000,2064.320000
-            359666460786,13754,3286.709200,49.300000,550.550000,2064.320000
-            """))
-
-  # Tests that total calculations are correct
-  def test_wattson_total_raven_calc(self):
-    return DiffTestBlueprint(
-        trace=DataPath('wattson_dsu_pmu.pb'),
-        query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.grouped;
-               select * from _wattson_entire_trace
-            """),
-        out=Csv("""
-            "total_l3","total_little_cpus","total_mid_cpus","total_big_cpus","total"
-            500.010000,662.000000,370.730000,1490.770000,3023.520000
-            """))
-
-  # Tests that total calculations are correct
-  def test_wattson_total_eos_calc(self):
-    return DiffTestBlueprint(
-        trace=DataPath('wattson_eos_suspend.pb'),
-        query=("""
-            INCLUDE PERFETTO MODULE wattson.curves.grouped;
-               select * from _wattson_entire_trace
-            """),
-        out=Csv("""
-            "total_l3","total_little_cpus","total_mid_cpus","total_big_cpus","total"
-            0.000000,2602.930000,0.000000,0.000000,2602.930000
             """))
 
   # Tests that total calculations are correct
