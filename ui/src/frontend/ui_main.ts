@@ -376,6 +376,23 @@ export class UiMainPerTrace implements m.ClassComponent {
         },
         defaultHotkey: 'Mod+A',
       },
+      {
+        id: 'perfetto.ConvertSelectionToArea',
+        name: 'Convert the current selection to an area selection',
+        callback: () => {
+          const selection = trace.selection.selection;
+          const range = trace.selection.findTimeRangeOfSelection();
+          if (selection.kind === 'track_event' && range) {
+            trace.selection.selectArea({
+              start: range.start,
+              end: range.end,
+              trackUris: [selection.trackUri],
+            });
+          }
+        },
+        // TODO(stevegolton): Decide on a sensible hotkey.
+        // defaultHotkey: 'L',
+      },
     ];
 
     // Register each command with the command manager
@@ -388,7 +405,7 @@ export class UiMainPerTrace implements m.ClassComponent {
     const omnibox = AppImpl.instance.omnibox;
     const omniboxMode = omnibox.mode;
     const statusMessage = omnibox.statusMessage;
-    if (statusMessage !== '') {
+    if (statusMessage !== undefined) {
       return m(
         `.omnibox.message-mode`,
         m(`input[readonly][disabled][ref=omnibox]`, {
