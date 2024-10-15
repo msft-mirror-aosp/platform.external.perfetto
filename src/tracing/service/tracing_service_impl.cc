@@ -23,12 +23,12 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <regex>
 #include <string>
 #include <unordered_set>
+
 #include "perfetto/base/time.h"
+#include "perfetto/ext/base/clock_snapshots.h"
 #include "perfetto/ext/tracing/core/client_identity.h"
-#include "perfetto/tracing/core/clock_snapshots.h"
 
 #if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
     !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
@@ -1901,6 +1901,11 @@ void TracingServiceImpl::Flush(TracingSessionID tsid,
     return;
   }
 
+  SnapshotLifecyleEvent(
+      tracing_session,
+      protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
+      false /* snapshot_clocks */);
+
   std::map<ProducerID, std::vector<DataSourceInstanceID>> data_source_instances;
   for (const auto& [producer_id, ds_inst] :
        tracing_session->data_source_instances) {
@@ -3487,7 +3492,8 @@ bool TracingServiceImpl::SnapshotClocks(
   // been emitted into the trace yet (see comment below).
   static constexpr int64_t kSignificantDriftNs = 10 * 1000 * 1000;  // 10 ms
 
-  TracingSession::ClockSnapshotData new_snapshot_data = CaptureClockSnapshots();
+  TracingSession::ClockSnapshotData new_snapshot_data =
+      base::CaptureClockSnapshots();
   // If we're about to update a session's latest clock snapshot that hasn't been
   // emitted into the trace yet, check whether the clocks have drifted enough to
   // warrant overriding the current snapshot values. The older snapshot would be
@@ -4021,6 +4027,9 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
     }
   }
 
+  SnapshotLifecyleEvent(
+      session, protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
+      false /* snapshot_clocks */);
   clone_op.pending_flush_cnt = bufs_groups.size();
   for (const std::set<BufferID>& buf_group : bufs_groups) {
     FlushDataSourceInstances(
@@ -4963,11 +4972,14 @@ TracingServiceImpl::TracingSession::TracingSession(
       config(new_config),
       snapshot_periodic_task(task_runner),
       timed_stop_task(task_runner) {
-  // all_data_sources_flushed is special because we store up to 64 events of
-  // this type. Other events will go through the default case in
+  // all_data_sources_flushed (and flush_started) is special because we store up
+  // to 64 events of this type. Other events will go through the default case in
   // SnapshotLifecycleEvent() where they will be given a max history of 1.
   lifecycle_events.emplace_back(
       protos::pbzero::TracingServiceEvent::kAllDataSourcesFlushedFieldNumber,
+      64 /* max_size */);
+  lifecycle_events.emplace_back(
+      protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
       64 /* max_size */);
 }
 
@@ -4982,8 +4994,8 @@ TracingServiceImpl::RelayEndpointImpl::~RelayEndpointImpl() = default;
 
 void TracingServiceImpl::RelayEndpointImpl::SyncClocks(
     SyncMode sync_mode,
-    ClockSnapshotVector client_clocks,
-    ClockSnapshotVector host_clocks) {
+    base::ClockSnapshotVector client_clocks,
+    base::ClockSnapshotVector host_clocks) {
   // We keep only the most recent 5 clock sync snapshots.
   static constexpr size_t kNumSyncClocks = 5;
   if (synced_clocks_.size() >= kNumSyncClocks)

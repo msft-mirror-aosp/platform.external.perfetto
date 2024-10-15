@@ -21,7 +21,6 @@ export enum OmniboxMode {
   Query,
   Command,
   Prompt,
-  StatusMessage,
 }
 
 interface Prompt {
@@ -40,8 +39,7 @@ export class OmniboxManagerImpl implements OmniboxManager {
   private _omniboxSelectionIndex = 0;
   private _forceShortTextSearch = false;
   private _textForMode = new Map<OmniboxMode, string>();
-  private _statusMessage = '';
-  private _statusMessageGeneration = 0;
+  private _statusMessageContainer: {msg?: string} = {};
 
   get mode(): OmniboxMode {
     return this._mode;
@@ -99,24 +97,19 @@ export class OmniboxManagerImpl implements OmniboxManager {
   }
 
   showStatusMessage(msg: string, durationMs = 2000) {
-    this._statusMessage = msg;
-    const generation = ++this._statusMessageGeneration;
-    const prevMode = this._mode;
-    this._mode = OmniboxMode.StatusMessage;
+    const statusMessageContainer: {msg?: string} = {msg};
+    if (durationMs > 0) {
+      setTimeout(() => {
+        statusMessageContainer.msg = undefined;
+        raf.scheduleFullRedraw();
+      }, durationMs);
+    }
+    this._statusMessageContainer = statusMessageContainer;
     raf.scheduleFullRedraw();
-    if (durationMs === 0) return; // Don't auto-reset
-    setTimeout(() => {
-      if (this._statusMessageGeneration !== generation) return;
-      raf.scheduleFullRedraw();
-      this._statusMessage = '';
-      if (this._mode === OmniboxMode.StatusMessage) {
-        this._mode = prevMode;
-      }
-    }, durationMs);
   }
 
-  get statusMessage() {
-    return this._statusMessage;
+  get statusMessage(): string | undefined {
+    return this._statusMessageContainer.msg;
   }
 
   // Start a prompt. If options are supplied, the user must pick one from the
@@ -160,6 +153,7 @@ export class OmniboxManagerImpl implements OmniboxManager {
   reset(focus = true): void {
     this.setMode(defaultMode, focus);
     this._omniboxSelectionIndex = 0;
+    this._statusMessageContainer = {};
     raf.scheduleFullRedraw();
   }
 

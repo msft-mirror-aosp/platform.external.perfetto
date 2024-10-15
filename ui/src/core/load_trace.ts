@@ -14,15 +14,12 @@
 
 import {assertExists, assertTrue} from '../base/logging';
 import {time, Time, TimeSpan} from '../base/time';
-import {Actions} from '../common/actions';
-import {cacheTrace} from '../core/cache_manager';
+import {cacheTrace} from './cache_manager';
 import {
   getEnabledMetatracingCategories,
   isMetatracingEnabled,
-} from '../core/metatracing';
-import {EngineConfig} from '../common/state';
-import {featureFlags, Flag} from '../core/feature_flags';
-import {globals} from '../frontend/globals';
+} from './metatracing';
+import {featureFlags} from './feature_flags';
 import {Engine, EngineBase} from '../trace_processor/engine';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {
@@ -30,58 +27,29 @@ import {
   LONG_NULL,
   NUM,
   NUM_NULL,
-  QueryError,
   STR,
   STR_NULL,
 } from '../trace_processor/query_result';
 import {WasmEngineProxy} from '../trace_processor/wasm_engine_proxy';
-import {Controller} from './controller';
 import {
   TraceBufferStream,
   TraceFileStream,
   TraceHttpStream,
   TraceStream,
 } from '../core/trace_stream';
-import {decideTracks} from '../core/track_decider';
+import {decideTracks} from './track_decider';
 import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
-} from '../core/state_serialization';
+} from './state_serialization';
 import {TraceInfo} from '../public/trace_info';
-import {AppImpl} from '../core/app_impl';
-import {raf} from '../core/raf_scheduler';
-import {TraceImpl} from '../core/trace_impl';
+import {AppImpl} from './app_impl';
+import {raf} from './raf_scheduler';
+import {TraceImpl} from './trace_impl';
 import {SerializedAppState} from '../public/state_serialization_schema';
 import {TraceSource} from '../public/trace_source';
 import {ThreadDesc} from '../public/threads';
 import {Router} from '../core/router';
-
-type States = 'init' | 'loading_trace' | 'ready';
-
-const METRICS = [
-  'android_ion',
-  'android_lmk',
-  'android_surfaceflinger',
-  'android_batt',
-  'android_other_traces',
-  'chrome_dropped_frames',
-  // TODO(289365196): Reenable:
-  // 'chrome_long_latency',
-  'android_trusty_workqueues',
-];
-const FLAGGED_METRICS: Array<[Flag, string]> = METRICS.map((m) => {
-  const id = `forceMetric${m}`;
-  let name = m.split('_').join(' ');
-  name = name[0].toUpperCase() + name.slice(1);
-  name = 'Metric: ' + name;
-  const flag = featureFlags.register({
-    id,
-    name,
-    description: `Overrides running the '${m}' metric at import time.`,
-    defaultValue: true,
-  });
-  return [flag, m];
-});
 
 const ENABLE_CHROME_RELIABLE_RANGE_ZOOM_FLAG = featureFlags.register({
   id: 'enableChromeReliableRangeZoom',
@@ -146,80 +114,26 @@ async function defineMaxLayoutDepthSqlFunction(engine: Engine): Promise<void> {
   `);
 }
 
-// TraceController handles handshakes with the frontend for everything that
-// concerns a single trace. It owns the WASM trace processor engine, handles
-// tracks data and SQL queries. There is one TraceController instance for each
-// trace opened in the UI (for now only one trace is supported).
-export class TraceController extends Controller<States> {
-  private trace?: TraceImpl = undefined;
+let lastEngineId = 0;
 
-  constructor(private engineCfg: EngineConfig) {
-    super('init');
-  }
-
-  run() {
-    switch (this.state) {
-      case 'init':
-        updateStatus('Opening trace');
-        this.setState('loading_trace');
-        loadTrace(this.engineCfg.source, this.engineCfg.id)
-          .then((traceImpl) => {
-            this.trace = traceImpl;
-          })
-          .catch((err) => {
-            updateStatus(`${err}`);
-            throw err;
-          })
-          .finally(() => {
-            globals.dispatch(Actions.runControllers({}));
-            AppImpl.instance.setIsLoadingTrace(false);
-            AppImpl.instance.omnibox.reset(/* focus= */ false);
-          });
-        break;
-
-      case 'loading_trace':
-        // Stay in this state until loadTrace() returns and marks the engine as
-        // ready.
-        if (this.trace === undefined || AppImpl.instance.isLoadingTrace) {
-          return;
-        }
-        this.setState('ready');
-        break;
-
-      case 'ready':
-        return [];
-
-      default:
-        throw new Error(`unknown state ${this.state}`);
-    }
-    return;
-  }
-
-  onDestroy() {
-    AppImpl.instance.plugins.onTraceClose();
-    AppImpl.instance.closeCurrentTrace();
-  }
-}
-
-// TODO(primiano): the extra indentation here is purely to help Gerrit diff
-// detection algorithm. It can be re-formatted in the next CL.
-
-async function loadTrace(
+export async function loadTrace(
+  app: AppImpl,
   traceSource: TraceSource,
-  engineId: string,
 ): Promise<TraceImpl> {
-  // TODO(primiano): in the next CL remember to invoke here clearState() because
-  // the openActions (which today do that) will be gone.
-  //  globals.dispatch(Actions.clearState({}));
-  const engine = await createEngine(engineId);
-  return await loadTraceIntoEngine(traceSource, engine);
+  updateStatus(app, 'Opening trace');
+  const engineId = `${++lastEngineId}`;
+  const engine = await createEngine(app, engineId);
+  return await loadTraceIntoEngine(app, traceSource, engine);
 }
 
-async function createEngine(engineId: string): Promise<EngineBase> {
+async function createEngine(
+  app: AppImpl,
+  engineId: string,
+): Promise<EngineBase> {
   // Check if there is any instance of the trace_processor_shell running in
   // HTTP RPC mode (i.e. trace_processor_shell -D).
   let useRpc = false;
-  if (AppImpl.instance.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
+  if (app.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
     useRpc = (await HttpRpcEngine.checkConnection()).connected;
   }
   let engine;
@@ -245,10 +159,10 @@ async function createEngine(engineId: string): Promise<EngineBase> {
 }
 
 async function loadTraceIntoEngine(
+  app: AppImpl,
   traceSource: TraceSource,
   engine: EngineBase,
 ): Promise<TraceImpl> {
-  AppImpl.instance.setIsLoadingTrace(true);
   let traceStream: TraceStream | undefined;
   let serializedAppState: SerializedAppState | undefined;
   if (traceSource.type === 'FILE') {
@@ -283,7 +197,7 @@ async function loadTraceIntoEngine(
         status += `${Math.round(res.bytesRead / 1e6)} MB`;
       }
       status += ` - ${Math.ceil(res.bytesRead / elapsed / 1e6)} MB/s`;
-      updateStatus(status);
+      updateStatus(app, status);
       if (res.eof) break;
     }
     await engine.notifyEof();
@@ -291,17 +205,13 @@ async function loadTraceIntoEngine(
     assertTrue(engine instanceof HttpRpcEngine);
     await engine.restoreInitialTables();
   }
-  for (const p of globals.extraSqlPackages) {
+  for (const p of app.extraSqlPackages) {
     await engine.registerSqlPackages(p);
   }
 
   const traceDetails = await getTraceInfo(engine, traceSource);
-  const trace = TraceImpl.createInstanceForCore(
-    AppImpl.instance,
-    engine,
-    traceDetails,
-  );
-  AppImpl.instance.setActiveTrace(trace);
+  const trace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
+  app.setActiveTrace(trace);
 
   const visibleTimeSpan = await computeVisibleTime(
     traceDetails.start,
@@ -316,8 +226,7 @@ async function loadTraceIntoEngine(
   Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
 
   // Make sure the helper views are available before we start adding tracks.
-  await initialiseHelperViews(trace);
-  await includeSummaryTables(engine);
+  await includeSummaryTables(trace);
 
   await defineMaxLayoutDepthSqlFunction(engine);
 
@@ -325,11 +234,11 @@ async function loadTraceIntoEngine(
     deserializeAppStatePhase1(serializedAppState, trace);
   }
 
-  await AppImpl.instance.plugins.onTraceLoad(trace, (id) => {
-    updateStatus(`Running plugin: ${id}`);
+  await app.plugins.onTraceLoad(trace, (id) => {
+    updateStatus(app, `Running plugin: ${id}`);
   });
 
-  updateStatus('Loading tracks');
+  updateStatus(app, 'Loading tracks');
   await decideTracks(trace);
 
   decideTabs(trace);
@@ -373,7 +282,7 @@ function decideTabs(trace: TraceImpl) {
 }
 
 async function listThreads(trace: TraceImpl) {
-  updateStatus('Reading thread list');
+  updateStatus(trace, 'Reading thread list');
   const query = `select
         utid,
         tid,
@@ -408,201 +317,27 @@ async function listThreads(trace: TraceImpl) {
   trace.setThreads(threads);
 }
 
-async function initialiseHelperViews(trace: TraceImpl) {
+async function includeSummaryTables(trace: TraceImpl) {
   const engine = trace.engine;
-  updateStatus('Creating annotation counter track table');
-  // Create the helper tables for all the annotations related data.
-  // NULL in min/max means "figure it out per track in the usual way".
-  await engine.query(`
-      CREATE TABLE annotation_counter_track(
-        id INTEGER PRIMARY KEY,
-        name STRING,
-        __metric_name STRING,
-        upid INTEGER,
-        min_value DOUBLE,
-        max_value DOUBLE
-      );
-    `);
-  updateStatus('Creating annotation slice track table');
-  await engine.query(`
-      CREATE TABLE annotation_slice_track(
-        id INTEGER PRIMARY KEY,
-        name STRING,
-        __metric_name STRING,
-        upid INTEGER,
-        group_name STRING
-      );
-    `);
-
-  updateStatus('Creating annotation counter table');
-  await engine.query(`
-      CREATE TABLE annotation_counter(
-        id BIGINT,
-        track_id INT,
-        ts BIGINT,
-        value DOUBLE,
-        PRIMARY KEY (track_id, ts)
-      ) WITHOUT ROWID;
-    `);
-  updateStatus('Creating annotation slice table');
-  await engine.query(`
-      CREATE TABLE annotation_slice(
-        id INTEGER PRIMARY KEY,
-        track_id INT,
-        ts BIGINT,
-        dur BIGINT,
-        thread_dur BIGINT,
-        depth INT,
-        cat STRING,
-        name STRING,
-        UNIQUE(track_id, ts)
-      );
-    `);
-
-  const availableMetrics = [];
-  const metricsResult = await engine.query('select name from trace_metrics');
-  for (const it = metricsResult.iter({name: STR}); it.valid(); it.next()) {
-    availableMetrics.push(it.name);
-  }
-
-  const availableMetricsSet = new Set<string>(availableMetrics);
-  for (const [flag, metric] of FLAGGED_METRICS) {
-    if (!flag.get() || !availableMetricsSet.has(metric)) {
-      continue;
-    }
-
-    updateStatus(`Computing ${metric} metric`);
-
-    try {
-      // We don't care about the actual result of metric here as we are just
-      // interested in the annotation tracks.
-      await engine.computeMetric([metric], 'proto');
-    } catch (e) {
-      if (e instanceof QueryError) {
-        trace.addLoadingError('MetricError: ' + e.message);
-        continue;
-      } else {
-        throw e;
-      }
-    }
-
-    updateStatus(`Inserting data for ${metric} metric`);
-    try {
-      const result = await engine.query(`pragma table_info(${metric}_event)`);
-      let hasSliceName = false;
-      let hasDur = false;
-      let hasUpid = false;
-      let hasValue = false;
-      let hasGroupName = false;
-      const it = result.iter({name: STR});
-      for (; it.valid(); it.next()) {
-        const name = it.name;
-        hasSliceName = hasSliceName || name === 'slice_name';
-        hasDur = hasDur || name === 'dur';
-        hasUpid = hasUpid || name === 'upid';
-        hasValue = hasValue || name === 'value';
-        hasGroupName = hasGroupName || name === 'group_name';
-      }
-
-      const upidColumnSelect = hasUpid ? 'upid' : '0 AS upid';
-      const upidColumnWhere = hasUpid ? 'upid' : '0';
-      const groupNameColumn = hasGroupName
-        ? 'group_name'
-        : 'NULL AS group_name';
-      if (hasSliceName && hasDur) {
-        await engine.query(`
-            INSERT INTO annotation_slice_track(
-              name, __metric_name, upid, group_name)
-            SELECT DISTINCT
-              track_name,
-              '${metric}' as metric_name,
-              ${upidColumnSelect},
-              ${groupNameColumn}
-            FROM ${metric}_event
-            WHERE track_type = 'slice'
-          `);
-        await engine.query(`
-            INSERT INTO annotation_slice(
-              track_id, ts, dur, thread_dur, depth, cat, name
-            )
-            SELECT
-              t.id AS track_id,
-              ts,
-              dur,
-              NULL as thread_dur,
-              0 AS depth,
-              a.track_name as cat,
-              slice_name AS name
-            FROM ${metric}_event a
-            JOIN annotation_slice_track t
-            ON a.track_name = t.name AND t.__metric_name = '${metric}'
-            ORDER BY t.id, ts
-          `);
-      }
-
-      if (hasValue) {
-        const minMax = await engine.query(`
-            SELECT
-              IFNULL(MIN(value), 0) as minValue,
-              IFNULL(MAX(value), 0) as maxValue
-            FROM ${metric}_event
-            WHERE ${upidColumnWhere} != 0`);
-        const row = minMax.firstRow({minValue: NUM, maxValue: NUM});
-        await engine.query(`
-            INSERT INTO annotation_counter_track(
-              name, __metric_name, min_value, max_value, upid)
-            SELECT DISTINCT
-              track_name,
-              '${metric}' as metric_name,
-              CASE ${upidColumnWhere} WHEN 0 THEN NULL ELSE ${row.minValue} END,
-              CASE ${upidColumnWhere} WHEN 0 THEN NULL ELSE ${row.maxValue} END,
-              ${upidColumnSelect}
-            FROM ${metric}_event
-            WHERE track_type = 'counter'
-          `);
-        await engine.query(`
-            INSERT INTO annotation_counter(id, track_id, ts, value)
-            SELECT
-              -1 as id,
-              t.id AS track_id,
-              ts,
-              value
-            FROM ${metric}_event a
-            JOIN annotation_counter_track t
-            ON a.track_name = t.name AND t.__metric_name = '${metric}'
-            ORDER BY t.id, ts
-          `);
-      }
-    } catch (e) {
-      if (e instanceof QueryError) {
-        trace.addLoadingError('MetricError: ' + e.message);
-      } else {
-        throw e;
-      }
-    }
-  }
-}
-
-async function includeSummaryTables(engine: Engine) {
-  updateStatus('Creating slice summaries');
+  updateStatus(trace, 'Creating slice summaries');
   await engine.query(`include perfetto module viz.summary.slices;`);
 
-  updateStatus('Creating counter summaries');
+  updateStatus(trace, 'Creating counter summaries');
   await engine.query(`include perfetto module viz.summary.counters;`);
 
-  updateStatus('Creating thread summaries');
+  updateStatus(trace, 'Creating thread summaries');
   await engine.query(`include perfetto module viz.summary.threads;`);
 
-  updateStatus('Creating processes summaries');
+  updateStatus(trace, 'Creating processes summaries');
   await engine.query(`include perfetto module viz.summary.processes;`);
 
-  updateStatus('Creating track summaries');
+  updateStatus(trace, 'Creating track summaries');
   await engine.query(`include perfetto module viz.summary.tracks;`);
 }
 
-function updateStatus(msg: string): void {
+function updateStatus(traceOrApp: TraceImpl | AppImpl, msg: string): void {
   const showUntilDismissed = 0;
-  AppImpl.instance.omnibox.showStatusMessage(msg, showUntilDismissed);
+  traceOrApp.omnibox.showStatusMessage(msg, showUntilDismissed);
 }
 
 async function computeFtraceBounds(engine: Engine): Promise<TimeSpan | null> {
@@ -753,11 +488,7 @@ async function getTraceInfo(
       break;
   }
 
-  const traceType = (
-    await engine.query(
-      `select str_value from metadata where name = 'trace_type'`,
-    )
-  ).firstRow({str_value: STR}).str_value;
+  const traceType = await getTraceType(engine);
 
   const hasFtrace =
     (await engine.query(`select * from ftrace_event limit 1`)).numRows() > 0;
@@ -785,6 +516,15 @@ async function getTraceInfo(
     uuid,
     cached,
   };
+}
+
+async function getTraceType(engine: Engine) {
+  const result = await engine.query(
+    `select str_value from metadata where name = 'trace_type'`,
+  );
+
+  if (result.numRows() === 0) return undefined;
+  return result.firstRow({str_value: STR}).str_value;
 }
 
 async function getTraceTimeBounds(engine: Engine): Promise<TimeSpan> {
