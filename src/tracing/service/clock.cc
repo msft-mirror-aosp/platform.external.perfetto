@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,20 @@
  * limitations under the License.
  */
 
-syntax = "proto2";
+#include "src/tracing/service/clock.h"
 
-package perfetto.protos;
+namespace perfetto::tracing_service {
 
-message AndroidOtherTracesMetric {
-  // Uuids of other traces being finalized while the current trace was being
-  // recorded.
-  repeated string finalized_traces_uuid = 1;
+Clock::~Clock() = default;
+
+ClockImpl::~ClockImpl() = default;
+
+base::TimeNanos ClockImpl::GetBootTimeNs() {
+  return base::GetBootTimeNs();
 }
+
+base::TimeNanos ClockImpl::GetWallTimeNs() {
+  return base::GetWallTimeNs();
+}
+
+}  // namespace perfetto::tracing_service

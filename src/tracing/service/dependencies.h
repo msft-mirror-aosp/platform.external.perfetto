@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,21 @@
  * limitations under the License.
  */
 
-syntax = "proto2";
+#ifndef SRC_TRACING_SERVICE_DEPENDENCIES_H_
+#define SRC_TRACING_SERVICE_DEPENDENCIES_H_
 
-package perfetto.protos;
+#include <memory>
 
-// Metric used to generate a simplified view of the Trusty kworker events.
-message AndroidTrustyWorkqueues {}
+#include "src/tracing/service/clock.h"
+
+namespace perfetto::tracing_service {
+
+// Dependencies of TracingServiceImpl. Can point to real implementations or to
+// mocks in tests.
+struct Dependencies {
+  std::unique_ptr<Clock> clock;
+};
+
+}  // namespace perfetto::tracing_service
+
+#endif  // SRC_TRACING_SERVICE_DEPENDENCIES_H_
