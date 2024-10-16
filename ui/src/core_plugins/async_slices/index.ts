@@ -25,8 +25,11 @@ import {
   getOrCreateGroupForThread,
 } from '../../public/standard_groups';
 import {exists} from '../../base/utils';
-import {ThreadSliceDetailsPanel} from '../../frontend/thread_slice_details_tab';
 import {assertExists, assertTrue} from '../../base/logging';
+import {SliceSelectionAggregator} from './slice_selection_aggregator';
+import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
+import {getSliceTable} from './table';
+import {extensions} from '../../public/lib/extensions';
 
 class AsyncSlicePlugin implements PerfettoPlugin {
   private readonly trackIdsToUris = new Map<number, string>();
@@ -68,6 +71,22 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           trackUri,
           eventId: id,
         };
+      },
+    });
+
+    ctx.selection.registerAreaSelectionAggreagtor(
+      new SliceSelectionAggregator(),
+    );
+
+    sqlTableRegistry['slice'] = getSliceTable();
+
+    ctx.commands.registerCommand({
+      id: 'perfetto.ShowTable.slice',
+      name: 'Open table: slice',
+      callback: () => {
+        extensions.addSqlTableTab(ctx, {
+          table: getSliceTable(),
+        });
       },
     });
   }
@@ -167,7 +186,6 @@ class AsyncSlicePlugin implements PerfettoPlugin {
             scope: 'global',
           },
           track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
-          detailsPanel: () => new ThreadSliceDetailsPanel(ctx),
         });
         const trackNode = new TrackNode({
           uri,
@@ -251,7 +269,6 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           upid,
         },
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
-        detailsPanel: () => new ThreadSliceDetailsPanel(ctx),
       });
       const track = new TrackNode({uri, title, sortOrder: 30});
       trackIds.forEach((id) => {
@@ -350,7 +367,6 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           isKernelThread === 0 && isMainThread === 1 && 'main thread',
         ]),
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
-        detailsPanel: () => new ThreadSliceDetailsPanel(ctx),
       });
       const track = new TrackNode({uri, title, sortOrder: 20});
       trackIds.forEach((id) => {
@@ -430,7 +446,6 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           kind: SLICE_TRACK_KIND,
         },
         track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
-        detailsPanel: () => new ThreadSliceDetailsPanel(ctx),
       });
 
       const track = new TrackNode({uri, title});
