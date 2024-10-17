@@ -55,6 +55,7 @@
 #include "protos/perfetto/trace/ftrace/cpuhp.pbzero.h"
 #include "protos/perfetto/trace/ftrace/cros_ec.pbzero.h"
 #include "protos/perfetto/trace/ftrace/dcvsh.pbzero.h"
+#include "protos/perfetto/trace/ftrace/devfreq.pbzero.h"
 #include "protos/perfetto/trace/ftrace/dmabuf_heap.pbzero.h"
 #include "protos/perfetto/trace/ftrace/dpu.pbzero.h"
 #include "protos/perfetto/trace/ftrace/fastrpc.pbzero.h"
@@ -319,6 +320,7 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       sched_wakeup_name_id_(context->storage->InternString("sched_wakeup")),
       sched_waking_name_id_(context->storage->InternString("sched_waking")),
       cpu_id_(context->storage->InternString("cpu")),
+      ucpu_id_(context->storage->InternString("ucpu")),
       suspend_resume_name_id_(
           context->storage->InternString("Suspend/Resume Latency")),
       suspend_resume_minimal_name_id_(
@@ -440,7 +442,8 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       suspend_resume_callback_phase_arg_name_(
           context->storage->InternString("callback_phase")),
       suspend_resume_event_type_arg_name_(
-          context->storage->InternString("event_type")) {
+          context->storage->InternString("event_type")),
+      device_name_id_(context->storage->InternString("device_name")) {
   // Build the lookup table for the strings inside ftrace events (e.g. the
   // name of ftrace event fields and the names of their args).
   for (size_t i = 0; i < GetDescriptorsSize(); i++) {
@@ -1079,7 +1082,7 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         break;
       }
       case FtraceEvent::kSuspendResumeFieldNumber: {
-        ParseSuspendResume(ts, pid, fld_bytes);
+        ParseSuspendResume(ts, cpu, pid, fld_bytes);
         break;
       }
       case FtraceEvent::kSuspendResumeMinimalFieldNumber: {
@@ -1221,6 +1224,10 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         ParseTrustyEnqueueNop(pid, ts, fld_bytes);
         break;
       }
+      case FtraceEvent::kDevfreqFrequencyFieldNumber: {
+        ParseDeviceFrequency(ts, fld_bytes);
+        break;
+      }
       case FtraceEvent::kMaliMaliKCPUCQSSETFieldNumber:
       case FtraceEvent::kMaliMaliKCPUCQSWAITSTARTFieldNumber:
       case FtraceEvent::kMaliMaliKCPUCQSWAITENDFieldNumber:
@@ -1295,7 +1302,7 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         break;
       }
       case FtraceEvent::kDevicePmCallbackStartFieldNumber: {
-        ParseDevicePmCallbackStart(ts, pid, fld_bytes);
+        ParseDevicePmCallbackStart(ts, cpu, pid, fld_bytes);
         break;
       }
       case FtraceEvent::kDevicePmCallbackEndFieldNumber: {
@@ -3326,6 +3333,7 @@ void FtraceParser::ParseWakeSourceDeactivate(int64_t timestamp,
 }
 
 void FtraceParser::ParseSuspendResume(int64_t timestamp,
+                                      uint32_t cpu,
                                       uint32_t tid,
                                       protozero::ConstBytes blob) {
   protos::pbzero::SuspendResumeFtraceEvent::Decoder evt(blob.data, blob.size);
@@ -3381,6 +3389,8 @@ void FtraceParser::ParseSuspendResume(int64_t timestamp,
                          context_->process_tracker->GetOrCreateThread(tid)));
     inserter->AddArg(suspend_resume_event_type_arg_name_,
                      Variadic::String(suspend_resume_main_event_id_));
+    auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
+    inserter->AddArg(ucpu_id_, Variadic::UnsignedInteger(ucpu.value));
 
     // These fields are set to null as this is not a device PM callback event.
     inserter->AddArg(suspend_resume_device_arg_name_,
@@ -3592,6 +3602,7 @@ void FtraceParser::ParseRpmStatus(int64_t ts, protozero::ConstBytes blob) {
 // Parses `device_pm_callback_start` events and begins corresponding slices in
 // the suspend / resume latency UI track.
 void FtraceParser::ParseDevicePmCallbackStart(int64_t ts,
+                                              uint32_t cpu,
                                               uint32_t tid,
                                               protozero::ConstBytes blob) {
   protos::pbzero::DevicePmCallbackStartFtraceEvent::Decoder dpm_event(
@@ -3626,6 +3637,8 @@ void FtraceParser::ParseDevicePmCallbackStart(int64_t ts,
                          context_->process_tracker->GetOrCreateThread(tid)));
     inserter->AddArg(suspend_resume_event_type_arg_name_,
                      Variadic::String(suspend_resume_device_pm_event_id_));
+    auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
+    inserter->AddArg(ucpu_id_, Variadic::UnsignedInteger(ucpu.value));
     inserter->AddArg(
         suspend_resume_device_arg_name_,
         Variadic::String(context_->storage->InternString(device_name.c_str())));
@@ -3690,6 +3703,34 @@ StringId FtraceParser::InternedKernelSymbolOrFallback(
     name_id = context_->storage->InternString(slice_name.string_view());
   }
   return name_id;
+}
+
+void FtraceParser::ParseDeviceFrequency(int64_t ts,
+                                        protozero::ConstBytes blob) {
+  protos::pbzero::DevfreqFrequencyFtraceEvent::Decoder event(blob);
+  constexpr char delimiter[] = "devfreq_";
+  std::string dev_name = event.dev_name().ToStdString();
+  auto position = dev_name.find(delimiter);
+
+  if (position != std::string::npos) {
+    // Get device name by getting substring after delimiter and keep existing
+    // naming convention (e.g. cpufreq, gpufreq) consistent by adding a suffix
+    // to the devfreq name (e.g. dsufreq, bcifreq)
+    StringId device_name = context_->storage->InternString(
+        (dev_name.substr(position + sizeof(delimiter) - 1) + "freq").c_str());
+
+    TrackTracker::DimensionsBuilder dims_builder =
+        context_->track_tracker->CreateDimensionsBuilder();
+    dims_builder.AppendDimension(device_name_id_,
+                                 Variadic::String(device_name));
+    TrackTracker::Dimensions dims_id = std::move(dims_builder).Build();
+
+    TrackId track_id = context_->track_tracker->InternCounterTrack(
+        TrackTracker::TrackClassification::kLinuxDeviceFrequency, dims_id,
+        device_name);
+    context_->event_tracker->PushCounter(ts, static_cast<double>(event.freq()),
+                                         track_id);
+  }
 }
 
 }  // namespace perfetto::trace_processor
