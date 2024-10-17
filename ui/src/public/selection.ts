@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {time, duration, TimeSpan} from '../base/time';
-import {Optional} from '../base/utils';
 import {Engine} from '../trace_processor/engine';
 import {ColumnDef, Sorting, ThreadStateExtra} from './aggregation';
 import {TrackDescriptor} from './track';
@@ -21,7 +20,7 @@ import {TrackDescriptor} from './track';
 export interface SelectionManager {
   readonly selection: Selection;
 
-  findTimeRangeOfSelection(): Optional<TimeSpan>;
+  findTimeRangeOfSelection(): TimeSpan | undefined;
   clear(): void;
 
   /**
@@ -92,7 +91,6 @@ export type Selection =
   | TrackSelection
   | AreaSelection
   | NoteSelection
-  | UnionSelection
   | EmptySelection;
 
 /** Defines how changes to selection affect the rest of the UI state */
@@ -151,11 +149,6 @@ export interface AreaSelection extends Area {
 export interface NoteSelection {
   readonly kind: 'note';
   readonly id: string;
-}
-
-export interface UnionSelection {
-  readonly kind: 'union';
-  readonly selections: ReadonlyArray<Selection>;
 }
 
 export interface EmptySelection {
