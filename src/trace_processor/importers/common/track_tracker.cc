@@ -66,62 +66,60 @@ const char* GetNameForGroup(TrackTracker::Group group) {
 // This function is added to keep backward compatibility. Don't add new names.
 inline std::optional<std::string> GetCpuTrackName(TrackClassification type,
                                                   uint32_t cpu) {
-  std::optional<std::string> track_name;
   if (type == TrackClassification::kIrqCpu)
-    track_name = base::StackString<255>("Irq Cpu %u", cpu).c_str();
-  else if (type == TrackClassification::kSoftirqCpu)
-    track_name = base::StackString<255>("SoftIrq Cpu %u", cpu).c_str();
-  else if (type == TrackClassification::kNapiGroCpu)
-    track_name = base::StackString<255>("Napi Gro Cpu %u", cpu).c_str();
-  else if (type == TrackClassification::kMaxFreqCpu)
-    track_name = base::StackString<255>("Cpu %u Max Freq Limit", cpu).c_str();
-  else if (type == TrackClassification::kMinFreqCpu)
-    track_name = base::StackString<255>("Cpu %u Min Freq Limit", cpu).c_str();
-  else if (type == TrackClassification::kFuncgraphCpu)
-    track_name = base::StackString<255>("swapper%u -funcgraph", cpu).c_str();
-  else if (type == TrackClassification::kMaliIrqCpu)
-    track_name = base::StackString<255>("Mali Irq Cpu %u", cpu).c_str();
-  else if (type == TrackClassification::kPkvmHypervisor)
-    track_name = base::StackString<255>("pkVM Hypervisor CPU %u", cpu).c_str();
-  return track_name;
+    return base::StackString<255>("Irq Cpu %u", cpu).ToStdString();
+  if (type == TrackClassification::kSoftirqCpu)
+    return base::StackString<255>("SoftIrq Cpu %u", cpu).ToStdString();
+  if (type == TrackClassification::kNapiGroCpu)
+    return base::StackString<255>("Napi Gro Cpu %u", cpu).ToStdString();
+  if (type == TrackClassification::kMaxFreqCpu)
+    return base::StackString<255>("Cpu %u Max Freq Limit", cpu).ToStdString();
+  if (type == TrackClassification::kMinFreqCpu)
+    return base::StackString<255>("Cpu %u Min Freq Limit", cpu).ToStdString();
+  if (type == TrackClassification::kFuncgraphCpu)
+    return base::StackString<255>("swapper%u -funcgraph", cpu).ToStdString();
+  if (type == TrackClassification::kMaliIrqCpu)
+    return base::StackString<255>("Mali Irq Cpu %u", cpu).ToStdString();
+  if (type == TrackClassification::kPkvmHypervisor)
+    return base::StackString<255>("pkVM Hypervisor CPU %u", cpu).ToStdString();
+  return std::nullopt;
 }
 
 // This function is added to keep backward compatibility. Don't add new names.
 inline std::optional<std::string> GetCpuCounterTrackName(
     TrackClassification type,
     uint32_t cpu) {
-  std::optional<std::string> maybe_name;
   if (type == TrackClassification::kCpuFrequency)
-    maybe_name = "cpufreq";
-  else if (type == TrackClassification::kCpuFrequencyThrottle)
-    maybe_name = "cpufreq_throttle";
-  else if (type == TrackClassification::kCpuIdle)
-    maybe_name = "cpuidle";
-  else if (type == TrackClassification::kUserTime)
-    maybe_name = "cpu.times.user_ns";
-  else if (type == TrackClassification::kNiceUserTime)
-    maybe_name = "cpu.times.user_nice_ns";
-  else if (type == TrackClassification::kSystemModeTime)
-    maybe_name = "cpu.times.system_mode_ns";
-  else if (type == TrackClassification::kCpuIdleTime)
-    maybe_name = "cpu.times.idle_ns";
-  else if (type == TrackClassification::kIoWaitTime)
-    maybe_name = "cpu.times.io_wait_ns";
-  else if (type == TrackClassification::kIrqTime)
-    maybe_name = "cpu.times.irq_ns";
-  else if (type == TrackClassification::kSoftIrqTime)
-    maybe_name = "cpu.times.softirq_ns";
-  else if (type == TrackClassification::kCpuUtilization)
-    maybe_name = base::StackString<255>("Cpu %u Util", cpu).c_str();
-  else if (type == TrackClassification::kCpuCapacity)
-    maybe_name = base::StackString<255>("Cpu %u Cap", cpu).c_str();
-  else if (type == TrackClassification::kCpuNumberRunning)
-    maybe_name = base::StackString<255>("Cpu %u Nr Running", cpu).c_str();
-  else if (type == TrackClassification::kCpuMaxFrequencyLimit)
-    maybe_name = base::StackString<255>("Cpu %u Max Freq Limit", cpu).c_str();
-  else if (type == TrackClassification::kCpuMinFrequencyLimit)
-    maybe_name = base::StackString<255>("Cpu %u Min Freq Limit", cpu).c_str();
-  return maybe_name;
+    return "cpufreq";
+  if (type == TrackClassification::kCpuFrequencyThrottle)
+    return "cpufreq_throttle";
+  if (type == TrackClassification::kCpuIdle)
+    return "cpuidle";
+  if (type == TrackClassification::kUserTime)
+    return "cpu.times.user_ns";
+  if (type == TrackClassification::kNiceUserTime)
+    return "cpu.times.user_nice_ns";
+  if (type == TrackClassification::kSystemModeTime)
+    return "cpu.times.system_mode_ns";
+  if (type == TrackClassification::kCpuIdleTime)
+    return "cpu.times.idle_ns";
+  if (type == TrackClassification::kIoWaitTime)
+    return "cpu.times.io_wait_ns";
+  if (type == TrackClassification::kIrqTime)
+    return "cpu.times.irq_ns";
+  if (type == TrackClassification::kSoftIrqTime)
+    return "cpu.times.softirq_ns";
+  if (type == TrackClassification::kCpuUtilization)
+    return base::StackString<255>("Cpu %u Util", cpu).ToStdString();
+  if (type == TrackClassification::kCpuCapacity)
+    return base::StackString<255>("Cpu %u Cap", cpu).ToStdString();
+  if (type == TrackClassification::kCpuNumberRunning)
+    return base::StackString<255>("Cpu %u Nr Running", cpu).ToStdString();
+  if (type == TrackClassification::kCpuMaxFrequencyLimit)
+    return base::StackString<255>("Cpu %u Max Freq Limit", cpu).ToStdString();
+  if (type == TrackClassification::kCpuMinFrequencyLimit)
+    return base::StackString<255>("Cpu %u Min Freq Limit", cpu).ToStdString();
+  return std::nullopt;
 }
 
 }  // namespace
@@ -150,7 +148,7 @@ TrackId TrackTracker::CreateTrack(TrackClassification classification,
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
   if (dimensions) {
-    row.dimensions = dimensions->arg_set_id;
+    row.dimension_arg_set_id = dimensions->arg_set_id;
   }
   row.machine_id = context_->machine_id();
   row.name = name;
@@ -165,7 +163,7 @@ TrackId TrackTracker::CreateCounterTrack(TrackClassification classification,
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
   if (dimensions) {
-    row.dimensions = dimensions->arg_set_id;
+    row.dimension_arg_set_id = dimensions->arg_set_id;
   }
   row.machine_id = context_->machine_id();
   row.name = name;
@@ -182,7 +180,7 @@ TrackId TrackTracker::CreateProcessTrack(TrackClassification classification,
 
   tables::ProcessTrackTable::Row row(name);
   row.upid = upid;
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
   row.machine_id = context_->machine_id();
@@ -200,7 +198,7 @@ TrackId TrackTracker::CreateProcessCounterTrack(
   tables::ProcessCounterTrackTable::Row row;
   row.upid = upid;
   row.machine_id = context_->machine_id();
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
 
@@ -217,7 +215,7 @@ TrackId TrackTracker::CreateThreadTrack(TrackClassification classification,
   row.utid = utid;
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   row.machine_id = context_->machine_id();
 
   return context_->storage->mutable_thread_track_table()->Insert(row).id;
@@ -232,7 +230,7 @@ TrackId TrackTracker::CreateThreadCounterTrack(
   tables::ThreadCounterTrackTable::Row row(name);
   row.utid = utid;
   row.machine_id = context_->machine_id();
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
 
@@ -243,13 +241,18 @@ TrackId TrackTracker::CreateThreadCounterTrack(
 
 TrackId TrackTracker::InternTrack(TrackClassification classification,
                                   std::optional<Dimensions> dimensions,
-                                  StringId name) {
+                                  StringId name,
+                                  const SetArgsCallback& callback) {
   auto* it = tracks_.Find({classification, dimensions});
   if (it)
     return *it;
 
   TrackId id = CreateTrack(classification, dimensions, name);
   tracks_[{classification, dimensions}] = id;
+  if (callback) {
+    ArgsTracker::BoundInserter inserter = context_->args_tracker->AddArgsTo(id);
+    callback(inserter);
+  }
   return id;
 }
 
@@ -322,7 +325,7 @@ TrackId TrackTracker::InternProcessCounterTrack(StringId raw_name,
   row.machine_id = context_->machine_id();
   row.classification = context_->storage->InternString(
       TrackClassificationToString(key.classification));
-  row.dimensions = key.dimensions->arg_set_id;
+  row.dimension_arg_set_id = key.dimensions->arg_set_id;
   TrackId track_id =
       context_->storage->mutable_process_counter_track_table()->Insert(row).id;
 
@@ -372,7 +375,7 @@ TrackId TrackTracker::InternCpuTrack(TrackClassification type, uint32_t cpu) {
   row.machine_id = context_->machine_id();
   row.classification =
       context_->storage->InternString(TrackClassificationToString(type));
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   if (std::optional<std::string> track_name = GetCpuTrackName(type, cpu)) {
     row.name = context_->storage->InternString(track_name.value().c_str());
   }
@@ -426,7 +429,7 @@ TrackId TrackTracker::InternGpuTrack(const tables::GpuTrackTable::Row& row) {
   auto row_copy = row;
   row_copy.classification = context_->storage->InternString(
       TrackClassificationToString(TrackClassification::kUnknown));
-  row_copy.dimensions = dims_id.arg_set_id;
+  row_copy.dimension_arg_set_id = dims_id.arg_set_id;
   row_copy.machine_id = context_->machine_id();
 
   TrackId track_id =
@@ -493,7 +496,7 @@ TrackId TrackTracker::InternCpuCounterTrack(TrackClassification type,
   row.machine_id = context_->machine_id();
   row.classification =
       context_->storage->InternString(TrackClassificationToString(type));
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   if (key.name) {
     row.name = *key.name;
   }
@@ -530,7 +533,7 @@ TrackId TrackTracker::LegacyInternCpuIdleStateTrack(uint32_t cpu,
   row.machine_id = context_->machine_id();
   row.classification = context_->storage->InternString(
       TrackClassificationToString(classification));
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
 
   TrackId track_id =
       context_->storage->mutable_cpu_counter_track_table()->Insert(row).id;
@@ -553,7 +556,7 @@ TrackId TrackTracker::LegacyInternIrqCounterTrack(TrackClassification type,
   row.machine_id = context_->machine_id();
   row.classification =
       context_->storage->InternString(TrackClassificationToString(type));
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
 
   if (type == TrackClassification::kIrqCount)
     row.name = context_->storage->InternString("num_irq");
@@ -578,7 +581,7 @@ TrackId TrackTracker::LegacyInternSoftirqCounterTrack(TrackClassification type,
   row.machine_id = context_->machine_id();
   row.classification =
       context_->storage->InternString(TrackClassificationToString(type));
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
 
   if (type == TrackClassification::kSoftirqCount)
     row.name = context_->storage->InternString("num_softirq");
@@ -602,7 +605,7 @@ TrackId TrackTracker::InternGpuCounterTrack(TrackClassification type,
   tables::GpuCounterTrackTable::Row row;
   row.gpu_id = gpu_id;
   row.machine_id = context_->machine_id();
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   row.classification =
       context_->storage->InternString(TrackClassificationToString(type));
   if (type == TrackClassification::kGpuFrequency)
@@ -612,97 +615,6 @@ TrackId TrackTracker::InternGpuCounterTrack(TrackClassification type,
       context_->storage->mutable_gpu_counter_track_table()->Insert(row).id;
 
   tracks_[{type, dims_id}] = track_id;
-  return track_id;
-}
-
-TrackId TrackTracker::LegacyInternLegacyEnergyCounterTrack(
-    StringId name,
-    int32_t consumer_id,
-    StringId consumer_type,
-    int32_t ordinal) {
-  Dimensions dims_id =
-      SingleDimension(context_->storage->InternString("energy_consumer_id"),
-                      Variadic::Integer(consumer_id));
-
-  TrackMapKey key;
-  key.classification = TrackClassification::kUnknown;
-  key.dimensions = dims_id;
-  key.name = name;
-
-  auto* it = tracks_.Find(key);
-  if (it) {
-    return *it;
-  }
-  tables::EnergyCounterTrackTable::Row row(name);
-  row.consumer_id = consumer_id;
-  row.consumer_type = consumer_type;
-  row.ordinal = ordinal;
-  row.machine_id = context_->machine_id();
-  row.dimensions = dims_id.arg_set_id;
-  row.classification = context_->storage->InternString(
-      TrackClassificationToString(TrackClassification::kUnknown));
-
-  TrackId track_id =
-      context_->storage->mutable_energy_counter_track_table()->Insert(row).id;
-
-  tracks_[key] = track_id;
-  return track_id;
-}
-
-TrackId TrackTracker::LegacyInternLegacyEnergyPerUidCounterTrack(
-    StringId name,
-    int32_t consumer_id,
-    int32_t uid) {
-  DimensionsBuilder dims_builder = CreateDimensionsBuilder();
-  dims_builder.AppendUid(uid);
-  dims_builder.AppendDimension(
-      context_->storage->InternString("energy_consumer_id"),
-      Variadic::Integer(consumer_id));
-  Dimensions dims_id = std::move(dims_builder).Build();
-
-  TrackMapKey key;
-  key.classification = TrackClassification::kUnknown;
-  key.dimensions = dims_id;
-  key.name = name;
-
-  auto* it = tracks_.Find(key);
-  if (it) {
-    return *it;
-  }
-
-  tables::EnergyPerUidCounterTrackTable::Row row(name);
-  row.consumer_id = consumer_id;
-  row.uid = uid;
-  row.machine_id = context_->machine_id();
-  row.dimensions = dims_id.arg_set_id;
-  row.classification = context_->storage->InternString(
-      TrackClassificationToString(TrackClassification::kUnknown));
-
-  TrackId track_id =
-      context_->storage->mutable_energy_per_uid_counter_track_table()
-          ->Insert(row)
-          .id;
-
-  tracks_[key] = track_id;
-  return track_id;
-}
-
-TrackId TrackTracker::LegacyInternLinuxDeviceTrack(StringId name) {
-  Dimensions dims_id = SingleDimension(name_id_, Variadic::String(name));
-
-  if (auto* it = tracks_.Find({TrackClassification::kLinuxDevice, dims_id});
-      it) {
-    return *it;
-  }
-
-  tables::LinuxDeviceTrackTable::Row row(name);
-  row.dimensions = dims_id.arg_set_id;
-  row.classification = context_->storage->InternString(
-      TrackClassificationToString(TrackClassification::kLinuxDevice));
-
-  TrackId track_id =
-      context_->storage->mutable_linux_device_track_table()->Insert(row).id;
-  tracks_[{TrackClassification::kLinuxDevice, dims_id}] = track_id;
   return track_id;
 }
 
@@ -717,7 +629,7 @@ TrackId TrackTracker::LegacyCreateGpuCounterTrack(StringId name,
   row.machine_id = context_->machine_id();
   row.classification = context_->storage->InternString(
       TrackClassificationToString(TrackClassification::kUnknown));
-  row.dimensions =
+  row.dimension_arg_set_id =
       SingleDimension(gpu_id_, Variadic::Integer(gpu_id)).arg_set_id;
 
   return context_->storage->mutable_gpu_counter_track_table()->Insert(row).id;
@@ -739,7 +651,7 @@ TrackId TrackTracker::LegacyCreatePerfCounterTrack(
   row.perf_session_id = perf_session_id;
   row.cpu = cpu;
   row.is_timebase = is_timebase;
-  row.dimensions = dims_id.arg_set_id;
+  row.dimension_arg_set_id = dims_id.arg_set_id;
   row.classification = context_->storage->InternString(
       TrackClassificationToString(TrackClassification::kUnknown));
   row.machine_id = context_->machine_id();
@@ -779,7 +691,7 @@ TrackId TrackTracker::LegacyInternGpuWorkPeriodTrack(
   tables::GpuWorkPeriodTrackTable::Row row_copy = row;
   row_copy.classification = context_->storage->InternString(
       TrackClassificationToString(TrackClassification::kUnknown));
-  row_copy.dimensions = dims_id.arg_set_id;
+  row_copy.dimension_arg_set_id = dims_id.arg_set_id;
   row_copy.machine_id = context_->machine_id();
 
   TrackId track_id = context_->storage->mutable_gpu_work_period_track_table()
@@ -838,7 +750,7 @@ TrackId TrackTracker::LegacyInternLegacyChromeAsyncTrack(
   track.upid = upid;
   track.classification = context_->storage->InternString(
       TrackClassificationToString(TrackClassification::kUnknown));
-  track.dimensions = dims_id.arg_set_id;
+  track.dimension_arg_set_id = dims_id.arg_set_id;
   track.machine_id = context_->machine_id();
 
   TrackId id =
