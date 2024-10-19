@@ -18,22 +18,24 @@
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACK_TRACKER_H_
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <optional>
-#include <string>
-#include <vector>
 
 #include "perfetto/ext/base/flat_hash_map.h"
-#include "perfetto/ext/base/string_view.h"
+#include "perfetto/ext/base/hash.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/importers/common/global_args_tracker.h"
+#include "src/trace_processor/importers/common/track_classification.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/tables/profiler_tables_py.h"
+#include "src/trace_processor/tables/track_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/types/variadic.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 // Tracks and stores tracks based on track types, ids and scopes.
 class TrackTracker {
@@ -85,18 +87,11 @@ class TrackTracker {
 
     // Append custom dimension. Only use if none of the other Append functions
     // are suitable.
-    void AppendDimension(StringId key, Variadic val) {
-      GlobalArgsTracker::Arg arg;
+    void AppendDimension(StringId key, const Variadic& val) {
+      GlobalArgsTracker::CompactArg& arg = args_[count_args++];
       arg.flat_key = key;
       arg.key = key;
       arg.value = val;
-
-      // Those will not be used.
-      arg.row = std::numeric_limits<uint32_t>::max();
-      arg.column = nullptr;
-
-      args_[count_args] = std::move(arg);
-      count_args++;
     }
 
     // Build to fetch the `Dimensions` value of the Appended dimensions. Pushes
@@ -109,76 +104,8 @@ class TrackTracker {
 
    private:
     TrackTracker* tt_;
-    std::array<GlobalArgsTracker::Arg, 64> args_;
+    std::array<GlobalArgsTracker::CompactArg, 64> args_;
     uint32_t count_args = 0;
-  };
-
-  // The classification of the track. Each track has to have one of those.
-  // Together with dimensions they are responsible for uniquely identifying the
-  // track.
-  // When adding new track prefer to choose one of the below if possible, with
-  // remembering that dimensions are also used to identify the track.
-  //
-  // Example: under classification kAsync, you can have both global async tracks
-  // and process async tracks. The difference between those is in the fact that
-  // process async tracks will also have "upid" dimension.
-  enum class TrackClassification {
-    // Global tracks, unique per trace.
-    kTrigger,
-    kInterconnect,
-    kChromeLegacyGlobalInstant,
-
-    // General tracks.
-    kThread,
-    kProcess,
-    kLinuxDevice,
-    kChromeProcessInstant,
-    kAsync,
-
-    // Irq tracks.
-    kIrqCount,
-
-    // Softirq tracks.
-    kSoftirqCount,
-
-    // Gpu tracks.
-    kGpuFrequency,
-
-    // Cpu tracks.
-    kIrqCpu,
-    kSoftirqCpu,
-    kNapiGroCpu,
-    kMaliIrqCpu,
-    kMinFreqCpu,
-    kMaxFreqCpu,
-    kFuncgraphCpu,
-    kPkvmHypervisor,
-
-    // Cpu counter tracks.
-    kCpuFrequency,
-    kCpuFrequencyThrottle,
-    kCpuMaxFrequencyLimit,
-    kCpuMinFrequencyLimit,
-
-    kCpuIdle,
-    kCpuIdleState,
-    kCpuUtilization,
-    kCpuCapacity,
-    kCpuNumberRunning,
-
-    // Time CPU spent in state.
-    kUserTime,
-    kNiceUserTime,
-    kSystemModeTime,
-    kIoWaitTime,
-    kIrqTime,
-    kSoftIrqTime,
-    kCpuIdleTime,
-
-    // Not set. Legacy, never use for new tracks.
-    // If set the classification can't be used to decide the tracks and
-    // dimensions + name should be used instead. Strongly discouraged.
-    kUnknown
   };
 
   // Enum which groups global tracks to avoid an explosion of tracks at the top
@@ -209,8 +136,30 @@ class TrackTracker {
   // Interns track into TrackTable. If the track created with below arguments
   // already exists, returns the TrackTable::Id of the track.
   TrackId InternTrack(TrackClassification,
-                      std::optional<Dimensions> dimensions,
-                      StringId name);
+                      std::optional<Dimensions>,
+                      StringId name,
+                      const SetArgsCallback& callback = {});
+
+  // Interns a track with the given classification and one dimension into the
+  // `track` table. This is useful when interning global tracks which have a
+  // single uncommon dimension attached to them.
+  //
+  // Note: name is *not* used relevant for interning: it's used purely as a
+  // display name.
+  TrackId InternSingleDimensionTrack(TrackClassification classification,
+                                     StringId key,
+                                     const Variadic& value,
+                                     StringId name,
+                                     const SetArgsCallback& callback = {}) {
+    return InternTrack(classification, SingleDimension(key, value), name,
+                       callback);
+  }
+
+  // Interns counter track into TrackTable. If the track created with below
+  // arguments already exists, returns the TrackTable::Id of the track.
+  TrackId InternCounterTrack(TrackClassification,
+                             std::optional<Dimensions>,
+                             StringId name);
 
   // Interns a unique track into the storage.
   TrackId InternGlobalTrack(TrackClassification);
@@ -232,8 +181,14 @@ class TrackTracker {
   // functions.
   TrackId InternThreadCounterTrack(StringId name, UniqueTid);
 
+  TrackId InternProcessTrack(TrackClassification,
+                             UniquePid,
+                             StringId name = kNullStringId);
+
   // Interns a process track into the storage.
   TrackId InternProcessTrack(UniquePid);
+
+  TrackId InternProcessCounterTrack(UniquePid);
 
   // Interns a counter track associated with a process into the storage.
   // TODO(mayzner): Cleanup the arguments to be consistent with other Intern
@@ -257,13 +212,6 @@ class TrackTracker {
   // Interns a counter track associated with a GPU into the storage.
   TrackId InternGpuCounterTrack(TrackClassification, uint32_t gpu_id);
 
-  // Pushes async track into TrackTable. Returns the TrackTable::Id of the newly
-  // created track.
-  // TODO(mayzner): make name optional and later remove the option of adding it
-  // fully. Those changes can be made when we add support for autogenerating
-  // names.
-  TrackId CreateAsyncTrack(std::optional<Dimensions> dimensions, StringId name);
-
   // Interns a GPU work period track into the storage.
   // TODO(mayzner): Remove when all usages migrated to new track design.
   TrackId LegacyInternGpuWorkPeriodTrack(
@@ -277,11 +225,6 @@ class TrackTracker {
                                              bool trace_id_is_process_scoped,
                                              StringId source_scope);
 
-  // Interns a track for legacy Chrome process-scoped instant events into the
-  // storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId InternLegacyChromeProcessInstantTrack(UniquePid);
-
   // Interns a counter track associated with a cpu into the storage.
   // TODO(mayzner): Remove when all usages migrated to new track design.
   TrackId LegacyInternCpuIdleStateTrack(uint32_t cpu, StringId state);
@@ -293,26 +236,6 @@ class TrackTracker {
   // Interns a counter track associated with an softirq into the storage.
   // TODO(mayzner): Remove when all usages migrated to new track design.
   TrackId LegacyInternSoftirqCounterTrack(TrackClassification, int32_t softirq);
-
-  // Interns energy counter track associated with a
-  // Energy breakdown into the storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyInternLegacyEnergyCounterTrack(StringId name,
-                                               int32_t consumer_id,
-                                               StringId consumer_type,
-                                               int32_t ordinal);
-
-  // Interns a per process energy consumer counter track associated with a
-  // Energy Uid into the storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyInternLegacyEnergyPerUidCounterTrack(StringId name,
-                                                     int32_t consumer_id,
-                                                     int32_t uid);
-
-  // Interns a track associated with a Linux device (where a Linux device
-  // implies a kernel-level device managed by a Linux driver).
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyInternLinuxDeviceTrack(StringId name);
 
   // Creates a counter track associated with a GPU into the storage.
   // TODO(mayzner): Remove when all usages migrated to new track design.
@@ -335,20 +258,10 @@ class TrackTracker {
                                         uint32_t upid,
                                         int64_t correlation_id);
 
-  // NOTE:
-  // The below method should only be called by AsyncTrackSetTracker
-
-  // Creates and inserts a global async track into the storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyCreateGlobalAsyncTrack(StringId name, StringId source);
-
-  // Creates and inserts a Android async track into the storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyCreateProcessAsyncTrack(StringId name,
-                                        UniquePid upid,
-                                        StringId source);
-
  private:
+  friend class AsyncTrackSetTracker;
+  friend class TrackEventTracker;
+
   struct TrackMapKey {
     TrackClassification classification;
     std::optional<Dimensions> dimensions;
@@ -391,107 +304,36 @@ class TrackTracker {
   static constexpr size_t kGroupCount =
       static_cast<uint32_t>(Group::kSizeSentinel);
 
-  Dimensions SingleDimension(StringId key, Variadic val) {
-    GlobalArgsTracker::Arg arg;
-    arg.flat_key = key;
-    arg.key = key;
-    arg.value = val;
+  TrackId CreateTrack(TrackClassification,
+                      std::optional<Dimensions>,
+                      StringId name);
 
-    // Those will not be used.
-    arg.row = std::numeric_limits<uint32_t>::max();
-    arg.column = nullptr;
+  TrackId CreateCounterTrack(TrackClassification,
+                             std::optional<Dimensions>,
+                             StringId name);
 
-    std::vector<GlobalArgsTracker::Arg> args{arg};
+  TrackId CreateThreadTrack(TrackClassification, UniqueTid);
 
-    return Dimensions{context_->global_args_tracker->AddArgSet(args, 0, 1)};
-  }
+  TrackId CreateThreadCounterTrack(TrackClassification,
+                                   StringId name,
+                                   UniqueTid);
 
-  std::string GetClassification(TrackClassification type) {
-    switch (type) {
-      case TrackClassification::kTrigger:
-        return "triggers";
-      case TrackClassification::kInterconnect:
-        return "interconnect_events";
-      case TrackClassification::kChromeLegacyGlobalInstant:
-        return "legacy_chrome_global_instants";
-      case TrackClassification::kThread:
-        return "thread";
-      case TrackClassification::kProcess:
-        return "process";
-      case TrackClassification::kChromeProcessInstant:
-        return "chrome_process_instant";
-      case TrackClassification::kLinuxDevice:
-        return "linux_device";
-      case TrackClassification::kAsync:
-        return "async";
-      case TrackClassification::kIrqCount:
-        return "irq_count_num";
-      case TrackClassification::kSoftirqCount:
-        return "softirq_count_num";
-      case TrackClassification::kGpuFrequency:
-        return "gpu_frequency";
-      case TrackClassification::kFuncgraphCpu:
-        return "cpu_funcgraph";
-      case TrackClassification::kIrqCpu:
-        return "cpu_irq";
-      case TrackClassification::kIrqTime:
-        return "cpu_irq_time";
-      case TrackClassification::kMaliIrqCpu:
-        return "cpu_mali_irq";
-      case TrackClassification::kNapiGroCpu:
-        return "cpu_napi_gro";
-      case TrackClassification::kSoftirqCpu:
-        return "cpu_softirq";
-      case TrackClassification::kSoftIrqTime:
-        return "cpu_softirq_time";
-      case TrackClassification::kPkvmHypervisor:
-        return "pkvm_hypervisor";
-      case TrackClassification::kMaxFreqCpu:
-        return "cpu_max_frequency";
-      case TrackClassification::kMinFreqCpu:
-        return "cpu_min_frequency";
-      case TrackClassification::kCpuFrequency:
-        return "cpu_frequency";
-      case TrackClassification::kCpuFrequencyThrottle:
-        return "cpu_frequency_throttle";
-      case TrackClassification::kCpuMinFrequencyLimit:
-        return "cpu_min_frequency_limit";
-      case TrackClassification::kCpuMaxFrequencyLimit:
-        return "cpu_max_frequency_limit";
-      case TrackClassification::kCpuCapacity:
-        return "cpu_capacity";
-      case TrackClassification::kCpuIdle:
-        return "cpu_idle";
-      case TrackClassification::kCpuIdleTime:
-        return "cpu_idle_time";
-      case TrackClassification::kCpuIdleState:
-        return "cpu_idle_state";
-      case TrackClassification::kIoWaitTime:
-        return "cpu_io_wait_time";
-      case TrackClassification::kCpuNumberRunning:
-        return "cpu_nr_running";
-      case TrackClassification::kCpuUtilization:
-        return "cpu_utilization";
-      case TrackClassification::kSystemModeTime:
-        return "cpu_system_mode_time";
-      case TrackClassification::kUserTime:
-        return "cpu_user_time";
-      case TrackClassification::kNiceUserTime:
-        return "cpu_nice_user_time";
+  TrackId CreateProcessTrack(TrackClassification,
+                             UniquePid,
+                             std::optional<Dimensions> = std::nullopt,
+                             StringId name = kNullStringId);
 
-      case TrackClassification::kUnknown:
-        return "N/A";
-    }
-    PERFETTO_FATAL("For GCC");
-  }
+  TrackId CreateProcessCounterTrack(TrackClassification,
+                                    UniquePid,
+                                    std::optional<Dimensions> = std::nullopt);
 
   TrackId InternTrackForGroup(Group);
 
-  TrackId InternProcessTrack(
-      TrackClassification,
-      UniquePid,
-      std::optional<Dimensions> use_other_dimension = std::nullopt,
-      StringId name = kNullStringId);
+  Dimensions SingleDimension(StringId key, const Variadic& val) {
+    std::array args{GlobalArgsTracker::CompactArg{key, key, val}};
+    return Dimensions{
+        context_->global_args_tracker->AddArgSet(args.data(), 0, 1)};
+  }
 
   std::array<std::optional<TrackId>, kGroupCount> group_track_ids_;
 
@@ -516,7 +358,6 @@ class TrackTracker {
   TraceProcessorContext* const context_;
 };
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor
 
 #endif  // SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_TRACK_TRACKER_H_

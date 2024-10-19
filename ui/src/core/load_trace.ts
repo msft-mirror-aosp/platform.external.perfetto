@@ -37,7 +37,6 @@ import {
   TraceHttpStream,
   TraceStream,
 } from '../core/trace_stream';
-import {decideTracks} from './track_decider';
 import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
@@ -237,9 +236,6 @@ async function loadTraceIntoEngine(
   await app.plugins.onTraceLoad(trace, (id) => {
     updateStatus(app, `Running plugin: ${id}`);
   });
-
-  updateStatus(app, 'Loading tracks');
-  await decideTracks(trace);
 
   decideTabs(trace);
 
@@ -508,7 +504,6 @@ async function getTraceInfo(
     utcOffset,
     traceTzOffset,
     cpus: await getCpus(engine),
-    gpuCount: await getNumberOfGpus(engine),
     importErrors: await getTraceErrors(engine),
     source: traceSource,
     traceType,
@@ -548,15 +543,6 @@ async function getCpus(engine: Engine): Promise<number[]> {
     cpus.push(it.cpu);
   }
   return cpus;
-}
-
-async function getNumberOfGpus(engine: Engine): Promise<number> {
-  const result = await engine.query(`
-    select count(distinct(gpu_id)) as gpuCount
-    from gpu_counter_track
-    where name = 'gpufreq';
-  `);
-  return result.firstRow({gpuCount: NUM}).gpuCount;
 }
 
 async function getTraceErrors(engine: Engine): Promise<number> {
