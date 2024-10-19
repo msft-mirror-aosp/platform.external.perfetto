@@ -120,10 +120,6 @@ IrqCounterTrackTable::~IrqCounterTrackTable() = default;
 SoftirqCounterTrackTable::~SoftirqCounterTrackTable() = default;
 GpuCounterTrackTable::~GpuCounterTrackTable() = default;
 PerfCounterTrackTable::~PerfCounterTrackTable() = default;
-EnergyCounterTrackTable::~EnergyCounterTrackTable() = default;
-UidCounterTrackTable::~UidCounterTrackTable() = default;
-EnergyPerUidCounterTrackTable::~EnergyPerUidCounterTrackTable() = default;
-LinuxDeviceTrackTable::~LinuxDeviceTrackTable() = default;
 
 // trace_proto_tables_py.h
 ExperimentalProtoPathTable::~ExperimentalProtoPathTable() = default;
