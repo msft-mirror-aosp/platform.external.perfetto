@@ -102,6 +102,7 @@ using ::testing::InvokeWithoutArgs;
 using ::testing::IsEmpty;
 using ::testing::Mock;
 using ::testing::Ne;
+using ::testing::NiceMock;
 using ::testing::Not;
 using ::testing::Pointee;
 using ::testing::Property;
@@ -206,7 +207,18 @@ std::vector<std::string> GetReceivedTriggers(
   return triggers;
 }
 
-}  // namespace
+class MockClock : public tracing_service::Clock {
+ public:
+  ~MockClock() override = default;
+  MOCK_METHOD(base::TimeNanos, GetBootTimeNs, (), (override));
+  MOCK_METHOD(base::TimeNanos, GetWallTimeNs, (), (override));
+};
+
+class MockRandom : public tracing_service::Random {
+ public:
+  ~MockRandom() override = default;
+  MOCK_METHOD(double, GetValue, (), (override));
+};
 
 class TracingServiceImplTest : public testing::Test {
  public:
@@ -215,10 +227,30 @@ class TracingServiceImplTest : public testing::Test {
   void InitializeSvcWithOpts(TracingService::InitOpts init_opts) {
     auto shm_factory =
         std::unique_ptr<SharedMemory::Factory>(new TestSharedMemory::Factory());
-    svc.reset(static_cast<TracingServiceImpl*>(
-        TracingService::CreateInstance(std::move(shm_factory), &task_runner,
-                                       init_opts)
-            .release()));
+
+    tracing_service::Dependencies deps;
+
+    auto mock_clock = std::make_unique<NiceMock<MockClock>>();
+    mock_clock_ = mock_clock.get();
+    deps.clock = std::move(mock_clock);
+    ON_CALL(*mock_clock_, GetBootTimeNs).WillByDefault(Invoke([&] {
+      return real_clock_.GetBootTimeNs() + mock_clock_displacement_;
+    }));
+    ON_CALL(*mock_clock_, GetWallTimeNs).WillByDefault(Invoke([&] {
+      return real_clock_.GetWallTimeNs() + mock_clock_displacement_;
+    }));
+
+    auto mock_random = std::make_unique<NiceMock<MockRandom>>();
+    mock_random_ = mock_random.get();
+    deps.random = std::move(mock_random);
+    real_random_ = std::make_unique<tracing_service::RandomImpl>(
+        real_clock_.GetWallTimeMs().count());
+    ON_CALL(*mock_random_, GetValue).WillByDefault(Invoke([&] {
+      return real_random_->GetValue();
+    }));
+
+    svc = std::make_unique<TracingServiceImpl>(
+        std::move(shm_factory), &task_runner, std::move(deps), init_opts);
   }
 
   std::unique_ptr<MockProducer> CreateMockProducer() {
@@ -243,20 +275,19 @@ class TracingServiceImplTest : public testing::Test {
     return ret;
   }
 
-  void SetTriggerWindowNs(int64_t window_ns) {
-    svc->trigger_window_ns_ = window_ns;
-  }
-
   void AdvanceTimeAndRunUntilIdle(uint32_t ms) {
+    mock_clock_displacement_ += base::TimeMillis(ms);
     task_runner.AdvanceTimeAndRunUntilIdle(ms);
   }
 
-  void OverrideNextTriggerRandomNumber(double number) {
-    svc->trigger_rnd_override_for_testing_ = number;
-  }
+  base::TimeNanos mock_clock_displacement_{0};
+  tracing_service::ClockImpl real_clock_;
+  MockClock* mock_clock_;  // Owned by svc;
+  std::unique_ptr<tracing_service::RandomImpl> real_random_;
+  MockRandom* mock_random_;  // Owned by svc;
 
   base::TestTaskRunner task_runner;
-  std::unique_ptr<TracingServiceImpl> svc;
+  std::unique_ptr<TracingService> svc;
 };
 
 TEST_F(TracingServiceImplTest, AtMostOneConfig) {
@@ -1187,6 +1218,8 @@ TEST_F(TracingServiceImplTest, SecondTriggerHitsLimit) {
     EXPECT_THAT(GetReceivedTriggers(packets), ElementsAre("trigger_name"));
   }
 
+  AdvanceTimeAndRunUntilIdle(23 * 60 * 60 * 1000);  // 23h
+
   // Second session.
   {
     std::unique_ptr<MockProducer> producer = CreateMockProducer();
@@ -1233,10 +1266,6 @@ TEST_F(TracingServiceImplTest, SecondTriggerDoesntHitLimit) {
 
   auto* ds = trace_config.add_data_sources()->mutable_config();
 
-  // Set the trigger window size to something really small so the second
-  // session is still allowed through.
-  SetTriggerWindowNs(1);
-
   // First session.
   {
     std::unique_ptr<MockProducer> producer = CreateMockProducer();
@@ -1269,8 +1298,7 @@ TEST_F(TracingServiceImplTest, SecondTriggerDoesntHitLimit) {
     EXPECT_THAT(GetReceivedTriggers(packets), ElementsAre("trigger_name"));
   }
 
-  // Sleep 1 micro so that we're sure that the window time would have elapsed.
-  base::SleepMicroseconds(1);
+  AdvanceTimeAndRunUntilIdle(24 * 60 * 60 * 1000);  // 24h
 
   // Second session.
   {
@@ -1336,14 +1364,14 @@ TEST_F(TracingServiceImplTest, SkipProbability) {
   req.push_back("trigger_name");
 
   // This is below the probability of 0.15 so should be skipped.
-  OverrideNextTriggerRandomNumber(0.14);
+  EXPECT_CALL(*mock_random_, GetValue).WillOnce(Return(0.14));
   producer->endpoint()->ActivateTriggers(req);
 
   // When triggers are not hit, the tracing session doesn't return any data.
   EXPECT_THAT(consumer->ReadBuffers(), IsEmpty());
 
-  // This is above the probaility of 0.15 so should be allowed.
-  OverrideNextTriggerRandomNumber(0.16);
+  // This is above the probability of 0.15 so should be allowed.
+  EXPECT_CALL(*mock_random_, GetValue).WillOnce(Return(0.16));
   producer->endpoint()->ActivateTriggers(req);
 
   auto writer = producer->CreateTraceWriter("data_source");
@@ -5952,5 +5980,7 @@ TEST_F(TracingServiceImplTest, FlushTimeoutEventsEmitted) {
   producer->WaitForDataSourceStop("ds_1");
   consumer->WaitForTracingDisabled();
 }
+
+}  // namespace
 
 }  // namespace perfetto
