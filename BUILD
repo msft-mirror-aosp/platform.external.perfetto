@@ -1267,8 +1267,6 @@ perfetto_filegroup(
         "src/perfetto_cmd/packet_writer.h",
         "src/perfetto_cmd/perfetto_cmd.cc",
         "src/perfetto_cmd/perfetto_cmd.h",
-        "src/perfetto_cmd/rate_limiter.cc",
-        "src/perfetto_cmd/rate_limiter.h",
     ],
 )
 
@@ -1630,6 +1628,7 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/trace_file_tracker.cc",
         "src/trace_processor/importers/common/trace_file_tracker.h",
         "src/trace_processor/importers/common/trace_parser.cc",
+        "src/trace_processor/importers/common/track_classification.h",
         "src/trace_processor/importers/common/track_tracker.cc",
         "src/trace_processor/importers/common/track_tracker.h",
         "src/trace_processor/importers/common/virtual_memory_mapping.cc",
@@ -2783,6 +2782,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/startup/startup_breakdowns.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startup_events.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startups.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startups_maxsdk28.sql",
@@ -2960,6 +2960,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_linux",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/linux/devfreq.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/threads.sql",
     ],
 )
@@ -3081,6 +3082,8 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/estimates.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/idle_attribution.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/utils.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/w_cpu_dependence.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/w_dsu_dependence.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/device_infos.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/system_state.sql",
     ],
@@ -3930,11 +3933,16 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_tracing_service_service",
     srcs = [
+        "src/tracing/service/clock.cc",
+        "src/tracing/service/clock.h",
+        "src/tracing/service/dependencies.h",
         "src/tracing/service/histogram.h",
         "src/tracing/service/metatrace_writer.cc",
         "src/tracing/service/metatrace_writer.h",
         "src/tracing/service/packet_stream_validator.cc",
         "src/tracing/service/packet_stream_validator.h",
+        "src/tracing/service/random.cc",
+        "src/tracing/service/random.h",
         "src/tracing/service/trace_buffer.cc",
         "src/tracing/service/trace_buffer.h",
         "src/tracing/service/tracing_service_impl.cc",

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,29 +14,30 @@
  * limitations under the License.
  */
 
-#ifndef SRC_PERFETTO_CMD_RATE_LIMITER_H_
-#define SRC_PERFETTO_CMD_RATE_LIMITER_H_
+#ifndef SRC_TRACING_SERVICE_RANDOM_H_
+#define SRC_TRACING_SERVICE_RANDOM_H_
 
-namespace perfetto {
+#include <random>
 
-class RateLimiter {
+namespace perfetto::tracing_service {
+
+class Random {
  public:
-  struct Args {
-    bool is_user_build = false;
-    bool is_uploading = false;
-    bool allow_user_build_tracing = false;
-  };
-  enum ShouldTraceResponse {
-    kOkToTrace,
-    kNotAllowedOnUserBuild,
-  };
-
-  RateLimiter();
-  virtual ~RateLimiter();
-
-  ShouldTraceResponse ShouldTrace(const Args& args);
+  virtual ~Random();
+  virtual double GetValue() = 0;
 };
 
-}  // namespace perfetto
+class RandomImpl : public Random {
+ public:
+  explicit RandomImpl(uint32_t seed);
+  ~RandomImpl() override;
+  double GetValue() override;
 
-#endif  // SRC_PERFETTO_CMD_RATE_LIMITER_H_
+ private:
+  std::minstd_rand prng_;
+  std::uniform_real_distribution<double> dist_;
+};
+
+}  // namespace perfetto::tracing_service
+
+#endif  // SRC_TRACING_SERVICE_RANDOM_H_
