@@ -21,9 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <optional>
-#include <vector>
 
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/hash.h"
@@ -89,18 +87,11 @@ class TrackTracker {
 
     // Append custom dimension. Only use if none of the other Append functions
     // are suitable.
-    void AppendDimension(StringId key, Variadic val) {
-      GlobalArgsTracker::Arg arg;
+    void AppendDimension(StringId key, const Variadic& val) {
+      GlobalArgsTracker::CompactArg& arg = args_[count_args++];
       arg.flat_key = key;
       arg.key = key;
       arg.value = val;
-
-      // Those will not be used.
-      arg.row = std::numeric_limits<uint32_t>::max();
-      arg.column = nullptr;
-
-      args_[count_args] = std::move(arg);
-      count_args++;
     }
 
     // Build to fetch the `Dimensions` value of the Appended dimensions. Pushes
@@ -113,7 +104,7 @@ class TrackTracker {
 
    private:
     TrackTracker* tt_;
-    std::array<GlobalArgsTracker::Arg, 64> args_;
+    std::array<GlobalArgsTracker::CompactArg, 64> args_;
     uint32_t count_args = 0;
   };
 
@@ -146,7 +137,23 @@ class TrackTracker {
   // already exists, returns the TrackTable::Id of the track.
   TrackId InternTrack(TrackClassification,
                       std::optional<Dimensions>,
-                      StringId name);
+                      StringId name,
+                      const SetArgsCallback& callback = {});
+
+  // Interns a track with the given classification and one dimension into the
+  // `track` table. This is useful when interning global tracks which have a
+  // single uncommon dimension attached to them.
+  //
+  // Note: name is *not* used relevant for interning: it's used purely as a
+  // display name.
+  TrackId InternSingleDimensionTrack(TrackClassification classification,
+                                     StringId key,
+                                     const Variadic& value,
+                                     StringId name,
+                                     const SetArgsCallback& callback = {}) {
+    return InternTrack(classification, SingleDimension(key, value), name,
+                       callback);
+  }
 
   // Interns counter track into TrackTable. If the track created with below
   // arguments already exists, returns the TrackTable::Id of the track.
@@ -230,26 +237,6 @@ class TrackTracker {
   // TODO(mayzner): Remove when all usages migrated to new track design.
   TrackId LegacyInternSoftirqCounterTrack(TrackClassification, int32_t softirq);
 
-  // Interns energy counter track associated with a
-  // Energy breakdown into the storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyInternLegacyEnergyCounterTrack(StringId name,
-                                               int32_t consumer_id,
-                                               StringId consumer_type,
-                                               int32_t ordinal);
-
-  // Interns a per process energy consumer counter track associated with a
-  // Energy Uid into the storage.
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyInternLegacyEnergyPerUidCounterTrack(StringId name,
-                                                     int32_t consumer_id,
-                                                     int32_t uid);
-
-  // Interns a track associated with a Linux device (where a Linux device
-  // implies a kernel-level device managed by a Linux driver).
-  // TODO(mayzner): Remove when all usages migrated to new track design.
-  TrackId LegacyInternLinuxDeviceTrack(StringId name);
-
   // Creates a counter track associated with a GPU into the storage.
   // TODO(mayzner): Remove when all usages migrated to new track design.
   TrackId LegacyCreateGpuCounterTrack(StringId name,
@@ -317,21 +304,6 @@ class TrackTracker {
   static constexpr size_t kGroupCount =
       static_cast<uint32_t>(Group::kSizeSentinel);
 
-  Dimensions SingleDimension(StringId key, Variadic val) {
-    GlobalArgsTracker::Arg arg;
-    arg.flat_key = key;
-    arg.key = key;
-    arg.value = val;
-
-    // Those will not be used.
-    arg.row = std::numeric_limits<uint32_t>::max();
-    arg.column = nullptr;
-
-    std::vector<GlobalArgsTracker::Arg> args{arg};
-
-    return Dimensions{context_->global_args_tracker->AddArgSet(args, 0, 1)};
-  }
-
   TrackId CreateTrack(TrackClassification,
                       std::optional<Dimensions>,
                       StringId name);
@@ -356,6 +328,12 @@ class TrackTracker {
                                     std::optional<Dimensions> = std::nullopt);
 
   TrackId InternTrackForGroup(Group);
+
+  Dimensions SingleDimension(StringId key, const Variadic& val) {
+    std::array args{GlobalArgsTracker::CompactArg{key, key, val}};
+    return Dimensions{
+        context_->global_args_tracker->AddArgSet(args.data(), 0, 1)};
+  }
 
   std::array<std::optional<TrackId>, kGroupCount> group_track_ids_;
 
