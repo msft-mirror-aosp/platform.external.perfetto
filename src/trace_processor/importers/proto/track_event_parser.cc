@@ -38,8 +38,6 @@
 #include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/flow_tracker.h"
-#include "src/trace_processor/importers/common/global_args_tracker.h"
-#include "src/trace_processor/importers/common/legacy_v8_cpu_profile_tracker.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
@@ -373,9 +371,10 @@ class TrackEventParser::EventImporter {
           track_event_tracker_->GetDescriptorTrack(track_uuid_, name_id_,
                                                    packet_sequence_id_);
       if (!opt_track_id) {
-        track_event_tracker_->ReserveDescriptorChildTrack(track_uuid_,
-                                                          /*parent_uuid=*/0,
-                                                          name_id_);
+        TrackEventTracker::DescriptorTrackReservation r;
+        r.parent_uuid = 0;
+        r.name = name_id_;
+        track_event_tracker_->ReserveDescriptorTrack(track_uuid_, r);
         opt_track_id = track_event_tracker_->GetDescriptorTrack(
             track_uuid_, name_id_, packet_sequence_id_);
       }
@@ -517,7 +516,7 @@ class TrackEventParser::EventImporter {
             break;
           case LegacyEvent::SCOPE_GLOBAL:
             track_id_ = context_->track_tracker->InternGlobalTrack(
-                TrackTracker::TrackClassification::kChromeLegacyGlobalInstant);
+                TrackClassification::kChromeLegacyGlobalInstant);
             legacy_passthrough_utid_ = utid_;
             utid_ = std::nullopt;
             break;
@@ -527,9 +526,11 @@ class TrackEventParser::EventImporter {
                   "Process-scoped instant event without process association");
             }
 
-            track_id_ =
-                context_->track_tracker->InternLegacyChromeProcessInstantTrack(
-                    *upid_);
+            track_id_ = context_->track_tracker->InternProcessTrack(
+                TrackClassification::kChromeProcessInstant, *upid_);
+            context_->args_tracker->AddArgsTo(track_id_).AddArg(
+                context_->storage->InternString("source"),
+                Variadic::String(context_->storage->InternString("chrome")));
             legacy_passthrough_utid_ = utid_;
             utid_ = std::nullopt;
             break;
