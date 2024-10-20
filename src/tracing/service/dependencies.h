@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "src/tracing/service/clock.h"
+#include "src/tracing/service/random.h"
 
 namespace perfetto::tracing_service {
 
@@ -27,6 +28,7 @@ namespace perfetto::tracing_service {
 // mocks in tests.
 struct Dependencies {
   std::unique_ptr<Clock> clock;
+  std::unique_ptr<Random> random;
 };
 
 }  // namespace perfetto::tracing_service

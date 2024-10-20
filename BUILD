@@ -1267,8 +1267,6 @@ perfetto_filegroup(
         "src/perfetto_cmd/packet_writer.h",
         "src/perfetto_cmd/perfetto_cmd.cc",
         "src/perfetto_cmd/perfetto_cmd.h",
-        "src/perfetto_cmd/rate_limiter.cc",
-        "src/perfetto_cmd/rate_limiter.h",
     ],
 )
 
@@ -1630,6 +1628,7 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/trace_file_tracker.cc",
         "src/trace_processor/importers/common/trace_file_tracker.h",
         "src/trace_processor/importers/common/trace_parser.cc",
+        "src/trace_processor/importers/common/track_classification.h",
         "src/trace_processor/importers/common/track_tracker.cc",
         "src/trace_processor/importers/common/track_tracker.h",
         "src/trace_processor/importers/common/virtual_memory_mapping.cc",
@@ -2783,6 +2782,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/startup/startup_breakdowns.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startup_events.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startups.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/startup/startups_maxsdk28.sql",
@@ -2960,6 +2960,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_linux",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/linux/devfreq.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/threads.sql",
     ],
 )
@@ -2972,17 +2973,29 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/prelude/after_eof:after_eof
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_prelude_after_eof_after_eof",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/prelude/after_eof/casts.sql",
+        "src/trace_processor/perfetto_sql/stdlib/prelude/after_eof/slices.sql",
+        "src/trace_processor/perfetto_sql/stdlib/prelude/after_eof/tables_views.sql",
+        "src/trace_processor/perfetto_sql/stdlib/prelude/after_eof/views.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/prelude/before_eof:before_eof
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_prelude_before_eof_before_eof",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/prelude/before_eof/tables.sql",
+        "src/trace_processor/perfetto_sql/stdlib/prelude/before_eof/trace_bounds.sql",
+    ],
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/prelude:prelude
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
-    srcs = [
-        "src/trace_processor/perfetto_sql/stdlib/prelude/casts.sql",
-        "src/trace_processor/perfetto_sql/stdlib/prelude/slices.sql",
-        "src/trace_processor/perfetto_sql/stdlib/prelude/tables.sql",
-        "src/trace_processor/perfetto_sql/stdlib/prelude/tables_views.sql",
-        "src/trace_processor/perfetto_sql/stdlib/prelude/trace_bounds.sql",
-        "src/trace_processor/perfetto_sql/stdlib/prelude/views.sql",
-    ],
 )
 
 # GN target: //src/trace_processor/perfetto_sql/stdlib/sched:sched
@@ -3081,6 +3094,8 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/estimates.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/idle_attribution.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/curves/utils.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/w_cpu_dependence.sql",
+        "src/trace_processor/perfetto_sql/stdlib/wattson/curves/w_dsu_dependence.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/device_infos.sql",
         "src/trace_processor/perfetto_sql/stdlib/wattson/system_state.sql",
     ],
@@ -3114,6 +3129,8 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_linux_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_linux_perf_perf",
         ":src_trace_processor_perfetto_sql_stdlib_pkvm_pkvm",
+        ":src_trace_processor_perfetto_sql_stdlib_prelude_after_eof_after_eof",
+        ":src_trace_processor_perfetto_sql_stdlib_prelude_before_eof_before_eof",
         ":src_trace_processor_perfetto_sql_stdlib_prelude_prelude",
         ":src_trace_processor_perfetto_sql_stdlib_sched_sched",
         ":src_trace_processor_perfetto_sql_stdlib_slices_slices",
@@ -3938,6 +3955,8 @@ perfetto_filegroup(
         "src/tracing/service/metatrace_writer.h",
         "src/tracing/service/packet_stream_validator.cc",
         "src/tracing/service/packet_stream_validator.h",
+        "src/tracing/service/random.cc",
+        "src/tracing/service/random.h",
         "src/tracing/service/trace_buffer.cc",
         "src/tracing/service/trace_buffer.h",
         "src/tracing/service/tracing_service_impl.cc",
