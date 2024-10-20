@@ -40,16 +40,13 @@ export interface TraceInfo {
   // The list of CPUs in the trace
   readonly cpus: number[];
 
-  // The number of gpus in the trace
-  readonly gpuCount: number;
-
   // The number of import/analysis errors present in the `stats` table.
   readonly importErrors: number;
 
   // The trace type inferred by TraceProcessor (e.g. 'proto', 'json, ...).
   // See TraceTypeToString() in src/trace_processor/util/trace_type.cc for
   // all the available types.
-  readonly traceType: string;
+  readonly traceType?: string;
 
   // True if the trace contains any ftrace data (sched or other ftrace events).
   readonly hasFtrace: boolean;

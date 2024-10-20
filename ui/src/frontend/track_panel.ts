@@ -18,7 +18,7 @@ import {classNames} from '../base/classnames';
 import {Bounds2D, Size2D, VerticalBounds} from '../base/geom';
 import {Icons} from '../base/semantic_icons';
 import {TimeScale} from '../base/time_scale';
-import {Optional, RequiredField} from '../base/utils';
+import {RequiredField} from '../base/utils';
 import {calculateResolution} from '../common/resolution';
 import {featureFlags} from '../core/feature_flags';
 import {TrackRenderer} from '../core/track_manager';
@@ -206,7 +206,7 @@ export class TrackPanel implements Panel {
     highlightIfTrackInAreaSelection(ctx, timescale, node, trackSize);
   }
 
-  getSliceVerticalBounds(depth: number): Optional<VerticalBounds> {
+  getSliceVerticalBounds(depth: number): VerticalBounds | undefined {
     if (this.attrs.trackRenderer === undefined) {
       return undefined;
     }
@@ -263,6 +263,13 @@ function isHighlighted(node: TrackNode) {
       return true;
     }
   }
+
+  if (globals.selectionManager.selection.kind === 'track') {
+    if (globals.selectionManager.selection.trackUri === node.uri) {
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -421,6 +428,10 @@ function renderTrackDetailsButton(
         }),
         m(TreeNode, {left: 'Path', right: fullPath}),
         m(TreeNode, {left: 'Title', right: node.title}),
+        m(TreeNode, {
+          left: 'Workspace',
+          right: node.workspace?.title ?? '[no workspace]',
+        }),
         td && m(TreeNode, {left: 'Plugin ID', right: td.pluginId}),
         td &&
           m(

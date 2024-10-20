@@ -50,7 +50,6 @@ import {AppImpl} from '../core/app_impl';
 import {NotesEditorTab} from './notes_panel';
 import {NotesListEditor} from './notes_list_editor';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../public/utils';
-import {scrollTo} from '../public/scroll_helper';
 
 const OMNIBOX_INPUT_REF = 'omnibox';
 
@@ -378,17 +377,21 @@ export class UiMainPerTrace implements m.ClassComponent {
         defaultHotkey: 'Mod+A',
       },
       {
-        id: 'perfetto.ScrollToTrack',
-        name: 'Scroll to track',
-        callback: async () => {
-          const opts = trace.tracks
-            .getAllTracks()
-            .map((td) => ({key: td.uri, displayName: td.uri}));
-          const result = await trace.omnibox.prompt('Choose a track', opts);
-          if (result) {
-            scrollTo({track: {uri: result, expandGroup: true}});
+        id: 'perfetto.ConvertSelectionToArea',
+        name: 'Convert the current selection to an area selection',
+        callback: () => {
+          const selection = trace.selection.selection;
+          const range = trace.selection.findTimeRangeOfSelection();
+          if (selection.kind === 'track_event' && range) {
+            trace.selection.selectArea({
+              start: range.start,
+              end: range.end,
+              trackUris: [selection.trackUri],
+            });
           }
         },
+        // TODO(stevegolton): Decide on a sensible hotkey.
+        // defaultHotkey: 'L',
       },
     ];
 
@@ -399,13 +402,15 @@ export class UiMainPerTrace implements m.ClassComponent {
   }
 
   private renderOmnibox(): m.Children {
-    const omniboxMode = AppImpl.instance.omnibox.mode;
-    if (omniboxMode === OmniboxMode.StatusMessage) {
+    const omnibox = AppImpl.instance.omnibox;
+    const omniboxMode = omnibox.mode;
+    const statusMessage = omnibox.statusMessage;
+    if (statusMessage !== undefined) {
       return m(
         `.omnibox.message-mode`,
         m(`input[readonly][disabled][ref=omnibox]`, {
           value: '',
-          placeholder: AppImpl.instance.omnibox.statusMessage,
+          placeholder: statusMessage,
         }),
       );
     } else if (omniboxMode === OmniboxMode.Command) {

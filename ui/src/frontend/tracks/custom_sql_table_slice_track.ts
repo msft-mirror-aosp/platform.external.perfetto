@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {generateSqlWithInternalLayout} from '../../common/internal_layout_utils';
-import {GenericSliceDetailsTabConfigBase} from '../generic_slice_details_tab';
+import {generateSqlWithInternalLayout} from '../../trace_processor/sql_utils/layout';
 import {NAMED_ROW, NamedRow, NamedSliceTrack} from '../named_slice_track';
 import {NewTrackArgs} from '../track';
 import {createView} from '../../trace_processor/sql_utils';
@@ -32,13 +31,6 @@ export interface CustomSqlTableDefConfig {
   columns?: string[];
   whereClause?: string;
   disposable?: AsyncDisposable;
-}
-
-export interface CustomSqlDetailsPanelConfig {
-  // Type of details panel to create
-  kind: string;
-  // Config for the details panel
-  config: GenericSliceDetailsTabConfigBase;
 }
 
 export abstract class CustomSqlTableSliceTrack extends NamedSliceTrack<

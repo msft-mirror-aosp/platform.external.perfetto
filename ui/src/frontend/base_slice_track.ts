@@ -15,7 +15,7 @@
 import {assertExists} from '../base/logging';
 import {clamp, floatEqual} from '../base/math_utils';
 import {Duration, Time, time} from '../base/time';
-import {exists, Optional} from '../base/utils';
+import {exists} from '../base/utils';
 import {Actions} from '../common/actions';
 import {drawIncompleteSlice, drawTrackHoverTooltip} from '../base/canvas_utils';
 import {cropText} from '../base/string_utils';
@@ -654,7 +654,7 @@ export abstract class BaseSliceTrack<
       );
     }
 
-    const resolution = rawSlicesKey.bucketSize;
+    const resolution = slicesKey.bucketSize;
     const extraCols = this.extraSqlColumns.join(',');
     const queryRes = await this.engine.query(`
       SELECT
@@ -668,7 +668,7 @@ export abstract class BaseSliceTrack<
       FROM ${this.getTableName()}(
         ${slicesKey.start},
         ${slicesKey.end},
-        ${slicesKey.bucketSize}
+        ${resolution}
       ) z
       CROSS JOIN (${this.getSqlSource()}) s using (id)
     `);
@@ -939,7 +939,7 @@ export abstract class BaseSliceTrack<
     return this.computedTrackHeight;
   }
 
-  getSliceVerticalBounds(depth: number): Optional<VerticalBounds> {
+  getSliceVerticalBounds(depth: number): VerticalBounds | undefined {
     this.updateSliceAndTrackHeight();
 
     const totalSliceHeight = this.computedRowSpacing + this.computedSliceHeight;

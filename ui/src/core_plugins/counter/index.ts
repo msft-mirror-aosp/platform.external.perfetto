@@ -25,7 +25,6 @@ import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {CounterOptions} from '../../frontend/base_counter_track';
 import {TraceProcessorCounterTrack} from './trace_processor_counter_track';
-import {CounterDetailsPanel} from './counter_details_panel';
 import {exists} from '../../base/utils';
 import {TrackNode} from '../../public/workspace';
 import {
@@ -167,12 +166,12 @@ class CounterPlugin implements PerfettoPlugin {
           trace: ctx,
           uri,
           trackId,
+          trackName: title,
           options: {
             ...getDefaultCounterOptions(title),
             unit,
           },
         }),
-        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, title),
       });
       const track = new TrackNode({uri, title});
       ctx.workspace.addChildInOrder(track);
@@ -246,9 +245,9 @@ class CounterPlugin implements PerfettoPlugin {
           trace: ctx,
           uri,
           trackId: trackId,
+          trackName: name,
           options: getDefaultCounterOptions(name),
         }),
-        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
       });
       const trackNode = new TrackNode({uri, title: name, sortOrder: -20});
       ctx.workspace.addChildInOrder(trackNode);
@@ -313,9 +312,9 @@ class CounterPlugin implements PerfettoPlugin {
           trace: ctx,
           uri,
           trackId: trackId,
+          trackName: name,
           options: getDefaultCounterOptions(name),
         }),
-        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
       });
       const group = getOrCreateGroupForThread(ctx.workspace, utid);
       const track = new TrackNode({uri, title: name, sortOrder: 30});
@@ -371,9 +370,9 @@ class CounterPlugin implements PerfettoPlugin {
           trace: ctx,
           uri,
           trackId: trackId,
+          trackName: name,
           options: getDefaultCounterOptions(name),
         }),
-        detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
       });
       const group = getOrCreateGroupForProcess(ctx.workspace, upid);
       const track = new TrackNode({uri, title: name, sortOrder: 20});
@@ -383,41 +382,35 @@ class CounterPlugin implements PerfettoPlugin {
 
   private async addGpuFrequencyTracks(ctx: Trace) {
     const engine = ctx.engine;
-    const numGpus = ctx.traceInfo.gpuCount;
 
-    for (let gpu = 0; gpu < numGpus; gpu++) {
-      // Only add a gpu freq track if we have
-      // gpu freq data.
-      const freqExistsResult = await engine.query(`
-        select id
-        from gpu_counter_track
-        join _counter_track_summary using (id)
-        where name = 'gpufreq' and gpu_id = ${gpu}
-        limit 1;
-      `);
-      if (freqExistsResult.numRows() > 0) {
-        const trackId = freqExistsResult.firstRow({id: NUM}).id;
-        const uri = `/gpu_frequency_${gpu}`;
-        const name = `Gpu ${gpu} Frequency`;
-        ctx.tracks.registerTrack({
+    const result = await engine.query(`
+      select id, gpu_id as gpuId
+      from gpu_counter_track
+      join _counter_track_summary using (id)
+      where name = 'gpufreq'
+    `);
+    const it = result.iter({id: NUM, gpuId: NUM});
+    for (; it.valid(); it.next()) {
+      const uri = `/gpu_frequency_${it.gpuId}`;
+      const name = `Gpu ${it.gpuId} Frequency`;
+      ctx.tracks.registerTrack({
+        uri,
+        title: name,
+        tags: {
+          kind: COUNTER_TRACK_KIND,
+          trackIds: [it.id],
+          scope: 'gpuFreq',
+        },
+        track: new TraceProcessorCounterTrack({
+          trace: ctx,
           uri,
-          title: name,
-          tags: {
-            kind: COUNTER_TRACK_KIND,
-            trackIds: [trackId],
-            scope: 'gpuFreq',
-          },
-          track: new TraceProcessorCounterTrack({
-            trace: ctx,
-            uri,
-            trackId: trackId,
-            options: getDefaultCounterOptions(name),
-          }),
-          detailsPanel: () => new CounterDetailsPanel(ctx, trackId, name),
-        });
-        const track = new TrackNode({uri, title: name, sortOrder: -20});
-        ctx.workspace.addChildInOrder(track);
-      }
+          trackId: it.id,
+          trackName: name,
+          options: getDefaultCounterOptions(name),
+        }),
+      });
+      const track = new TrackNode({uri, title: name, sortOrder: -20});
+      ctx.workspace.addChildInOrder(track);
     }
   }
 }

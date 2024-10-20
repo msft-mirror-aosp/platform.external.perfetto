@@ -38,8 +38,6 @@
 #include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/flow_tracker.h"
-#include "src/trace_processor/importers/common/global_args_tracker.h"
-#include "src/trace_processor/importers/common/legacy_v8_cpu_profile_tracker.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
@@ -527,9 +525,12 @@ class TrackEventParser::EventImporter {
                   "Process-scoped instant event without process association");
             }
 
-            track_id_ =
-                context_->track_tracker->InternLegacyChromeProcessInstantTrack(
-                    *upid_);
+            track_id_ = context_->track_tracker->InternProcessTrack(
+                TrackTracker::TrackClassification::kChromeProcessInstant,
+                *upid_);
+            context_->args_tracker->AddArgsTo(track_id_).AddArg(
+                context_->storage->InternString("source"),
+                Variadic::String(context_->storage->InternString("chrome")));
             legacy_passthrough_utid_ = utid_;
             utid_ = std::nullopt;
             break;

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {time, duration, TimeSpan} from '../base/time';
-import {Optional} from '../base/utils';
 import {Engine} from '../trace_processor/engine';
 import {ColumnDef, Sorting, ThreadStateExtra} from './aggregation';
 import {TrackDescriptor} from './track';
@@ -21,7 +20,7 @@ import {TrackDescriptor} from './track';
 export interface SelectionManager {
   readonly selection: Selection;
 
-  findTimeRangeOfSelection(): Optional<TimeSpan>;
+  findTimeRangeOfSelection(): TimeSpan | undefined;
   clear(): void;
 
   /**
@@ -36,6 +35,14 @@ export interface SelectionManager {
     eventId: number,
     opts?: SelectionOpts,
   ): void;
+
+  /**
+   * Select a track.
+   *
+   * @param trackUri - The URI for the track to select.
+   * @param opts - Additional options.
+   */
+  selectTrack(trackUri: string, opts?: SelectionOpts): void;
 
   /**
    * Select a track event via a sql table name + id.
@@ -81,9 +88,9 @@ export interface AreaSelectionAggregator {
 
 export type Selection =
   | TrackEventSelection
+  | TrackSelection
   | AreaSelection
   | NoteSelection
-  | UnionSelection
   | EmptySelection;
 
 /** Defines how changes to selection affect the rest of the UI state */
@@ -97,6 +104,11 @@ export interface TrackEventSelection extends TrackEventDetails {
   readonly kind: 'track_event';
   readonly trackUri: string;
   readonly eventId: number;
+}
+
+export interface TrackSelection {
+  readonly kind: 'track';
+  readonly trackUri: string;
 }
 
 export interface TrackEventDetails {
@@ -137,11 +149,6 @@ export interface AreaSelection extends Area {
 export interface NoteSelection {
   readonly kind: 'note';
   readonly id: string;
-}
-
-export interface UnionSelection {
-  readonly kind: 'union';
-  readonly selections: ReadonlyArray<Selection>;
 }
 
 export interface EmptySelection {
