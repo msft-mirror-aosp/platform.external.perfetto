@@ -360,12 +360,12 @@ avgFreqKhze
 threads (2(.perfetto.protos.AndroidCpuMetric.ThreadRthreads>
 core (2*.perfetto.protos.AndroidCpuMetric.CoreDataRcoreK
 	core_type (2..perfetto.protos.AndroidCpuMetric.CoreTypeDataRcoreTypeJ
-ë	
-3protos/perfetto/metrics/android/codec_metrics.protoperfetto.protos0protos/perfetto/metrics/android/cpu_metric.proto"ñ
+’	
+3protos/perfetto/metrics/android/codec_metrics.protoperfetto.protos0protos/perfetto/metrics/android/cpu_metric.proto"⁄
 AndroidCodecMetricsJ
 	cpu_usage (2-.perfetto.protos.AndroidCodecMetrics.CpuUsageRcpuUsageY
-codec_function (22.perfetto.protos.AndroidCodecMetrics.CodecFunctionRcodecFunctionS
-energy_usage (20.perfetto.protos.AndroidCodecMetrics.EnergyUsageRenergyUsageê
+codec_function (22.perfetto.protos.AndroidCodecMetrics.CodecFunctionRcodecFunctionC
+energy (2+.perfetto.protos.AndroidCodecMetrics.EnergyRenergyê
 Detail
 thread_name (	R
 threadName 
@@ -385,14 +385,18 @@ threadName"
 thread_cpu_ns (RthreadCpuNs
 num_threads (R
 numThreadsK
-	core_data (2..perfetto.protos.AndroidCpuMetric.CoreTypeDataRcoreDataJG
-EnergyBreakdown
-	subsystem (	R	subsystem
-energy (Renergy†
-EnergyUsage!
+	core_data (2..perfetto.protos.AndroidCpuMetric.CoreTypeDataRcoreDataJô
+Rail
+name (	RnameB
+info (2..perfetto.protos.AndroidCodecMetrics.Rail.InfoRinfo9
+Info
+energy (Renergy
+power_mw (RpowerMw°
+Energy!
 total_energy (RtotalEnergy
-duration (RdurationR
-	subsystem (24.perfetto.protos.AndroidCodecMetrics.EnergyBreakdownR	subsystem
+duration (Rduration
+power_mw (RpowerMw=
+rail (2).perfetto.protos.AndroidCodecMetrics.RailRrail
 Ú
 3protos/perfetto/metrics/android/camera_metric.protoperfetto.protos"©
 AndroidCameraMetricQ
@@ -1023,8 +1027,8 @@ maxRuntime$
 name (	RnameY
 threads (2?.perfetto.protos.AndroidSimpleperfMetric.PerfEventMetric.ThreadRthreads
 total (Rtotal
-õE
-4protos/perfetto/metrics/android/startup_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"ôD
+¬F
+4protos/perfetto/metrics/android/startup_metric.protoperfetto.protos6protos/perfetto/metrics/android/process_metadata.proto"¿E
 AndroidStartupMetricG
 startup (2-.perfetto.protos.AndroidStartupMetric.StartupRstartupÛ
 TaskStateBreakdown$
@@ -1041,7 +1045,7 @@ maxRuntime$
 unknown (Runknown5
 Slice
 dur_ns (RdurNs
-dur_ms (RdurMs˙
+dur_ms (RdurMs°
 ToFirstFrame
 dur_ns (RdurNs
 dur_ms (RdurMsr
@@ -1065,10 +1069,12 @@ maxRuntime$
 toPostForkb
 to_activity_thread_main (2+.perfetto.protos.AndroidStartupMetric.SliceRtoActivityThreadMain[
 to_bind_application (2+.perfetto.protos.AndroidStartupMetric.SliceRtoBindApplicationQ
-time_post_fork (2+.perfetto.protos.AndroidStartupMetric.SliceRtimePostForkO
+time_post_fork (2+.perfetto.protos.AndroidStartupMetric.SliceRtimePostForkg
+time_class_initialization$ (2+.perfetto.protos.AndroidStartupMetric.SliceRtimeClassInitializationO
 time_dex_open (2+.perfetto.protos.AndroidStartupMetric.SliceRtimeDexOpenW
 time_verify_class (2+.perfetto.protos.AndroidStartupMetric.SliceRtimeVerifyClass0
-jit_compiled_methods (RjitCompiledMethodsh
+jit_compiled_methods (RjitCompiledMethods<
+class_initialization_count% (RclassInitializationCounth
 time_jit_thread_pool_on_cpu (2+.perfetto.protos.AndroidStartupMetric.SliceRtimeJitThreadPoolOnCpuO
 time_gc_total (2+.perfetto.protos.AndroidStartupMetric.SliceRtimeGcTotalP
 time_gc_on_cpu (2+.perfetto.protos.AndroidStartupMetric.SliceRtimeGcOnCpus
