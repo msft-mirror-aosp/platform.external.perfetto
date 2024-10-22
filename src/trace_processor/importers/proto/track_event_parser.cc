@@ -516,7 +516,13 @@ class TrackEventParser::EventImporter {
             break;
           case LegacyEvent::SCOPE_GLOBAL:
             track_id_ = context_->track_tracker->InternGlobalTrack(
-                TrackClassification::kChromeLegacyGlobalInstant);
+                tracks::legacy_chrome_global_instants, TrackTracker::AutoName(),
+                [this](ArgsTracker::BoundInserter& inserter) {
+                  inserter.AddArg(
+                      context_->storage->InternString("source"),
+                      Variadic::String(
+                          context_->storage->InternString("chrome")));
+                });
             legacy_passthrough_utid_ = utid_;
             utid_ = std::nullopt;
             break;
@@ -527,7 +533,7 @@ class TrackEventParser::EventImporter {
             }
 
             track_id_ = context_->track_tracker->InternProcessTrack(
-                TrackClassification::kChromeProcessInstant, *upid_);
+                tracks::chrome_process_instant, *upid_);
             context_->args_tracker->AddArgsTo(track_id_).AddArg(
                 context_->storage->InternString("source"),
                 Variadic::String(context_->storage->InternString("chrome")));
@@ -584,14 +590,16 @@ class TrackEventParser::EventImporter {
     // EventTracker expects counters to be pushed in order of their timestamps.
     // One more reason to switch to split begin/end events.
     if (thread_timestamp_) {
-      TrackId track_id = context_->track_tracker->InternThreadCounterTrack(
-          parser_->counter_name_thread_time_id_, *utid_);
+      TrackId track_id =
+          context_->track_tracker->LegacyInternThreadCounterTrack(
+              parser_->counter_name_thread_time_id_, *utid_);
       context_->event_tracker->PushCounter(
           ts_, static_cast<double>(*thread_timestamp_), track_id);
     }
     if (thread_instruction_count_) {
-      TrackId track_id = context_->track_tracker->InternThreadCounterTrack(
-          parser_->counter_name_thread_instruction_count_id_, *utid_);
+      TrackId track_id =
+          context_->track_tracker->LegacyInternThreadCounterTrack(
+              parser_->counter_name_thread_instruction_count_id_, *utid_);
       context_->event_tracker->PushCounter(
           ts_, static_cast<double>(*thread_instruction_count_), track_id);
     }
