@@ -32,6 +32,7 @@
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/common/tracks.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
@@ -170,14 +171,16 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
           if (it != thread_tracks_.end()) {
             return it->second;
           }
-          return thread_tracks_[track.utid()] =
-                     context_->track_tracker->CreateThreadTrack(
-                         TrackClassification::kTrackEvent, track.utid());
+          TrackId id = context_->track_tracker->CreateThreadTrack(
+              tracks::track_event, track.utid(), TrackTracker::AutoName());
+          thread_tracks_[track.utid()] = id;
+          return id;
         }
         return context_->track_tracker->InternThreadTrack(track.utid());
       }
       case ResolvedDescriptorTrack::Scope::kProcess:
-        return context_->track_tracker->InternProcessTrack(track.upid());
+        return context_->track_tracker->InternProcessTrack(tracks::track_event,
+                                                           track.upid());
       case ResolvedDescriptorTrack::Scope::kGlobal:
         // Will be handled below.
         break;
@@ -188,28 +191,30 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
     switch (track.scope()) {
       case ResolvedDescriptorTrack::Scope::kThread:
         return context_->track_tracker->CreateThreadCounterTrack(
-            TrackClassification::kTrackEvent, kNullStringId, track.utid());
+            tracks::track_event, track.utid(), TrackTracker::AutoName());
       case ResolvedDescriptorTrack::Scope::kProcess:
         return context_->track_tracker->CreateProcessCounterTrack(
-            TrackClassification::kTrackEvent, track.upid());
+            tracks::track_event, track.upid(), std::nullopt,
+            TrackTracker::AutoName());
       case ResolvedDescriptorTrack::Scope::kGlobal:
         return context_->track_tracker->CreateCounterTrack(
-            TrackClassification::kTrackEvent, std::nullopt, kNullStringId);
+            tracks::track_event, std::nullopt, TrackTracker::AutoName());
     }
   }
 
   switch (track.scope()) {
     case ResolvedDescriptorTrack::Scope::kThread: {
       return context_->track_tracker->CreateThreadTrack(
-          TrackClassification::kTrackEvent, track.utid());
+          tracks::track_event, track.utid(), TrackTracker::AutoName());
     }
     case ResolvedDescriptorTrack::Scope::kProcess: {
       return context_->track_tracker->CreateProcessTrack(
-          TrackClassification::kTrackEvent, track.upid());
+          tracks::track_event, track.upid(), std::nullopt,
+          TrackTracker::AutoName());
     }
     case ResolvedDescriptorTrack::Scope::kGlobal: {
       return context_->track_tracker->CreateTrack(
-          TrackClassification::kTrackEvent, std::nullopt, kNullStringId);
+          tracks::track_event, std::nullopt, TrackTracker::AutoName());
     }
   }
   PERFETTO_FATAL("For GCC");
