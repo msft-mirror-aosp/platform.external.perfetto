@@ -17,6 +17,7 @@ import {addDebugSliceTrack} from '../../public/debug_tracks';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {addAndPinSliceTrack} from './trackUtils';
+import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
 
 /**
  * Adds the Debug Slice Track for given Jank CUJ name
@@ -216,7 +217,7 @@ const BLOCKING_CALLS_DURING_CUJS_COLUMNS = [
 
 class AndroidCujs implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinJankCUJs',
       name: 'Add track: Android jank CUJs',
       callback: () => {
@@ -226,17 +227,20 @@ class AndroidCujs implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#ListJankCUJs',
       name: 'Run query: Android jank CUJs',
       callback: () => {
-        ctx.engine
-          .query(JANK_CUJ_QUERY_PRECONDITIONS)
-          .then(() => ctx.tabs.openQuery(JANK_CUJ_QUERY, 'Android Jank CUJs'));
+        ctx.engine.query(JANK_CUJ_QUERY_PRECONDITIONS).then(() =>
+          addQueryResultsTab(ctx, {
+            query: JANK_CUJ_QUERY,
+            title: 'Android Jank CUJs',
+          }),
+        );
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinLatencyCUJs',
       name: 'Add track: Android latency CUJs',
       callback: () => {
@@ -253,14 +257,17 @@ class AndroidCujs implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#ListLatencyCUJs',
       name: 'Run query: Android Latency CUJs',
       callback: () =>
-        ctx.tabs.openQuery(LATENCY_CUJ_QUERY, 'Android Latency CUJs'),
+        addQueryResultsTab(ctx, {
+          query: LATENCY_CUJ_QUERY,
+          title: 'Android Latency CUJs',
+        }),
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidCujs#PinBlockingCalls',
       name: 'Add track: Android Blocking calls during CUJs',
       callback: () => {

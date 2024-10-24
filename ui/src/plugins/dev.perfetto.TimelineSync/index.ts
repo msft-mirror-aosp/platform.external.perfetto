@@ -65,17 +65,17 @@ class TimelineSync implements PerfettoPlugin {
   >();
 
   onActivate(ctx: App): void {
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: `dev.perfetto.SplitScreen#enableTimelineSync`,
       name: 'Enable timeline sync with other Perfetto UI tabs',
       callback: () => this.showTimelineSyncDialog(),
     });
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: `dev.perfetto.SplitScreen#disableTimelineSync`,
       name: 'Disable timeline sync',
       callback: () => this.disableTimelineSync(this._sessionId),
     });
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: `dev.perfetto.SplitScreen#toggleTimelineSync`,
       name: 'Toggle timeline sync with other PerfettoUI tabs',
       callback: () => this.toggleTimelineSync(),
@@ -98,10 +98,6 @@ class TimelineSync implements PerfettoPlugin {
         ? parseInt(m[1].substring(1))
         : DEFAULT_SESSION_ID;
     }
-  }
-
-  onDeactivate(_: App) {
-    this.disableTimelineSync(this._sessionId);
   }
 
   async onTraceLoad(ctx: Trace) {
@@ -397,7 +393,7 @@ class TimelineSync implements PerfettoPlugin {
   }
 
   private getCurrentViewportBounds(): ViewportBounds {
-    return this._ctx!.timeline.viewport;
+    return this._ctx!.timeline.visibleWindow.toTimeSpan();
   }
 
   private purgeInactiveClients() {

@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Actions} from '../../common/actions';
-import {globals} from '../../frontend/globals';
+import {AppImpl} from '../../core/app_impl';
 import {App} from '../../public/app';
 import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 
@@ -23,23 +22,23 @@ const EXAMPLE_ANDROID_TRACE_URL =
 const EXAMPLE_CHROME_TRACE_URL =
   'https://storage.googleapis.com/perfetto-misc/chrome_example_wikipedia.perfetto_trace.gz';
 
-function openTraceUrl(url: string): void {
-  globals.logging.logEvent('Trace Actions', 'Open example trace');
-  globals.dispatch(Actions.openTraceFromUrl({url}));
+function openTraceUrl(app: App, url: string): void {
+  app.analytics.logEvent('Trace Actions', 'Open example trace');
+  AppImpl.instance.openTraceFromUrl(url);
 }
 
 class ExampleTracesPlugin implements PerfettoPlugin {
   onActivate(ctx: App) {
     const OPEN_EXAMPLE_ANDROID_TRACE_COMMAND_ID =
       'perfetto.CoreCommands#openExampleAndroidTrace';
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: OPEN_EXAMPLE_ANDROID_TRACE_COMMAND_ID,
       name: 'Open Android example',
       callback: () => {
-        openTraceUrl(EXAMPLE_ANDROID_TRACE_URL);
+        openTraceUrl(ctx, EXAMPLE_ANDROID_TRACE_URL);
       },
     });
-    ctx.addSidebarMenuItem({
+    ctx.sidebar.addMenuItem({
       commandId: OPEN_EXAMPLE_ANDROID_TRACE_COMMAND_ID,
       group: 'example_traces',
       icon: 'description',
@@ -47,14 +46,14 @@ class ExampleTracesPlugin implements PerfettoPlugin {
 
     const OPEN_EXAMPLE_CHROME_TRACE_COMMAND_ID =
       'perfetto.CoreCommands#openExampleChromeTrace';
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: OPEN_EXAMPLE_CHROME_TRACE_COMMAND_ID,
       name: 'Open Chrome example',
       callback: () => {
-        openTraceUrl(EXAMPLE_CHROME_TRACE_URL);
+        openTraceUrl(ctx, EXAMPLE_CHROME_TRACE_URL);
       },
     });
-    ctx.addSidebarMenuItem({
+    ctx.sidebar.addMenuItem({
       commandId: OPEN_EXAMPLE_CHROME_TRACE_COMMAND_ID,
       group: 'example_traces',
       icon: 'description',

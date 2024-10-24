@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {getColorForSlice} from '../core/colorizer';
+import {getColorForSlice} from '../public/lib/colorizer';
+import {TrackEventDetailsPanel} from '../public/details_panel';
+import {TrackEventSelection} from '../public/selection';
 import {Slice} from '../public/track';
 import {STR_NULL} from '../trace_processor/query_result';
 import {
@@ -23,7 +25,7 @@ import {
   SLICE_FLAGS_INCOMPLETE,
   SLICE_FLAGS_INSTANT,
 } from './base_slice_track';
-import {globals} from './globals';
+import {ThreadSliceDetailsPanel} from './thread_slice_details_tab';
 import {NewTrackArgs} from './track';
 import {renderDuration} from './widgets/duration';
 
@@ -67,18 +69,10 @@ export abstract class NamedSliceTrack<
   }
 
   onSliceClick(args: OnSliceClickArgs<SliceType>) {
-    globals.setLegacySelection(
-      {
-        kind: 'SLICE',
-        id: args.slice.id,
-        trackUri: this.uri,
-        table: 'slice',
-      },
-      {
-        clearSearch: true,
-        pendingScrollId: undefined,
-        switchToCurrentSelectionTab: true,
-      },
-    );
+    this.trace.selection.selectTrackEvent(this.uri, args.slice.id);
+  }
+
+  detailsPanel(_sel: TrackEventSelection): TrackEventDetailsPanel {
+    return new ThreadSliceDetailsPanel(this.trace);
   }
 }
