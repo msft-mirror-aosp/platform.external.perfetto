@@ -37,7 +37,6 @@ import {
   TraceHttpStream,
   TraceStream,
 } from '../core/trace_stream';
-import {decideTracks} from './track_decider';
 import {
   deserializeAppStatePhase1,
   deserializeAppStatePhase2,
@@ -238,9 +237,6 @@ async function loadTraceIntoEngine(
     updateStatus(app, `Running plugin: ${id}`);
   });
 
-  updateStatus(app, 'Loading tracks');
-  await decideTracks(trace);
-
   decideTabs(trace);
 
   await listThreads(trace);
@@ -261,6 +257,8 @@ async function loadTraceIntoEngine(
     }
   }
 
+  await trace.plugins.onTraceReady();
+
   if (serializedAppState !== undefined) {
     // Wait that plugins have completed their actions and then proceed with
     // the final phase of app state restore.
@@ -268,8 +266,6 @@ async function loadTraceIntoEngine(
     // to be URI based and can deal with non-existing URIs.
     deserializeAppStatePhase2(serializedAppState, trace);
   }
-
-  await trace.plugins.onTraceReady();
 
   return trace;
 }

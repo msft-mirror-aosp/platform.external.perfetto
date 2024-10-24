@@ -59,10 +59,16 @@ AS
 SELECT
   base.ts,
   base.dur,
-  COALESCE(lut0.curve_value, cpu0_curve) as cpu0_curve,
-  COALESCE(lut1.curve_value, cpu1_curve) as cpu1_curve,
-  COALESCE(lut2.curve_value, cpu2_curve) as cpu2_curve,
-  COALESCE(lut3.curve_value, cpu3_curve) as cpu3_curve,
+  -- base.cpu[0-3]_curve will be non-zero if CPU has 1D dependency
+  -- base.cpu[0-3]_curve will be zero if device is suspended or deep idle
+  -- base.cpu[0-3]_curve will be NULL if 2D dependency required
+  COALESCE(base.cpu0_curve, lut0.curve_value) as cpu0_curve,
+  COALESCE(base.cpu1_curve, lut1.curve_value) as cpu1_curve,
+  COALESCE(base.cpu2_curve, lut2.curve_value) as cpu2_curve,
+  COALESCE(base.cpu3_curve, lut3.curve_value) as cpu3_curve,
+  -- base.cpu[4-7]_curve will be non-zero if CPU has 1D dependency
+  -- base.cpu[4-7]_curve will be zero if device is suspended or deep idle
+  -- base.cpu[4-7]_curve will be NULL if CPU doesn't exist on device
   COALESCE(base.cpu4_curve, 0.0) as cpu4_curve,
   COALESCE(base.cpu5_curve, 0.0) as cpu5_curve,
   COALESCE(base.cpu6_curve, 0.0) as cpu6_curve,
@@ -150,3 +156,28 @@ SELECT
   ) + static_curve as dsu_scu_mw
 FROM _system_state_curves;
 
+-- API to get power from each system state in an arbitrary time window
+CREATE PERFETTO FUNCTION _windowed_system_state_mw(ts LONG, dur LONG)
+RETURNS TABLE(
+  cpu0_mw FLOAT,
+  cpu1_mw FLOAT,
+  cpu2_mw FLOAT,
+  cpu3_mw FLOAT,
+  cpu4_mw FLOAT,
+  cpu5_mw FLOAT,
+  cpu6_mw FLOAT,
+  cpu7_mw FLOAT,
+  dsu_scu_mw FLOAT
+) AS
+SELECT
+  SUM(ss.cpu0_mw * ss.dur) / SUM(ss.dur) AS cpu0_mw,
+  SUM(ss.cpu1_mw * ss.dur) / SUM(ss.dur) AS cpu1_mw,
+  SUM(ss.cpu2_mw * ss.dur) / SUM(ss.dur) AS cpu2_mw,
+  SUM(ss.cpu3_mw * ss.dur) / SUM(ss.dur) AS cpu3_mw,
+  SUM(ss.cpu4_mw * ss.dur) / SUM(ss.dur) AS cpu4_mw,
+  SUM(ss.cpu5_mw * ss.dur) / SUM(ss.dur) AS cpu5_mw,
+  SUM(ss.cpu6_mw * ss.dur) / SUM(ss.dur) AS cpu6_mw,
+  SUM(ss.cpu7_mw * ss.dur) / SUM(ss.dur) AS cpu7_mw,
+  SUM(ss.dsu_scu_mw * ss.dur) / SUM(ss.dur) AS dsu_scu_mw
+FROM _interval_intersect_single!($ts, $dur, _ii_subquery!(_system_state_mw)) ii
+JOIN _system_state_mw AS ss ON ss._auto_id = id;
