@@ -27,6 +27,8 @@ import {SerializedAppState} from '../public/state_serialization_schema';
 import {PostedTrace, TraceSource} from '../public/trace_source';
 import {loadTrace} from './load_trace';
 import {CORE_PLUGIN_ID} from './plugin_manager';
+import {Router} from './router';
+import {AnalyticsInternal, initAnalytics} from './analytics_impl';
 
 // The args that frontend/index.ts passes when calling AppImpl.initialize().
 // This is to deal with injections that would otherwise cause circular deps.
@@ -50,12 +52,15 @@ export interface AppInitArgs {
 export class AppContext {
   readonly commandMgr = new CommandManagerImpl();
   readonly omniboxMgr = new OmniboxManagerImpl();
-  readonly sidebarMgr = new SidebarManagerImpl();
+  readonly sidebarMgr: SidebarManagerImpl;
   readonly pluginMgr: PluginManager;
+  readonly analytics: AnalyticsInternal;
   newEngineMode: NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE';
   initialRouteArgs: RouteArgs;
   isLoadingTrace = false; // Set when calling openTrace().
   readonly initArgs: AppInitArgs;
+  readonly embeddedMode: boolean;
+  readonly testingMode: boolean;
 
   // This is normally empty and is injected with extra google-internal packages
   // via is_internal_user.js
@@ -66,7 +71,12 @@ export class AppContext {
   constructor(initArgs: AppInitArgs) {
     this.initArgs = initArgs;
     this.initialRouteArgs = initArgs.initialRouteArgs;
-
+    this.sidebarMgr = new SidebarManagerImpl(this.initialRouteArgs.hideSidebar);
+    this.embeddedMode = this.initialRouteArgs.mode === 'embedded';
+    this.testingMode =
+      self.location !== undefined &&
+      self.location.search.indexOf('testing=1') >= 0;
+    this.analytics = initAnalytics(this.testingMode, this.embeddedMode);
     // The rootUrl should point to 'https://ui.perfetto.dev/v1.2.3/'. It's
     // allowed to be empty only in unittests, because there there is no bundle
     // hence no concrete root.
@@ -135,11 +145,15 @@ export class AppImpl implements App {
     return this.appCtx.pluginMgr;
   }
 
+  get analytics(): AnalyticsInternal {
+    return this.appCtx.analytics;
+  }
+
   get trace(): TraceImpl | undefined {
     return this.currentTrace;
   }
 
-  scheduleRedraw(): void {
+  scheduleFullRedraw(): void {
     raf.scheduleFullRedraw();
   }
 
@@ -204,6 +218,14 @@ export class AppImpl implements App {
     }
   }
 
+  get embeddedMode(): boolean {
+    return this.appCtx.embeddedMode;
+  }
+
+  get testingMode(): boolean {
+    return this.appCtx.testingMode;
+  }
+
   closeCurrentTrace() {
     // This method should be called only on the core instance, plugins don't
     // have access to openTrace*() methods.
@@ -247,5 +269,9 @@ export class AppImpl implements App {
   // and app_impl.ts.
   get __appCtxForTraceImplCtor() {
     return this.appCtx;
+  }
+
+  navigate(newHash: string): void {
+    Router.navigate(newHash);
   }
 }
