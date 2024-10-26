@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ConversionJobStatusUpdate} from '../common/conversion_jobs';
 import {raf} from '../core/raf_scheduler';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {globals} from './globals';
@@ -27,13 +26,6 @@ export function publishHttpRpcState(httpRpcState: HttpRpcState) {
   raf.scheduleFullRedraw();
 }
 
-export function publishConversionJobStatusUpdate(
-  job: ConversionJobStatusUpdate,
-) {
-  globals.setConversionJobStatus(job.jobName, job.jobStatus);
-  globals.publishRedraw();
-}
-
 export function publishBufferUsage(args: {percentage: number}) {
   globals.setBufferUsage(args.percentage);
   globals.publishRedraw();
@@ -46,10 +38,5 @@ export function publishRecordingLog(args: {logs: string}) {
 
 export function publishShowPanningHint() {
   globals.showPanningHint = true;
-  globals.publishRedraw();
-}
-
-export function publishPermalinkHash(hash: string | undefined): void {
-  globals.permalinkHash = hash;
   globals.publishRedraw();
 }
