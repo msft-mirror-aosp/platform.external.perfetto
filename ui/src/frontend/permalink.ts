@@ -15,7 +15,6 @@
 import m from 'mithril';
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
-import {ConversionJobStatus} from '../common/conversion_jobs';
 import {
   JsonSerialize,
   parseAppState,
@@ -29,10 +28,6 @@ import {
 } from '../common/gcs_uploader';
 import {globals} from './globals';
 import {
-  publishConversionJobStatusUpdate,
-  publishPermalinkHash,
-} from './publish';
-import {
   SERIALIZED_STATE_VERSION,
   SerializedAppState,
 } from '../public/state_serialization_schema';
@@ -40,6 +35,7 @@ import {z} from 'zod';
 import {showModal} from '../widgets/modal';
 import {AppImpl} from '../core/app_impl';
 import {Router} from '../core/router';
+import {onClickCopy} from './clipboard';
 
 // Permalink serialization has two layers:
 // 1. Serialization of the app state (state_serialization.ts):
@@ -76,21 +72,8 @@ export interface PermalinkOptions {
 }
 
 export async function createPermalink(opts: PermalinkOptions): Promise<void> {
-  const jobName = 'create_permalink';
-  publishConversionJobStatusUpdate({
-    jobName,
-    jobStatus: ConversionJobStatus.InProgress,
-  });
-
-  try {
-    const hash = await createPermalinkInternal(opts);
-    publishPermalinkHash(hash);
-  } finally {
-    publishConversionJobStatusUpdate({
-      jobName,
-      jobStatus: ConversionJobStatus.NotRunning,
-    });
-  }
+  const hash = await createPermalinkInternal(opts);
+  showPermalinkDialog(hash);
 }
 
 // Returns the file name, not the full url (i.e. the name of the GCS object).
@@ -283,4 +266,18 @@ function reportUpdateProgress(uploader: GcsUploader) {
 
 function updateStatus(msg: string): void {
   AppImpl.instance.omnibox.showStatusMessage(msg);
+}
+
+function showPermalinkDialog(hash: string) {
+  const url = `${self.location.origin}/#!/?s=${hash}`;
+  const linkProps = {title: 'Click to copy the URL', onclick: onClickCopy(url)};
+  showModal({
+    title: 'Permalink',
+    content: m(
+      'div',
+      m(`a[href=${url}]`, linkProps, url),
+      m('br'),
+      m('i', 'Click on the URL to copy it into the clipboard'),
+    ),
+  });
 }
