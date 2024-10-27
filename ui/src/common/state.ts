@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {TraceSource} from '../public/trace_source';
 
@@ -173,19 +172,12 @@ export interface State {
 
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
-  flamegraphModalDismissed: boolean;
 
   // Show track perf debugging overlay
   perfDebug: boolean;
 
   // Show the sidebar extended
   sidebarVisible: boolean;
-
-  // Hovered and focused events
-  hoveredUtid: number;
-  hoveredPid: number;
-  hoveredNoteTimestamp: time;
-  highlightedSliceId: number;
 
   /**
    * Trace recording

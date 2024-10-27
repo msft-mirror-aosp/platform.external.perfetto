@@ -71,6 +71,7 @@ source_set("common") {
     "trace_parser.cc",
     "track_tracker.cc",
     "track_tracker.h",
+    "tracks.h",
     "virtual_memory_mapping.cc",
     "virtual_memory_mapping.h",
   ]

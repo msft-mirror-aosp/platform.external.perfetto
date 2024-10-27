@@ -15,7 +15,7 @@
 import m from 'mithril';
 import {assertExists, assertTrue} from '../base/logging';
 import {isString} from '../base/object_utils';
-import {getCurrentChannel} from '../common/channels';
+import {getCurrentChannel} from '../core/channels';
 import {TRACE_SUFFIX} from '../common/constants';
 import {ConversionJobStatus} from '../common/conversion_jobs';
 import {
@@ -95,6 +95,13 @@ const VIZ_PAGE_IN_NAV_FLAG = featureFlags.register({
   defaultValue: true,
 });
 
+const EXPLORE_PAGE_IN_NAV_FLAG = featureFlags.register({
+  id: 'showExplorePageInNav',
+  name: 'Show explore page',
+  description: 'Show a link to the explore page in the side bar.',
+  defaultValue: false,
+});
+
 export interface OptionalTraceAttrs {
   trace?: Trace;
 }
@@ -161,22 +168,25 @@ function getSections(trace?: Trace): Section[] {
       expanded: true,
       items: [
         ...insertSidebarMenuitems('navigation'),
-        {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
+        {
+          t: 'Record new trace',
+          a: (e: Event) => navigateToPage(e, 'record'),
+          i: 'fiber_smart_record',
+        },
         {
           t: 'Widgets',
-          a: navigateWidgets,
+          a: (e: Event) => navigateToPage(e, 'widgets'),
           i: 'widgets',
           isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
         },
         {
           t: 'Plugins',
-          a: navigatePlugins,
+          a: (e: Event) => navigateToPage(e, 'plugins'),
           i: 'extension',
           isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
         },
       ],
     },
-
     {
       title: 'Current Trace',
       summary: 'Actions on the current trace',
@@ -184,7 +194,11 @@ function getSections(trace?: Trace): Section[] {
       hideIfNoTraceLoaded: true,
       appendOpenedTraceTitle: true,
       items: [
-        {t: 'Show timeline', a: navigateViewer, i: 'line_style'},
+        {
+          t: 'Show timeline',
+          a: (e: Event) => navigateToPage(e, 'viewer'),
+          i: 'line_style',
+        },
         {
           t: 'Share',
           a: handleShareTrace,
@@ -200,21 +214,39 @@ function getSections(trace?: Trace): Section[] {
           i: 'file_download',
           checkDownloadDisabled: true,
         },
-        {t: 'Query (SQL)', a: navigateQuery, i: 'database'},
+        {
+          t: 'Query (SQL)',
+          a: (e: Event) => navigateToPage(e, 'query'),
+          i: 'database',
+        },
+        {
+          t: 'Explore',
+          a: (e: Event) => navigateToPage(e, 'explore'),
+          i: 'data_exploration',
+          isVisible: () => EXPLORE_PAGE_IN_NAV_FLAG.get(),
+        },
         {
           t: 'Insights',
-          a: navigateInsights,
+          a: (e: Event) => navigateToPage(e, 'insights'),
           i: 'insights',
           isVisible: () => INSIGHTS_PAGE_IN_NAV_FLAG.get(),
         },
         {
           t: 'Viz',
-          a: navigateViz,
+          a: (e: Event) => navigateToPage(e, 'viz'),
           i: 'area_chart',
           isVisible: () => VIZ_PAGE_IN_NAV_FLAG.get(),
         },
-        {t: 'Metrics', a: navigateMetrics, i: 'speed'},
-        {t: 'Info and stats', a: navigateInfo, i: 'info'},
+        {
+          t: 'Metrics',
+          a: (e: Event) => navigateToPage(e, 'metrics'),
+          i: 'speed',
+        },
+        {
+          t: 'Info and stats',
+          a: (e: Event) => navigateToPage(e, 'info'),
+          i: 'info',
+        },
       ],
     },
 
@@ -269,7 +301,11 @@ function getSections(trace?: Trace): Section[] {
       items: [
         {t: 'Keyboard shortcuts', a: openHelp, i: 'help'},
         {t: 'Documentation', a: 'https://perfetto.dev/docs', i: 'find_in_page'},
-        {t: 'Flags', a: navigateFlags, i: 'emoji_flags'},
+        {
+          t: 'Flags',
+          a: (e: Event) => navigateToPage(e, 'flags'),
+          i: 'emoji_flags',
+        },
         {
           t: 'Report a bug',
           a: getBugReportUrl(),
@@ -338,7 +374,10 @@ export async function getCurrentTrace(): Promise<Blob> {
 function openCurrentTraceWithOldUI(e: Event) {
   e.preventDefault();
   assertTrue(isTraceLoaded());
-  globals.logging.logEvent('Trace Actions', 'Open current trace in legacy UI');
+  AppImpl.instance.analytics.logEvent(
+    'Trace Actions',
+    'Open current trace in legacy UI',
+  );
   if (!isTraceLoaded()) return;
   getCurrentTrace()
     .then((file) => {
@@ -352,7 +391,7 @@ function openCurrentTraceWithOldUI(e: Event) {
 function convertTraceToSystrace(e: Event) {
   e.preventDefault();
   assertTrue(isTraceLoaded());
-  globals.logging.logEvent('Trace Actions', 'Convert to .systrace');
+  AppImpl.instance.analytics.logEvent('Trace Actions', 'Convert to .systrace');
   if (!isTraceLoaded()) return;
   getCurrentTrace()
     .then((file) => {
@@ -366,7 +405,7 @@ function convertTraceToSystrace(e: Event) {
 function convertTraceToJson(e: Event) {
   e.preventDefault();
   assertTrue(isTraceLoaded());
-  globals.logging.logEvent('Trace Actions', 'Convert to .json');
+  AppImpl.instance.analytics.logEvent('Trace Actions', 'Convert to .json');
   if (!isTraceLoaded()) return;
   getCurrentTrace()
     .then((file) => {
@@ -377,54 +416,9 @@ function convertTraceToJson(e: Event) {
     });
 }
 
-function navigateRecord(e: Event) {
+function navigateToPage(e: Event, pageName: string) {
   e.preventDefault();
-  Router.navigate('#!/record');
-}
-
-function navigateWidgets(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/widgets');
-}
-
-function navigatePlugins(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/plugins');
-}
-
-function navigateQuery(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/query');
-}
-
-function navigateInsights(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/insights');
-}
-
-function navigateViz(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/viz');
-}
-
-function navigateFlags(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/flags');
-}
-
-function navigateMetrics(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/metrics');
-}
-
-function navigateInfo(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/info');
-}
-
-function navigateViewer(e: Event) {
-  e.preventDefault();
-  Router.navigate('#!/viewer');
+  Router.navigate(`#!/${pageName}`);
 }
 
 function handleShareTrace(e: Event) {
@@ -435,7 +429,7 @@ function handleShareTrace(e: Event) {
 function downloadTrace(e: Event, trace: Trace) {
   e.preventDefault();
   if (!isDownloadable() || !isTraceLoaded()) return;
-  globals.logging.logEvent('Trace Actions', 'Download trace');
+  AppImpl.instance.analytics.logEvent('Trace Actions', 'Download trace');
 
   let url = '';
   let fileName = `trace${TRACE_SUFFIX}`;
@@ -475,7 +469,7 @@ function highPrecisionTimersAvailable(): boolean {
 
 function recordMetatrace(e: Event, engine: Engine) {
   e.preventDefault();
-  globals.logging.logEvent('Trace Actions', 'Record metatrace');
+  AppImpl.instance.analytics.logEvent('Trace Actions', 'Record metatrace');
 
   if (!highPrecisionTimersAvailable()) {
     const PROMPT = `High-precision timers are not available to WASM trace processor yet.
@@ -513,7 +507,7 @@ Alternatively, connect to a trace_processor_shell --httpd instance.
 
 async function finaliseMetatrace(e: Event, engine: Engine) {
   e.preventDefault();
-  globals.logging.logEvent('Trace Actions', 'Finalise metatrace');
+  AppImpl.instance.analytics.logEvent('Trace Actions', 'Finalise metatrace');
 
   const jsEvents = disableMetatracingAndGetTrace();
 
@@ -699,7 +693,7 @@ class HiringBanner implements m.ClassComponent {
 export class Sidebar implements m.ClassComponent<OptionalTraceAttrs> {
   private _redrawWhileAnimating = new Animation(() => raf.scheduleFullRedraw());
   view({attrs}: m.CVnode<OptionalTraceAttrs>) {
-    if (globals.hideSidebar) return null;
+    if (AppImpl.instance.sidebar.sidebarHidden) return null;
     const vdomSections = [];
     for (const section of getSections(attrs.trace)) {
       if (section.hideIfNoTraceLoaded && !isTraceLoaded()) continue;

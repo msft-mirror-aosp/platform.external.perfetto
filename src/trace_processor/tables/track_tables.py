@@ -38,8 +38,8 @@ TRACK_TABLE = Table(
         C("parent_id", CppOptional(CppSelfTableId())),
         C("source_arg_set_id", CppOptional(CppUint32())),
         C('machine_id', CppOptional(CppTableId(MACHINE_TABLE))),
-        C("classification", CppString(), flags=ColumnFlag.HIDDEN),
-        C("dimensions", CppOptional(CppUint32()), flags=ColumnFlag.HIDDEN),
+        C("classification", CppString()),
+        C("dimension_arg_set_id", CppOptional(CppUint32())),
     ],
     wrapping_sql_view=WrappingSqlView('track'),
     tabledoc=TableDoc(
@@ -61,14 +61,6 @@ TRACK_TABLE = Table(
                   The track which is the "parent" of this track. Only non-null
                   for tracks created using Perfetto's track_event API.
                 ''',
-            'source_arg_set_id':
-                ColumnDoc(
-                    doc='''
-                      Args for this track which store information about "source"
-                      of this track in the trace. For example: whether this
-                      track orginated from atrace, Chrome tracepoints etc.
-                    ''',
-                    joinable='args.arg_set_id'),
             'machine_id':
                 '''
                   Machine identifier, non-null for tracks on a remote machine.
@@ -78,12 +70,24 @@ TRACK_TABLE = Table(
                   Classification of this track. Responsible for grouping
                   similar tracks together.
                 ''',
-            'dimensions':
+            'dimension_arg_set_id':
                 ColumnDoc(
                     doc='''
-                      Dimensions of the track classification, used to
-                      associate the track with certain properties (like CPU or
-                      thread id). Join with `args` table to recover the values.
+                      The dimensions of the track which uniquely identify the
+                      track within a given classification.
+
+                      Join with the `args` table or use the `EXTRACT_ARG` helper
+                      function to expand the args.
+                    ''',
+                    joinable='args.arg_set_id'),
+            'source_arg_set_id':
+                ColumnDoc(
+                    doc='''
+                      Generic key-value pairs containing extra information about
+                      the track.
+
+                      Join with the `args` table or use the `EXTRACT_ARG` helper
+                      function to expand the args.
                     ''',
                     joinable='args.arg_set_id'),
         }))
@@ -167,36 +171,6 @@ GPU_TRACK_TABLE = Table(
                 'The context id for the GPU this track is associated to.'
         }))
 
-UID_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='UidTrackTable',
-    sql_name='uid_track',
-    columns=[
-        C('uid', CppInt32()),
-    ],
-    parent=TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='Tracks associated to a UID.',
-        group='Tracks',
-        columns={
-            'uid': 'The uid associated with this track.',
-        }))
-
-GPU_WORK_PERIOD_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='GpuWorkPeriodTrackTable',
-    sql_name='gpu_work_period_track',
-    columns=[
-        C('gpu_id', CppUint32()),
-    ],
-    parent=UID_TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='Tracks containing gpu_work_period events.',
-        group='Tracks',
-        columns={
-            'gpu_id': 'The identifier for the GPU.',
-        }))
-
 COUNTER_TRACK_TABLE = Table(
     python_module=__file__,
     class_name='CounterTrackTable',
@@ -275,32 +249,6 @@ CPU_COUNTER_TRACK_TABLE = Table(
             'ucpu': 'The unique CPU identifier associated with this track.'
         }))
 
-IRQ_COUNTER_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='IrqCounterTrackTable',
-    sql_name='irq_counter_track',
-    columns=[
-        C('irq', CppInt32()),
-    ],
-    parent=COUNTER_TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='Tracks containing counter-like events associated to an hardirq',
-        group='Counter Tracks',
-        columns={'irq': 'The identifier for the hardirq.'}))
-
-SOFTIRQ_COUNTER_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='SoftirqCounterTrackTable',
-    sql_name='softirq_counter_track',
-    columns=[
-        C('softirq', CppInt32()),
-    ],
-    parent=COUNTER_TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='Tracks containing counter-like events associated to a softirq',
-        group='Counter Tracks',
-        columns={'softirq': 'The identifier for the softirq.'}))
-
 GPU_COUNTER_TRACK_TABLE = Table(
     python_module=__file__,
     class_name='GpuCounterTrackTable',
@@ -315,90 +263,16 @@ GPU_COUNTER_TRACK_TABLE = Table(
         columns={'gpu_id': 'The identifier for the GPU.'}))
 
 
-ENERGY_COUNTER_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='EnergyCounterTrackTable',
-    sql_name='energy_counter_track',
-    columns=[
-        C('consumer_id', CppInt32()),
-        C('consumer_type', CppString()),
-        C('ordinal', CppInt32()),
-    ],
-    parent=COUNTER_TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='''
-          Energy consumers' values for energy descriptors in
-          energy_estimation_breakdown packet
-        ''',
-        group='Counter Tracks',
-        columns={
-            'consumer_id': 'id of a distinct energy consumer',
-            'consumer_type': 'type of energy consumer',
-            'ordinal': 'ordinal of energy consumer'
-        }))
-
-LINUX_DEVICE_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='LinuxDeviceTrackTable',
-    sql_name='linux_device_track',
-    columns=[],
-    parent=TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='''
-          Slice data corresponding to runtime power state transitions
-          associated with Linux devices (where a Linux device is anything
-          managed by a Linux driver). The name of each track corresponds to the
-          device name as recognized by the linux kernel running on the system.
-        ''',
-        group='Tracks',
-        # No additional columns are needed because the track name implicitly
-        # serves as the device name, providing all required information.
-        columns={}))
-
-UID_COUNTER_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='UidCounterTrackTable',
-    sql_name='uid_counter_track',
-    columns=[
-        C('uid', CppInt32()),
-    ],
-    parent=COUNTER_TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='The uid associated with this track',
-        group='Counter Tracks',
-        columns={'uid': 'uid of process for which breakdowns are emitted'}))
-
-ENERGY_PER_UID_COUNTER_TRACK_TABLE = Table(
-    python_module=__file__,
-    class_name='EnergyPerUidCounterTrackTable',
-    sql_name='energy_per_uid_counter_track',
-    columns=[
-        C('consumer_id', CppInt32()),
-    ],
-    parent=UID_COUNTER_TRACK_TABLE,
-    tabledoc=TableDoc(
-        doc='Energy consumer values for per uid in uid_counter_track',
-        group='Counter Tracks',
-        columns={'consumer_id': 'id of the consumer process'}))
-
 # Keep this list sorted.
 ALL_TABLES = [
     COUNTER_TRACK_TABLE,
     CPU_COUNTER_TRACK_TABLE,
     CPU_TRACK_TABLE,
-    ENERGY_COUNTER_TRACK_TABLE,
-    ENERGY_PER_UID_COUNTER_TRACK_TABLE,
     GPU_COUNTER_TRACK_TABLE,
     GPU_TRACK_TABLE,
-    GPU_WORK_PERIOD_TRACK_TABLE,
-    IRQ_COUNTER_TRACK_TABLE,
-    LINUX_DEVICE_TRACK_TABLE,
     PROCESS_COUNTER_TRACK_TABLE,
     PROCESS_TRACK_TABLE,
-    SOFTIRQ_COUNTER_TRACK_TABLE,
     THREAD_COUNTER_TRACK_TABLE,
     THREAD_TRACK_TABLE,
     TRACK_TABLE,
-    UID_COUNTER_TRACK_TABLE,
-    UID_TRACK_TABLE,
 ]
