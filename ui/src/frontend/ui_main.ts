@@ -16,7 +16,7 @@ import m from 'mithril';
 import {copyToClipboard} from '../base/clipboard';
 import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
-import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
+import {assertExists, assertUnreachable} from '../base/logging';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
 import {Actions} from '../common/actions';
 import {
@@ -30,7 +30,6 @@ import {Command} from '../public/command';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 import {maybeRenderFullscreenModalDialog, showModal} from '../widgets/modal';
-import {onClickCopy} from './clipboard';
 import {CookieConsent} from './cookie_consent';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
@@ -40,7 +39,6 @@ import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_attrs';
 import {AggregationsTabs} from './aggregation_tab';
-import {publishPermalinkHash} from './publish';
 import {OmniboxMode} from '../core/omnibox_manager';
 import {PromptOption} from '../public/omnibox';
 import {DisposableStack} from '../base/disposable_stack';
@@ -52,30 +50,6 @@ import {NotesListEditor} from './notes_list_editor';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../public/utils';
 
 const OMNIBOX_INPUT_REF = 'omnibox';
-
-function renderPermalink(): m.Children {
-  const hash = globals.permalinkHash;
-  if (!hash) return null;
-  const url = `${self.location.origin}/#!/?s=${hash}`;
-  const linkProps = {title: 'Click to copy the URL', onclick: onClickCopy(url)};
-
-  return m('.alert-permalink', [
-    m('div', 'Permalink: ', m(`a[href=${url}]`, linkProps, url)),
-    m(
-      'button',
-      {
-        onclick: () => publishPermalinkHash(undefined),
-      },
-      m('i.material-icons.disallow-selection', 'close'),
-    ),
-  ]);
-}
-
-class Alerts implements m.ClassComponent {
-  view() {
-    return m('.alerts', renderPermalink());
-  }
-}
 
 // This wrapper creates a new instance of UiMainPerTrace for each new trace
 // loaded (including the case of no trace at the beginning).
@@ -98,9 +72,9 @@ export class UiMainPerTrace implements m.ClassComponent {
   private trace?: TraceImpl;
 
   // This function is invoked once per trace.
-  async oncreate(vnode: m.VnodeDOM) {
-    this.updateOmniboxInputRef(vnode.dom);
-    this.maybeFocusOmnibar();
+  constructor() {
+    const trace = AppImpl.instance.trace;
+    this.trace = trace;
 
     // Register global commands (commands that are useful even without a trace
     // loaded).
@@ -125,10 +99,7 @@ export class UiMainPerTrace implements m.ClassComponent {
 
     // When the UI loads there is no trace. There is no point registering
     // commands or anything in this state as they will be useless.
-    const trace = AppImpl.instance.trace as TraceImpl;
     if (trace === undefined) return;
-    assertTrue(trace instanceof TraceImpl);
-    this.trace = trace;
     document.title = `${trace.traceInfo.traceTitle || 'Trace'} - Perfetto UI`;
     this.maybeShowJsonWarning();
 
@@ -657,6 +628,11 @@ export class UiMainPerTrace implements m.ClassComponent {
     return m('.stepthrough', children);
   }
 
+  oncreate(vnode: m.VnodeDOM) {
+    this.updateOmniboxInputRef(vnode.dom);
+    this.maybeFocusOmnibar();
+  }
+
   view({children}: m.Vnode): m.Children {
     const cmdMgr = AppImpl.instance.commands;
     const hotkeys: HotkeyConfig[] = [];
@@ -680,7 +656,6 @@ export class UiMainPerTrace implements m.ClassComponent {
           omnibox: this.renderOmnibox(),
           trace: this.trace,
         }),
-        m(Alerts),
         children,
         m(CookieConsent),
         maybeRenderFullscreenModalDialog(),
@@ -744,7 +719,7 @@ export class UiMainPerTrace implements m.ClassComponent {
     if (
       !isJsonTrace ||
       window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) === 'true' ||
-      globals.embeddedMode
+      AppImpl.instance.embeddedMode
     ) {
       // When in embedded mode, the host app will control which trace format
       // it passes to Perfetto, so we don't need to show this warning.

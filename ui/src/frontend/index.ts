@@ -36,6 +36,7 @@ import {UiMain} from './ui_main';
 import {initCssConstants} from './css_constants';
 import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
+import {ExplorePage} from './explore_page';
 import {installFileDropHandler} from './file_drop_handler';
 import {FlagsPage} from './flags_page';
 import {globals} from './globals';
@@ -56,7 +57,6 @@ import {VizPage} from './viz_page';
 import {WidgetsPage} from './widgets_page';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {showModal} from '../widgets/modal';
-import {initAnalytics} from './analytics';
 import {IdleDetector} from './idle_detector';
 import {IdleDetectorWindow} from './idle_detector_interface';
 import {pageWithTrace} from './pages';
@@ -238,19 +238,22 @@ function main() {
 
   // Load the script to detect if this is a Googler (see comments on globals.ts)
   // and initialize GA after that (or after a timeout if something goes wrong).
+  function initAnalyticsOnScriptLoad() {
+    AppImpl.instance.analytics.initialize(globals.isInternalUser);
+  }
   const script = document.createElement('script');
   script.src =
     'https://storage.cloud.google.com/perfetto-ui-internal/is_internal_user.js';
   script.async = true;
-  script.onerror = () => globals.logging.initialize();
-  script.onload = () => globals.logging.initialize();
-  setTimeout(() => globals.logging.initialize(), 5000);
+  script.onerror = () => initAnalyticsOnScriptLoad();
+  script.onload = () => initAnalyticsOnScriptLoad();
+  setTimeout(() => initAnalyticsOnScriptLoad(), 5000);
 
   document.head.append(script, css);
 
   // Route errors to both the UI bugreport dialog and Analytics (if enabled).
   addErrorHandler(maybeShowErrorDialog);
-  addErrorHandler((e) => globals.logging.logError(e));
+  addErrorHandler((e) => AppImpl.instance.analytics.logError(e));
 
   // Add Error handlers for JS error and for uncaught exceptions in promises.
   window.addEventListener('error', (e) => reportError(e));
@@ -262,11 +265,7 @@ function main() {
   initController(extensionLocalChannel.port1);
 
   // These need to be set before globals.initialize.
-  const route = Router.parseUrl(window.location.href);
-  globals.embeddedMode = route.args.mode === 'embedded';
-  globals.hideSidebar = route.args.hideSidebar === true;
-
-  globals.initialize(stateActionDispatcher, initAnalytics);
+  globals.initialize(stateActionDispatcher);
 
   globals.serviceWorkerController.install();
 
@@ -289,7 +288,7 @@ function main() {
 
   cssLoadPromise.then(() => onCssLoaded());
 
-  if (globals.testing) {
+  if (AppImpl.instance.testingMode) {
     document.body.classList.add('testing');
   }
 
@@ -306,6 +305,7 @@ function onCssLoaded() {
 
   const router = new Router({
     '/': HomePage,
+    '/explore': ExplorePage,
     '/flags': FlagsPage,
     '/info': pageWithTrace(TraceInfoPage),
     '/insights': pageWithTrace(InsightsPage),
@@ -326,8 +326,8 @@ function onCssLoaded() {
   if (
     (location.origin.startsWith('http://localhost:') ||
       location.origin.startsWith('http://127.0.0.1:')) &&
-    !globals.embeddedMode &&
-    !globals.testing
+    !AppImpl.instance.embeddedMode &&
+    !AppImpl.instance.testingMode
   ) {
     initLiveReload();
   }
@@ -355,7 +355,7 @@ function onCssLoaded() {
   maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-    if (!globals.embeddedMode) {
+    if (!AppImpl.instance.embeddedMode) {
       installFileDropHandler();
     }
 
