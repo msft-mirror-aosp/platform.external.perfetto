@@ -1,4 +1,4 @@
-// Copyright (C) 2021 The Android Open Source Project
+// Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export enum ConversionJobStatus {
-  InProgress = 'InProgress',
-  NotRunning = 'NotRunning',
-}
+import m from 'mithril';
+import {PageWithTraceAttrs} from './pages';
 
-export type ConversionJobName =
-  | 'convert_systrace'
-  | 'convert_json'
-  | 'open_in_legacy'
-  | 'convert_pprof'
-  | 'create_permalink';
-
-export interface ConversionJobStatusUpdate {
-  jobName: ConversionJobName;
-  jobStatus: ConversionJobStatus;
+export class ExplorePage implements m.ClassComponent<PageWithTraceAttrs> {
+  view() {
+    return m('.explore-page');
+  }
 }
