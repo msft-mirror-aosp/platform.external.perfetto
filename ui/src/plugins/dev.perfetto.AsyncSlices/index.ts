@@ -32,14 +32,12 @@ import {getSliceTable} from './table';
 import {extensions} from '../../public/lib/extensions';
 
 class AsyncSlicePlugin implements PerfettoPlugin {
-  private readonly trackIdsToUris = new Map<number, string>();
-
   async onTraceLoad(ctx: Trace): Promise<void> {
-    this.trackIdsToUris.clear();
+    const trackIdsToUris = new Map<number, string>();
 
-    await this.addGlobalAsyncTracks(ctx);
-    await this.addProcessAsyncSliceTracks(ctx);
-    await this.addThreadAsyncSliceTracks(ctx);
+    await this.addGlobalAsyncTracks(ctx, trackIdsToUris);
+    await this.addProcessAsyncSliceTracks(ctx, trackIdsToUris);
+    await this.addThreadAsyncSliceTracks(ctx, trackIdsToUris);
 
     ctx.selection.registerSqlSelectionResolver({
       sqlTableName: 'slice',
@@ -61,7 +59,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
           trackId: NUM,
         });
 
-        const trackUri = this.trackIdsToUris.get(trackId);
+        const trackUri = trackIdsToUris.get(trackId);
         if (!trackUri) {
           return undefined;
         }
@@ -90,33 +88,41 @@ class AsyncSlicePlugin implements PerfettoPlugin {
     });
   }
 
-  async addGlobalAsyncTracks(ctx: Trace): Promise<void> {
+  async addGlobalAsyncTracks(
+    ctx: Trace,
+    trackIdsToUris: Map<number, string>,
+  ): Promise<void> {
     const {engine} = ctx;
     // TODO(stevegolton): The track exclusion logic is currently a hack. This will be replaced
     // by a mechanism for more specific plugins to override tracks from more generic plugins.
     const suspendResumeLatencyTrackName = 'Suspend/Resume Latency';
     const rawGlobalAsyncTracks = await engine.query(`
       include perfetto module graphs.search;
+      include perfetto module viz.summary.tracks;
 
       with global_tracks_grouped as (
         select
-          parent_id,
-          name,
+          t.parent_id,
+          t.name,
           group_concat(id) as trackIds,
-          count() as trackCount
+          count() as trackCount,
+          min(a.order_id) as order_id
         from track t
         join _slice_track_summary using (id)
+        left join _track_event_tracks_ordered a USING (id)
         where
           t.type in ('__intrinsic_track', 'gpu_track', '__intrinsic_cpu_track')
           and (name != '${suspendResumeLatencyTrackName}' or name is null)
           and classification not in (
             'linux_rpm',
+            'linux_device_frequency',
             'irq_counter',
             'softirq_counter',
             'android_energy_estimation_breakdown',
             'android_energy_estimation_breakdown_per_uid'
           )
         group by parent_id, name
+        order by parent_id, order_id
       ),
       intermediate_groups as (
         select
@@ -200,7 +206,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         });
         trackIds.forEach((id) => {
           trackMap.set(id, {parentId: it.parentId, trackNode});
-          this.trackIdsToUris.set(id, uri);
+          trackIdsToUris.set(id, uri);
         });
       }
     }
@@ -216,7 +222,10 @@ class AsyncSlicePlugin implements PerfettoPlugin {
     });
   }
 
-  async addProcessAsyncSliceTracks(ctx: Trace): Promise<void> {
+  async addProcessAsyncSliceTracks(
+    ctx: Trace,
+    trackIdsToUris: Map<number, string>,
+  ): Promise<void> {
     const result = await ctx.engine.query(`
       select
         upid,
@@ -227,7 +236,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
         t.parent_id as parentId,
         __max_layout_depth(t.track_count, t.track_ids) as maxDepth
       from _process_track_summary_by_upid_and_parent_id_and_name t
-      join process using(upid)
+      join process using (upid)
       where t.name is null or t.name not glob "* Timeline"
     `);
 
@@ -279,7 +288,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
       const track = new TrackNode({uri, title, sortOrder: 30});
       trackIds.forEach((id) => {
         trackMap.set(id, {trackNode: track, parentId: it.parentId, upid});
-        this.trackIdsToUris.set(id, uri);
+        trackIdsToUris.set(id, uri);
       });
     }
 
@@ -295,7 +304,10 @@ class AsyncSlicePlugin implements PerfettoPlugin {
     });
   }
 
-  async addThreadAsyncSliceTracks(ctx: Trace): Promise<void> {
+  async addThreadAsyncSliceTracks(
+    ctx: Trace,
+    trackIdsToUris: Map<number, string>,
+  ): Promise<void> {
     const result = await ctx.engine.query(`
       include perfetto module viz.summary.slices;
       include perfetto module viz.summary.threads;
@@ -377,7 +389,7 @@ class AsyncSlicePlugin implements PerfettoPlugin {
       const track = new TrackNode({uri, title, sortOrder: 20});
       trackIds.forEach((id) => {
         trackMap.set(id, {trackNode: track, parentId, utid});
-        this.trackIdsToUris.set(id, uri);
+        trackIdsToUris.set(id, uri);
       });
     }
 
