@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import {assertExists} from '../base/logging';
 import {Registry} from '../base/registry';
 import {App} from '../public/app';
 import {
   MetricVisualisation,
   PerfettoPlugin,
-  PluginDescriptor,
+  PluginDescriptorStatic,
 } from '../public/plugin';
 import {Trace} from '../public/trace';
 import {defaultPlugins} from './default_plugins';
@@ -27,16 +28,12 @@ import {TraceImpl} from './trace_impl';
 // The pseudo plugin id used for the core instance of AppImpl.
 export const CORE_PLUGIN_ID = '__core__';
 
-function makePlugin(info: PluginDescriptor): PerfettoPlugin {
-  const {plugin} = info;
-
-  // Class refs are functions, concrete plugins are not
-  if (typeof plugin === 'function') {
-    const PluginClass = plugin;
-    return new PluginClass();
-  } else {
-    return plugin;
-  }
+function makePlugin(
+  desc: PluginDescriptorStatic<PerfettoPlugin>,
+  trace: Trace,
+): PerfettoPlugin {
+  const PluginClass = desc;
+  return new PluginClass(trace);
 }
 
 // This interface injects AppImpl's methods into PluginManager to avoid
@@ -46,57 +43,43 @@ export interface PluginAppInterface {
   get trace(): TraceImpl | undefined;
 }
 
-// Contains all the information about a plugin.
+// Contains information about a plugin.
 export interface PluginWrapper {
   // A reference to the plugin descriptor
-  readonly desc: PluginDescriptor;
+  readonly desc: PluginDescriptorStatic<PerfettoPlugin>;
 
   // The feature flag used to allow users to change whether this plugin should
   // be enabled or not.
   readonly enableFlag: Flag;
 
-  // If a plugin has been activated, the relevant context is stored here.
-  activatedContext?: ActivePluginContext;
+  // Keeps track of whether the plugin has been activated or not.
+  active?: boolean;
+
+  // If a trace has been loaded, this object stores the relevant trace-scoped
+  // plugin data
+  traceContext?: {
+    // The concrete plugin instance, created on trace load.
+    readonly instance: PerfettoPlugin;
+
+    // How long it took for the plugin's onTraceLoad() function to run.
+    readonly loadTimeMs: number;
+  };
 }
 
-// Contains an active plugin's contextual information, only created at plugin
-// activation time.
-interface ActivePluginContext {
-  // The plugin instance, which is only created at plugin activation time.
-  readonly pluginInstance: PerfettoPlugin;
-
-  // The app interface for this plugin.
-  readonly app: App;
-
-  // If a plugin has had its trace loaded, the relevant context is stored here.
-  traceContext?: TracePluginContext;
-}
-
-// Contains the contextual information required by a plugin which has had a
-// trace loaded.
-interface TracePluginContext {
-  // The trace interface for this plugin.
-  readonly trace: Trace;
-
-  // The time taken in milliseconds to execute this onTraceLoad() function.
-  readonly loadTimeMs: number;
-}
-
-export class PluginManager {
-  private readonly registry = new Registry<PluginWrapper>(
-    (x) => x.desc.pluginId,
-  );
+export class PluginManagerImpl {
+  private readonly registry = new Registry<PluginWrapper>((x) => x.desc.id);
+  private orderedPlugins: Array<PluginWrapper> = [];
 
   constructor(private readonly app: PluginAppInterface) {}
 
-  registerPlugin(desc: PluginDescriptor) {
-    const flagId = `plugin_${desc.pluginId}`;
-    const name = `Plugin: ${desc.pluginId}`;
+  registerPlugin(desc: PluginDescriptorStatic<PerfettoPlugin>) {
+    const flagId = `plugin_${desc.id}`;
+    const name = `Plugin: ${desc.id}`;
     const flag = featureFlags.register({
       id: flagId,
       name,
-      description: `Overrides '${desc.pluginId}' plugin.`,
-      defaultValue: defaultPlugins.includes(desc.pluginId),
+      description: `Overrides '${desc.id}' plugin.`,
+      defaultValue: defaultPlugins.includes(desc.id),
     });
     this.registry.register({
       desc,
@@ -111,21 +94,18 @@ export class PluginManager {
    * the current flag setting.
    */
   activatePlugins(enableOverrides: ReadonlyArray<string> = []) {
-    this.registry
+    const enabledPlugins = this.registry
       .valuesAsArray()
-      .filter(
-        (p) => p.enableFlag.get() || enableOverrides.includes(p.desc.pluginId),
-      )
-      .forEach((p) => {
-        if (p.activatedContext) return;
-        const pluginInstance = makePlugin(p.desc);
-        const app = this.app.forkForPlugin(p.desc.pluginId);
-        pluginInstance.onActivate?.(app);
-        p.activatedContext = {
-          pluginInstance,
-          app,
-        };
-      });
+      .filter((p) => p.enableFlag.get() || enableOverrides.includes(p.desc.id));
+
+    this.orderedPlugins = this.sortPluginsTopologically(enabledPlugins);
+
+    this.orderedPlugins.forEach((p) => {
+      if (p.active) return;
+      const app = this.app.forkForPlugin(p.desc.id);
+      p.desc.onActivate?.(app);
+      p.active = true;
+    });
   }
 
   async onTraceLoad(
@@ -137,20 +117,20 @@ export class PluginManager {
     // Running in parallel will have very little performance benefit assuming
     // most plugins use the same engine, which can only process one query at a
     // time.
-    for (const p of this.registry.values()) {
-      const activePlugin = p.activatedContext;
-      if (activePlugin) {
-        beforeEach?.(p.desc.pluginId);
-        const trace = traceCore.forkForPlugin(p.desc.pluginId);
+    for (const p of this.orderedPlugins) {
+      if (p.active) {
+        beforeEach?.(p.desc.id);
+        const trace = traceCore.forkForPlugin(p.desc.id);
         const before = performance.now();
-        await activePlugin.pluginInstance.onTraceLoad?.(trace);
+        const instance = makePlugin(p.desc, trace);
+        await instance.onTraceLoad?.(trace);
         const loadTimeMs = performance.now() - before;
-        activePlugin.traceContext = {
-          trace,
-          loadTimeMs: loadTimeMs,
+        p.traceContext = {
+          instance,
+          loadTimeMs,
         };
         traceCore.trash.defer(() => {
-          activePlugin.traceContext = undefined;
+          p.traceContext = undefined;
         });
       }
     }
@@ -158,16 +138,8 @@ export class PluginManager {
 
   metricVisualisations(): MetricVisualisation[] {
     return this.registry.valuesAsArray().flatMap((plugin) => {
-      const activePlugin = plugin.activatedContext;
-      if (activePlugin) {
-        return (
-          activePlugin.pluginInstance.metricVisualisations?.(
-            activePlugin.app,
-          ) ?? []
-        );
-      } else {
-        return [];
-      }
+      if (!plugin.active) return [];
+      return plugin.desc.metricVisualisations?.() ?? [];
     });
   }
 
@@ -179,7 +151,55 @@ export class PluginManager {
     return this.registry.tryGet(id);
   }
 
-  getPlugin(id: string): PerfettoPlugin | undefined {
-    return this.registry.tryGet(id)?.activatedContext?.pluginInstance;
+  getPlugin<T extends PerfettoPlugin>(
+    pluginDescriptor: PluginDescriptorStatic<T>,
+  ): T {
+    const plugin = this.registry.get(pluginDescriptor.id);
+    return assertExists(plugin.traceContext).instance as T;
+  }
+
+  /**
+   * Sort plugins in dependency order, ensuring that if a plugin depends on
+   * other plugins, those plugins will appear fist in the list.
+   */
+  private sortPluginsTopologically(
+    plugins: ReadonlyArray<PluginWrapper>,
+  ): Array<PluginWrapper> {
+    const orderedPlugins = new Array<PluginWrapper>();
+    const visiting = new Set<string>();
+
+    const visit = (p: PluginWrapper) => {
+      // Continue if we've already added this plugin, there's no need to add it
+      // again
+      if (orderedPlugins.includes(p)) {
+        return;
+      }
+
+      // Detect circular dependencies
+      if (visiting.has(p.desc.id)) {
+        const cycle = Array.from(visiting).concat(p.desc.id);
+        throw new Error(
+          `Cyclic plugin dependency detected: ${cycle.join(' -> ')}`,
+        );
+      }
+
+      // Temporarily push this plugin onto the visiting stack while visiting
+      // dependencies, to allow circular dependencies to be detected
+      visiting.add(p.desc.id);
+
+      // Recursively visit dependencies
+      p.desc.dependencies?.forEach((d) => {
+        visit(this.registry.get(d.id));
+      });
+
+      visiting.delete(p.desc.id);
+
+      // Finally add this plugin to the ordered list
+      orderedPlugins.push(p);
+    };
+
+    plugins.forEach((p) => visit(p));
+
+    return orderedPlugins;
   }
 }
