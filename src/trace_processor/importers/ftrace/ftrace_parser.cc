@@ -1699,7 +1699,7 @@ void FtraceParser::ParseGpuFreq(int64_t timestamp, ConstBytes blob) {
   uint32_t gpu = freq.gpu_id();
   uint32_t new_freq = freq.state();
   TrackId track = context_->track_tracker->InternGpuCounterTrack(
-      tracks::gpu_frequency, gpu);
+      tracks::gpu_frequency, gpu, TrackTracker::LegacyCharArrayName{"gpufreq"});
   context_->event_tracker->PushCounter(timestamp, new_freq, track);
 }
 
@@ -1710,7 +1710,7 @@ void FtraceParser::ParseKgslGpuFreq(int64_t timestamp, ConstBytes blob) {
   // Source data is frequency / 1000, so we correct that here:
   double new_freq = static_cast<double>(freq.gpu_freq()) * 1000.0;
   TrackId track = context_->track_tracker->InternGpuCounterTrack(
-      tracks::gpu_frequency, gpu);
+      tracks::gpu_frequency, gpu, TrackTracker::LegacyCharArrayName{"gpufreq"});
   context_->event_tracker->PushCounter(timestamp, new_freq, track);
 }
 
@@ -3807,13 +3807,9 @@ void FtraceParser::ParseDeviceFrequency(int64_t ts,
   StringId device_name = context_->storage->InternString(
       (dev_name.substr(position + sizeof(kDelimiter) - 1) + "freq").c_str());
 
-  TrackTracker::DimensionsBuilder dims_builder =
-      context_->track_tracker->CreateDimensionsBuilder();
-  dims_builder.AppendDimension(device_name_id_, Variadic::String(device_name));
-  TrackTracker::Dimensions dims_id = std::move(dims_builder).Build();
-
-  TrackId track_id = context_->track_tracker->InternCounterTrack(
-      tracks::linux_device_frequency, dims_id);
+  TrackId track_id = context_->track_tracker->InternSingleDimensionTrack(
+      tracks::linux_device_frequency, device_name_id_,
+      Variadic::String(device_name));
   context_->event_tracker->PushCounter(ts, static_cast<double>(event.freq()),
                                        track_id);
 }
