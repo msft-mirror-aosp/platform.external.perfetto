@@ -68,7 +68,7 @@ import {
   addDebugCounterTrack,
   addDebugSliceTrack,
 } from '../public/lib/debug_tracks/debug_tracks';
-import {addVisualisedArgTracks} from './visualized_args_tracks';
+import {addVisualizedArgTracks} from './visualized_args_tracks';
 import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
@@ -381,13 +381,9 @@ function onCssLoaded() {
   const pluginManager = AppImpl.instance.plugins;
   CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
   NON_CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
-  pluginManager.initialize();
   const route = Router.parseUrl(window.location.href);
-  for (const pluginId of (route.args.enablePlugins ?? '').split(',')) {
-    if (pluginManager.hasPlugin(pluginId)) {
-      pluginManager.activatePlugin(pluginId);
-    }
-  }
+  const overrides = (route.args.enablePlugins ?? '').split(',');
+  pluginManager.activatePlugins(overrides);
 }
 
 // If the URL is /#!?rpc_port=1234, change the default RPC port.
@@ -452,7 +448,7 @@ function scheduleRafAndRunControllersOnStateChange(
 configureExtensions({
   addDebugCounterTrack,
   addDebugSliceTrack,
-  addVisualisedArgTracks,
+  addVisualizedArgTracks,
   addSqlTableTab,
   addQueryResultsTab,
 });
