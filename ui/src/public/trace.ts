@@ -23,7 +23,13 @@ import {Workspace, WorkspaceManager} from './workspace';
 import {SelectionManager} from './selection';
 import {ScrollToArgs} from './scroll_helper';
 import {NoteManager} from './note';
-import {ThreadMap} from './threads';
+import {DisposableStack} from '../base/disposable_stack';
+
+// Lists all the possible event listeners using the key as the event name and
+// the type as the type of the callback.
+export interface EventListeners {
+  traceready: () => Promise<void> | void;
+}
 
 /**
  * The main API endpoint to interact programmaticaly with the UI and alter its
@@ -44,11 +50,6 @@ export interface Trace extends App {
   readonly workspaces: WorkspaceManager;
   readonly traceInfo: TraceInfo;
 
-  // TODO(primiano): move this to a lib/ extension (or core_plugins/thread/)
-  // once we have an intra-plugin dep system. The thread concept doesn't belong
-  // to core and should be an extension instead.
-  readonly threads: ThreadMap;
-
   // Scrolls to the given track and/or time. Does NOT change the current
   // selection.
   scrollTo(args: ScrollToArgs): void;
@@ -60,6 +61,15 @@ export interface Trace extends App {
   // of postMessageData.pluginArgs[pluginId] for the current plugin. If not
   // present returns undefined.
   readonly openerPluginArgs?: {[key: string]: unknown};
+
+  // Trace scoped disposables. Will be destroyed when the trace is unloaded.
+  readonly trash: DisposableStack;
+
+  // Register event listeners for trace-level events, e.g. trace ready
+  addEventListener<T extends keyof EventListeners>(
+    event: T,
+    callback: EventListeners[T],
+  ): void;
 }
 
 /**
