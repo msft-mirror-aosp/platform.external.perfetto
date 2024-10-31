@@ -13,23 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {
-  ThreadStateSqlId,
-  Utid,
-} from '../../trace_processor/sql_utils/core_types';
-import {duration, time} from '../../base/time';
+import {ThreadStateSqlId} from '../../trace_processor/sql_utils/core_types';
 import {Anchor} from '../../widgets/anchor';
 import {Icons} from '../../base/semantic_icons';
 import {globals} from '../globals';
-import {THREAD_STATE_TRACK_KIND} from '../../public/track_kinds';
-import {scrollToTrackAndTs} from '../scroll_helper';
 import {ThreadState} from '../../trace_processor/sql_utils/thread_state';
 
 interface ThreadStateRefAttrs {
   id: ThreadStateSqlId;
-  ts: time;
-  dur: duration;
-  utid: Utid;
   // If not present, a placeholder name will be used.
   name?: string;
 
@@ -46,29 +37,15 @@ export class ThreadStateRef implements m.ClassComponent<ThreadStateRefAttrs> {
       {
         icon: Icons.UpdateSelection,
         onclick: () => {
-          const trackDescriptor = globals.trackManager
-            .getAllTracks()
-            .find(
-              (td) =>
-                td.tags?.kind === THREAD_STATE_TRACK_KIND &&
-                td.tags?.utid === vnode.attrs.utid,
-            );
-
-          if (trackDescriptor === undefined) return;
-
-          globals.selectionManager.setLegacy(
-            {
-              kind: 'THREAD_STATE',
-              id: vnode.attrs.id,
-              trackUri: trackDescriptor.uri,
-            },
+          globals.selectionManager.selectSqlEvent(
+            'thread_state',
+            vnode.attrs.id,
             {
               switchToCurrentSelectionTab:
                 vnode.attrs.switchToCurrentSelectionTab,
+              scrollToSelection: true,
             },
           );
-
-          scrollToTrackAndTs(trackDescriptor.uri, vnode.attrs.ts, true);
         },
       },
       vnode.attrs.name ?? `Thread State ${vnode.attrs.id}`,
@@ -81,8 +58,5 @@ export function threadStateRef(state: ThreadState): m.Child {
 
   return m(ThreadStateRef, {
     id: state.threadStateSqlId,
-    ts: state.ts,
-    dur: state.dur,
-    utid: state.thread?.utid,
   });
 }

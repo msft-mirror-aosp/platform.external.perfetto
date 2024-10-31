@@ -15,45 +15,29 @@
 import {Trace} from './trace';
 import {App} from './app';
 
+/**
+ * This interface defines the shape of the plugins's class constructor (i.e. the
+ * the constructor and all static members of the plugin's class.
+ *
+ * This class constructor is registered with the core.
+ *
+ * On trace load, the core will create a new class instance by calling new on
+ * this constructor and then call its onTraceLoad() function.
+ */
+export interface PerfettoPluginStatic<T extends PerfettoPlugin> {
+  readonly id: string;
+  readonly dependencies?: ReadonlyArray<PerfettoPluginStatic<PerfettoPlugin>>;
+  onActivate?(app: App): void;
+  metricVisualisations?(): MetricVisualisation[];
+  new (trace: Trace): T;
+}
+
+/**
+ * This interface defines the shape of a plugin's trace-scoped instance, which
+ * is created from the class constructor above at trace load time.
+ */
 export interface PerfettoPlugin {
-  // Lifecycle methods.
-  onActivate?(ctx: App): void;
   onTraceLoad?(ctx: Trace): Promise<void>;
-  onTraceReady?(ctx: Trace): Promise<void>;
-  onTraceUnload?(ctx: Trace): Promise<void>;
-  onDeactivate?(ctx: App): void;
-
-  // Extension points.
-  metricVisualisations?(ctx: App): MetricVisualisation[];
-}
-// This interface defines what a plugin factory should look like.
-// This can be defined in the plugin class definition by defining a constructor
-// and the relevant static methods:
-// E.g.
-// class MyPlugin implements TracePlugin<MyState> {
-//   migrate(initialState: unknown): MyState {...}
-//   constructor(store: Store<MyState>, engine: EngineProxy) {...}
-//   ... methods from the TracePlugin interface go here ...
-// }
-// ... which can then be passed around by class i.e. MyPlugin
-
-export interface PluginClass {
-  // Instantiate the plugin.
-  new (): PerfettoPlugin;
-}
-// Plugins can be class refs or concrete plugin implementations.
-
-export type PluginFactory = PluginClass | PerfettoPlugin;
-
-export interface PluginDescriptor {
-  // A unique string for your plugin. To ensure the name is unique you
-  // may wish to use a URL with reversed components in the manner of
-  // Java package names.
-  pluginId: string;
-
-  // The plugin factory used to instantiate the plugin object, or if this is
-  // an actual plugin implementation, it's just used as-is.
-  plugin: PluginFactory;
 }
 
 export interface MetricVisualisation {
@@ -87,4 +71,8 @@ export interface MetricVisualisation {
   // [ {"name": "a"}, {"name": "b"}, {"name": "c"} ]
   // And pass that to the vega(-lite) visualisation.
   path: string[];
+}
+
+export interface PluginManager {
+  getPlugin<T extends PerfettoPlugin>(plugin: PerfettoPluginStatic<T>): T;
 }

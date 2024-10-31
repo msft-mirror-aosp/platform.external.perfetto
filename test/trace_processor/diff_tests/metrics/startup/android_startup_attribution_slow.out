@@ -1,6 +1,7 @@
 android_startup {
   startup {
     startup_id: 0
+    cpu_count: 1
     package_name: "com.some.app"
     process_name: "com.some.app"
     zygote_new_process: false
@@ -128,19 +129,16 @@ android_startup {
       trace_thread_sections {
         start_timestamp: 155000000000
         end_timestamp: 165000000000
-        thread_utid: 4
         thread_name: "Jit thread pool"
       }
       trace_thread_sections {
         start_timestamp: 170000000000
         end_timestamp: 175000000000
-        thread_utid: 4
         thread_name: "Jit thread pool"
       }
       trace_thread_sections {
         start_timestamp: 185000000000
         end_timestamp: 190000000000
-        thread_utid: 4
         thread_name: "Jit thread pool"
       }
     }

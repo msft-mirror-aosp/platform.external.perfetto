@@ -60,9 +60,11 @@ export class DurationWidget implements m.ClassComponent<DurationWidgetAttrs> {
         menuItemForFormat(TimestampFormat.UTC, 'Realtime (UTC)'),
         menuItemForFormat(TimestampFormat.TraceTz, 'Realtime (Trace TZ)'),
         menuItemForFormat(TimestampFormat.Seconds, 'Seconds'),
-        menuItemForFormat(TimestampFormat.Raw, 'Raw'),
+        menuItemForFormat(TimestampFormat.Milliseoncds, 'Milliseconds'),
+        menuItemForFormat(TimestampFormat.Microseconds, 'Microseconds'),
+        menuItemForFormat(TimestampFormat.TraceNs, 'Raw'),
         menuItemForFormat(
-          TimestampFormat.RawLocale,
+          TimestampFormat.TraceNsLocale,
           'Raw (with locale-specific formatting)',
         ),
       ),
@@ -113,12 +115,16 @@ export function renderDuration(dur: duration): string {
     case TimestampFormat.TraceTz:
     case TimestampFormat.Timecode:
       return renderFormattedDuration(dur);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return dur.toString();
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return dur.toLocaleString();
     case TimestampFormat.Seconds:
       return Duration.formatSeconds(dur);
+    case TimestampFormat.Milliseoncds:
+      return Duration.formatMilliseconds(dur);
+    case TimestampFormat.Microseconds:
+      return Duration.formatMicroseconds(dur);
     default:
       const x: never = fmt;
       throw new Error(`Invalid format ${x}`);
