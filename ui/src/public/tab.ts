@@ -13,6 +13,15 @@
 // limitations under the License.
 
 import m from 'mithril';
+import {DetailsPanel} from './details_panel';
+
+export interface TabManager {
+  registerTab(tab: TabDescriptor): void;
+  registerDetailsPanel(detailsPanel: DetailsPanel): Disposable;
+  showTab(uri: string): void;
+  hideTab(uri: string): void;
+  addDefaultTab(uri: string): void;
+}
 
 export interface Tab {
   render(): m.Children;
