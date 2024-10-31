@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {findCurrentSelection} from '../../frontend/keyboard_event_handler';
 import {SimpleSliceTrackConfig} from '../../frontend/simple_slice_track';
 import {addDebugSliceTrack} from '../../public/debug_tracks';
 import {Trace} from '../../public/trace';
@@ -62,25 +61,8 @@ export function addAndPinSliceTrack(
  * Takes and adds desired slice to current selection
  * Retrieves the track key and scrolls to the desired slice
  */
-export function focusOnSlice(
-  ctx: Trace,
-  sqlSliceId: number,
-  sqlTrackId: number,
-) {
-  // Finds the TrackDescriptor associated to the given SQL `tracks(table).id`.
-  const track = ctx.tracks.findTrack((trackDescriptor) => {
-    return trackDescriptor?.tags?.trackIds?.includes(sqlTrackId);
+export function focusOnSlice(ctx: Trace, sqlSliceId: number) {
+  ctx.selection.selectSqlEvent('slice', sqlSliceId, {
+    scrollToSelection: true,
   });
-  ctx.selection.setLegacy(
-    {
-      kind: 'SLICE',
-      id: sqlSliceId,
-      trackUri: track?.uri,
-      table: 'slice',
-    },
-    {
-      pendingScrollId: sqlSliceId,
-    },
-  );
-  findCurrentSelection();
 }
