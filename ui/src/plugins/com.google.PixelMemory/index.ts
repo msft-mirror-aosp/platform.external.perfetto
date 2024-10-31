@@ -13,12 +13,14 @@
 // limitations under the License.
 
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
-import {addDebugCounterTrack} from '../../frontend/debug_tracks/debug_tracks';
+import {PerfettoPlugin} from '../../public/plugin';
+import {addDebugCounterTrack} from '../../public/lib/debug_tracks/debug_tracks';
 
-class PixelMemory implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'com.google.PixelMemory';
+
   async onTraceLoad(ctx: Trace): Promise<void> {
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.PixelMemory#ShowTotalMemory',
       name: 'Add tracks: show a process total memory',
       callback: async (pid) => {
@@ -59,8 +61,3 @@ class PixelMemory implements PerfettoPlugin {
     });
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'com.google.PixelMemory',
-  plugin: PixelMemory,
-};

@@ -162,7 +162,7 @@ export class TimeSelectionPanel implements Panel {
 
     if (size.width > 0 && timespan.duration > 0n) {
       const maxMajorTicks = getMaxMajorTicks(size.width);
-      const offset = globals.timestampOffset();
+      const offset = globals.trace.timeline.timestampOffset();
       const tickGen = generateTicks(timespan, maxMajorTicks, offset);
       for (const {type, time} of tickGen) {
         const px = Math.floor(timescale.timeToPx(time));
@@ -173,30 +173,38 @@ export class TimeSelectionPanel implements Panel {
     }
 
     const localArea = globals.timeline.selectedArea;
-    const selection = globals.state.selection;
+    const selection = globals.selectionManager.selection;
     if (localArea !== undefined) {
       const start = Time.min(localArea.start, localArea.end);
       const end = Time.max(localArea.start, localArea.end);
       this.renderSpan(ctx, timescale, size, start, end);
-    } else if (selection.kind === 'area') {
-      const start = Time.min(selection.start, selection.end);
-      const end = Time.max(selection.start, selection.end);
-      this.renderSpan(ctx, timescale, size, start, end);
+    } else {
+      if (selection.kind === 'area') {
+        const start = Time.min(selection.start, selection.end);
+        const end = Time.max(selection.start, selection.end);
+        this.renderSpan(ctx, timescale, size, start, end);
+      } else if (selection.kind === 'track_event') {
+        const start = selection.ts;
+        const end = Time.add(selection.ts, selection.dur);
+        if (end > start) {
+          this.renderSpan(ctx, timescale, size, start, end);
+        }
+      }
     }
 
-    if (globals.state.hoverCursorTimestamp !== -1n) {
+    if (globals.trace.timeline.hoverCursorTimestamp !== undefined) {
       this.renderHover(
         ctx,
         timescale,
         size,
-        globals.state.hoverCursorTimestamp,
+        globals.trace.timeline.hoverCursorTimestamp,
       );
     }
 
-    for (const note of Object.values(globals.state.notes)) {
+    for (const note of globals.noteManager.notes.values()) {
       const noteIsSelected =
         selection.kind === 'note' && selection.id === note.id;
-      if (note.noteType === 'SPAN' && !noteIsSelected) {
+      if (note.noteType === 'SPAN' && noteIsSelected) {
         this.renderSpan(ctx, timescale, size, note.start, note.end);
       }
     }
@@ -211,7 +219,7 @@ export class TimeSelectionPanel implements Panel {
     ts: time,
   ) {
     const xPos = Math.floor(timescale.timeToPx(ts));
-    const domainTime = globals.toDomainTime(ts);
+    const domainTime = globals.trace.timeline.toDomainTime(ts);
     const label = stringifyTimestamp(domainTime);
     drawIBar(ctx, xPos, this.getBBoxFromSize(size), label);
   }
@@ -257,12 +265,16 @@ function stringifyTimestamp(time: time): string {
     case TimestampFormat.Timecode:
       const THIN_SPACE = '\u2009';
       return Time.toTimecode(time).toString(THIN_SPACE);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return time.toString();
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return time.toLocaleString();
     case TimestampFormat.Seconds:
       return Time.formatSeconds(time);
+    case TimestampFormat.Milliseoncds:
+      return Time.formatMilliseconds(time);
+    case TimestampFormat.Microseconds:
+      return Time.formatMicroseconds(time);
     default:
       const z: never = fmt;
       throw new Error(`Invalid timestamp ${z}`);

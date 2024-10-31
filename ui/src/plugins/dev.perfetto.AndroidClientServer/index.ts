@@ -14,12 +14,13 @@
 
 import {NUM, STR} from '../../trace_processor/query_result';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {addDebugSliceTrack} from '../../public/debug_tracks';
 
-class AndroidClientServer implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.AndroidClientServer';
   async onTraceLoad(ctx: Trace): Promise<void> {
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.AndroidClientServer#ThreadRuntimeIPC',
       name: 'Show dependencies in client server model',
       callback: async (sliceId) => {
@@ -205,8 +206,3 @@ class AndroidClientServer implements PerfettoPlugin {
     });
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.AndroidClientServer',
-  plugin: AndroidClientServer,
-};
