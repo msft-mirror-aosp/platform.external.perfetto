@@ -55,10 +55,10 @@ export class TimeAxisPanel implements Panel {
   }
 
   private renderOffsetTimestamp(ctx: CanvasRenderingContext2D): void {
-    const offset = globals.timestampOffset();
+    const offset = globals.trace.timeline.timestampOffset();
     switch (timestampFormat()) {
-      case TimestampFormat.Raw:
-      case TimestampFormat.RawLocale:
+      case TimestampFormat.TraceNs:
+      case TimestampFormat.TraceNsLocale:
         break;
       case TimestampFormat.Seconds:
       case TimestampFormat.Timecode:
@@ -91,7 +91,7 @@ export class TimeAxisPanel implements Panel {
       right: size.width,
     });
     const timespan = visibleWindow.toTimeSpan();
-    const offset = globals.timestampOffset();
+    const offset = globals.trace.timeline.timestampOffset();
 
     // Draw time axis.
     if (size.width > 0 && timespan.duration > 0n) {
@@ -101,7 +101,7 @@ export class TimeAxisPanel implements Panel {
         if (type === TickType.MAJOR) {
           const position = Math.floor(timescale.timeToPx(time));
           ctx.fillRect(position, 0, 1, size.height);
-          const domainTime = globals.toDomainTime(time);
+          const domainTime = globals.trace.timeline.toDomainTime(time);
           renderTimestamp(ctx, domainTime, position + 5, 10, MIN_PX_PER_STEP);
         }
       }
@@ -122,12 +122,28 @@ function renderTimestamp(
     case TimestampFormat.TraceTz:
     case TimestampFormat.Timecode:
       return renderTimecode(ctx, time, x, y, minWidth);
-    case TimestampFormat.Raw:
+    case TimestampFormat.TraceNs:
       return renderRawTimestamp(ctx, time.toString(), x, y, minWidth);
-    case TimestampFormat.RawLocale:
+    case TimestampFormat.TraceNsLocale:
       return renderRawTimestamp(ctx, time.toLocaleString(), x, y, minWidth);
     case TimestampFormat.Seconds:
       return renderRawTimestamp(ctx, Time.formatSeconds(time), x, y, minWidth);
+    case TimestampFormat.Milliseoncds:
+      return renderRawTimestamp(
+        ctx,
+        Time.formatMilliseconds(time),
+        x,
+        y,
+        minWidth,
+      );
+    case TimestampFormat.Microseconds:
+      return renderRawTimestamp(
+        ctx,
+        Time.formatMicroseconds(time),
+        x,
+        y,
+        minWidth,
+      );
     default:
       const z: never = fmt;
       throw new Error(`Invalid timestamp ${z}`);

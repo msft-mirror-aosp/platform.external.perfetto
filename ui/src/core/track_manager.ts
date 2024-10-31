@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Optional} from '../base/utils';
 import {Registry} from '../base/registry';
-import {Track, TrackDescriptor} from '../public/track';
+import {Track, TrackDescriptor, TrackManager} from '../public/track';
 import {AsyncLimiter} from '../base/async_limiter';
 import {TrackRenderContext} from '../public/track';
 
@@ -22,7 +21,7 @@ export interface TrackRenderer {
   readonly track: Track;
   desc: TrackDescriptor;
   render(ctx: TrackRenderContext): void;
-  getError(): Optional<Error>;
+  getError(): Error | undefined;
 }
 
 /**
@@ -48,8 +47,18 @@ export interface TrackRenderer {
  * Third cycle
  *   flushTracks() <-- 'foo' is destroyed.
  */
-export class TrackManagerImpl {
+export class TrackManagerImpl implements TrackManager {
   private tracks = new Registry<TrackFSM>((x) => x.desc.uri);
+
+  // This property is written by scroll_helper.ts and read&cleared by the
+  // track_panel.ts. This exist for the following use case: the user wants to
+  // scroll to track X, but X is not visible because it's in a collapsed group.
+  // So we want to stash this information in a place that track_panel.ts can
+  // access when creating dom elements.
+  //
+  // Note: this is the node id of the track node to scroll to, not the track
+  // uri, as this allows us to scroll to tracks that have no uri.
+  scrollToTrackNodeId?: string;
 
   registerTrack(trackDesc: TrackDescriptor): Disposable {
     return this.tracks.register(new TrackFSM(trackDesc));
@@ -162,7 +171,7 @@ class TrackFSM implements TrackRenderer {
     this.track.render(ctx);
   }
 
-  getError(): Optional<Error> {
+  getError(): Error | undefined {
     return this.error;
   }
 
