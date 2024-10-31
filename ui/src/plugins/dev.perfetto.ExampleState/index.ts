@@ -15,7 +15,8 @@
 import {createStore, Store} from '../../base/store';
 import {exists} from '../../base/utils';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
+import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
 
 interface State {
   counter: number;
@@ -23,7 +24,8 @@ interface State {
 
 // This example plugin shows using state that is persisted in the
 // permalink.
-class ExampleState implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.ExampleState';
   private store: Store<State> = createStore({counter: 0});
 
   private migrate(initialState: unknown): State {
@@ -41,29 +43,21 @@ class ExampleState implements PerfettoPlugin {
 
   async onTraceLoad(ctx: Trace): Promise<void> {
     this.store = ctx.mountStore((init: unknown) => this.migrate(init));
+    ctx.trash.use(this.store);
 
     ctx.commands.registerCommand({
       id: 'dev.perfetto.ExampleState#ShowCounter',
       name: 'Show ExampleState counter',
       callback: () => {
         const counter = this.store.state.counter;
-        ctx.tabs.openQuery(
-          `SELECT ${counter} as counter;`,
-          `Show counter ${counter}`,
-        );
+        addQueryResultsTab(ctx, {
+          query: `SELECT ${counter} as counter;`,
+          title: `Show counter ${counter}`,
+        });
         this.store.edit((draft) => {
           ++draft.counter;
         });
       },
     });
   }
-
-  async onTraceUnload(_: Trace): Promise<void> {
-    this.store[Symbol.dispose]();
-  }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.ExampleState',
-  plugin: ExampleState,
-};

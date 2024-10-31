@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {Time, duration, time} from '../../base/time';
 import {
   asSliceSqlId,
   SliceSqlId,
@@ -21,8 +20,6 @@ import {
 import {Anchor} from '../../widgets/anchor';
 import {Icons} from '../../base/semantic_icons';
 import {globals} from '../globals';
-import {focusHorizontalRange, verticalScrollToTrack} from '../scroll_helper';
-import {BigintMath} from '../../base/bigint_math';
 import {getSlice, SliceDetails} from '../../trace_processor/sql_utils/slice';
 import {
   createSqlIdRefRenderer,
@@ -32,9 +29,6 @@ import {
 interface SliceRefAttrs {
   readonly id: SliceSqlId;
   readonly name: string;
-  readonly ts: time;
-  readonly dur: duration;
-  readonly sqlTrackId: number;
 
   // Whether clicking on the reference should change the current tab
   // to "current selection" tab in addition to updating the selection
@@ -49,30 +43,11 @@ export class SliceRef implements m.ClassComponent<SliceRefAttrs> {
       {
         icon: Icons.UpdateSelection,
         onclick: () => {
-          const track = globals.trackManager.findTrack((td) => {
-            return td.tags?.trackIds?.includes(vnode.attrs.sqlTrackId);
+          globals.selectionManager.selectSqlEvent('slice', vnode.attrs.id, {
+            switchToCurrentSelectionTab:
+              vnode.attrs.switchToCurrentSelectionTab,
+            scrollToSelection: true,
           });
-          if (track === undefined) return;
-          verticalScrollToTrack(track.uri, true);
-          // Clamp duration to 1 - i.e. for instant events
-          const dur = BigintMath.max(1n, vnode.attrs.dur);
-          focusHorizontalRange(
-            vnode.attrs.ts,
-            Time.fromRaw(vnode.attrs.ts + dur),
-          );
-
-          globals.selectionManager.setLegacy(
-            {
-              kind: 'SLICE',
-              id: vnode.attrs.id,
-              trackUri: track.uri,
-              table: 'slice',
-            },
-            {
-              switchToCurrentSelectionTab:
-                vnode.attrs.switchToCurrentSelectionTab,
-            },
-          );
         },
       },
       vnode.attrs.name,
@@ -84,9 +59,6 @@ export function sliceRef(slice: SliceDetails, name?: string): m.Child {
   return m(SliceRef, {
     id: slice.id,
     name: name ?? slice.name,
-    ts: slice.ts,
-    dur: slice.dur,
-    sqlTrackId: slice.trackId,
   });
 }
 

@@ -45,6 +45,7 @@ import {
 import {Controller} from './controller';
 import {RecordConfig} from './record_config_types';
 import {Consumer, RpcConsumerPort} from './record_controller_interfaces';
+import {AppImpl} from '../core/app_impl';
 
 type RPCImplMethod = Method | rpc.ServiceMethod<Message<{}>, Message<{}>>;
 
@@ -133,6 +134,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
       value.startsWith('STAT_') ||
       value.startsWith('LID_') ||
       value.startsWith('BATTERY_COUNTER_') ||
+      value.startsWith('ATOM_') ||
       value === 'DISCARD' ||
       value === 'RING_BUFFER' ||
       value === 'BACKGROUND' ||
@@ -276,6 +278,7 @@ export class RecordController extends Controller<'main'> implements Consumer {
 
   stopRecordTrace() {
     if (this.bufferUpdateInterval) clearInterval(this.bufferUpdateInterval);
+    this.consumerPort.flush({});
     this.consumerPort.disableTracing({});
   }
 
@@ -328,13 +331,11 @@ export class RecordController extends Controller<'main'> implements Consumer {
       return;
     }
     const trace = this.generateTrace();
-    globals.dispatch(
-      Actions.openTraceFromBuffer({
-        title: 'Recorded trace',
-        buffer: trace.buffer,
-        fileName: `recorded_trace${this.recordedTraceSuffix}`,
-      }),
-    );
+    AppImpl.instance.openTraceFromBuffer({
+      title: 'Recorded trace',
+      buffer: trace.buffer,
+      fileName: `recorded_trace${this.recordedTraceSuffix}`,
+    });
     this.traceBuffer = [];
   }
 
