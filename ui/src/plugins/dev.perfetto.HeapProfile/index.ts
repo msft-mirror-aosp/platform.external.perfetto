@@ -14,7 +14,7 @@
 
 import {HEAP_PROFILE_TRACK_KIND} from '../../public/track_kinds';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {LONG, NUM, STR} from '../../trace_processor/query_result';
 import {HeapProfileTrack} from './heap_profile_track';
 import {getOrCreateGroupForProcess} from '../../public/standard_groups';
@@ -25,7 +25,8 @@ function getUriForTrack(upid: number): string {
   return `/process_${upid}/heap_profile`;
 }
 
-class HeapProfilePlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.HeapProfile';
   async onTraceLoad(ctx: Trace): Promise<void> {
     const it = await ctx.engine.query(`
       select value from stats
@@ -105,10 +106,10 @@ class HeapProfilePlugin implements PerfettoPlugin {
       const track = new TrackNode({uri, title, sortOrder: -30});
       group.addChildInOrder(track);
     }
-  }
 
-  async onTraceReady(ctx: Trace): Promise<void> {
-    await selectFirstHeapProfile(ctx);
+    ctx.addEventListener('traceready', async () => {
+      await selectFirstHeapProfile(ctx);
+    });
   }
 }
 
@@ -135,8 +136,3 @@ async function selectFirstHeapProfile(ctx: Trace) {
 
   ctx.selection.selectTrackEvent(getUriForTrack(upid), 0);
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.HeapProfile',
-  plugin: HeapProfilePlugin,
-};

@@ -19,7 +19,7 @@ import {CommandManagerImpl} from './command_manager';
 import {OmniboxManagerImpl} from './omnibox_manager';
 import {raf} from './raf_scheduler';
 import {SidebarManagerImpl} from './sidebar_manager';
-import {PluginManager} from './plugin_manager';
+import {PluginManagerImpl} from './plugin_manager';
 import {NewEngineMode} from '../trace_processor/engine';
 import {RouteArgs} from '../public/route_schema';
 import {SqlPackage} from '../public/extra_sql_packages';
@@ -53,7 +53,7 @@ export class AppContext {
   readonly commandMgr = new CommandManagerImpl();
   readonly omniboxMgr = new OmniboxManagerImpl();
   readonly sidebarMgr: SidebarManagerImpl;
-  readonly pluginMgr: PluginManager;
+  readonly pluginMgr: PluginManagerImpl;
   readonly analytics: AnalyticsInternal;
   newEngineMode: NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE';
   initialRouteArgs: RouteArgs;
@@ -71,7 +71,9 @@ export class AppContext {
   constructor(initArgs: AppInitArgs) {
     this.initArgs = initArgs;
     this.initialRouteArgs = initArgs.initialRouteArgs;
-    this.sidebarMgr = new SidebarManagerImpl(this.initialRouteArgs.hideSidebar);
+    this.sidebarMgr = new SidebarManagerImpl(
+      this.initialRouteArgs.hideSidebar === true ? 'DISABLED' : 'ENABLED',
+    );
     this.embeddedMode = this.initialRouteArgs.mode === 'embedded';
     this.testingMode =
       self.location !== undefined &&
@@ -81,7 +83,7 @@ export class AppContext {
     // allowed to be empty only in unittests, because there there is no bundle
     // hence no concrete root.
     assertTrue(this.initArgs.rootUrl !== '' || typeof jest !== 'undefined');
-    this.pluginMgr = new PluginManager({
+    this.pluginMgr = new PluginManagerImpl({
       forkForPlugin: (p) => AppImpl.instance.forkForPlugin(p),
       get trace() {
         return AppImpl.instance.trace;
@@ -141,7 +143,7 @@ export class AppImpl implements App {
     return this.appCtx.omniboxMgr;
   }
 
-  get plugins(): PluginManager {
+  get plugins(): PluginManagerImpl {
     return this.appCtx.pluginMgr;
   }
 
@@ -233,7 +235,6 @@ export class AppImpl implements App {
     this.omnibox.reset(/* focus= */ false);
 
     if (this.currentTrace !== undefined) {
-      this.appCtx.pluginMgr.onTraceClose();
       // This will trigger the unregistration of trace-scoped commands and
       // sidebar menuitems (and few similar things).
       this.currentTrace[Symbol.dispose]();

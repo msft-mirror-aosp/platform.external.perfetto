@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {getThreadOrProcUri} from '../../public/utils';
 import {NUM, NUM_NULL, STR} from '../../trace_processor/query_result';
 import {
@@ -26,16 +26,22 @@ import {
   PROCESS_SUMMARY_TRACK,
   ProcessSummaryTrack,
 } from './process_summary_track';
+import ThreadPlugin from '../dev.perfetto.Thread';
 
 // This plugin is responsible for adding summary tracks for process and thread
 // groups.
-class ProcessSummaryPlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.ProcessSummary';
+  static readonly dependencies = [ThreadPlugin];
+
   async onTraceLoad(ctx: Trace): Promise<void> {
     await this.addProcessTrackGroups(ctx);
     await this.addKernelThreadSummary(ctx);
   }
 
   private async addProcessTrackGroups(ctx: Trace): Promise<void> {
+    const threads = ctx.plugins.getPlugin(ThreadPlugin).getThreadMap();
+
     const cpuCount = Math.max(...ctx.traceInfo.cpus, -1) + 1;
 
     const result = await ctx.engine.query(`
@@ -122,7 +128,7 @@ class ProcessSummaryPlugin implements PerfettoPlugin {
             kind: PROCESS_SCHEDULING_TRACK_KIND,
           },
           chips,
-          track: new ProcessSchedulingTrack(ctx, config, cpuCount),
+          track: new ProcessSchedulingTrack(ctx, config, cpuCount, threads),
           subtitle,
         });
       } else {
@@ -201,8 +207,3 @@ class ProcessSummaryPlugin implements PerfettoPlugin {
     });
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.ProcessSummary',
-  plugin: ProcessSummaryPlugin,
-};

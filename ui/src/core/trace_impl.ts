@@ -17,7 +17,7 @@ import {assertTrue} from '../base/logging';
 import {createStore, Migrate, Store} from '../base/store';
 import {TimelineImpl} from './timeline';
 import {Command} from '../public/command';
-import {Trace} from '../public/trace';
+import {EventListeners, Trace} from '../public/trace';
 import {ScrollToArgs, setScrollToFunction} from '../public/scroll_helper';
 import {TraceInfo} from '../public/trace_info';
 import {TrackDescriptor} from '../public/track';
@@ -38,11 +38,12 @@ import {SearchResult} from '../public/search';
 import {PivotTableManager} from './pivot_table_manager';
 import {FlowManager} from './flow_manager';
 import {AppContext, AppImpl} from './app_impl';
-import {PluginManager} from './plugin_manager';
-import {ThreadDesc, ThreadMap} from '../public/threads';
+import {PluginManagerImpl} from './plugin_manager';
 import {RouteArgs} from '../public/route_schema';
 import {CORE_PLUGIN_ID} from './plugin_manager';
 import {Analytics} from '../public/analytics';
+import {getOrCreate} from '../base/utils';
+import {fetchWithProgress} from '../base/http_utils';
 
 /**
  * Handles the per-trace state of the UI
@@ -68,8 +69,8 @@ class TraceContext implements Disposable {
   readonly pluginSerializableState = createStore<{[key: string]: {}}>({});
   readonly scrollHelper: ScrollHelper;
   readonly pivotTableMgr;
-  readonly threads = new Map<number, ThreadDesc>();
   readonly trash = new DisposableStack();
+  readonly eventListeners = new Map<keyof EventListeners, Array<unknown>>();
 
   // List of errors that were encountered while loading the trace by the TS
   // code. These are on top of traceInfo.importErrors, which is a summary of
@@ -254,6 +255,31 @@ export class TraceImpl implements Trace {
     return this.traceCtx.pluginSerializableState;
   }
 
+  async getTraceFile(): Promise<Blob> {
+    const src = this.traceInfo.source;
+    if (this.traceInfo.downloadable) {
+      if (src.type === 'ARRAY_BUFFER') {
+        return new Blob([src.buffer]);
+      } else if (src.type === 'FILE') {
+        return src.file;
+      } else if (src.type === 'URL') {
+        return await fetchWithProgress(src.url, (progressPercent: number) =>
+          this.omnibox.showStatusMessage(
+            `Downloading trace ${progressPercent}%`,
+          ),
+        );
+      }
+    }
+    // Not available in HTTP+RPC mode. Rather than propagating an undefined,
+    // show a graceful error (the ERR:trace_src will be intercepted by
+    // error_dialog.ts). We expect all users of this feature to not be able to
+    // do anything useful if we returned undefined (other than showing the same
+    // dialog).
+    // The caller was supposed to check that traceInfo.downloadable === true
+    // before calling this. Throwing while downloadable is true is a bug.
+    throw new Error(`Cannot getTraceFile(${src.type})`);
+  }
+
   get openerPluginArgs(): {[key: string]: unknown} | undefined {
     const traceSource = this.traceCtx.traceInfo.source;
     if (traceSource.type !== 'ARRAY_BUFFER') {
@@ -319,15 +345,6 @@ export class TraceImpl implements Trace {
     this.traceCtx.loadingErrors.push(err);
   }
 
-  get threads(): ThreadMap {
-    return this.traceCtx.threads;
-  }
-
-  setThreads(threadMap: ThreadMap) {
-    this.traceCtx.threads.clear();
-    threadMap.forEach((v, k) => this.traceCtx.threads.set(k, v));
-  }
-
   // App interface implementation.
 
   get pluginId(): string {
@@ -346,7 +363,7 @@ export class TraceImpl implements Trace {
     return this.appImpl.omnibox;
   }
 
-  get plugins(): PluginManager {
+  get plugins(): PluginManagerImpl {
     return this.appImpl.plugins;
   }
 
@@ -374,6 +391,33 @@ export class TraceImpl implements Trace {
 
   navigate(newHash: string): void {
     this.appImpl.navigate(newHash);
+  }
+
+  addEventListener<T extends keyof EventListeners>(
+    event: T,
+    callback: EventListeners[T],
+  ): void {
+    const listeners = getOrCreate(
+      this.traceCtx.eventListeners,
+      event,
+      () => [],
+    );
+    listeners.push(callback);
+  }
+
+  getEventListeners<T extends keyof EventListeners>(
+    event: T,
+  ): ReadonlyArray<EventListeners[T]> {
+    const listeners = this.traceCtx.eventListeners.get(event);
+    if (listeners) {
+      return listeners as ReadonlyArray<EventListeners[T]>;
+    } else {
+      return [];
+    }
+  }
+
+  get trash(): DisposableStack {
+    return this.traceCtx.trash;
   }
 }
 
