@@ -134,6 +134,7 @@ export function toPbtxt(configBuffer: Uint8Array): string {
       value.startsWith('STAT_') ||
       value.startsWith('LID_') ||
       value.startsWith('BATTERY_COUNTER_') ||
+      value.startsWith('ATOM_') ||
       value === 'DISCARD' ||
       value === 'RING_BUFFER' ||
       value === 'BACKGROUND' ||
@@ -277,6 +278,7 @@ export class RecordController extends Controller<'main'> implements Consumer {
 
   stopRecordTrace() {
     if (this.bufferUpdateInterval) clearInterval(this.bufferUpdateInterval);
+    this.consumerPort.flush({});
     this.consumerPort.disableTracing({});
   }
 

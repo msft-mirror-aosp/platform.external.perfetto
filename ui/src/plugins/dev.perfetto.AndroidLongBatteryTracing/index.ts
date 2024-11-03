@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {Engine} from '../../trace_processor/engine';
 import {
   SimpleSliceTrack,
@@ -1100,7 +1100,8 @@ const BT_ACTIVITY = `
   from step2
 `;
 
-class AndroidLongBatteryTracing implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.AndroidLongBatteryTracing';
   private readonly groups = new Map<string, TrackNode>();
 
   private addTrack(ctx: Trace, track: TrackNode, groupName?: string): void {
@@ -1303,6 +1304,78 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
          where counter_name = '${countersIt.counter_name}'`,
         countersIt.ui_group,
         opts,
+      );
+    }
+  }
+
+  async addAtomSlices(ctx: Trace): Promise<void> {
+    const e = ctx.engine;
+
+    try {
+      await e.query(
+        `INCLUDE PERFETTO MODULE
+            google3.wireless.android.telemetry.trace_extractor.modules.atom_counters_slices`,
+      );
+    } catch (e) {
+      return;
+    }
+
+    const sliceTracks = await e.query(
+      `select distinct ui_group, ui_name, atom, field
+       from atom_slices
+       where ui_name is not null
+       order by 1, 2, 3, 4`,
+    );
+    const slicesIt = sliceTracks.iter({
+      atom: 'str',
+      ui_group: 'str',
+      ui_name: 'str',
+      field: 'str',
+    });
+
+    const tracks = new Map<
+      string,
+      {
+        ui_group: string;
+        ui_name: string;
+      }
+    >();
+    const fields = new Map<string, string[]>();
+    for (; slicesIt.valid(); slicesIt.next()) {
+      const atom = slicesIt.atom;
+      let args = fields.get(atom);
+      if (args === undefined) {
+        args = [];
+        fields.set(atom, args);
+      }
+      args.push(slicesIt.field);
+      tracks.set(atom, {
+        ui_group: slicesIt.ui_group,
+        ui_name: slicesIt.ui_name,
+      });
+    }
+
+    for (const [atom, args] of fields) {
+      function safeArg(arg: string) {
+        return arg.replaceAll(/[[\]]/g, '').replaceAll(/\./g, '_');
+      }
+
+      // We need to make arg names compatible with SQL here because they pass through several
+      // layers of SQL without being quoted in "".
+      function argSql(arg: string) {
+        return `max(case when field = '${arg}' then ifnull(string_value, int_value) end)
+                as ${safeArg(arg)}`;
+      }
+
+      this.addSliceTrack(
+        ctx,
+        tracks.get(atom)!.ui_name,
+        `select ts, dur, slice_name as name, ${args.map((a) => argSql(a)).join(', ')}
+         from atom_slices
+         where atom = '${atom}'
+         group by ts, dur, name`,
+        tracks.get(atom)!.ui_group,
+        args.map((a) => safeArg(a)),
       );
     }
   }
@@ -1823,13 +1896,14 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
 
     await ctx.engine.query(PACKAGE_LOOKUP);
     await this.addNetworkSummary(ctx, features);
+    await this.addBluetooth(ctx, features);
     await this.addAtomCounters(ctx);
+    await this.addAtomSlices(ctx);
     await this.addModemDetail(ctx, features);
     await this.addKernelWakelocks(ctx, features);
     await this.addWakeups(ctx, features);
     await this.addDeviceState(ctx, features);
     await this.addHighCpu(ctx, features);
-    await this.addBluetooth(ctx, features);
     await this.addContainedTraces(ctx, containedTraces);
   }
 
@@ -1837,8 +1911,3 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     await this.addTracks(ctx);
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.AndroidLongBatteryTracing',
-  plugin: AndroidLongBatteryTracing,
-};
