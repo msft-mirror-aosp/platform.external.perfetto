@@ -1,6 +1,7 @@
 android_startup {
   startup {
     startup_id: 0
+    cpu_count: 2
     package_name: "com.google.android.calendar"
     process_name: "com.google.android.calendar"
     zygote_new_process: false
@@ -79,8 +80,9 @@ android_startup {
       trace_thread_sections {
         start_timestamp: 130
         end_timestamp: 210
-        thread_utid: 3
         thread_name: "com.google.android.calendar"
+        thread_tid: 3
+        process_pid: 3
       }
     }
     startup_type: "warm"
