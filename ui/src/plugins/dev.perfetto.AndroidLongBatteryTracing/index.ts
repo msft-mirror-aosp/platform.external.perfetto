@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {Engine} from '../../trace_processor/engine';
 import {
   SimpleSliceTrack,
@@ -24,8 +24,7 @@ import {
   SimpleCounterTrack,
   SimpleCounterTrackConfig,
 } from '../../frontend/simple_counter_track';
-import {globals} from '../../frontend/globals';
-import {GroupNode, TrackNode} from '../../public/workspace';
+import {TrackNode} from '../../public/workspace';
 
 interface ContainedTrace {
   uuid: string;
@@ -171,54 +170,6 @@ const NETWORK_SUMMARY = `
       group by 1, 2, 3
   )
   select * from final where ts is not null`;
-
-const MODEM_ACTIVITY_INFO = `
-  drop table if exists modem_activity_info;
-  create table modem_activity_info as
-  with modem_raw as (
-    select
-      ts,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.timestamp_millis') as timestamp_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.sleep_time_millis') as sleep_time_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_idle_time_millis') as controller_idle_time_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_tx_time_pl0_millis') as controller_tx_time_pl0_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_tx_time_pl1_millis') as controller_tx_time_pl1_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_tx_time_pl2_millis') as controller_tx_time_pl2_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_tx_time_pl3_millis') as controller_tx_time_pl3_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_tx_time_pl4_millis') as controller_tx_time_pl4_millis,
-      EXTRACT_ARG(arg_set_id, 'modem_activity_info.controller_rx_time_millis') as controller_rx_time_millis
-    from track t join slice s on t.id = s.track_id
-    where t.name = 'Statsd Atoms'
-      and s.name = 'modem_activity_info'
-  ),
-  deltas as (
-      select
-          timestamp_millis * 1000000 as ts,
-          lead(timestamp_millis) over (order by ts) - timestamp_millis as dur_millis,
-          lead(sleep_time_millis) over (order by ts) - sleep_time_millis as sleep_time_millis,
-          lead(controller_idle_time_millis) over (order by ts) - controller_idle_time_millis as controller_idle_time_millis,
-          lead(controller_tx_time_pl0_millis) over (order by ts) - controller_tx_time_pl0_millis as controller_tx_time_pl0_millis,
-          lead(controller_tx_time_pl1_millis) over (order by ts) - controller_tx_time_pl1_millis as controller_tx_time_pl1_millis,
-          lead(controller_tx_time_pl2_millis) over (order by ts) - controller_tx_time_pl2_millis as controller_tx_time_pl2_millis,
-          lead(controller_tx_time_pl3_millis) over (order by ts) - controller_tx_time_pl3_millis as controller_tx_time_pl3_millis,
-          lead(controller_tx_time_pl4_millis) over (order by ts) - controller_tx_time_pl4_millis as controller_tx_time_pl4_millis,
-          lead(controller_rx_time_millis) over (order by ts) - controller_rx_time_millis as controller_rx_time_millis
-      from modem_raw
-  ),
-  ratios as (
-      select
-          ts,
-          100.0 * sleep_time_millis / dur_millis as sleep_time_ratio,
-          100.0 * controller_idle_time_millis / dur_millis as controller_idle_time_ratio,
-          100.0 * controller_tx_time_pl0_millis / dur_millis as controller_tx_time_pl0_ratio,
-          100.0 * controller_tx_time_pl1_millis / dur_millis as controller_tx_time_pl1_ratio,
-          100.0 * controller_tx_time_pl2_millis / dur_millis as controller_tx_time_pl2_ratio,
-          100.0 * controller_tx_time_pl3_millis / dur_millis as controller_tx_time_pl3_ratio,
-          100.0 * controller_tx_time_pl4_millis / dur_millis as controller_tx_time_pl4_ratio,
-          100.0 * controller_rx_time_millis / dur_millis as controller_rx_time_ratio
-      from deltas
-  )
-  select * from ratios where sleep_time_ratio is not null and sleep_time_ratio >= 0`;
 
 const MODEM_RIL_STRENGTH = `
   DROP VIEW IF EXISTS ScreenOn;
@@ -1149,22 +1100,23 @@ const BT_ACTIVITY = `
   from step2
 `;
 
-class AndroidLongBatteryTracing implements PerfettoPlugin {
-  private readonly groups = new Map<string, GroupNode>();
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.AndroidLongBatteryTracing';
+  private readonly groups = new Map<string, TrackNode>();
 
   private addTrack(ctx: Trace, track: TrackNode, groupName?: string): void {
     if (groupName) {
       const existingGroup = this.groups.get(groupName);
       if (existingGroup) {
-        existingGroup.insertChildInOrder(track);
+        existingGroup.addChildInOrder(track);
       } else {
-        const group = new GroupNode(groupName);
-        group.insertChildInOrder(track);
+        const group = new TrackNode({title: groupName, isSummary: true});
+        group.addChildInOrder(track);
         this.groups.set(groupName, group);
-        ctx.workspace.insertChildInOrder(group);
+        ctx.workspace.addChildInOrder(group);
       }
     } else {
-      ctx.workspace.insertChildInOrder(track);
+      ctx.workspace.addChildInOrder(track);
     }
   }
 
@@ -1185,13 +1137,14 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     };
 
     const uri = `/long_battery_tracing_${name}`;
+    const track = new SimpleSliceTrack(ctx, {trackUri: uri}, config);
     ctx.tracks.registerTrack({
       uri,
       title: name,
-      track: new SimpleSliceTrack(ctx.engine, {trackUri: uri}, config),
+      track,
     });
-    const track = new TrackNode(uri, name);
-    this.addTrack(ctx, track, groupName);
+    const trackNode = new TrackNode({uri, title: name});
+    this.addTrack(ctx, trackNode, groupName);
   }
 
   addCounterTrack(
@@ -1214,9 +1167,9 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     ctx.tracks.registerTrack({
       uri,
       title: name,
-      track: new SimpleCounterTrack(ctx.engine, {trackUri: uri}, config),
+      track: new SimpleCounterTrack(ctx, {trackUri: uri}, config),
     });
-    const track = new TrackNode(uri, name);
+    const track = new TrackNode({uri, title: name});
     this.addTrack(ctx, track, groupName);
   }
 
@@ -1307,6 +1260,122 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
         ctx,
         'Device State: Thermal throttling',
         THERMAL_THROTTLING,
+      );
+    }
+  }
+
+  async addAtomCounters(ctx: Trace): Promise<void> {
+    const e = ctx.engine;
+
+    try {
+      await e.query(
+        `INCLUDE PERFETTO MODULE
+            google3.wireless.android.telemetry.trace_extractor.modules.atom_counters_slices`,
+      );
+    } catch (e) {
+      return;
+    }
+
+    const counters = await e.query(
+      `select distinct ui_group, ui_name, ui_unit, counter_name
+       from atom_counters
+       where ui_name is not null`,
+    );
+    const countersIt = counters.iter({
+      ui_group: 'str',
+      ui_name: 'str',
+      ui_unit: 'str',
+      counter_name: 'str',
+    });
+    for (; countersIt.valid(); countersIt.next()) {
+      const unit = countersIt.ui_unit;
+      const opts =
+        unit === '%'
+          ? {yOverrideMaximum: 100, unit: '%'}
+          : unit !== undefined
+            ? {unit}
+            : undefined;
+
+      this.addCounterTrack(
+        ctx,
+        countersIt.ui_name,
+        `select ts, ${unit === '%' ? 100.0 : 1.0} * counter_value as value
+         from atom_counters
+         where counter_name = '${countersIt.counter_name}'`,
+        countersIt.ui_group,
+        opts,
+      );
+    }
+  }
+
+  async addAtomSlices(ctx: Trace): Promise<void> {
+    const e = ctx.engine;
+
+    try {
+      await e.query(
+        `INCLUDE PERFETTO MODULE
+            google3.wireless.android.telemetry.trace_extractor.modules.atom_counters_slices`,
+      );
+    } catch (e) {
+      return;
+    }
+
+    const sliceTracks = await e.query(
+      `select distinct ui_group, ui_name, atom, field
+       from atom_slices
+       where ui_name is not null
+       order by 1, 2, 3, 4`,
+    );
+    const slicesIt = sliceTracks.iter({
+      atom: 'str',
+      ui_group: 'str',
+      ui_name: 'str',
+      field: 'str',
+    });
+
+    const tracks = new Map<
+      string,
+      {
+        ui_group: string;
+        ui_name: string;
+      }
+    >();
+    const fields = new Map<string, string[]>();
+    for (; slicesIt.valid(); slicesIt.next()) {
+      const atom = slicesIt.atom;
+      let args = fields.get(atom);
+      if (args === undefined) {
+        args = [];
+        fields.set(atom, args);
+      }
+      args.push(slicesIt.field);
+      tracks.set(atom, {
+        ui_group: slicesIt.ui_group,
+        ui_name: slicesIt.ui_name,
+      });
+    }
+
+    for (const [atom, args] of fields) {
+      function safeArg(arg: string) {
+        return arg.replaceAll(/[[\]]/g, '').replaceAll(/\./g, '_');
+      }
+
+      // We need to make arg names compatible with SQL here because they pass through several
+      // layers of SQL without being quoted in "".
+      function argSql(arg: string) {
+        return `max(case when field = '${arg}' then ifnull(string_value, int_value) end)
+                as ${safeArg(arg)}`;
+      }
+
+      this.addSliceTrack(
+        ctx,
+        tracks.get(atom)!.ui_name,
+        `select ts, dur, slice_name as name, ${args.map((a) => argSql(a)).join(', ')}
+         from atom_slices
+         where atom = '${atom}'
+         group by ts, dur, name`,
+        tracks.get(atom)!.ui_group,
+        args.map((a) => safeArg(a)),
       );
     }
   }
@@ -1417,35 +1486,11 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
   }
 
   async addModemDetail(ctx: Trace, features: Set<string>): Promise<void> {
-    if (!features.has('atom.modem_activity_info')) {
-      return;
-    }
     const groupName = 'Modem Detail';
-    await this.addModemActivityInfo(ctx, groupName);
     if (features.has('track.ril')) {
       await this.addModemRil(ctx, groupName);
     }
-  }
-
-  async addModemActivityInfo(ctx: Trace, groupName: string): Promise<void> {
-    const query = (name: string, col: string): void =>
-      this.addCounterTrack(
-        ctx,
-        name,
-        `select ts, ${col}_ratio as value from modem_activity_info`,
-        groupName,
-        {yOverrideMaximum: 100, unit: '%'},
-      );
-
-    await ctx.engine.query(MODEM_ACTIVITY_INFO);
-    query('Modem sleep', 'sleep_time');
-    query('Modem controller idle', 'controller_idle_time');
-    query('Modem RX time', 'controller_rx_time');
-    query('Modem TX time power 0', 'controller_tx_time_pl0');
-    query('Modem TX time power 1', 'controller_tx_time_pl1');
-    query('Modem TX time power 2', 'controller_tx_time_pl2');
-    query('Modem TX time power 3', 'controller_tx_time_pl3');
-    query('Modem TX time power 4', 'controller_tx_time_pl4');
+    await this.addModemTeaData(ctx, groupName);
   }
 
   async addModemRil(ctx: Trace, groupName: string): Promise<void> {
@@ -1458,40 +1503,6 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
       );
 
     const e = ctx.engine;
-
-    if (
-      globals.extraSqlPackages.find((x) => x.name === 'google3') !== undefined
-    ) {
-      await e.query(
-        `INCLUDE PERFETTO MODULE
-            google3.wireless.android.telemetry.trace_extractor.modules.modem_tea_metrics`,
-      );
-      const counters = await e.query(
-        `select distinct name from pixel_modem_counters`,
-      );
-      const countersIt = counters.iter({name: 'str'});
-      for (; countersIt.valid(); countersIt.next()) {
-        this.addCounterTrack(
-          ctx,
-          countersIt.name,
-          `select ts, value from pixel_modem_counters where name = '${countersIt.name}'`,
-          groupName,
-        );
-      }
-      const slices = await e.query(
-        `select distinct track_name from pixel_modem_slices`,
-      );
-      const slicesIt = slices.iter({track_name: 'str'});
-      for (; slicesIt.valid(); slicesIt.next()) {
-        this.addSliceTrack(
-          ctx,
-          it.name,
-          `select ts dur, slice_name as name from pixel_modem_counters
-              where track_name = '${slicesIt.track_name}'`,
-          groupName,
-        );
-      }
-    }
 
     await e.query(MODEM_RIL_STRENGTH);
     await e.query(MODEM_RIL_CHANNELS_PREAMBLE);
@@ -1515,6 +1526,45 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
       groupName,
       ['raw_ril'],
     );
+  }
+
+  async addModemTeaData(ctx: Trace, groupName: string): Promise<void> {
+    const e = ctx.engine;
+
+    try {
+      await e.query(
+        `INCLUDE PERFETTO MODULE
+            google3.wireless.android.telemetry.trace_extractor.modules.modem_tea_metrics`,
+      );
+    } catch {
+      return;
+    }
+
+    const counters = await e.query(
+      `select distinct name from pixel_modem_counters`,
+    );
+    const countersIt = counters.iter({name: 'str'});
+    for (; countersIt.valid(); countersIt.next()) {
+      this.addCounterTrack(
+        ctx,
+        countersIt.name,
+        `select ts, value from pixel_modem_counters where name = '${countersIt.name}'`,
+        groupName,
+      );
+    }
+    const slices = await e.query(
+      `select distinct track_name from pixel_modem_slices`,
+    );
+    const slicesIt = slices.iter({track_name: 'str'});
+    for (; slicesIt.valid(); slicesIt.next()) {
+      this.addSliceTrack(
+        ctx,
+        slicesIt.track_name,
+        `select ts, dur, slice_name as name from pixel_modem_slices
+            where track_name = '${slicesIt.track_name}'`,
+        groupName,
+      );
+    }
   }
 
   async addKernelWakelocks(ctx: Trace, features: Set<string>): Promise<void> {
@@ -1846,12 +1896,14 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
 
     await ctx.engine.query(PACKAGE_LOOKUP);
     await this.addNetworkSummary(ctx, features);
+    await this.addBluetooth(ctx, features);
+    await this.addAtomCounters(ctx);
+    await this.addAtomSlices(ctx);
     await this.addModemDetail(ctx, features);
     await this.addKernelWakelocks(ctx, features);
     await this.addWakeups(ctx, features);
     await this.addDeviceState(ctx, features);
     await this.addHighCpu(ctx, features);
-    await this.addBluetooth(ctx, features);
     await this.addContainedTraces(ctx, containedTraces);
   }
 
@@ -1859,8 +1911,3 @@ class AndroidLongBatteryTracing implements PerfettoPlugin {
     await this.addTracks(ctx);
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.AndroidLongBatteryTracing',
-  plugin: AndroidLongBatteryTracing,
-};
