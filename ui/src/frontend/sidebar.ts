@@ -41,6 +41,7 @@ import {SidebarMenuItem} from '../public/sidebar';
 import {AppImpl} from '../core/app_impl';
 import {Trace} from '../public/trace';
 import {removeFalsyValues} from '../base/array_utils';
+import {OptionalTraceImplAttrs, TraceImpl} from '../core/trace_impl';
 
 const GITILES_URL =
   'https://android.googlesource.com/platform/external/perfetto';
@@ -95,10 +96,6 @@ const EXPLORE_PAGE_IN_NAV_FLAG = featureFlags.register({
   defaultValue: false,
 });
 
-export interface OptionalTraceAttrs {
-  trace?: Trace;
-}
-
 function shouldShowHiringBanner(): boolean {
   return globals.isInternalUser && HIRING_BANNER_FLAG.get();
 }
@@ -122,7 +119,6 @@ interface Section {
 }
 
 function insertSidebarMenuitems(
-  app: AppImpl,
   groupSelector: SidebarMenuItem['group'],
 ): ReadonlyArray<SectionItem> {
   return AppImpl.instance.sidebar.menuItems
@@ -134,7 +130,7 @@ function insertSidebarMenuitems(
       return prioA - prioB;
     })
     .map((item) => {
-      const cmd = app.commands.getCommand(item.commandId);
+      const cmd = AppImpl.instance.commands.getCommand(item.commandId);
       const title = cmd.defaultHotkey
         ? `${cmd.name} [${formatHotkey(cmd.defaultHotkey)}]`
         : cmd.name;
@@ -147,7 +143,7 @@ function insertSidebarMenuitems(
     });
 }
 
-function getSections(app: AppImpl, trace: Trace | undefined): Section[] {
+function getSections(trace?: TraceImpl): Section[] {
   const downloadDisabled = trace?.traceInfo.downloadable
     ? undefined
     : 'Cannot download external trace';
@@ -157,7 +153,7 @@ function getSections(app: AppImpl, trace: Trace | undefined): Section[] {
       summary: 'Open or record a new trace',
       expanded: true,
       items: [
-        ...insertSidebarMenuitems(app, 'navigation'),
+        ...insertSidebarMenuitems('navigation'),
         {
           t: 'Record new trace',
           a: '#!/record',
@@ -257,7 +253,7 @@ function getSections(app: AppImpl, trace: Trace | undefined): Section[] {
       title: 'Example Traces',
       expanded: true,
       summary: 'Open an example trace',
-      items: [...insertSidebarMenuitems(app, 'example_traces')],
+      items: [...insertSidebarMenuitems('example_traces')],
     },
 
     {
@@ -265,11 +261,7 @@ function getSections(app: AppImpl, trace: Trace | undefined): Section[] {
       expanded: true,
       summary: 'Documentation & Bugs',
       items: removeFalsyValues([
-        {
-          t: 'Keyboard shortcuts',
-          a: () => toggleHelp(AppImpl.instance),
-          i: 'help',
-        },
+        {t: 'Keyboard shortcuts', a: toggleHelp, i: 'help'},
         {t: 'Documentation', a: 'https://perfetto.dev/docs', i: 'find_in_page'},
         {t: 'Flags', a: '#!/flags', i: 'emoji_flags'},
         {
@@ -315,7 +307,7 @@ async function convertTraceToJson(trace: Trace): Promise<void> {
   await convertTraceToJsonAndDownload(file);
 }
 
-function downloadTrace(trace: Trace) {
+function downloadTrace(trace: TraceImpl) {
   if (!trace.traceInfo.downloadable) return;
   AppImpl.instance.analytics.logEvent('Trace Actions', 'Download trace');
 
@@ -405,8 +397,8 @@ async function finaliseMetatrace(engine: Engine) {
   downloadData('metatrace', result.metatrace, jsEvents);
 }
 
-class EngineRPCWidget implements m.ClassComponent<OptionalTraceAttrs> {
-  view({attrs}: m.CVnode<OptionalTraceAttrs>) {
+class EngineRPCWidget implements m.ClassComponent<OptionalTraceImplAttrs> {
+  view({attrs}: m.CVnode<OptionalTraceImplAttrs>) {
     let cssClass = '';
     let title = 'Number of pending SQL queries';
     let label: string;
@@ -538,8 +530,8 @@ const ServiceWorkerWidget: m.Component = {
   },
 };
 
-class SidebarFooter implements m.ClassComponent<OptionalTraceAttrs> {
-  view({attrs}: m.CVnode<OptionalTraceAttrs>) {
+class SidebarFooter implements m.ClassComponent<OptionalTraceImplAttrs> {
+  view({attrs}: m.CVnode<OptionalTraceImplAttrs>) {
     return m(
       '.sidebar-footer',
       m(EngineRPCWidget, attrs),
@@ -576,21 +568,17 @@ class HiringBanner implements m.ClassComponent {
   }
 }
 
-export interface SidebarAttrs extends OptionalTraceAttrs {
-  app: AppImpl;
-}
-
-export class Sidebar implements m.ClassComponent<SidebarAttrs> {
+export class Sidebar implements m.ClassComponent<OptionalTraceImplAttrs> {
   private _redrawWhileAnimating = new Animation(() => raf.scheduleFullRedraw());
   private _asyncJobPending = new Set<string>();
 
-  view({attrs}: m.CVnode<SidebarAttrs>) {
-    if (attrs.app.sidebar.sidebarEnabled === 'DISABLED') {
+  view({attrs}: m.CVnode<OptionalTraceImplAttrs>) {
+    if (AppImpl.instance.sidebar.sidebarEnabled === 'DISABLED') {
       return null;
     }
     const vdomSections = [];
     const trace = attrs.trace;
-    for (const section of getSections(attrs.app, trace)) {
+    for (const section of getSections(trace)) {
       const vdomItems = [];
       for (const item of section.items) {
         if (item.isVisible !== undefined && !item.isVisible()) {
@@ -635,11 +623,9 @@ export class Sidebar implements m.ClassComponent<SidebarAttrs> {
           ),
         );
       }
-      if (section.appendOpenedTraceTitle) {
-        if (attrs.trace?.traceInfo.traceTitle) {
-          const {traceTitle, traceUrl} = attrs.trace.traceInfo;
-          vdomItems.unshift(m('li', createTraceLink(traceTitle, traceUrl)));
-        }
+      if (section.appendOpenedTraceTitle && attrs.trace?.traceInfo.traceTitle) {
+        const {traceTitle, traceUrl} = attrs.trace?.traceInfo;
+        vdomItems.unshift(m('li', createTraceLink(traceTitle, traceUrl)));
       }
       vdomSections.push(
         m(
@@ -684,17 +670,13 @@ export class Sidebar implements m.ClassComponent<SidebarAttrs> {
         m(
           'button.sidebar-button',
           {
-            onclick: () => {
-              attrs.app.commands.runCommand(
-                'perfetto.CoreCommands#ToggleLeftSidebar',
-              );
-            },
+            onclick: () => AppImpl.instance.sidebar.toggleSidebarVisbility(),
           },
           m(
             'i.material-icons',
             {
               title:
-                attrs.app.sidebar.sidebarVisibility === 'VISIBLE'
+                AppImpl.instance.sidebar.sidebarVisibility === 'VISIBLE'
                   ? 'Hide menu'
                   : 'Show menu',
             },
