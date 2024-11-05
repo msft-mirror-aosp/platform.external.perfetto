@@ -15,7 +15,6 @@
 import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
 import {Actions, DeferredAction} from '../common/actions';
-import {CommandManagerImpl} from '../core/command_manager';
 import {createEmptyState} from '../common/empty_state';
 import {State} from '../common/state';
 import {setPerfHooks} from '../core/perf';
@@ -23,10 +22,7 @@ import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
 import {getServingRoot} from '../base/http_utils';
-import {Workspace} from '../public/workspace';
-import {TraceImpl} from '../core/trace_impl';
 import {AppImpl} from '../core/app_impl';
-import {createFakeTraceImpl} from '../core/fake_trace_impl';
 
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
@@ -35,7 +31,6 @@ type TrackDataStore = Map<string, {}>;
  * Global accessors for state/dispatch in the frontend.
  */
 class Globals {
-  private _initialFakeTrace?: TraceImpl;
   private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
   private _serviceWorkerController?: ServiceWorkerController = undefined;
@@ -53,12 +48,6 @@ class Globals {
 
   initialize(dispatchMultiple: DispatchMultiple) {
     this._dispatchMultiple = dispatchMultiple;
-
-    // TODO(primiano): we do this to avoid making all our members possibly
-    // undefined, which would cause a drama of if (!=undefined) all over the
-    // code. This is not pretty, but this entire file is going to be nuked from
-    // orbit soon.
-    this._initialFakeTrace = createFakeTraceImpl();
 
     setPerfHooks(
       () => this.state.perfDebug,
@@ -105,35 +94,11 @@ class Globals {
     assertExists(this._dispatchMultiple)(actions);
   }
 
-  get trace() {
-    const trace = AppImpl.instance.trace;
-    return trace ?? assertExists(this._initialFakeTrace);
-  }
-
-  get timeline() {
-    return this.trace.timeline;
-  }
-
-  get searchManager() {
-    return this.trace.search;
-  }
-
   get serviceWorkerController() {
     return assertExists(this._serviceWorkerController);
   }
 
-  get workspace(): Workspace {
-    return this.trace.workspace;
-  }
-
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
-
-  // TODO(primiano): this should be really renamed to traceInfo, but doing so
-  // creates extra churn. Not worth it as we are going to get rid of this file
-  // soon.
-  get traceContext() {
-    return this.trace.traceInfo;
-  }
 
   get trackDataStore(): TrackDataStore {
     return assertExists(this._trackDataStore);
@@ -157,10 +122,6 @@ class Globals {
 
   setRecordingLog(recordingLog: string) {
     this._recordingLog = recordingLog;
-  }
-
-  get extraSqlPackages() {
-    return AppImpl.instance.extraSqlPackages;
   }
 
   // This variable is set by the is_internal_user.js script if the user is a
@@ -188,26 +149,6 @@ class Globals {
   // be cleaned up explicitly.
   shutdown() {
     raf.shutdown();
-  }
-
-  get commandManager(): CommandManagerImpl {
-    return AppImpl.instance.commands;
-  }
-
-  get tabManager() {
-    return this.trace.tabs;
-  }
-
-  get trackManager() {
-    return this.trace.tracks;
-  }
-
-  get selectionManager() {
-    return this.trace.selection;
-  }
-
-  get noteManager() {
-    return this.trace.notes;
   }
 }
 

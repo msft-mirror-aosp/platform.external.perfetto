@@ -1,4 +1,4 @@
-// Copyright (C) 2023 The Android Open Source Project
+// Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {v4} from 'uuid';
-import {sqlNameSafe} from './string_utils';
+import {TraceSource} from '../core/trace_source';
+import {TraceInfo} from '../public/trace_info';
 
-export const uuidv4 = v4;
-
-/**
- * Get a SQL friendly UUID, or convert a pre-existing one.
- * @param uuid Optional: Pre-existing uuid to format.
- * @returns string The resulting uuid.
- */
-export function uuidv4Sql(uuid?: string): string {
-  const str = uuid ?? uuidv4();
-  return sqlNameSafe(str);
+export interface TraceInfoImpl extends TraceInfo {
+  readonly source: TraceSource;
 }

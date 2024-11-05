@@ -32,10 +32,11 @@ import {
 } from '../../trace_processor/query_result';
 import {
   Flamegraph,
-  FlamegraphFilters,
   FlamegraphQueryData,
+  FlamegraphState,
   FlamegraphView,
 } from '../../widgets/flamegraph';
+import {Trace} from '../trace';
 
 export interface QueryFlamegraphColumn {
   // The name of the column in SQL.
@@ -118,64 +119,46 @@ export function metricsFromTableOrSubquery(
   return metrics;
 }
 
-export interface QueryFlamegraphAttrs {
-  readonly engine: Engine;
-  readonly metrics: ReadonlyArray<QueryFlamegraphMetric>;
-}
-
-// A Mithril component which wraps the `Flamegraph` widget and fetches the data
-// for the widget by querying an `Engine`.
-export class QueryFlamegraph implements m.ClassComponent<QueryFlamegraphAttrs> {
-  private selectedMetricName;
+// A Perfetto UI component which wraps the `Flamegraph` widget and fetches the
+// data for the widget by querying an `Engine`.
+export class QueryFlamegraph {
   private data?: FlamegraphQueryData;
-  private filters: FlamegraphFilters = {
-    showStack: [],
-    hideStack: [],
-    showFromFrame: [],
-    hideFrame: [],
-    view: {kind: 'TOP_DOWN'},
-  };
-  private attrs: QueryFlamegraphAttrs;
-  private selMonitor = new Monitor([() => this.attrs.metrics]);
+  private state: FlamegraphState;
+  private selMonitor = new Monitor([() => this.state]);
   private queryLimiter = new AsyncLimiter();
 
-  constructor({attrs}: m.Vnode<QueryFlamegraphAttrs>) {
-    this.attrs = attrs;
-    this.selectedMetricName = attrs.metrics[0].name;
+  constructor(
+    private readonly trace: Trace,
+    private readonly metrics: QueryFlamegraphMetric[],
+  ) {
+    this.state = {
+      selectedMetricName: metrics[0].name,
+      filters: [],
+      view: {kind: 'TOP_DOWN'},
+    };
   }
 
-  view({attrs}: m.Vnode<QueryFlamegraphAttrs>) {
-    this.attrs = attrs;
+  render() {
     if (this.selMonitor.ifStateChanged()) {
-      this.selectedMetricName = attrs.metrics[0].name;
+      const metric = assertExists(
+        this.metrics.find((x) => this.state.selectedMetricName === x.name),
+      );
+      const engine = this.trace.engine;
+      const state = this.state;
       this.data = undefined;
-      this.fetchData(attrs);
+      this.queryLimiter.schedule(async () => {
+        this.data = undefined;
+        this.data = await computeFlamegraphTree(engine, metric, state);
+      });
     }
     return m(Flamegraph, {
-      metrics: attrs.metrics,
-      selectedMetricName: this.selectedMetricName,
+      metrics: this.metrics,
       data: this.data,
-      onMetricChange: (name) => {
-        this.selectedMetricName = name;
-        this.data = undefined;
-        this.fetchData(attrs);
+      state: this.state,
+      onStateChange: (state) => {
+        this.state = state;
+        this.trace.scheduleFullRedraw();
       },
-      onFiltersChanged: (filters) => {
-        this.filters = filters;
-        this.data = undefined;
-        this.fetchData(attrs);
-      },
-    });
-  }
-
-  private async fetchData(attrs: QueryFlamegraphAttrs) {
-    const metric = assertExists(
-      attrs.metrics.find((metric) => metric.name === this.selectedMetricName),
-    );
-    const engine = attrs.engine;
-    const filters = this.filters;
-    this.queryLimiter.schedule(async () => {
-      this.data = await computeFlamegraphTree(engine, metric, filters);
     });
   }
 }
@@ -188,8 +171,21 @@ async function computeFlamegraphTree(
     unaggregatableProperties,
     aggregatableProperties,
   }: QueryFlamegraphMetric,
-  {showStack, hideStack, showFromFrame, hideFrame, view}: FlamegraphFilters,
+  {filters, view}: FlamegraphState,
 ): Promise<FlamegraphQueryData> {
+  const showStack = filters
+    .filter((x) => x.kind === 'SHOW_STACK')
+    .map((x) => x.filter);
+  const hideStack = filters
+    .filter((x) => x.kind === 'HIDE_STACK')
+    .map((x) => x.filter);
+  const showFromFrame = filters
+    .filter((x) => x.kind === 'SHOW_FROM_FRAME')
+    .map((x) => x.filter);
+  const hideFrame = filters
+    .filter((x) => x.kind === 'HIDE_FRAME')
+    .map((x) => x.filter);
+
   // Pivot also essentially acts as a "show stack" filter so treat it like one.
   const showStackAndPivot = [...showStack];
   if (view.kind === 'PIVOT') {
