@@ -52,6 +52,9 @@ bool RequiresZlibSupport(TraceType type) {
     case kAndroidLogcatTraceType:
     case kAndroidDumpstateTraceType:
     case kGeckoTraceType:
+    case kArtMethodTraceType:
+    case kPerfTextTraceType:
+    case kTarTraceType:
       return false;
   }
   PERFETTO_FATAL("For GCC");

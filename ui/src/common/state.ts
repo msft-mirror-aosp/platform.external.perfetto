@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
-import {TraceSource} from '../public/trace_source';
+import {TraceSource} from '../core/trace_source';
 
 /**
  * A plain js object, holding objects of type |Class| keyed by string id.
@@ -158,7 +157,6 @@ export interface PendingDeeplinkState {
 
 export interface State {
   version: number;
-  nextId: string;
 
   /**
    * State of the ConfigEditor.
@@ -174,21 +172,9 @@ export interface State {
 
   debugTrackId?: string;
   lastTrackReloadRequest?: number;
-  queries: ObjectById<QueryConfig>;
-  traceConversionInProgress: boolean;
-  flamegraphModalDismissed: boolean;
 
   // Show track perf debugging overlay
   perfDebug: boolean;
-
-  // Show the sidebar extended
-  sidebarVisible: boolean;
-
-  // Hovered and focused events
-  hoveredUtid: number;
-  hoveredPid: number;
-  hoveredNoteTimestamp: time;
-  highlightedSliceId: number;
 
   /**
    * Trace recording

@@ -15,20 +15,15 @@
 import {assertTrue, assertUnreachable} from '../base/logging';
 import {
   Selection,
-  LegacySelection,
   Area,
   SelectionOpts,
   SelectionManager,
   AreaSelectionAggregator,
   SqlSelectionResolver,
 } from '../public/selection';
-import {duration, Time, time, TimeSpan} from '../base/time';
-import {
-  GenericSliceDetailsTabConfig,
-  GenericSliceDetailsTabConfigBase,
-} from '../public/details_panel';
+import {TimeSpan} from '../base/time';
 import {raf} from './raf_scheduler';
-import {exists, Optional} from '../base/utils';
+import {exists} from '../base/utils';
 import {TrackManagerImpl} from './track_manager';
 import {Engine} from '../trace_processor/engine';
 import {ScrollHelper} from './scroll_helper';
@@ -49,7 +44,6 @@ const INCOMPLETE_SLICE_DURATION = 30_000n;
 //    requires querying the SQL engine, which is an async operation.
 export class SelectionManagerImpl implements SelectionManager {
   private _selection: Selection = {kind: 'empty'};
-  private _selectedDetails?: LegacySelectionDetails;
   private _aggregationManager: SelectionAggregationManager;
   // Incremented every time _selection changes.
   private readonly selectionResolvers = new Array<SqlSelectionResolver>();
@@ -98,6 +92,10 @@ export class SelectionManagerImpl implements SelectionManager {
     );
   }
 
+  selectTrack(trackUri: string, opts?: SelectionOpts) {
+    this.setSelection({kind: 'track', trackUri}, opts);
+  }
+
   selectNote(args: {id: string}, opts?: SelectionOpts) {
     this.setSelection(
       {
@@ -125,9 +123,9 @@ export class SelectionManagerImpl implements SelectionManager {
 
     this.setSelection(
       {
+        ...area,
         kind: 'area',
         tracks,
-        ...area,
       },
       opts,
     );
@@ -143,7 +141,7 @@ export class SelectionManagerImpl implements SelectionManager {
     } else {
       trackUris = trackUris.filter((t) => t !== trackUri);
     }
-    this.setSelection({
+    this.selectArea({
       ...curSelection,
       trackUris,
     });
@@ -171,66 +169,14 @@ export class SelectionManagerImpl implements SelectionManager {
         }
       });
     }
-    this.setSelection({
+    this.selectArea({
       ...curSelection,
       trackUris: newTrackUris,
     });
   }
 
-  // There is no matching addLegacy as we did not support multi-single
-  // selection with the legacy selection system.
-  selectLegacy(legacySelection: LegacySelection, opts?: SelectionOpts): void {
-    this.setSelection(
-      {
-        kind: 'legacy',
-        legacySelection,
-      },
-      opts,
-    );
-  }
-
-  selectGenericSlice(args: {
-    id: number;
-    sqlTableName: string;
-    start: time;
-    duration: duration;
-    trackUri: string;
-    detailsPanelConfig: {
-      kind: string;
-      config: GenericSliceDetailsTabConfigBase;
-    };
-  }): void {
-    const detailsPanelConfig: GenericSliceDetailsTabConfig = {
-      id: args.id,
-      ...args.detailsPanelConfig.config,
-    };
-    this.setSelection({
-      kind: 'legacy',
-      legacySelection: {
-        kind: 'GENERIC_SLICE',
-        id: args.id,
-        sqlTableName: args.sqlTableName,
-        start: args.start,
-        duration: args.duration,
-        trackUri: args.trackUri,
-        detailsPanelConfig: {
-          kind: args.detailsPanelConfig.kind,
-          config: detailsPanelConfig,
-        },
-      },
-    });
-  }
-
   get selection(): Selection {
     return this._selection;
-  }
-
-  get legacySelection(): LegacySelection | null {
-    return toLegacySelection(this._selection);
-  }
-
-  get legacySelectionDetails(): LegacySelectionDetails | undefined {
-    return this._selectedDetails;
   }
 
   registerSqlSelectionResolver(resolver: SqlSelectionResolver): void {
@@ -265,9 +211,7 @@ export class SelectionManagerImpl implements SelectionManager {
 
   private setSelection(selection: Selection, opts?: SelectionOpts) {
     this._selection = selection;
-
     this.onSelectionChange(selection, opts ?? {});
-
     raf.scheduleFullRedraw();
 
     if (opts?.scrollToSelection) {
@@ -288,8 +232,9 @@ export class SelectionManagerImpl implements SelectionManager {
     }
     switch (source) {
       case 'track':
-        this.scrollHelper.scrollTo({
-          track: {uri: trackUri, expandGroup: true},
+        this.selectTrack(trackUri, {
+          clearSearch: false,
+          scrollToSelection: true,
         });
         break;
       case 'cpu':
@@ -320,21 +265,40 @@ export class SelectionManagerImpl implements SelectionManager {
     const uri = (() => {
       switch (this.selection.kind) {
         case 'track_event':
+        case 'track':
           return this.selection.trackUri;
-        case 'legacy':
-          return this.selection.legacySelection.trackUri;
+        // TODO(stevegolton): Handle scrolling to area and note selections.
         default:
           return undefined;
       }
     })();
-    const range = this.findTimeRangeOfSelection();
+    const range = this.findFocusRangeOfSelection();
     this.scrollHelper.scrollTo({
       time: range ? {...range} : undefined,
       track: uri ? {uri: uri, expandGroup: true} : undefined,
     });
   }
 
-  findTimeRangeOfSelection(): Optional<TimeSpan> {
+  // Finds the time range range that we should actually focus on - using dummy
+  // values for instant and incomplete slices, so we don't end up super zoomed
+  // in.
+  private findFocusRangeOfSelection(): TimeSpan | undefined {
+    const sel = this.selection;
+    if (sel.kind === 'track_event') {
+      // The focus range of slices is different to that of the actual span
+      if (sel.dur === -1n) {
+        return TimeSpan.fromTimeAndDuration(sel.ts, INCOMPLETE_SLICE_DURATION);
+      } else if (sel.dur === 0n) {
+        return TimeSpan.fromTimeAndDuration(sel.ts, INSTANT_FOCUS_DURATION);
+      } else {
+        return TimeSpan.fromTimeAndDuration(sel.ts, sel.dur);
+      }
+    } else {
+      return this.findTimeRangeOfSelection();
+    }
+  }
+
+  findTimeRangeOfSelection(): TimeSpan | undefined {
     const sel = this.selection;
     if (sel.kind === 'area') {
       return new TimeSpan(sel.start, sel.end);
@@ -358,70 +322,10 @@ export class SelectionManagerImpl implements SelectionManager {
       return TimeSpan.fromTimeAndDuration(sel.ts, sel.dur);
     }
 
-    const legacySel = this.legacySelection;
-    if (!exists(legacySel)) {
-      return undefined;
-    }
-
-    if (legacySel.kind === 'GENERIC_SLICE') {
-      return findTimeRangeOfSlice({
-        ts: legacySel.start,
-        dur: legacySel.duration,
-      });
-    }
-
     return undefined;
   }
 
   get aggregation() {
     return this._aggregationManager;
   }
-}
-
-function toLegacySelection(selection: Selection): LegacySelection | null {
-  switch (selection.kind) {
-    case 'area':
-    case 'track_event':
-    case 'empty':
-    case 'note':
-      return null;
-    case 'union':
-      for (const child of selection.selections) {
-        const result = toLegacySelection(child);
-        if (result !== null) {
-          return result;
-        }
-      }
-      return null;
-    case 'legacy':
-      return selection.legacySelection;
-    default:
-      assertUnreachable(selection);
-      return null;
-  }
-}
-
-// Returns the start and end points of a slice-like object If slice is instant
-// or incomplete, dummy time will be returned which instead.
-function findTimeRangeOfSlice(slice: {ts?: time; dur?: duration}): TimeSpan {
-  if (exists(slice.ts) && exists(slice.dur)) {
-    if (slice.dur === -1n) {
-      return TimeSpan.fromTimeAndDuration(slice.ts, INCOMPLETE_SLICE_DURATION);
-    } else if (slice.dur === 0n) {
-      return TimeSpan.fromTimeAndDuration(slice.ts, INSTANT_FOCUS_DURATION);
-    } else {
-      return TimeSpan.fromTimeAndDuration(slice.ts, slice.dur);
-    }
-  } else {
-    // TODO(primiano): unclear why we dont return undefined here.
-    return new TimeSpan(Time.INVALID, Time.INVALID);
-  }
-}
-
-export interface LegacySelectionDetails {
-  ts?: time;
-  dur?: duration;
-  // Additional information for sched selection, used to draw the wakeup arrow.
-  wakeupTs?: time;
-  wakerCpu?: number;
 }

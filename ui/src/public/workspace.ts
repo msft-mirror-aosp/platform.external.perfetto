@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {raf} from '../core/raf_scheduler';
+import {assertTrue} from '../base/logging';
 
 export interface WorkspaceManager {
   // This is the same of ctx.workspace, exposed for consistency also here.
@@ -66,6 +66,7 @@ function createSessionUniqueId(): string {
 export abstract class TrackNodeContainer {
   protected _children: Array<TrackNode> = [];
   protected readonly tracksById = new Map<string, TrackNode>();
+  protected abstract fireOnChangeListener(): void;
 
   /**
    * True if this node has children, false otherwise.
@@ -110,7 +111,7 @@ export abstract class TrackNodeContainer {
   addChildLast(child: TrackNode): void {
     this.adopt(child);
     this._children.push(child);
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -121,7 +122,7 @@ export abstract class TrackNodeContainer {
   addChildFirst(child: TrackNode): void {
     this.adopt(child);
     this._children.unshift(child);
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -132,15 +133,15 @@ export abstract class TrackNodeContainer {
    * before this node.
    */
   addChildBefore(child: TrackNode, referenceNode: TrackNode): void {
-    const indexOfReference = this.children.indexOf(referenceNode);
-    if (indexOfReference === -1) {
-      throw new Error('Reference node is not a child of this node');
-    }
+    if (child === referenceNode) return;
+
+    assertTrue(this.children.includes(referenceNode));
 
     this.adopt(child);
 
+    const indexOfReference = this.children.indexOf(referenceNode);
     this._children.splice(indexOfReference, 0, child);
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -151,15 +152,15 @@ export abstract class TrackNodeContainer {
    * after this node.
    */
   addChildAfter(child: TrackNode, referenceNode: TrackNode): void {
-    const indexOfReference = this.children.indexOf(referenceNode);
-    if (indexOfReference === -1) {
-      throw new Error('Reference node is not a child of this node');
-    }
+    if (child === referenceNode) return;
+
+    assertTrue(this.children.includes(referenceNode));
 
     this.adopt(child);
 
+    const indexOfReference = this.children.indexOf(referenceNode);
     this._children.splice(indexOfReference + 1, 0, child);
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -171,7 +172,7 @@ export abstract class TrackNodeContainer {
     this._children = this.children.filter((x) => child !== x);
     child.parent = undefined;
     child.id && this.tracksById.delete(child.id);
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -189,7 +190,7 @@ export abstract class TrackNodeContainer {
   clear(): void {
     this._children = [];
     this.tracksById.clear();
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -327,7 +328,7 @@ export class TrackNode extends TrackNodeContainer {
    * list of that workspace.
    */
   get isPinned(): boolean {
-    return Boolean(this.workspace?.pinnedTracks.includes(this));
+    return Boolean(this.workspace?.hasPinnedTrack(this));
   }
 
   /**
@@ -396,7 +397,7 @@ export class TrackNode extends TrackNodeContainer {
    */
   expand(): void {
     this._collapsed = false;
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -405,7 +406,7 @@ export class TrackNode extends TrackNodeContainer {
    */
   collapse(): void {
     this._collapsed = true;
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -413,7 +414,7 @@ export class TrackNode extends TrackNodeContainer {
    */
   toggleCollapsed(): void {
     this._collapsed = !this._collapsed;
-    raf.scheduleFullRedraw();
+    this.fireOnChangeListener();
   }
 
   /**
@@ -448,19 +449,31 @@ export class TrackNode extends TrackNodeContainer {
     }
     return fullPath;
   }
+
+  protected override fireOnChangeListener(): void {
+    this.workspace?.onchange(this.workspace);
+  }
 }
 
 /**
  * Defines a workspace containing a track tree and a pinned area.
  */
 export class Workspace extends TrackNodeContainer {
-  public pinnedTracks: Array<TrackNode> = [];
   public title = '<untitled-workspace>';
   public readonly id: string;
+  onchange: (w: Workspace) => void = () => {};
+
+  // Dummy node to contain the pinned tracks
+  private pinnedRoot = new TrackNode();
+
+  get pinnedTracks(): ReadonlyArray<TrackNode> {
+    return this.pinnedRoot.children;
+  }
 
   constructor() {
     super();
     this.id = createSessionUniqueId();
+    this.pinnedRoot.parent = this;
   }
 
   /**
@@ -468,25 +481,33 @@ export class Workspace extends TrackNodeContainer {
    */
   override clear(): void {
     super.clear();
-    this.pinnedTracks = [];
+    this.pinnedRoot.clear();
   }
 
   /**
    * Adds a track node to this workspace's pinned area.
    */
   pinTrack(track: TrackNode): void {
-    // TODO(stevegolton): Check if the track exists in this workspace first
-    // otherwise we might get surprises.
-    this.pinnedTracks.push(track);
-    raf.scheduleFullRedraw();
+    // Make a lightweight clone of this track - just the uri and the title.
+    const cloned = new TrackNode({uri: track.uri, title: track.title});
+    this.pinnedRoot.addChildLast(cloned);
   }
 
   /**
    * Removes a track node from this workspace's pinned area.
    */
   unpinTrack(track: TrackNode): void {
-    this.pinnedTracks = this.pinnedTracks.filter((t) => t !== track);
-    raf.scheduleFullRedraw();
+    const foundNode = this.pinnedRoot.children.find((t) => t.uri === track.uri);
+    if (foundNode) {
+      this.pinnedRoot.removeChild(foundNode);
+    }
+  }
+
+  /**
+   * Check if this workspace has a pinned track with the same URI as |track|.
+   */
+  hasPinnedTrack(track: TrackNode): boolean {
+    return this.pinnedTracks.some((p) => p.uri === track.uri);
   }
 
   /**
@@ -501,5 +522,17 @@ export class Workspace extends TrackNodeContainer {
    */
   findTrackByUri(uri: string): TrackNode | undefined {
     return this.flatTracks.find((t) => t.uri === uri);
+  }
+
+  /**
+   * Find a track by ID, also searching pinned tracks.
+   */
+  override getTrackById(id: string): TrackNode | undefined {
+    // Also search the pinned tracks
+    return this.pinnedRoot.getTrackById(id) || super.getTrackById(id);
+  }
+
+  protected override fireOnChangeListener(): void {
+    this.onchange(this);
   }
 }

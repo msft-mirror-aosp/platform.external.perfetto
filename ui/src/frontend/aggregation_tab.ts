@@ -26,13 +26,13 @@ import {Monitor} from '../base/monitor';
 import {
   CPU_PROFILE_TRACK_KIND,
   PERF_SAMPLES_PROFILE_TRACK_KIND,
-  THREAD_SLICE_TRACK_KIND,
+  SLICE_TRACK_KIND,
 } from '../public/track_kinds';
 import {
   QueryFlamegraph,
   QueryFlamegraphAttrs,
   metricsFromTableOrSubquery,
-} from '../core/query_flamegraph';
+} from '../public/lib/query_flamegraph';
 import {DisposableStack} from '../base/disposable_stack';
 import {assertExists} from '../base/logging';
 import {TraceImpl} from '../core/trace_impl';
@@ -242,7 +242,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
                 source_file,
                 cast(line_number AS text) as line_number,
                 self_count
-              from _callstacks_for_cpu_profile_stack_samples!((
+              from _callstacks_for_callsites!((
                 select p.callsite_id
                 from cpu_profile_stack_sample p
                 where p.ts >= ${currentSelection.start}
@@ -299,7 +299,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
           `
             (
               select id, parent_id as parentId, name, self_count
-              from _linux_perf_callstacks_for_samples!((
+              from _callstacks_for_callsites!((
                 select p.callsite_id
                 from perf_sample p
                 join thread t using (utid)
@@ -337,7 +337,7 @@ class AreaDetailsPanel implements m.ClassComponent<AreaDetailsPanelAttrs> {
     }
     const trackIds = [];
     for (const trackInfo of currentSelection.tracks) {
-      if (trackInfo?.tags?.kind !== THREAD_SLICE_TRACK_KIND) {
+      if (trackInfo?.tags?.kind !== SLICE_TRACK_KIND) {
         continue;
       }
       if (trackInfo.tags?.trackIds === undefined) {

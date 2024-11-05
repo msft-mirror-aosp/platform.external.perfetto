@@ -27,10 +27,6 @@ import {
 } from './debug_tracks';
 import {Trace} from '../../trace';
 
-export function uuidToViewName(uuid: string): string {
-  return `view_${uuid.split('-').join('_')}`;
-}
-
 interface AddDebugTrackMenuAttrs {
   dataSource: Required<SqlDataSource>;
   trace: Trace;
@@ -121,7 +117,7 @@ export class AddDebugTrackMenu
           this.trackType = (e.target as HTMLSelectElement).value as
             | 'slice'
             | 'counter';
-          trace.scheduleRedraw();
+          trace.scheduleFullRedraw();
         },
       },
       options,

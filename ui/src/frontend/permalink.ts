@@ -15,12 +15,11 @@
 import m from 'mithril';
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
-import {ConversionJobStatus} from '../common/conversion_jobs';
 import {
   JsonSerialize,
   parseAppState,
   serializeAppState,
-} from '../common/state_serialization';
+} from '../core/state_serialization';
 import {
   BUCKET_NAME,
   MIME_BINARY,
@@ -29,18 +28,14 @@ import {
 } from '../common/gcs_uploader';
 import {globals} from './globals';
 import {
-  publishConversionJobStatusUpdate,
-  publishPermalinkHash,
-} from './publish';
-import {Router} from './router';
-import {Optional} from '../base/utils';
-import {
   SERIALIZED_STATE_VERSION,
   SerializedAppState,
-} from '../public/state_serialization_schema';
+} from '../core/state_serialization_schema';
 import {z} from 'zod';
 import {showModal} from '../widgets/modal';
 import {AppImpl} from '../core/app_impl';
+import {Router} from '../core/router';
+import {onClickCopy} from './clipboard';
 
 // Permalink serialization has two layers:
 // 1. Serialization of the app state (state_serialization.ts):
@@ -77,21 +72,8 @@ export interface PermalinkOptions {
 }
 
 export async function createPermalink(opts: PermalinkOptions): Promise<void> {
-  const jobName = 'create_permalink';
-  publishConversionJobStatusUpdate({
-    jobName,
-    jobStatus: ConversionJobStatus.InProgress,
-  });
-
-  try {
-    const hash = await createPermalinkInternal(opts);
-    publishPermalinkHash(hash);
-  } finally {
-    publishConversionJobStatusUpdate({
-      jobName,
-      jobStatus: ConversionJobStatus.NotRunning,
-    });
-  }
+  const hash = await createPermalinkInternal(opts);
+  showPermalinkDialog(hash);
 }
 
 // Returns the file name, not the full url (i.e. the name of the GCS object).
@@ -106,10 +88,10 @@ async function createPermalinkInternal(
     // Check if we need to upload the trace file, before serializing the app
     // state.
     let alreadyUploadedUrl = '';
-    const traceInfo = assertExists(AppImpl.instance.trace?.traceInfo);
-    const traceSource = traceInfo.source;
+    const trace = assertExists(AppImpl.instance.trace);
+    const traceSource = trace.traceInfo.source;
     let dataToUpload: File | ArrayBuffer | undefined = undefined;
-    let traceName = traceInfo.traceTitle || 'trace';
+    let traceName = trace.traceInfo.traceTitle || 'trace';
     if (traceSource.type === 'FILE') {
       dataToUpload = traceSource.file;
       traceName = dataToUpload.name;
@@ -136,7 +118,7 @@ async function createPermalinkInternal(
       permalinkData.traceUrl = uploader.uploadedUrl;
     }
 
-    permalinkData.appState = serializeAppState();
+    permalinkData.appState = serializeAppState(trace);
   }
 
   // Serialize the permalink with the app state (or recording state) and upload.
@@ -194,7 +176,7 @@ export async function loadPermalink(gcsFileName: string): Promise<void> {
     Router.navigate('#!/record');
     return;
   }
-  let serializedAppState: Optional<SerializedAppState> = undefined;
+  let serializedAppState: SerializedAppState | undefined = undefined;
   if (permalink.appState !== undefined) {
     // This is the most common case where the permalink contains the app state
     // (and optionally a traceUrl, below).
@@ -206,9 +188,7 @@ export async function loadPermalink(gcsFileName: string): Promise<void> {
     }
   }
   if (permalink.traceUrl) {
-    globals.dispatch(
-      Actions.openTraceFromUrl({url: permalink.traceUrl, serializedAppState}),
-    );
+    AppImpl.instance.openTraceFromUrl(permalink.traceUrl, serializedAppState);
   }
 
   if (error) {
@@ -247,7 +227,7 @@ export async function loadPermalink(gcsFileName: string): Promise<void> {
 // the trace URL.
 // If we suceed, convert it to a new-style JSON object preserving some minimal
 // information (really just vieport and pinned tracks).
-function tryLoadLegacyPermalink(data: unknown): Optional<PermalinkState> {
+function tryLoadLegacyPermalink(data: unknown): PermalinkState | undefined {
   const legacyData = data as {
     version?: number;
     engine?: {source?: {url?: string}};
@@ -286,4 +266,18 @@ function reportUpdateProgress(uploader: GcsUploader) {
 
 function updateStatus(msg: string): void {
   AppImpl.instance.omnibox.showStatusMessage(msg);
+}
+
+function showPermalinkDialog(hash: string) {
+  const url = `${self.location.origin}/#!/?s=${hash}`;
+  const linkProps = {title: 'Click to copy the URL', onclick: onClickCopy(url)};
+  showModal({
+    title: 'Permalink',
+    content: m(
+      'div',
+      m(`a[href=${url}]`, linkProps, url),
+      m('br'),
+      m('i', 'Click on the URL to copy it into the clipboard'),
+    ),
+  });
 }

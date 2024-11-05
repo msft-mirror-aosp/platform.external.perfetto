@@ -13,17 +13,14 @@
 // limitations under the License.
 
 import {time, duration, TimeSpan} from '../base/time';
-import {Optional} from '../base/utils';
 import {Engine} from '../trace_processor/engine';
 import {ColumnDef, Sorting, ThreadStateExtra} from './aggregation';
-import {GenericSliceDetailsTabConfigBase} from './details_panel';
 import {TrackDescriptor} from './track';
 
 export interface SelectionManager {
   readonly selection: Selection;
-  readonly legacySelection: LegacySelection | null;
 
-  findTimeRangeOfSelection(): Optional<TimeSpan>;
+  findTimeRangeOfSelection(): TimeSpan | undefined;
   clear(): void;
 
   /**
@@ -40,6 +37,14 @@ export interface SelectionManager {
   ): void;
 
   /**
+   * Select a track.
+   *
+   * @param trackUri - The URI for the track to select.
+   * @param opts - Additional options.
+   */
+  selectTrack(trackUri: string, opts?: SelectionOpts): void;
+
+  /**
    * Select a track event via a sql table name + id.
    *
    * @param sqlTableName - The name of the SQL table to resolve.
@@ -47,14 +52,6 @@ export interface SelectionManager {
    * @param opts - Additional options.
    */
   selectSqlEvent(sqlTableName: string, id: number, opts?: SelectionOpts): void;
-
-  /**
-   * Select a legacy selection.
-   *
-   * @param selection - The legacy selection to select.
-   * @param opts - Additional options.
-   */
-  selectLegacy(selection: LegacySelection, opts?: SelectionOpts): void;
 
   /**
    * Create an area selection for the purposes of aggregation.
@@ -66,20 +63,6 @@ export interface SelectionManager {
 
   scrollToCurrentSelection(): void;
   registerAreaSelectionAggreagtor(aggr: AreaSelectionAggregator): void;
-
-  // TODO(primiano): I don't undertsand what this generic slice is, but now
-  // is exposed to plugins. For now i'm just carrying it forward.
-  selectGenericSlice(args: {
-    id: number;
-    sqlTableName: string;
-    start: time;
-    duration: duration;
-    trackUri: string;
-    detailsPanelConfig: {
-      kind: string;
-      config: GenericSliceDetailsTabConfigBase;
-    };
-  }): void;
 
   /**
    * Register a new SQL selection resolver.
@@ -105,11 +88,10 @@ export interface AreaSelectionAggregator {
 
 export type Selection =
   | TrackEventSelection
+  | TrackSelection
   | AreaSelection
   | NoteSelection
-  | UnionSelection
-  | EmptySelection
-  | LegacySelectionWrapper;
+  | EmptySelection;
 
 /** Defines how changes to selection affect the rest of the UI state */
 export interface SelectionOpts {
@@ -118,36 +100,15 @@ export interface SelectionOpts {
   scrollToSelection?: boolean; // Default: false.
 }
 
-// LEGACY Selection types:
-
-export interface LegacySelectionWrapper {
-  readonly kind: 'legacy';
-  readonly legacySelection: LegacySelection;
-}
-
-export type LegacySelection = GenericSliceSelection & {
-  trackUri?: string;
-};
-
-export interface GenericSliceSelection {
-  readonly kind: 'GENERIC_SLICE';
-  readonly id: number;
-  readonly sqlTableName: string;
-  readonly start: time;
-  readonly duration: duration;
-  // NOTE: this config can be expanded for multiple details panel types.
-  readonly detailsPanelConfig: {
-    readonly kind: string;
-    readonly config: GenericSliceDetailsTabConfigBase;
-  };
-}
-
-// New Selection types:
-
 export interface TrackEventSelection extends TrackEventDetails {
   readonly kind: 'track_event';
   readonly trackUri: string;
   readonly eventId: number;
+}
+
+export interface TrackSelection {
+  readonly kind: 'track';
+  readonly trackUri: string;
 }
 
 export interface TrackEventDetails {
@@ -165,6 +126,7 @@ export interface TrackEventDetails {
   readonly utid?: number;
   readonly tableName?: string;
   readonly profileType?: ProfileType;
+  readonly interactionType?: string;
 }
 
 export interface Area {
@@ -187,11 +149,6 @@ export interface AreaSelection extends Area {
 export interface NoteSelection {
   readonly kind: 'note';
   readonly id: string;
-}
-
-export interface UnionSelection {
-  readonly kind: 'union';
-  readonly selections: ReadonlyArray<Selection>;
 }
 
 export interface EmptySelection {

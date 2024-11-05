@@ -16,7 +16,7 @@ import m from 'mithril';
 import {copyToClipboard} from '../base/clipboard';
 import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
-import {assertExists, assertTrue, assertUnreachable} from '../base/logging';
+import {assertExists, assertUnreachable} from '../base/logging';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
 import {Actions} from '../common/actions';
 import {
@@ -30,7 +30,6 @@ import {Command} from '../public/command';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 import {maybeRenderFullscreenModalDialog, showModal} from '../widgets/modal';
-import {onClickCopy} from './clipboard';
 import {CookieConsent} from './cookie_consent';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
@@ -38,9 +37,8 @@ import {Omnibox, OmniboxOption} from './omnibox';
 import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
 import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
-import {shareTrace} from './trace_attrs';
+import {shareTrace} from './trace_share_utils';
 import {AggregationsTabs} from './aggregation_tab';
-import {publishPermalinkHash} from './publish';
 import {OmniboxMode} from '../core/omnibox_manager';
 import {PromptOption} from '../public/omnibox';
 import {DisposableStack} from '../base/disposable_stack';
@@ -50,39 +48,15 @@ import {AppImpl} from '../core/app_impl';
 import {NotesEditorTab} from './notes_panel';
 import {NotesListEditor} from './notes_list_editor';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../public/utils';
-import {scrollTo} from '../public/scroll_helper';
 
 const OMNIBOX_INPUT_REF = 'omnibox';
-
-function renderPermalink(): m.Children {
-  const hash = globals.permalinkHash;
-  if (!hash) return null;
-  const url = `${self.location.origin}/#!/?s=${hash}`;
-  const linkProps = {title: 'Click to copy the URL', onclick: onClickCopy(url)};
-
-  return m('.alert-permalink', [
-    m('div', 'Permalink: ', m(`a[href=${url}]`, linkProps, url)),
-    m(
-      'button',
-      {
-        onclick: () => publishPermalinkHash(undefined),
-      },
-      m('i.material-icons.disallow-selection', 'close'),
-    ),
-  ]);
-}
-
-class Alerts implements m.ClassComponent {
-  view() {
-    return m('.alerts', renderPermalink());
-  }
-}
 
 // This wrapper creates a new instance of UiMainPerTrace for each new trace
 // loaded (including the case of no trace at the beginning).
 export class UiMain implements m.ClassComponent {
   view({children}: m.CVnode) {
-    return [m(UiMainPerTrace, {key: globals.currentTraceId}, children)];
+    const currentTraceId = AppImpl.instance.trace?.engine.engineId ?? '';
+    return [m(UiMainPerTrace, {key: currentTraceId}, children)];
   }
 }
 
@@ -98,9 +72,10 @@ export class UiMainPerTrace implements m.ClassComponent {
   private trace?: TraceImpl;
 
   // This function is invoked once per trace.
-  async oncreate(vnode: m.VnodeDOM) {
-    this.updateOmniboxInputRef(vnode.dom);
-    this.maybeFocusOmnibar();
+  constructor() {
+    const app = AppImpl.instance;
+    const trace = app.trace;
+    this.trace = trace;
 
     // Register global commands (commands that are useful even without a trace
     // loaded).
@@ -108,7 +83,7 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.OpenCommandPalette',
         name: 'Open command palette',
-        callback: () => AppImpl.instance.omnibox.setMode(OmniboxMode.Command),
+        callback: () => app.omnibox.setMode(OmniboxMode.Command),
         defaultHotkey: '!Mod+Shift+P',
       },
 
@@ -120,15 +95,12 @@ export class UiMainPerTrace implements m.ClassComponent {
       },
     ];
     globalCmds.forEach((cmd) => {
-      this.trash.use(AppImpl.instance.commands.registerCommand(cmd));
+      this.trash.use(app.commands.registerCommand(cmd));
     });
 
     // When the UI loads there is no trace. There is no point registering
     // commands or anything in this state as they will be useless.
-    const trace = AppImpl.instance.trace as TraceImpl;
     if (trace === undefined) return;
-    assertTrue(trace instanceof TraceImpl);
-    this.trace = trace;
     document.title = `${trace.traceInfo.traceTitle || 'Trace'} - Perfetto UI`;
     this.maybeShowJsonWarning();
 
@@ -144,7 +116,7 @@ export class UiMainPerTrace implements m.ClassComponent {
         isEphemeral: false,
         content: {
           getTitle: () => 'Notes & markers',
-          render: () => m(NotesListEditor),
+          render: () => m(NotesListEditor, {trace}),
         },
       }),
     );
@@ -173,10 +145,7 @@ export class UiMainPerTrace implements m.ClassComponent {
           ];
           const promptText = 'Select format...';
 
-          const result = await AppImpl.instance.omnibox.prompt(
-            promptText,
-            options,
-          );
+          const result = await app.omnibox.prompt(promptText, options);
           if (result === undefined) return;
           setTimestampFormat(result as TimestampFormat);
           raf.scheduleFullRedraw();
@@ -195,10 +164,7 @@ export class UiMainPerTrace implements m.ClassComponent {
           ];
           const promptText = 'Select duration precision mode...';
 
-          const result = await AppImpl.instance.omnibox.prompt(
-            promptText,
-            options,
-          );
+          const result = await app.omnibox.prompt(promptText, options);
           if (result === undefined) return;
           setDurationPrecision(result as DurationPrecision);
           raf.scheduleFullRedraw();
@@ -341,7 +307,7 @@ export class UiMainPerTrace implements m.ClassComponent {
           // - If nothing is selected, or all selected tracks are entirely
           //   selected, then select the entire trace. This allows double tapping
           //   Ctrl+A to select the entire track, then select the entire trace.
-          let tracksToSelect: string[] = [];
+          let tracksToSelect: string[];
           const selection = trace.selection.selection;
           if (selection.kind === 'area') {
             // Something is already selected, let's see if it covers the entire
@@ -377,17 +343,21 @@ export class UiMainPerTrace implements m.ClassComponent {
         defaultHotkey: 'Mod+A',
       },
       {
-        id: 'perfetto.ScrollToTrack',
-        name: 'Scroll to track',
-        callback: async () => {
-          const opts = trace.tracks
-            .getAllTracks()
-            .map((td) => ({key: td.uri, displayName: td.uri}));
-          const result = await trace.omnibox.prompt('Choose a track', opts);
-          if (result) {
-            scrollTo({track: {uri: result, expandGroup: true}});
+        id: 'perfetto.ConvertSelectionToArea',
+        name: 'Convert the current selection to an area selection',
+        callback: () => {
+          const selection = trace.selection.selection;
+          const range = trace.selection.findTimeRangeOfSelection();
+          if (selection.kind === 'track_event' && range) {
+            trace.selection.selectArea({
+              start: range.start,
+              end: range.end,
+              trackUris: [selection.trackUri],
+            });
           }
         },
+        // TODO(stevegolton): Decide on a sensible hotkey.
+        // defaultHotkey: 'L',
       },
     ];
 
@@ -398,13 +368,15 @@ export class UiMainPerTrace implements m.ClassComponent {
   }
 
   private renderOmnibox(): m.Children {
-    const omniboxMode = AppImpl.instance.omnibox.mode;
-    if (omniboxMode === OmniboxMode.StatusMessage) {
+    const omnibox = AppImpl.instance.omnibox;
+    const omniboxMode = omnibox.mode;
+    const statusMessage = omnibox.statusMessage;
+    if (statusMessage !== undefined) {
       return m(
         `.omnibox.message-mode`,
         m(`input[readonly][disabled][ref=omnibox]`, {
           value: '',
-          placeholder: AppImpl.instance.omnibox.statusMessage,
+          placeholder: statusMessage,
         }),
       );
     } else if (omniboxMode === OmniboxMode.Command) {
@@ -421,7 +393,8 @@ export class UiMainPerTrace implements m.ClassComponent {
   }
 
   renderPromptOmnibox(): m.Children {
-    const prompt = assertExists(AppImpl.instance.omnibox.pendingPrompt);
+    const omnibox = AppImpl.instance.omnibox;
+    const prompt = assertExists(omnibox.pendingPrompt);
 
     let options: OmniboxOption[] | undefined = undefined;
 
@@ -430,7 +403,7 @@ export class UiMainPerTrace implements m.ClassComponent {
         prompt.options,
         ({displayName}) => displayName,
       );
-      const result = fuzzy.find(AppImpl.instance.omnibox.text);
+      const result = fuzzy.find(omnibox.text);
       options = result.map((result) => {
         return {
           key: result.item.key,
@@ -440,38 +413,35 @@ export class UiMainPerTrace implements m.ClassComponent {
     }
 
     return m(Omnibox, {
-      value: AppImpl.instance.omnibox.text,
+      value: omnibox.text,
       placeholder: prompt.text,
       inputRef: OMNIBOX_INPUT_REF,
       extraClasses: 'prompt-mode',
       closeOnOutsideClick: true,
       options,
-      selectedOptionIndex: AppImpl.instance.omnibox.selectionIndex,
+      selectedOptionIndex: omnibox.selectionIndex,
       onSelectedOptionChanged: (index) => {
-        AppImpl.instance.omnibox.setSelectionIndex(index);
+        omnibox.setSelectionIndex(index);
         raf.scheduleFullRedraw();
       },
       onInput: (value) => {
-        AppImpl.instance.omnibox.setText(value);
-        AppImpl.instance.omnibox.setSelectionIndex(0);
+        omnibox.setText(value);
+        omnibox.setSelectionIndex(0);
         raf.scheduleFullRedraw();
       },
       onSubmit: (value, _alt) => {
-        AppImpl.instance.omnibox.resolvePrompt(value);
+        omnibox.resolvePrompt(value);
       },
       onClose: () => {
-        AppImpl.instance.omnibox.rejectPrompt();
+        omnibox.rejectPrompt();
       },
     });
   }
 
   renderCommandOmnibox(): m.Children {
-    const cmdMgr = AppImpl.instance.commands;
-
     // Fuzzy-filter commands by the filter string.
-    const filteredCmds = cmdMgr.fuzzyFilterCommands(
-      AppImpl.instance.omnibox.text,
-    );
+    const {commands, omnibox} = AppImpl.instance;
+    const filteredCmds = commands.fuzzyFilterCommands(omnibox.text);
 
     // Create an array of commands with attached heuristics from the recent
     // command register.
@@ -502,35 +472,35 @@ export class UiMainPerTrace implements m.ClassComponent {
     });
 
     return m(Omnibox, {
-      value: AppImpl.instance.omnibox.text,
+      value: omnibox.text,
       placeholder: 'Filter commands...',
       inputRef: OMNIBOX_INPUT_REF,
       extraClasses: 'command-mode',
       options,
       closeOnSubmit: true,
       closeOnOutsideClick: true,
-      selectedOptionIndex: AppImpl.instance.omnibox.selectionIndex,
+      selectedOptionIndex: omnibox.selectionIndex,
       onSelectedOptionChanged: (index) => {
-        AppImpl.instance.omnibox.setSelectionIndex(index);
+        omnibox.setSelectionIndex(index);
         raf.scheduleFullRedraw();
       },
       onInput: (value) => {
-        AppImpl.instance.omnibox.setText(value);
-        AppImpl.instance.omnibox.setSelectionIndex(0);
+        omnibox.setText(value);
+        omnibox.setSelectionIndex(0);
         raf.scheduleFullRedraw();
       },
       onClose: () => {
         if (this.omniboxInputEl) {
           this.omniboxInputEl.blur();
         }
-        AppImpl.instance.omnibox.reset();
+        omnibox.reset();
       },
       onSubmit: (key: string) => {
         this.addRecentCommand(key);
-        cmdMgr.runCommand(key);
+        commands.runCommand(key);
       },
       onGoBack: () => {
-        AppImpl.instance.omnibox.reset();
+        omnibox.reset();
       },
     });
   }
@@ -651,14 +621,17 @@ export class UiMainPerTrace implements m.ClassComponent {
     return m('.stepthrough', children);
   }
 
+  oncreate(vnode: m.VnodeDOM) {
+    this.updateOmniboxInputRef(vnode.dom);
+    this.maybeFocusOmnibar();
+  }
+
   view({children}: m.Vnode): m.Children {
-    const cmdMgr = AppImpl.instance.commands;
     const hotkeys: HotkeyConfig[] = [];
-    const commands = cmdMgr.commands;
-    for (const {id, defaultHotkey} of commands) {
+    for (const {id, defaultHotkey} of AppImpl.instance.commands.commands) {
       if (defaultHotkey) {
         hotkeys.push({
-          callback: () => cmdMgr.runCommand(id),
+          callback: () => AppImpl.instance.commands.runCommand(id),
           hotkey: defaultHotkey,
         });
       }
@@ -674,7 +647,6 @@ export class UiMainPerTrace implements m.ClassComponent {
           omnibox: this.renderOmnibox(),
           trace: this.trace,
         }),
-        m(Alerts),
         children,
         m(CookieConsent),
         maybeRenderFullscreenModalDialog(),
@@ -738,7 +710,7 @@ export class UiMainPerTrace implements m.ClassComponent {
     if (
       !isJsonTrace ||
       window.localStorage.getItem(SHOWN_JSON_WARNING_KEY) === 'true' ||
-      globals.embeddedMode
+      AppImpl.instance.embeddedMode
     ) {
       // When in embedded mode, the host app will control which trace format
       // it passes to Perfetto, so we don't need to show this warning.

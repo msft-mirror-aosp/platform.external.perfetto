@@ -14,10 +14,8 @@
 
 import {ArrowHeadStyle, drawBezierArrow} from '../base/canvas/bezier_arrow';
 import {Size2D, Point2D, HorizontalBounds} from '../base/geom';
-import {Optional} from '../base/utils';
 import {ALL_CATEGORIES, getFlowCategories} from './flow_events_panel';
-import {globals} from './globals';
-import {Flow} from 'src/core/flow_types';
+import {Flow} from '../core/flow_types';
 import {RenderedPanelInfo} from './panel_container';
 import {TimeScale} from '../base/time_scale';
 import {TrackNode} from '../public/workspace';
@@ -107,11 +105,11 @@ export function renderFlows(
     }
 
     const highlighted =
-      flow.end.sliceId === globals.state.highlightedSliceId ||
-      flow.begin.sliceId === globals.state.highlightedSliceId;
+      flow.end.sliceId === trace.timeline.highlightedSliceId ||
+      flow.begin.sliceId === trace.timeline.highlightedSliceId;
     const focused =
-      flow.id === globals.trace.flows.focusedFlowIdLeft ||
-      flow.id === globals.trace.flows.focusedFlowIdRight;
+      flow.id === trace.flows.focusedFlowIdLeft ||
+      flow.id === trace.flows.focusedFlowIdRight;
 
     let intensity = DEFAULT_FLOW_INTENSITY;
     let width = DEFAULT_FLOW_WIDTH;
@@ -139,7 +137,7 @@ export function renderFlows(
     trackId: number,
     depth: number,
     x: number,
-  ): Optional<VerticalEdgeOrPoint> => {
+  ): VerticalEdgeOrPoint | undefined => {
     const track = sqlTrackIdToTrack.get(trackId);
     if (!track) {
       return undefined;
@@ -185,17 +183,17 @@ export function renderFlows(
   };
 
   // Render the connected flows
-  globals.trace.flows.connectedFlows.forEach((flow) => {
+  trace.flows.connectedFlows.forEach((flow) => {
     drawFlow(flow, CONNECTED_FLOW_HUE);
   });
 
   // Render the selected flows
-  globals.trace.flows.selectedFlows.forEach((flow) => {
+  trace.flows.selectedFlows.forEach((flow) => {
     const categories = getFlowCategories(flow);
     for (const cat of categories) {
       if (
-        globals.trace.flows.visibleCategories.get(cat) ||
-        globals.trace.flows.visibleCategories.get(ALL_CATEGORIES)
+        trace.flows.visibleCategories.get(cat) ||
+        trace.flows.visibleCategories.get(ALL_CATEGORIES)
       ) {
         drawFlow(flow, SELECTED_FLOW_HUE);
         break;

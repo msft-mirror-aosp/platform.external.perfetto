@@ -37,7 +37,7 @@ import {
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {globals} from './globals';
-import {PageAttrs} from './pages';
+import {PageAttrs} from '../core/router';
 import {
   autosaveConfigStore,
   recordConfigStore,
@@ -56,6 +56,7 @@ import {RecordingSectionAttrs} from './recording/recording_sections';
 import {RecordingSettings} from './recording/recording_settings';
 import {EtwSettings} from './recording/etw_settings';
 import {createPermalink} from './permalink';
+import {AppImpl} from '../core/app_impl';
 
 export const PERSIST_CONFIG_FLAG = featureFlags.register({
   id: 'persistConfigsUI',
@@ -598,7 +599,10 @@ function onStartRecordingPressed() {
     isChromeTarget(target) ||
     isWindowsTarget(target)
   ) {
-    globals.logging.logEvent('Record Trace', `Record trace (${target.os})`);
+    AppImpl.instance.analytics.logEvent(
+      'Record Trace',
+      `Record trace (${target.os})`,
+    );
     globals.dispatch(Actions.startRecording({}));
   }
 }

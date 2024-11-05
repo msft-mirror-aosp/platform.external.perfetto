@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Time} from '../base/time';
 import {createEmptyRecordConfig} from '../controller/record_config_types';
 import {featureFlags} from '../core/feature_flags';
 import {
@@ -46,8 +45,6 @@ export function keyedMap<T>(
 export function createEmptyState(): State {
   return {
     version: STATE_VERSION,
-    nextId: '-1',
-    queries: {},
 
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get()
       ? autosaveConfigStore.get()
@@ -55,19 +52,11 @@ export function createEmptyState(): State {
     displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
 
-    traceConversionInProgress: false,
-
     perfDebug: false,
-    sidebarVisible: true,
-    hoveredUtid: -1,
-    hoveredPid: -1,
-    hoveredNoteTimestamp: Time.INVALID,
-    highlightedSliceId: -1,
 
     recordingInProgress: false,
     recordingCancelled: false,
     extensionInstalled: false,
-    flamegraphModalDismissed: false,
     recordingTarget: recordTargetStore.getValidTarget(),
     availableAdbDevices: [],
 

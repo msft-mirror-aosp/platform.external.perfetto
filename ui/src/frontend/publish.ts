@@ -12,31 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ConversionJobStatusUpdate} from '../common/conversion_jobs';
 import {raf} from '../core/raf_scheduler';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
-import {globals, QuantizedLoad, ThreadDesc} from './globals';
-
-export function publishOverviewData(data: {
-  [key: string]: QuantizedLoad | QuantizedLoad[];
-}) {
-  for (const [key, value] of Object.entries(data)) {
-    if (!globals.overviewStore.has(key)) {
-      globals.overviewStore.set(key, []);
-    }
-    if (value instanceof Array) {
-      globals.overviewStore.get(key)!.push(...value);
-    } else {
-      globals.overviewStore.get(key)!.push(value);
-    }
-  }
-  raf.scheduleRedraw();
-}
-
-export function clearOverviewData() {
-  globals.overviewStore.clear();
-  raf.scheduleRedraw();
-}
+import {globals} from './globals';
 
 export function publishTrackData(args: {id: string; data: {}}) {
   globals.setTrackData(args.id, args.data);
@@ -46,18 +24,6 @@ export function publishTrackData(args: {id: string; data: {}}) {
 export function publishHttpRpcState(httpRpcState: HttpRpcState) {
   globals.httpRpcState = httpRpcState;
   raf.scheduleFullRedraw();
-}
-
-export function publishHasFtrace(value: boolean): void {
-  globals.hasFtrace = value;
-  globals.publishRedraw();
-}
-
-export function publishConversionJobStatusUpdate(
-  job: ConversionJobStatusUpdate,
-) {
-  globals.setConversionJobStatus(job.jobName, job.jobStatus);
-  globals.publishRedraw();
 }
 
 export function publishBufferUsage(args: {percentage: number}) {
@@ -70,25 +36,7 @@ export function publishRecordingLog(args: {logs: string}) {
   globals.publishRedraw();
 }
 
-export function publishMetricError(error: string) {
-  globals.setMetricError(error);
-  globals.publishRedraw();
-}
-
-export function publishThreads(data: ThreadDesc[]) {
-  globals.threads.clear();
-  data.forEach((thread) => {
-    globals.threads.set(thread.utid, thread);
-  });
-  globals.publishRedraw();
-}
-
 export function publishShowPanningHint() {
   globals.showPanningHint = true;
-  globals.publishRedraw();
-}
-
-export function publishPermalinkHash(hash: string | undefined): void {
-  globals.permalinkHash = hash;
   globals.publishRedraw();
 }

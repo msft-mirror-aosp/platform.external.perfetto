@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {Draft} from 'immer';
-import {time} from '../base/time';
 import {RecordConfig} from '../controller/record_config_types';
 import {createEmptyState} from './empty_state';
 import {
@@ -22,78 +21,25 @@ import {
   RecordingTarget,
   State,
 } from './state';
-import {SerializedAppState} from '../public/state_serialization_schema';
-import {PostedTrace} from '../public/trace_source';
 
 type StateDraft = Draft<State>;
 
-function clearTraceState(state: StateDraft) {
-  const nextId = state.nextId;
-  const recordConfig = state.recordConfig;
-  const recordingTarget = state.recordingTarget;
-  const fetchChromeCategories = state.fetchChromeCategories;
-  const extensionInstalled = state.extensionInstalled;
-  const availableAdbDevices = state.availableAdbDevices;
-  const chromeCategories = state.chromeCategories;
-
-  Object.assign(state, createEmptyState());
-  state.nextId = nextId;
-  state.recordConfig = recordConfig;
-  state.recordingTarget = recordingTarget;
-  state.fetchChromeCategories = fetchChromeCategories;
-  state.extensionInstalled = extensionInstalled;
-  state.availableAdbDevices = availableAdbDevices;
-  state.chromeCategories = chromeCategories;
-}
-
-function generateNextId(draft: StateDraft): string {
-  const nextId = String(Number(draft.nextId) + 1);
-  draft.nextId = nextId;
-  return nextId;
-}
-
 export const StateActions = {
-  openTraceFromFile(state: StateDraft, args: {file: File}): void {
-    clearTraceState(state);
-    const id = generateNextId(state);
-    state.engine = {
-      id,
-      source: {type: 'FILE', file: args.file},
-    };
-  },
+  clearState(state: StateDraft, _args: {}) {
+    const recordConfig = state.recordConfig;
+    const recordingTarget = state.recordingTarget;
+    const fetchChromeCategories = state.fetchChromeCategories;
+    const extensionInstalled = state.extensionInstalled;
+    const availableAdbDevices = state.availableAdbDevices;
+    const chromeCategories = state.chromeCategories;
 
-  openTraceFromBuffer(state: StateDraft, args: PostedTrace): void {
-    clearTraceState(state);
-    const id = generateNextId(state);
-    state.engine = {
-      id,
-      source: {type: 'ARRAY_BUFFER', ...args},
-    };
-  },
-
-  openTraceFromUrl(
-    state: StateDraft,
-    args: {url: string; serializedAppState?: SerializedAppState},
-  ): void {
-    clearTraceState(state);
-    const id = generateNextId(state);
-    state.engine = {
-      id,
-      source: {
-        type: 'URL',
-        url: args.url,
-        serializedAppState: args.serializedAppState,
-      },
-    };
-  },
-
-  openTraceFromHttpRpc(state: StateDraft, _args: {}): void {
-    clearTraceState(state);
-    const id = generateNextId(state);
-    state.engine = {
-      id,
-      source: {type: 'HTTP_RPC'},
-    };
+    Object.assign(state, createEmptyState());
+    state.recordConfig = recordConfig;
+    state.recordingTarget = recordingTarget;
+    state.fetchChromeCategories = fetchChromeCategories;
+    state.extensionInstalled = extensionInstalled;
+    state.availableAdbDevices = availableAdbDevices;
+    state.chromeCategories = chromeCategories;
   },
 
   requestTrackReload(state: StateDraft, _: {}) {
@@ -175,27 +121,6 @@ export const StateActions = {
 
   togglePerfDebug(state: StateDraft, _: {}): void {
     state.perfDebug = !state.perfDebug;
-  },
-
-  setSidebar(state: StateDraft, args: {visible: boolean}): void {
-    state.sidebarVisible = args.visible;
-  },
-
-  setHoveredUtidAndPid(state: StateDraft, args: {utid: number; pid: number}) {
-    state.hoveredPid = args.pid;
-    state.hoveredUtid = args.utid;
-  },
-
-  setHighlightedSliceId(state: StateDraft, args: {sliceId: number}) {
-    state.highlightedSliceId = args.sliceId;
-  },
-
-  setHoveredNoteTimestamp(state: StateDraft, args: {ts: time}) {
-    state.hoveredNoteTimestamp = args.ts;
-  },
-
-  dismissFlamegraphModal(state: StateDraft, _: {}) {
-    state.flamegraphModalDismissed = true;
   },
 
   setTrackFilterTerm(

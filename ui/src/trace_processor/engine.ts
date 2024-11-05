@@ -22,7 +22,7 @@ import {
   MetatraceCategories,
   QueryArgs,
   QueryResult as ProtoQueryResult,
-  RegisterSqlModuleArgs,
+  RegisterSqlPackageArgs,
   ResetTraceProcessorArgs,
   TraceProcessorRpc,
   TraceProcessorRpcStream,
@@ -35,7 +35,7 @@ import {
   WritableQueryResult,
 } from './query_result';
 import TPM = TraceProcessorRpc.TraceProcessorMethod;
-import {exists, Optional, Result} from '../base/utils';
+import {exists, Result} from '../base/utils';
 
 export type EngineMode = 'WASM' | 'HTTP_RPC';
 export type NewEngineMode = 'USE_HTTP_RPC_IF_AVAILABLE' | 'FORCE_BUILTIN_WASM';
@@ -100,7 +100,7 @@ export interface Engine {
 
   getProxy(tag: string): EngineProxy;
   readonly numRequestsPending: number;
-  readonly failed: Optional<string>;
+  readonly failed: string | undefined;
 }
 
 // Abstract interface of a trace proccessor.
@@ -127,10 +127,10 @@ export abstract class EngineBase implements Engine, Disposable {
   private pendingRestoreTables = new Array<Deferred<void>>();
   private pendingComputeMetrics = new Array<Deferred<string | Uint8Array>>();
   private pendingReadMetatrace?: Deferred<DisableAndReadMetatraceResult>;
-  private pendingRegisterSqlModule?: Deferred<void>;
+  private pendingRegisterSqlPackage?: Deferred<void>;
   private _isMetatracingEnabled = false;
   private _numRequestsPending = 0;
-  private _failed: Optional<string> = undefined;
+  private _failed: string | undefined = undefined;
 
   // TraceController sets this to raf.scheduleFullRedraw().
   onResponseReceived?: () => void;
@@ -265,9 +265,9 @@ export abstract class EngineBase implements Engine, Disposable {
         assertExists(this.pendingReadMetatrace).resolve(metatraceRes);
         this.pendingReadMetatrace = undefined;
         break;
-      case TPM.TPM_REGISTER_SQL_MODULE:
-        const registerResult = assertExists(rpc.registerSqlModuleResult);
-        const res = assertExists(this.pendingRegisterSqlModule);
+      case TPM.TPM_REGISTER_SQL_PACKAGE:
+        const registerResult = assertExists(rpc.registerSqlPackageResult);
+        const res = assertExists(this.pendingRegisterSqlPackage);
         if (exists(registerResult.error) && registerResult.error.length > 0) {
           res.reject(registerResult.error);
         } else {
@@ -476,23 +476,23 @@ export abstract class EngineBase implements Engine, Disposable {
     return result;
   }
 
-  registerSqlModules(p: {
+  registerSqlPackages(p: {
     name: string;
     modules: {name: string; sql: string}[];
   }): Promise<void> {
-    if (this.pendingRegisterSqlModule) {
+    if (this.pendingRegisterSqlPackage) {
       return Promise.reject(new Error('Already finalising a metatrace'));
     }
 
     const result = defer<void>();
 
     const rpc = TraceProcessorRpc.create();
-    rpc.request = TPM.TPM_REGISTER_SQL_MODULE;
-    const args = (rpc.registerSqlModuleArgs = new RegisterSqlModuleArgs());
-    args.topLevelPackageName = p.name;
+    rpc.request = TPM.TPM_REGISTER_SQL_PACKAGE;
+    const args = (rpc.registerSqlPackageArgs = new RegisterSqlPackageArgs());
+    args.packageName = p.name;
     args.modules = p.modules;
-    args.allowModuleOverride = true;
-    this.pendingRegisterSqlModule = result;
+    args.allowOverride = true;
+    this.pendingRegisterSqlPackage = result;
     this.rpcSendRequest(rpc);
     return result;
   }
@@ -527,7 +527,7 @@ export abstract class EngineBase implements Engine, Disposable {
     throw new Error(reason);
   }
 
-  get failed(): Optional<string> {
+  get failed(): string | undefined {
     return this._failed;
   }
 

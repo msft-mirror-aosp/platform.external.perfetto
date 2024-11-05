@@ -14,20 +14,14 @@
 
 import {assertExists} from '../base/logging';
 import {createStore, Store} from '../base/store';
-import {time} from '../base/time';
 import {Actions, DeferredAction} from '../common/actions';
 import {CommandManagerImpl} from '../core/command_manager';
-import {
-  ConversionJobName,
-  ConversionJobStatus,
-} from '../common/conversion_jobs';
 import {createEmptyState} from '../common/empty_state';
 import {State} from '../common/state';
 import {setPerfHooks} from '../core/perf';
 import {raf} from '../core/raf_scheduler';
 import {ServiceWorkerController} from './service_worker_controller';
 import {HttpRpcState} from '../trace_processor/http_rpc_engine';
-import type {Analytics} from './analytics';
 import {getServingRoot} from '../base/http_utils';
 import {Workspace} from '../public/workspace';
 import {TraceImpl} from '../core/trace_impl';
@@ -37,97 +31,34 @@ import {createFakeTraceImpl} from '../core/fake_trace_impl';
 type DispatchMultiple = (actions: DeferredAction[]) => void;
 type TrackDataStore = Map<string, {}>;
 
-export interface QuantizedLoad {
-  start: time;
-  end: time;
-  load: number;
-}
-type OverviewStore = Map<string, QuantizedLoad[]>;
-
-export interface ThreadDesc {
-  utid: number;
-  tid: number;
-  threadName: string;
-  pid?: number;
-  procName?: string;
-  cmdline?: string;
-}
-type ThreadMap = Map<number, ThreadDesc>;
-
-interface SqlModule {
-  readonly name: string;
-  readonly sql: string;
-}
-
-interface SqlPackage {
-  readonly name: string;
-  readonly modules: SqlModule[];
-}
-
 /**
  * Global accessors for state/dispatch in the frontend.
  */
 class Globals {
-  readonly root = getServingRoot();
-
-  private _trace: TraceImpl;
-  private _testing = false;
+  private _initialFakeTrace?: TraceImpl;
   private _dispatchMultiple?: DispatchMultiple = undefined;
   private _store = createStore<State>(createEmptyState());
   private _serviceWorkerController?: ServiceWorkerController = undefined;
-  private _logging?: Analytics = undefined;
   private _isInternalUser: boolean | undefined = undefined;
 
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;
-  private _overviewStore?: OverviewStore = undefined;
-  private _threadMap?: ThreadMap = undefined;
   private _bufferUsage?: number = undefined;
   private _recordingLog?: string = undefined;
-  private _metricError?: string = undefined;
-  private _jobStatus?: Map<ConversionJobName, ConversionJobStatus> = undefined;
-  private _embeddedMode?: boolean = undefined;
-  private _hideSidebar?: boolean = undefined;
-  private _hasFtrace: boolean = false;
-  private _currentTraceId = '';
   httpRpcState: HttpRpcState = {connected: false};
   showPanningHint = false;
-  permalinkHash?: string;
-  extraSqlPackages: SqlPackage[] = [];
-
-  get workspace(): Workspace {
-    return this._trace?.workspace;
-  }
-
-  // This is the app's equivalent of a plugin's onTraceLoad() function.
-  // TODO(primiano): right now this is used to inject the TracImpl class into
-  // globals, so it can hop consistently all its accessors to it. Once globals
-  // is gone, figure out what to do with createSearchOverviewTrack().
-  async onTraceLoad(trace: TraceImpl): Promise<void> {
-    this._trace = trace;
-    this._currentTraceId = trace.engine.engineId;
-  }
 
   // TODO(hjd): Remove once we no longer need to update UUID on redraw.
   private _publishRedraw?: () => void = undefined;
 
-  constructor() {
+  initialize(dispatchMultiple: DispatchMultiple) {
+    this._dispatchMultiple = dispatchMultiple;
+
     // TODO(primiano): we do this to avoid making all our members possibly
     // undefined, which would cause a drama of if (!=undefined) all over the
     // code. This is not pretty, but this entire file is going to be nuked from
     // orbit soon.
-    this._trace = createFakeTraceImpl();
-
-    // We just want an empty instance of TraceImpl but don't want to mark it
-    // as the current trace, otherwise this will trigger the plugins' OnLoad().
-    AppImpl.instance.closeCurrentTrace();
-  }
-
-  initialize(
-    dispatchMultiple: DispatchMultiple,
-    initAnalytics: () => Analytics,
-  ) {
-    this._dispatchMultiple = dispatchMultiple;
+    this._initialFakeTrace = createFakeTraceImpl();
 
     setPerfHooks(
       () => this.state.perfDebug,
@@ -137,17 +68,6 @@ class Globals {
     this._serviceWorkerController = new ServiceWorkerController(
       getServingRoot(),
     );
-    this._testing =
-      /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-      self.location && self.location.search.indexOf('testing=1') >= 0;
-    /* eslint-enable */
-
-    // TODO(stevegolton): This is a mess. We should just inject this object in,
-    // instead of passing in a function. The only reason this is done like this
-    // is because the current implementation of initAnalytics depends on the
-    // state of globals.testing, so this needs to be set before we run the
-    // function.
-    this._logging = initAnalytics();
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
     // TODO(primiano): for posterity: these assignments below are completely
@@ -155,8 +75,10 @@ class Globals {
     // initialize() is only called ever once. (But then i'm going to kill this
     // entire file soon).
     this._trackDataStore = new Map<string, {}>();
-    this._overviewStore = new Map<string, QuantizedLoad[]>();
-    this._threadMap = new Map<number, ThreadDesc>();
+  }
+
+  get root() {
+    return AppImpl.instance.rootUrl;
   }
 
   get publishRedraw(): () => void {
@@ -184,23 +106,24 @@ class Globals {
   }
 
   get trace() {
-    return this._trace;
+    const trace = AppImpl.instance.trace;
+    return trace ?? assertExists(this._initialFakeTrace);
   }
 
   get timeline() {
-    return this._trace.timeline;
+    return this.trace.timeline;
   }
 
   get searchManager() {
-    return this._trace.search;
-  }
-
-  get logging() {
-    return assertExists(this._logging);
+    return this.trace.search;
   }
 
   get serviceWorkerController() {
     return assertExists(this._serviceWorkerController);
+  }
+
+  get workspace(): Workspace {
+    return this.trace.workspace;
   }
 
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
@@ -209,27 +132,11 @@ class Globals {
   // creates extra churn. Not worth it as we are going to get rid of this file
   // soon.
   get traceContext() {
-    return this._trace.traceInfo;
-  }
-
-  get overviewStore(): OverviewStore {
-    return assertExists(this._overviewStore);
+    return this.trace.traceInfo;
   }
 
   get trackDataStore(): TrackDataStore {
     return assertExists(this._trackDataStore);
-  }
-
-  get threads() {
-    return assertExists(this._threadMap);
-  }
-
-  get metricError() {
-    return this._metricError;
-  }
-
-  setMetricError(arg: string) {
-    this._metricError = arg;
   }
 
   get bufferUsage() {
@@ -238,54 +145,6 @@ class Globals {
 
   get recordingLog() {
     return this._recordingLog;
-  }
-
-  set hasFtrace(value: boolean) {
-    this._hasFtrace = value;
-  }
-
-  get hasFtrace(): boolean {
-    return this._hasFtrace;
-  }
-
-  get currentTraceId() {
-    return this._currentTraceId;
-  }
-
-  getConversionJobStatus(name: ConversionJobName): ConversionJobStatus {
-    return this.getJobStatusMap().get(name) ?? ConversionJobStatus.NotRunning;
-  }
-
-  setConversionJobStatus(name: ConversionJobName, status: ConversionJobStatus) {
-    const map = this.getJobStatusMap();
-    if (status === ConversionJobStatus.NotRunning) {
-      map.delete(name);
-    } else {
-      map.set(name, status);
-    }
-  }
-
-  private getJobStatusMap(): Map<ConversionJobName, ConversionJobStatus> {
-    if (!this._jobStatus) {
-      this._jobStatus = new Map();
-    }
-    return this._jobStatus;
-  }
-
-  get embeddedMode(): boolean {
-    return !!this._embeddedMode;
-  }
-
-  set embeddedMode(value: boolean) {
-    this._embeddedMode = value;
-  }
-
-  get hideSidebar(): boolean {
-    return !!this._hideSidebar;
-  }
-
-  set hideSidebar(value: boolean) {
-    this._hideSidebar = value;
   }
 
   setBufferUsage(bufferUsage: number) {
@@ -298,6 +157,10 @@ class Globals {
 
   setRecordingLog(recordingLog: string) {
     this._recordingLog = recordingLog;
+  }
+
+  get extraSqlPackages() {
+    return AppImpl.instance.extraSqlPackages;
   }
 
   // This variable is set by the is_internal_user.js script if the user is a
@@ -319,10 +182,6 @@ class Globals {
     raf.scheduleFullRedraw();
   }
 
-  get testing() {
-    return this._testing;
-  }
-
   // Used when switching to the legacy TraceViewer UI.
   // Most resources are cleaned up by replacing the current |window| object,
   // however pending RAFs and workers seem to outlive the |window| and need to
@@ -336,19 +195,19 @@ class Globals {
   }
 
   get tabManager() {
-    return this._trace.tabs;
+    return this.trace.tabs;
   }
 
   get trackManager() {
-    return this._trace.tracks;
+    return this.trace.tracks;
   }
 
   get selectionManager() {
-    return this._trace.selection;
+    return this.trace.selection;
   }
 
   get noteManager() {
-    return this._trace.notes;
+    return this.trace.notes;
   }
 }
 

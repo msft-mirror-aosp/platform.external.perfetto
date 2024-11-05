@@ -28,12 +28,14 @@
 #include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event.h"
+#include "src/trace_processor/importers/art_method/art_method_event.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/common/trace_parser.h"
 #include "src/trace_processor/importers/fuchsia/fuchsia_record.h"
 #include "src/trace_processor/importers/gecko/gecko_event.h"
 #include "src/trace_processor/importers/instruments/row.h"
 #include "src/trace_processor/importers/perf/record.h"
+#include "src/trace_processor/importers/perf_text/perf_text_event.h"
 #include "src/trace_processor/sorter/trace_sorter.h"
 #include "src/trace_processor/sorter/trace_token_buffer.h"
 #include "src/trace_processor/storage/stats.h"
@@ -43,13 +45,12 @@
 namespace perfetto::trace_processor {
 
 TraceSorter::TraceSorter(TraceProcessorContext* context,
-                         SortingMode sorting_mode)
-    : sorting_mode_(sorting_mode), storage_(context->storage) {
+                         SortingMode sorting_mode,
+                         EventHandling event_handling)
+    : sorting_mode_(sorting_mode),
+      storage_(context->storage),
+      event_handling_(event_handling) {
   AddMachineContext(context);
-  const char* env = getenv("TRACE_PROCESSOR_SORT_ONLY");
-  bypass_next_stage_for_testing_ = env && !strcmp(env, "1");
-  if (bypass_next_stage_for_testing_)
-    PERFETTO_ELOG("TEST MODE: bypassing protobuf parsing stage");
 }
 
 TraceSorter::~TraceSorter() {
@@ -260,12 +261,21 @@ void TraceSorter::ParseTracePacket(TraceProcessorContext& context,
           event.ts, token_buffer_.Extract<AndroidLogEvent>(id));
       return;
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
-      context.proto_trace_parser->ParseLegacyV8ProfileEvent(
+      context.json_trace_parser->ParseLegacyV8ProfileEvent(
           event.ts, token_buffer_.Extract<LegacyV8CpuProfileEvent>(id));
       return;
     case TimestampedEvent::Type::kGeckoEvent:
       context.gecko_trace_parser->ParseGeckoEvent(
           event.ts, token_buffer_.Extract<gecko_importer::GeckoEvent>(id));
+      return;
+    case TimestampedEvent::Type::kArtMethodEvent:
+      context.art_method_parser->ParseArtMethodEvent(
+          event.ts, token_buffer_.Extract<art_method::ArtMethodEvent>(id));
+      return;
+    case TimestampedEvent::Type::kPerfTextEvent:
+      context.perf_text_parser->ParsePerfTextEvent(
+          event.ts,
+          token_buffer_.Extract<perf_text_importer::PerfTextEvent>(id));
       return;
     case TimestampedEvent::Type::kInlineSchedSwitch:
     case TimestampedEvent::Type::kInlineSchedWaking:
@@ -300,6 +310,8 @@ void TraceSorter::ParseEtwPacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kAndroidLogEvent:
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
     case TimestampedEvent::Type::kGeckoEvent:
+    case TimestampedEvent::Type::kArtMethodEvent:
+    case TimestampedEvent::Type::kPerfTextEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -335,6 +347,8 @@ void TraceSorter::ParseFtracePacket(TraceProcessorContext& context,
     case TimestampedEvent::Type::kAndroidLogEvent:
     case TimestampedEvent::Type::kLegacyV8CpuProfileEvent:
     case TimestampedEvent::Type::kGeckoEvent:
+    case TimestampedEvent::Type::kArtMethodEvent:
+    case TimestampedEvent::Type::kPerfTextEvent:
       PERFETTO_FATAL("Invalid event type");
   }
   PERFETTO_FATAL("For GCC");
@@ -389,6 +403,14 @@ void TraceSorter::ExtractAndDiscardTokenizedObject(
       base::ignore_result(
           token_buffer_.Extract<gecko_importer::GeckoEvent>(id));
       return;
+    case TimestampedEvent::Type::kArtMethodEvent:
+      base::ignore_result(
+          token_buffer_.Extract<art_method::ArtMethodEvent>(id));
+      return;
+    case TimestampedEvent::Type::kPerfTextEvent:
+      base::ignore_result(
+          token_buffer_.Extract<perf_text_importer::PerfTextEvent>(id));
+      return;
   }
   PERFETTO_FATAL("For GCC");
 }
@@ -404,12 +426,13 @@ void TraceSorter::MaybeExtractEvent(size_t min_machine_idx,
 
   latest_pushed_event_ts_ = std::max(latest_pushed_event_ts_, timestamp);
 
-  if (PERFETTO_UNLIKELY(bypass_next_stage_for_testing_)) {
+  if (PERFETTO_UNLIKELY(event_handling_ == EventHandling::kSortAndDrop)) {
     // Parse* would extract this event and push it to the next stage. Since we
     // are skipping that, just extract and discard it.
     ExtractAndDiscardTokenizedObject(event);
     return;
   }
+  PERFETTO_DCHECK(event_handling_ == EventHandling::kSortAndPush);
 
   if (queue_idx == 0) {
     ParseTracePacket(*machine_context, event);
