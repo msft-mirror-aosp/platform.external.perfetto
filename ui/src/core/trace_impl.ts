@@ -19,7 +19,6 @@ import {TimelineImpl} from './timeline';
 import {Command} from '../public/command';
 import {EventListeners, Trace} from '../public/trace';
 import {ScrollToArgs, setScrollToFunction} from '../public/scroll_helper';
-import {TraceInfo} from '../public/trace_info';
 import {TrackDescriptor} from '../public/track';
 import {EngineBase, EngineProxy} from '../trace_processor/engine';
 import {CommandManagerImpl} from './command_manager';
@@ -43,6 +42,8 @@ import {RouteArgs} from '../public/route_schema';
 import {CORE_PLUGIN_ID} from './plugin_manager';
 import {Analytics} from '../public/analytics';
 import {getOrCreate} from '../base/utils';
+import {fetchWithProgress} from '../base/http_utils';
+import {TraceInfoImpl} from './trace_info_impl';
 
 /**
  * Handles the per-trace state of the UI
@@ -60,7 +61,7 @@ class TraceContext implements Disposable {
   readonly selectionMgr: SelectionManagerImpl;
   readonly tabMgr = new TabManagerImpl();
   readonly timeline: TimelineImpl;
-  readonly traceInfo: TraceInfo;
+  readonly traceInfo: TraceInfoImpl;
   readonly trackMgr = new TrackManagerImpl();
   readonly workspaceMgr = new WorkspaceManagerImpl();
   readonly noteMgr = new NoteManagerImpl();
@@ -76,7 +77,7 @@ class TraceContext implements Disposable {
   // what TraceProcessor reports on the stats table at import time.
   readonly loadingErrors: string[] = [];
 
-  constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfo) {
+  constructor(gctx: AppContext, engine: EngineBase, traceInfo: TraceInfoImpl) {
     this.appCtx = gctx;
     this.engine = engine;
     this.trash.use(engine);
@@ -133,7 +134,7 @@ class TraceContext implements Disposable {
     if (clearSearch) {
       this.searchMgr.reset();
     }
-    if (switchToCurrentSelectionTab) {
+    if (switchToCurrentSelectionTab && selection.kind !== 'empty') {
       this.tabMgr.showCurrentSelectionTab();
     }
 
@@ -178,7 +179,7 @@ export class TraceImpl implements Trace {
   static createInstanceForCore(
     appImpl: AppImpl,
     engine: EngineBase,
-    traceInfo: TraceInfo,
+    traceInfo: TraceInfoImpl,
   ): TraceImpl {
     const traceCtx = new TraceContext(
       appImpl.__appCtxForTraceImplCtor,
@@ -254,6 +255,31 @@ export class TraceImpl implements Trace {
     return this.traceCtx.pluginSerializableState;
   }
 
+  async getTraceFile(): Promise<Blob> {
+    const src = this.traceInfo.source;
+    if (this.traceInfo.downloadable) {
+      if (src.type === 'ARRAY_BUFFER') {
+        return new Blob([src.buffer]);
+      } else if (src.type === 'FILE') {
+        return src.file;
+      } else if (src.type === 'URL') {
+        return await fetchWithProgress(src.url, (progressPercent: number) =>
+          this.omnibox.showStatusMessage(
+            `Downloading trace ${progressPercent}%`,
+          ),
+        );
+      }
+    }
+    // Not available in HTTP+RPC mode. Rather than propagating an undefined,
+    // show a graceful error (the ERR:trace_src will be intercepted by
+    // error_dialog.ts). We expect all users of this feature to not be able to
+    // do anything useful if we returned undefined (other than showing the same
+    // dialog).
+    // The caller was supposed to check that traceInfo.downloadable === true
+    // before calling this. Throwing while downloadable is true is a bug.
+    throw new Error(`Cannot getTraceFile(${src.type})`);
+  }
+
   get openerPluginArgs(): {[key: string]: unknown} | undefined {
     const traceSource = this.traceCtx.traceInfo.source;
     if (traceSource.type !== 'ARRAY_BUFFER') {
@@ -295,7 +321,7 @@ export class TraceImpl implements Trace {
     return this.traceCtx.selectionMgr;
   }
 
-  get traceInfo(): TraceInfo {
+  get traceInfo(): TraceInfoImpl {
     return this.traceCtx.traceInfo;
   }
 
@@ -398,6 +424,10 @@ export class TraceImpl implements Trace {
 // A convenience interface to inject the App in Mithril components.
 export interface TraceImplAttrs {
   trace: TraceImpl;
+}
+
+export interface OptionalTraceImplAttrs {
+  trace?: TraceImpl;
 }
 
 // Allows to take an existing class instance (`target`) and override some of its

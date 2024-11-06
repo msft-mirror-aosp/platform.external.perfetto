@@ -604,6 +604,7 @@ perfetto_filegroup(
         "include/perfetto/base/status.h",
         "include/perfetto/base/task_runner.h",
         "include/perfetto/base/template_util.h",
+        "include/perfetto/base/thread_annotations.h",
         "include/perfetto/base/thread_utils.h",
         "include/perfetto/base/time.h",
     ],
@@ -4717,6 +4718,7 @@ perfetto_proto_library(
     srcs = [
         "protos/perfetto/config/chrome/chrome_config.proto",
         "protos/perfetto/config/chrome/scenario_config.proto",
+        "protos/perfetto/config/chrome/system_metrics.proto",
         "protos/perfetto/config/chrome/v8_config.proto",
         "protos/perfetto/config/data_source_config.proto",
         "protos/perfetto/config/etw/etw_config.proto",
@@ -5178,6 +5180,9 @@ perfetto_proto_library(
         PERFETTO_CONFIG.proto_library_visibility,
     ],
     deps = [
+        ":protos_perfetto_trace_track_event_protos",
+    ],
+    exports = [
         ":protos_perfetto_trace_track_event_protos",
     ],
 )
