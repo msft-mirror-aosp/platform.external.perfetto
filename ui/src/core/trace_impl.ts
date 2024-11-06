@@ -134,7 +134,7 @@ class TraceContext implements Disposable {
     if (clearSearch) {
       this.searchMgr.reset();
     }
-    if (switchToCurrentSelectionTab) {
+    if (switchToCurrentSelectionTab && selection.kind !== 'empty') {
       this.tabMgr.showCurrentSelectionTab();
     }
 
@@ -424,6 +424,10 @@ export class TraceImpl implements Trace {
 // A convenience interface to inject the App in Mithril components.
 export interface TraceImplAttrs {
   trace: TraceImpl;
+}
+
+export interface OptionalTraceImplAttrs {
+  trace?: TraceImpl;
 }
 
 // Allows to take an existing class instance (`target`) and override some of its
