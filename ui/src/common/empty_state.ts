@@ -18,7 +18,7 @@ import {
   autosaveConfigStore,
   recordTargetStore,
 } from '../frontend/record_config';
-import {State, STATE_VERSION} from './state';
+import {State} from './state';
 
 const AUTOLOAD_STARTED_CONFIG_FLAG = featureFlags.register({
   id: 'autoloadStartedConfig',
@@ -29,27 +29,11 @@ const AUTOLOAD_STARTED_CONFIG_FLAG = featureFlags.register({
   defaultValue: true,
 });
 
-export function keyedMap<T>(
-  keyFn: (key: T) => string,
-  ...values: T[]
-): Map<string, T> {
-  const result = new Map<string, T>();
-
-  for (const value of values) {
-    result.set(keyFn(value), value);
-  }
-
-  return result;
-}
-
 export function createEmptyState(): State {
   return {
-    version: STATE_VERSION,
-
     recordConfig: AUTOLOAD_STARTED_CONFIG_FLAG.get()
       ? autosaveConfigStore.get()
       : createEmptyRecordConfig(),
-    displayConfigAsPbtxt: false,
     lastLoadedConfig: {type: 'NONE'},
 
     perfDebug: false,
@@ -62,8 +46,5 @@ export function createEmptyState(): State {
 
     fetchChromeCategories: false,
     chromeCategories: undefined,
-
-    trackFilterTerm: undefined,
-    forceRunControllers: 0,
   };
 }
