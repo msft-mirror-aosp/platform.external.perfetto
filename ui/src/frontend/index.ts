@@ -36,30 +36,20 @@ import {UiMain} from './ui_main';
 import {initCssConstants} from './css_constants';
 import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
-import {ExplorePage} from './explore_page';
 import {installFileDropHandler} from './file_drop_handler';
-import {FlagsPage} from './flags_page';
 import {globals} from './globals';
 import {HomePage} from './home_page';
-import {InsightsPage} from './insights_page';
-import {MetricsPage} from './metrics_page';
-import {PluginsPage} from './plugins_page';
 import {postMessageHandler} from './post_message_handler';
-import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
 import {Route, Router} from '../core/router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
-import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
 import {ViewerPage} from './viewer_page';
-import {VizPage} from './viz_page';
-import {WidgetsPage} from './widgets_page';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {showModal} from '../widgets/modal';
 import {IdleDetector} from './idle_detector';
 import {IdleDetectorWindow} from './idle_detector_interface';
-import {pageWithTrace} from './pages';
 import {AppImpl} from '../core/app_impl';
 import {addSqlTableTab} from './sql_table_tab';
 import {getServingRoot} from '../base/http_utils';
@@ -67,7 +57,7 @@ import {configureExtensions} from '../public/lib/extensions';
 import {
   addDebugCounterTrack,
   addDebugSliceTrack,
-} from '../public/lib/debug_tracks/debug_tracks';
+} from '../public/lib/tracks/debug_tracks';
 import {addVisualizedArgTracks} from './visualized_args_tracks';
 import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
 
@@ -303,24 +293,20 @@ function onCssLoaded() {
   // And replace it with the root <main> element which will be used by mithril.
   document.body.innerHTML = '';
 
-  const router = new Router({
-    '/': HomePage,
-    '/explore': pageWithTrace(ExplorePage),
-    '/flags': FlagsPage,
-    '/info': pageWithTrace(TraceInfoPage),
-    '/insights': pageWithTrace(InsightsPage),
-    '/metrics': pageWithTrace(MetricsPage),
-    '/plugins': PluginsPage,
-    '/query': pageWithTrace(QueryPage),
-    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
-    '/viewer': pageWithTrace(ViewerPage),
-    '/viz': pageWithTrace(VizPage),
-    '/widgets': WidgetsPage,
-  });
+  const pages = AppImpl.instance.pages;
+  const traceless = true;
+  pages.registerPage({route: '/', traceless, page: HomePage});
+  const recordPage = RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage;
+  pages.registerPage({route: '/record', traceless, page: recordPage});
+  pages.registerPage({route: '/viewer', page: ViewerPage});
+  const router = new Router();
   router.onRouteChanged = routeChange;
 
   raf.domRedraw = () => {
-    m.render(document.body, m(UiMain, router.resolve()));
+    m.render(
+      document.body,
+      m(UiMain, pages.renderPageForCurrentRoute(AppImpl.instance.trace)),
+    );
   };
 
   if (
@@ -375,7 +361,10 @@ function onCssLoaded() {
   });
 
   // Force one initial render to get everything in place
-  m.render(document.body, m(UiMain, router.resolve()));
+  m.render(
+    document.body,
+    m(UiMain, AppImpl.instance.pages.renderPageForCurrentRoute(undefined)),
+  );
 
   // Initialize plugins, now that we are ready to go.
   const pluginManager = AppImpl.instance.plugins;
