@@ -1,4 +1,4 @@
-// Copyright (C) 2022 The Android Open Source Project
+// Copyright (C) 2024 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {DataSource} from '../../common/recordingV2/recording_interfaces_v2';
-import {RecordingState} from '../../common/state';
+import {getServingRoot} from './http_utils';
 
-export interface RecordingSectionAttrs {
-  recState: RecordingState;
-  dataSources: DataSource[];
-  cssClass: string;
+let rootUrl = '';
+
+/**
+ * This function must be called once while bootstrapping in a direct script
+ * context (i.e. not a promise or callback). Typically frontend/index.ts.
+ */
+export function initAssets() {
+  rootUrl = getServingRoot();
 }
 
-export const POLL_INTERVAL_MS = [250, 500, 1000, 2500, 5000, 30000, 60000];
+/**
+ * Returns the absolute url of an asset.
+ * assetSrc('assets/image.jpg') -> '/v123-deadbef/assets/image.png';
+ */
+export function assetSrc(relPath: string) {
+  return rootUrl + relPath;
+}
