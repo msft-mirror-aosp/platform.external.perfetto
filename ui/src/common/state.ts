@@ -16,12 +16,6 @@ import {RecordConfig} from '../controller/record_config_types';
 
 export const MAX_TIME = 180;
 
-export interface QueryConfig {
-  id: string;
-  engineId?: string;
-  query: string;
-}
-
 export interface RecordingTarget {
   name: string;
   os: TargetOs;
@@ -49,15 +43,18 @@ export type LoadedConfig =
   | LoadedConfigAutomatic
   | LoadedConfigNamed;
 
-export interface State {
+export interface RecordCommand {
+  commandline: string;
+  pbtxt: string;
+  pbBase64: string;
+}
+
+export interface RecordingState {
   /**
    * State of the ConfigEditor.
    */
   recordConfig: RecordConfig;
   lastLoadedConfig: LoadedConfig;
-
-  // Show track perf debugging overlay
-  perfDebug: boolean;
 
   /**
    * Trace recording
@@ -72,6 +69,10 @@ export interface State {
 
   fetchChromeCategories: boolean;
   chromeCategories: string[] | undefined;
+
+  bufferUsage: number;
+  recordingLog: string;
+  recordCmd?: RecordCommand;
 }
 
 export declare type RecordMode =
@@ -96,7 +97,7 @@ export function isAndroidP(target: RecordingTarget) {
 }
 
 export function isAndroidTarget(target: RecordingTarget) {
-  return ['Q', 'P', 'O'].includes(target.os);
+  return ['Q', 'P', 'O', 'S'].includes(target.os);
 }
 
 export function isChromeTarget(target: RecordingTarget) {
