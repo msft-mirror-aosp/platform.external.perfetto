@@ -11533,6 +11533,7 @@ filegroup {
     name: "perfetto_src_profiling_perf_producer_unittests",
     srcs: [
         "src/profiling/perf/event_config_unittest.cc",
+        "src/profiling/perf/frame_pointer_unwinder_unittest.cc",
         "src/profiling/perf/perf_producer_unittest.cc",
         "src/profiling/perf/unwind_queue_unittest.cc",
     ],
@@ -11558,6 +11559,7 @@ filegroup {
 filegroup {
     name: "perfetto_src_profiling_perf_unwinding",
     srcs: [
+        "src/profiling/perf/frame_pointer_unwinder.cc",
         "src/profiling/perf/unwinding.cc",
     ],
 }
@@ -13571,6 +13573,7 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/helpers.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_graph/raw_dominator_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_profile/callstacks.sql",
+        "src/trace_processor/perfetto_sql/stdlib/android/memory/heap_profile/summary_tree.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/memory/process.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/monitor_contention.sql",
         "src/trace_processor/perfetto_sql/stdlib/android/network_packets.sql",
