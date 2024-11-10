@@ -19,7 +19,7 @@ import {QueryResponse, runQuery} from '../public/lib/query_table/queries';
 import {raf} from '../core/raf_scheduler';
 import {Callout} from '../widgets/callout';
 import {Editor} from '../widgets/editor';
-import {PageWithTraceAttrs} from './pages';
+import {PageWithTraceAttrs} from '../public/page';
 import {QueryHistoryComponent, queryHistoryStorage} from './query_history';
 import {Trace, TraceAttrs} from '../public/trace';
 import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
@@ -122,6 +122,7 @@ export class QueryPage implements m.ClassComponent<PageWithTraceAttrs> {
       state.executedQuery === undefined
         ? null
         : m(QueryTable, {
+            trace: attrs.trace,
             query: state.executedQuery,
             resp: state.queryResult,
             fillParent: false,
