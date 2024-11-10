@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 import {Time} from '../base/time';
-import {PostedTrace} from '../public/trace_source';
+import {PostedTrace} from '../core/trace_source';
 import {showModal} from '../widgets/modal';
 import {initCssConstants} from './css_constants';
 import {toggleHelp} from './help_modal';
@@ -157,7 +157,7 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   }
 
   if (messageEvent.data === 'SHOW-HELP') {
-    toggleHelp(AppImpl.instance);
+    toggleHelp();
     return;
   }
 

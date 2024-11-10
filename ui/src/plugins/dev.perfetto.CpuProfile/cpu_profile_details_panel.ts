@@ -17,68 +17,76 @@ import {time} from '../../base/time';
 import {
   metricsFromTableOrSubquery,
   QueryFlamegraph,
-  QueryFlamegraphAttrs,
 } from '../../public/lib/query_flamegraph';
 import {Timestamp} from '../../frontend/widgets/timestamp';
-import {TrackEventDetailsPanel} from '../../public/details_panel';
-import {Engine} from '../../trace_processor/engine';
+import {
+  TrackEventDetailsPanel,
+  TrackEventDetailsPanelSerializeArgs,
+} from '../../public/details_panel';
 import {DetailsShell} from '../../widgets/details_shell';
+import {Trace} from '../../public/trace';
+import {
+  Flamegraph,
+  FLAMEGRAPH_STATE_SCHEMA,
+  FlamegraphState,
+} from '../../widgets/flamegraph';
 
 export class CpuProfileSampleFlamegraphDetailsPanel
   implements TrackEventDetailsPanel
 {
-  private readonly flamegraphAttrs: QueryFlamegraphAttrs;
+  private readonly flamegraph: QueryFlamegraph;
+  readonly serialization: TrackEventDetailsPanelSerializeArgs<FlamegraphState>;
 
   constructor(
-    private engine: Engine,
+    trace: Trace,
     private ts: time,
     utid: number,
   ) {
-    this.flamegraphAttrs = {
-      engine: this.engine,
-      metrics: [
-        ...metricsFromTableOrSubquery(
-          `
-            (
-              select
-                id,
-                parent_id as parentId,
-                name,
-                mapping_name,
-                source_file,
-                cast(line_number AS text) as line_number,
-                self_count
-              from _callstacks_for_callsites!((
-                select p.callsite_id
-                from cpu_profile_stack_sample p
-                where p.ts = ${ts} and p.utid = ${utid}
-              ))
-            )
-          `,
-          [
-            {
-              name: 'CPU Profile Samples',
-              unit: '',
-              columnName: 'self_count',
-            },
-          ],
-          'include perfetto module callstacks.stack_profile',
-          [{name: 'mapping_name', displayName: 'Mapping'}],
-          [
-            {
-              name: 'source_file',
-              displayName: 'Source File',
-              mergeAggregation: 'ONE_OR_NULL',
-            },
-            {
-              name: 'line_number',
-              displayName: 'Line Number',
-              mergeAggregation: 'ONE_OR_NULL',
-            },
-          ],
-        ),
+    const metrics = metricsFromTableOrSubquery(
+      `
+        (
+          select
+            id,
+            parent_id as parentId,
+            name,
+            mapping_name,
+            source_file,
+            cast(line_number AS text) as line_number,
+            self_count
+          from _callstacks_for_callsites!((
+            select p.callsite_id
+            from cpu_profile_stack_sample p
+            where p.ts = ${ts} and p.utid = ${utid}
+          ))
+        )
+      `,
+      [
+        {
+          name: 'CPU Profile Samples',
+          unit: '',
+          columnName: 'self_count',
+        },
       ],
+      'include perfetto module callstacks.stack_profile',
+      [{name: 'mapping_name', displayName: 'Mapping'}],
+      [
+        {
+          name: 'source_file',
+          displayName: 'Source File',
+          mergeAggregation: 'ONE_OR_NULL',
+        },
+        {
+          name: 'line_number',
+          displayName: 'Line Number',
+          mergeAggregation: 'ONE_OR_NULL',
+        },
+      ],
+    );
+    this.serialization = {
+      schema: FLAMEGRAPH_STATE_SCHEMA,
+      state: Flamegraph.createDefaultState(metrics),
     };
+    this.flamegraph = new QueryFlamegraph(trace, metrics, this.serialization);
   }
 
   render() {
@@ -92,7 +100,7 @@ export class CpuProfileSampleFlamegraphDetailsPanel
           description: [],
           buttons: [m('div.time', `Timestamp: `, m(Timestamp, {ts: this.ts}))],
         },
-        m(QueryFlamegraph, this.flamegraphAttrs),
+        this.flamegraph.render(),
       ),
     );
   }
