@@ -31,11 +31,12 @@ import {assertExists} from '../../base/logging';
 import {
   metricsFromTableOrSubquery,
   QueryFlamegraph,
-  QueryFlamegraphAttrs,
 } from '../../public/lib/query_flamegraph';
 import {DetailsShell} from '../../widgets/details_shell';
 import {Timestamp} from '../../frontend/widgets/timestamp';
 import {time} from '../../base/time';
+import {TrackEventDetailsPanel} from '../../public/details_panel';
+import {Flamegraph, FLAMEGRAPH_STATE_SCHEMA} from '../../widgets/flamegraph';
 
 interface PerfSampleRow extends NamedRow {
   callsiteId: number;
@@ -112,57 +113,57 @@ export class ProcessPerfSamplesProfileTrack extends BasePerfSamplesProfileTrack 
     const upid = assertExists(sel.upid);
     const ts = sel.ts;
 
-    const flamegraphAttrs = {
-      engine: this.engine,
-      metrics: [
-        ...metricsFromTableOrSubquery(
-          `
-                (
-                  select
-                    id,
-                    parent_id as parentId,
-                    name,
-                    mapping_name,
-                    source_file,
-                    cast(line_number AS text) as line_number,
-                    self_count
-                  from _callstacks_for_callsites!((
-                    select p.callsite_id
-                    from perf_sample p
-                    join thread t using (utid)
-                    where p.ts >= ${ts}
-                      and p.ts <= ${ts}
-                      and t.upid = ${upid}
-                  ))
-                )
-              `,
-          [
-            {
-              name: 'Perf Samples',
-              unit: '',
-              columnName: 'self_count',
-            },
-          ],
-          'include perfetto module linux.perf.samples',
-          [{name: 'mapping_name', displayName: 'Mapping'}],
-          [
-            {
-              name: 'source_file',
-              displayName: 'Source File',
-              mergeAggregation: 'ONE_OR_NULL',
-            },
-            {
-              name: 'line_number',
-              displayName: 'Line Number',
-              mergeAggregation: 'ONE_OR_NULL',
-            },
-          ],
-        ),
+    const metrics = metricsFromTableOrSubquery(
+      `
+        (
+          select
+            id,
+            parent_id as parentId,
+            name,
+            mapping_name,
+            source_file,
+            cast(line_number AS text) as line_number,
+            self_count
+          from _callstacks_for_callsites!((
+            select p.callsite_id
+            from perf_sample p
+            join thread t using (utid)
+            where p.ts >= ${ts}
+              and p.ts <= ${ts}
+              and t.upid = ${upid}
+          ))
+        )
+      `,
+      [
+        {
+          name: 'Perf Samples',
+          unit: '',
+          columnName: 'self_count',
+        },
       ],
+      'include perfetto module linux.perf.samples',
+      [{name: 'mapping_name', displayName: 'Mapping'}],
+      [
+        {
+          name: 'source_file',
+          displayName: 'Source File',
+          mergeAggregation: 'ONE_OR_NULL',
+        },
+        {
+          name: 'line_number',
+          displayName: 'Line Number',
+          mergeAggregation: 'ONE_OR_NULL',
+        },
+      ],
+    );
+    const serialization = {
+      schema: FLAMEGRAPH_STATE_SCHEMA,
+      state: Flamegraph.createDefaultState(metrics),
     };
-
+    const flamegraph = new QueryFlamegraph(this.trace, metrics, serialization);
     return {
-      render: () => renderDetailsPanel(flamegraphAttrs, ts),
+      render: () => renderDetailsPanel(flamegraph, ts),
+      serialization,
     };
   }
 }
@@ -202,65 +203,65 @@ export class ThreadPerfSamplesProfileTrack extends BasePerfSamplesProfileTrack {
     };
   }
 
-  detailsPanel(sel: TrackEventSelection) {
+  detailsPanel(sel: TrackEventSelection): TrackEventDetailsPanel {
     const utid = assertExists(sel.utid);
     const ts = sel.ts;
 
-    const flamegraphAttrs = {
-      engine: this.engine,
-      metrics: [
-        ...metricsFromTableOrSubquery(
-          `
-            (
-              select
-                id,
-                parent_id as parentId,
-                name,
-                mapping_name,
-                source_file,
-                cast(line_number AS text) as line_number,
-                self_count
-              from _callstacks_for_callsites!((
-                select p.callsite_id
-                from perf_sample p
-                where p.ts >= ${ts}
-                  and p.ts <= ${ts}
-                  and p.utid = ${utid}
-              ))
-            )
-          `,
-          [
-            {
-              name: 'Perf Samples',
-              unit: '',
-              columnName: 'self_count',
-            },
-          ],
-          'include perfetto module linux.perf.samples',
-          [{name: 'mapping_name', displayName: 'Mapping'}],
-          [
-            {
-              name: 'source_file',
-              displayName: 'Source File',
-              mergeAggregation: 'ONE_OR_NULL',
-            },
-            {
-              name: 'line_number',
-              displayName: 'Line Number',
-              mergeAggregation: 'ONE_OR_NULL',
-            },
-          ],
-        ),
+    const metrics = metricsFromTableOrSubquery(
+      `
+        (
+          select
+            id,
+            parent_id as parentId,
+            name,
+            mapping_name,
+            source_file,
+            cast(line_number AS text) as line_number,
+            self_count
+          from _callstacks_for_callsites!((
+            select p.callsite_id
+            from perf_sample p
+            where p.ts >= ${ts}
+              and p.ts <= ${ts}
+              and p.utid = ${utid}
+          ))
+        )
+      `,
+      [
+        {
+          name: 'Perf Samples',
+          unit: '',
+          columnName: 'self_count',
+        },
       ],
+      'include perfetto module linux.perf.samples',
+      [{name: 'mapping_name', displayName: 'Mapping'}],
+      [
+        {
+          name: 'source_file',
+          displayName: 'Source File',
+          mergeAggregation: 'ONE_OR_NULL',
+        },
+        {
+          name: 'line_number',
+          displayName: 'Line Number',
+          mergeAggregation: 'ONE_OR_NULL',
+        },
+      ],
+    );
+    const serialization = {
+      schema: FLAMEGRAPH_STATE_SCHEMA,
+      state: Flamegraph.createDefaultState(metrics),
     };
-
+    const flamegraph = new QueryFlamegraph(this.trace, metrics, serialization);
     return {
-      render: () => renderDetailsPanel(flamegraphAttrs, ts),
+      render: () => renderDetailsPanel(flamegraph, ts),
+      serialization,
     };
   }
 }
 
-function renderDetailsPanel(flamegraphAttrs: QueryFlamegraphAttrs, ts: time) {
+function renderDetailsPanel(flamegraph: QueryFlamegraph, ts: time) {
   return m(
     '.flamegraph-profile',
     m(
@@ -286,7 +287,7 @@ function renderDetailsPanel(flamegraphAttrs: QueryFlamegraphAttrs, ts: time) {
           ),
         ],
       },
-      m(QueryFlamegraph, assertExists(flamegraphAttrs)),
+      flamegraph.render(),
     ),
   );
 }

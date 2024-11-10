@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {DisposableStack} from '../base/disposable_stack';
-import {assertTrue} from '../base/logging';
 import {createStore, Migrate, Store} from '../base/store';
 import {TimelineImpl} from './timeline';
 import {Command} from '../public/command';
@@ -44,6 +43,9 @@ import {Analytics} from '../public/analytics';
 import {getOrCreate} from '../base/utils';
 import {fetchWithProgress} from '../base/http_utils';
 import {TraceInfoImpl} from './trace_info_impl';
+import {PageHandler, PageManager} from '../public/page';
+import {createProxy} from '../base/utils';
+import {PageManagerImpl} from './page_manager';
 
 /**
  * Handles the per-trace state of the UI
@@ -53,7 +55,8 @@ import {TraceInfoImpl} from './trace_info_impl';
  * This is the underlying storage for AppImpl, which instead has one instance
  * per trace per plugin.
  */
-class TraceContext implements Disposable {
+export class TraceContext implements Disposable {
+  private readonly pluginInstances = new Map<string, TraceImpl>();
   readonly appCtx: AppContext;
   readonly engine: EngineBase;
   readonly omniboxMgr = new OmniboxManagerImpl();
@@ -134,7 +137,7 @@ class TraceContext implements Disposable {
     if (clearSearch) {
       this.searchMgr.reset();
     }
-    if (switchToCurrentSelectionTab) {
+    if (switchToCurrentSelectionTab && selection.kind !== 'empty') {
       this.tabMgr.showCurrentSelectionTab();
     }
 
@@ -149,6 +152,16 @@ class TraceContext implements Disposable {
     this.selectionMgr.selectSearchResult(searchResult);
   }
 
+  // Gets or creates an instance of TraceImpl backed by the current TraceContext
+  // for the given plugin.
+  forPlugin(pluginId: string) {
+    return getOrCreate(this.pluginInstances, pluginId, () => {
+      const appForPlugin = this.appCtx.forPlugin(pluginId);
+      return new TraceImpl(appForPlugin, this);
+    });
+  }
+
+  // Called by AppContext.closeCurrentTrace().
   [Symbol.dispose]() {
     this.trash.dispose();
   }
@@ -162,15 +175,16 @@ class TraceContext implements Disposable {
  * for the core.
  */
 export class TraceImpl implements Trace {
-  private appImpl: AppImpl;
-  private traceCtx: TraceContext;
+  private readonly appImpl: AppImpl;
+  private readonly traceCtx: TraceContext;
 
   // This is not the original Engine base, rather an EngineProxy based on the
   // same engineBase.
-  private engineProxy: EngineProxy;
-  private trackMgrProxy: TrackManagerImpl;
-  private commandMgrProxy: CommandManagerImpl;
-  private sidebarProxy: SidebarManagerImpl;
+  private readonly engineProxy: EngineProxy;
+  private readonly trackMgrProxy: TrackManagerImpl;
+  private readonly commandMgrProxy: CommandManagerImpl;
+  private readonly sidebarProxy: SidebarManagerImpl;
+  private readonly pageMgrProxy: PageManagerImpl;
 
   // This is called by TraceController when loading a new trace, soon after the
   // engine has been set up. It obtains a new TraceImpl for the core. From that
@@ -182,15 +196,15 @@ export class TraceImpl implements Trace {
     traceInfo: TraceInfoImpl,
   ): TraceImpl {
     const traceCtx = new TraceContext(
-      appImpl.__appCtxForTraceImplCtor,
+      appImpl.__appCtxForTrace,
       engine,
       traceInfo,
     );
-    const traceImpl = new TraceImpl(appImpl, traceCtx);
-    return traceImpl;
+    return traceCtx.forPlugin(CORE_PLUGIN_ID);
   }
 
-  private constructor(appImpl: AppImpl, ctx: TraceContext) {
+  // Only called by TraceContext.forPlugin().
+  constructor(appImpl: AppImpl, ctx: TraceContext) {
     const pluginId = appImpl.pluginId;
     this.appImpl = appImpl;
     this.traceCtx = ctx;
@@ -228,6 +242,17 @@ export class TraceImpl implements Trace {
       },
     });
 
+    this.pageMgrProxy = createProxy(ctx.appCtx.pageMgr, {
+      registerPage(pageHandler: PageHandler): Disposable {
+        const disposable = appImpl.pages.registerPage({
+          ...pageHandler,
+          pluginId: appImpl.pluginId,
+        });
+        traceUnloadTrash.use(disposable);
+        return disposable;
+      },
+    });
+
     // TODO(primiano): remove this injection once we plumb Trace everywhere.
     setScrollToFunction((x: ScrollToArgs) => ctx.scrollHelper.scrollTo(x));
   }
@@ -240,8 +265,7 @@ export class TraceImpl implements Trace {
   // another plugin. This is effectively a way to "fork" the core instance and
   // create the N instances for plugins.
   forkForPlugin(pluginId: string) {
-    assertTrue(pluginId != CORE_PLUGIN_ID);
-    return new TraceImpl(this.appImpl.forkForPlugin(pluginId), this.traceCtx);
+    return this.traceCtx.forPlugin(pluginId);
   }
 
   mountStore<T>(migrate: Migrate<T>): Store<T> {
@@ -287,6 +311,10 @@ export class TraceImpl implements Trace {
     }
     const pluginArgs = traceSource.pluginArgs;
     return (pluginArgs ?? {})[this.pluginId];
+  }
+
+  get trace() {
+    return this;
   }
 
   get engine() {
@@ -359,6 +387,10 @@ export class TraceImpl implements Trace {
     return this.sidebarProxy;
   }
 
+  get pages(): PageManager {
+    return this.pageMgrProxy;
+  }
+
   get omnibox(): OmniboxManagerImpl {
     return this.appImpl.omnibox;
   }
@@ -375,18 +407,8 @@ export class TraceImpl implements Trace {
     return this.appImpl.initialRouteArgs;
   }
 
-  get rootUrl(): string {
-    return this.appImpl.rootUrl;
-  }
-
   scheduleFullRedraw(): void {
     this.appImpl.scheduleFullRedraw();
-  }
-
-  [Symbol.dispose]() {
-    if (this.pluginId === CORE_PLUGIN_ID) {
-      this.traceCtx[Symbol.dispose]();
-    }
   }
 
   navigate(newHash: string): void {
@@ -419,6 +441,11 @@ export class TraceImpl implements Trace {
   get trash(): DisposableStack {
     return this.traceCtx.trash;
   }
+
+  // Nothing other than AppImpl should ever refer to this, hence the __ name.
+  get __traceCtxForApp() {
+    return this.traceCtx;
+  }
 }
 
 // A convenience interface to inject the App in Mithril components.
@@ -426,24 +453,6 @@ export interface TraceImplAttrs {
   trace: TraceImpl;
 }
 
-// Allows to take an existing class instance (`target`) and override some of its
-// methods via `overrides`. We use this for cases where we want to expose a
-// "manager" (e.g. TrackManager, SidebarManager) to the plugins, but we want to
-// override few of its methods (e.g. to inject the pluginId in the args).
-function createProxy<T extends object>(target: T, overrides: Partial<T>): T {
-  return new Proxy(target, {
-    get: (target: T, prop: string | symbol, receiver) => {
-      // If the property is overriden, use that; otherwise, use target
-      const overrideValue = (overrides as {[key: symbol | string]: {}})[prop];
-      if (overrideValue !== undefined) {
-        return typeof overrideValue === 'function'
-          ? overrideValue.bind(overrides)
-          : overrideValue;
-      }
-      const baseValue = Reflect.get(target, prop, receiver);
-      return typeof baseValue === 'function'
-        ? baseValue.bind(target)
-        : baseValue;
-    },
-  }) as T;
+export interface OptionalTraceImplAttrs {
+  trace?: TraceImpl;
 }
