@@ -1982,6 +1982,8 @@ message PerfEventConfig {
     UNWIND_SKIP = 1;
     // Use libunwindstack (default):
     UNWIND_DWARF = 2;
+    // Use userspace frame pointer unwinder:
+    UNWIND_FRAME_POINTER = 3;
   }
 }
 
@@ -7536,6 +7538,16 @@ message MmCompactionWakeupKcompactdFtraceEvent {
 
 // End of protos/perfetto/trace/ftrace/compaction.proto
 
+// Begin of protos/perfetto/trace/ftrace/cpm_trace.proto
+
+message ParamSetValueCpmFtraceEvent {
+  optional string body = 1;
+  optional uint32 value = 2;
+  optional int64 timestamp = 3;
+}
+
+// End of protos/perfetto/trace/ftrace/cpm_trace.proto
+
 // Begin of protos/perfetto/trace/ftrace/cpuhp.proto
 
 message CpuhpExitFtraceEvent {
@@ -11411,6 +11423,7 @@ message FtraceEvent {
     SchedWakeupTaskAttrFtraceEvent sched_wakeup_task_attr = 540;
     DevfreqFrequencyFtraceEvent devfreq_frequency = 541;
     KprobeEvent kprobe_event = 542;
+    ParamSetValueCpmFtraceEvent param_set_value_cpm = 543;
   }
 }
 
@@ -11459,6 +11472,17 @@ message FtraceCpuStats {
 
   // The number of events read (consumed) from the buffer by userspace.
   optional uint64 read_events = 9;
+}
+
+// Kprobe statistical data, gathered from /sys/kernel/tracing/kprobe_profile.
+message FtraceKprobeStats {
+  // Cumulative number of kprobe events generated for this function
+  optional int64 hits = 1;
+  // Cumulative number of kprobe events that could not be generated for this
+  // function and were missed.  This happens when too much nesting
+  // happens between a kprobe and its kretprobe, overflowing the
+  // maxactives buffer.
+  optional int64 misses = 2;
 }
 
 // Errors and kernel buffer stats for the ftrace data source.
@@ -11512,6 +11536,9 @@ message FtraceStats {
   // Any traces with entries in this field should be investigated, as they
   // indicate a bug in perfetto or the kernel.
   repeated FtraceParseStatus ftrace_parse_errors = 9;
+
+  // Kprobe profile stats for functions hits and misses
+  optional FtraceKprobeStats kprobe_stats = 10;
 }
 
 enum FtraceParseStatus {

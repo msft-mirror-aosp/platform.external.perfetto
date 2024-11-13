@@ -14,8 +14,6 @@
 
 import {produce} from 'immer';
 import m from 'mithril';
-import {Actions} from '../common/actions';
-import {getSchema} from '../common/schema';
 import {raf} from '../core/raf_scheduler';
 import {globals} from './globals';
 import {App} from '../public/app';
@@ -25,20 +23,16 @@ declare global {
   interface Window {
     m: typeof m;
     app: App;
-    getSchema: typeof getSchema;
     globals: typeof globals;
-    Actions: typeof Actions;
     produce: typeof produce;
     raf: typeof raf;
   }
 }
 
 export function registerDebugGlobals() {
-  window.getSchema = getSchema;
   window.m = m;
   window.app = AppImpl.instance;
   window.globals = globals;
-  window.Actions = Actions;
   window.produce = produce;
   window.raf = raf;
 }

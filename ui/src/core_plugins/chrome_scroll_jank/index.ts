@@ -21,7 +21,8 @@ import {ScrollJankV3Track} from './scroll_jank_v3_track';
 import {TopLevelScrollTrack} from './scroll_track';
 import {ScrollJankCauseMap} from './scroll_jank_cause_map';
 import {TrackNode} from '../../public/workspace';
-import {featureFlags, OverrideState} from '../../core/feature_flags';
+import {featureFlags} from '../../core/feature_flags';
+import {OverrideState} from '../../public/feature_flag';
 
 // Before plugins were a thing, this plugin was enabled using a feature flag.
 // However, nowadays, plugins themselves can be selectively enabled and
@@ -85,6 +86,7 @@ export default class implements PerfettoPlugin {
     await ctx.engine.query(`
       INCLUDE PERFETTO MODULE chrome.chrome_scrolls;
       INCLUDE PERFETTO MODULE chrome.scroll_jank.scroll_offsets;
+      INCLUDE PERFETTO MODULE chrome.event_latency;
     `);
 
     const uri = 'perfetto.ChromeScrollJank#toplevelScrolls';
@@ -109,19 +111,15 @@ export default class implements PerfettoPlugin {
   ): Promise<void> {
     const subTableSql = generateSqlWithInternalLayout({
       columns: ['id', 'ts', 'dur', 'track_id', 'name'],
-      sourceTable: 'slice',
+      sourceTable: 'chrome_event_latencies',
       ts: 'ts',
       dur: 'dur',
       whereClause: `
-        EXTRACT_ARG(arg_set_id, 'event_latency.event_type') IN (
+        event_type IN (
           'FIRST_GESTURE_SCROLL_UPDATE',
           'GESTURE_SCROLL_UPDATE',
           'INERTIAL_GESTURE_SCROLL_UPDATE')
-        AND has_descendant_slice_with_name(
-          id,
-          'SubmitCompositorFrameToPresentationCompositorFrame')
-        AND name = 'EventLatency'
-        AND depth = 0`,
+        AND is_presented`,
     });
 
     // Table name must be unique - it cannot include '-' characters or begin
