@@ -19,6 +19,8 @@ import {SidebarManager} from './sidebar';
 import {Analytics} from './analytics';
 import {PluginManager} from './plugin';
 import {Trace} from './trace';
+import {PageManager} from './page';
+import {FeatureFlagManager} from './feature_flag';
 
 /**
  * The API endpoint to interact programmaticaly with the UI before a trace has
@@ -35,14 +37,14 @@ export interface App {
   readonly omnibox: OmniboxManager;
   readonly analytics: Analytics;
   readonly plugins: PluginManager;
+  readonly pages: PageManager;
+  readonly featureFlags: FeatureFlagManager;
 
   /**
    * The parsed querystring passed when starting the app, before any navigation
    * happens.
    */
   readonly initialRouteArgs: RouteArgs;
-
-  readonly rootUrl: string;
 
   /**
    * Returns the current trace object, if any. The instance being returned is
