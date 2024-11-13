@@ -3119,6 +3119,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/slices/flow.sql",
         "src/trace_processor/perfetto_sql/stdlib/slices/hierarchy.sql",
         "src/trace_processor/perfetto_sql/stdlib/slices/slices.sql",
+        "src/trace_processor/perfetto_sql/stdlib/slices/time_in_state.sql",
         "src/trace_processor/perfetto_sql/stdlib/slices/with_context.sql",
     ],
 )
@@ -5544,6 +5545,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/clk.proto",
         "protos/perfetto/trace/ftrace/cma.proto",
         "protos/perfetto/trace/ftrace/compaction.proto",
+        "protos/perfetto/trace/ftrace/cpm_trace.proto",
         "protos/perfetto/trace/ftrace/cpuhp.proto",
         "protos/perfetto/trace/ftrace/cros_ec.proto",
         "protos/perfetto/trace/ftrace/dcvsh.proto",
