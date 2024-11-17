@@ -19,7 +19,7 @@ import {exists} from '../base/utils';
 import {Button} from '../widgets/button';
 import {DetailsShell} from '../widgets/details_shell';
 import {Popup, PopupPosition} from '../widgets/popup';
-import {AddDebugTrackMenu} from '../public/lib/debug_tracks/add_debug_track_menu';
+import {AddDebugTrackMenu} from '../public/lib/tracks/add_debug_track_menu';
 import {Filter} from './widgets/sql/table/column';
 import {SqlTableState} from './widgets/sql/table/state';
 import {SqlTable} from './widgets/sql/table/table';
@@ -28,6 +28,12 @@ import {Trace} from '../public/trace';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 import {addEphemeralTab} from '../common/add_ephemeral_tab';
 import {Tab} from '../public/tab';
+import {addChartTab} from './widgets/charts/chart_tab';
+import {
+  ChartOption,
+  createChartConfigFromSqlTableState,
+} from './widgets/charts/chart';
+import {AddChartMenuItem} from './widgets/charts/add_chart_menu';
 
 export interface AddSqlTableTabParams {
   table: SqlTableDescription;
@@ -122,6 +128,16 @@ class SqlTableTab implements Tab {
       },
       m(SqlTable, {
         state: this.state,
+        addColumnMenuItems: (column, columnAlias) =>
+          m(AddChartMenuItem, {
+            chartConfig: createChartConfigFromSqlTableState(
+              column,
+              columnAlias,
+              this.state,
+            ),
+            chartOptions: [ChartOption.HISTOGRAM],
+            addChart: (chart) => addChartTab(chart),
+          }),
       }),
     );
   }

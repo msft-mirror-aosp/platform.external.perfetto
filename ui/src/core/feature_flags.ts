@@ -16,20 +16,7 @@
 // ~everywhere and the are "statically" initialized (i.e. files construct Flags
 // at import time) if this file starts importing anything we will quickly run
 // into issues with initialization order which will be a pain.
-
-interface FlagSettings {
-  id: string;
-  defaultValue: boolean;
-  description: string;
-  name?: string;
-  devOnly?: boolean;
-}
-
-export enum OverrideState {
-  DEFAULT = 'DEFAULT',
-  TRUE = 'OVERRIDE_TRUE',
-  FALSE = 'OVERRIDE_FALSE',
-}
+import {Flag, FlagSettings, OverrideState} from '../public/feature_flag';
 
 export interface FlagStore {
   load(): object;
@@ -135,39 +122,6 @@ class Flags {
   }
 }
 
-export interface Flag {
-  // A unique identifier for this flag ("magicSorting")
-  readonly id: string;
-
-  // The name of the flag the user sees ("New track sorting algorithm")
-  readonly name: string;
-
-  // A longer description which is displayed to the user.
-  // "Sort tracks using an embedded tfLite model based on your expression
-  // while waiting for the trace to load."
-  readonly description: string;
-
-  // Whether the flag defaults to true or false.
-  // If !flag.isOverridden() then flag.get() === flag.defaultValue
-  readonly defaultValue: boolean;
-
-  // Get the current value of the flag.
-  get(): boolean;
-
-  // Override the flag and persist the new value.
-  set(value: boolean): void;
-
-  // If the flag has been overridden.
-  // Note: A flag can be overridden to its default value.
-  isOverridden(): boolean;
-
-  // Reset the flag to its default setting.
-  reset(): void;
-
-  // Get the current state of the flag.
-  overriddenState(): OverrideState;
-}
-
 class FlagImpl implements Flag {
   registry: Flags;
   state: OverrideState;
@@ -248,10 +202,3 @@ class LocalStorageStore implements FlagStore {
 
 export const FlagsForTesting = Flags;
 export const featureFlags = new Flags(new LocalStorageStore());
-
-export const RECORDING_V2_FLAG = featureFlags.register({
-  id: 'recordingv2',
-  name: 'Recording V2',
-  description: 'Record using V2 interface',
-  defaultValue: false,
-});

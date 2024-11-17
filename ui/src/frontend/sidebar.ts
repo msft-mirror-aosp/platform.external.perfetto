@@ -13,9 +13,8 @@
 // limitations under the License.
 
 import m from 'mithril';
-import {isString} from '../base/object_utils';
 import {getCurrentChannel} from '../core/channels';
-import {TRACE_SUFFIX} from '../common/constants';
+import {TRACE_SUFFIX} from '../public/trace';
 import {
   disableMetatracingAndGetTrace,
   enableMetatracing,
@@ -30,18 +29,23 @@ import {Animation} from './animation';
 import {downloadData, downloadUrl} from './download_utils';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
-import {createTraceLink, shareTrace} from './trace_share_utils';
+import {shareTrace} from './trace_share_utils';
 import {
   convertTraceToJsonAndDownload,
   convertTraceToSystraceAndDownload,
 } from './trace_converter';
 import {openInOldUIWithSizeCheck} from './legacy_trace_viewer';
-import {formatHotkey} from '../base/hotkeys';
-import {SidebarMenuItem} from '../public/sidebar';
+import {SIDEBAR_SECTIONS, SidebarSections} from '../public/sidebar';
 import {AppImpl} from '../core/app_impl';
 import {Trace} from '../public/trace';
-import {removeFalsyValues} from '../base/array_utils';
 import {OptionalTraceImplAttrs, TraceImpl} from '../core/trace_impl';
+import {Command} from '../public/command';
+import {SidebarMenuItemInternal} from '../core/sidebar_manager';
+import {exists, getOrCreate} from '../base/utils';
+import {copyToClipboard} from '../base/clipboard';
+import {classNames} from '../base/classnames';
+import {formatHotkey} from '../base/hotkeys';
+import {assetSrc} from '../base/assets';
 
 const GITILES_URL =
   'https://android.googlesource.com/platform/external/perfetto';
@@ -61,229 +65,8 @@ const HIRING_BANNER_FLAG = featureFlags.register({
   defaultValue: false,
 });
 
-const WIDGETS_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showWidgetsPageInNav',
-  name: 'Show widgets page',
-  description: 'Show a link to the widgets page in the side bar.',
-  defaultValue: false,
-});
-
-const PLUGINS_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showPluginsPageInNav',
-  name: 'Show plugins page',
-  description: 'Show a link to the plugins page in the side bar.',
-  defaultValue: false,
-});
-
-const INSIGHTS_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showInsightsPageInNav',
-  name: 'Show insights page',
-  description: 'Show a link to the insights page in the side bar.',
-  defaultValue: false,
-});
-
-const VIZ_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showVizPageInNav',
-  name: 'Show viz page',
-  description: 'Show a link to the viz page in the side bar.',
-  defaultValue: true,
-});
-
-const EXPLORE_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showExplorePageInNav',
-  name: 'Show explore page',
-  description: 'Show a link to the explore page in the side bar.',
-  defaultValue: false,
-});
-
 function shouldShowHiringBanner(): boolean {
   return globals.isInternalUser && HIRING_BANNER_FLAG.get();
-}
-
-interface SectionItem {
-  t: string;
-  a: string | (() => void | Promise<void>);
-  i: string;
-  tooltip?: string;
-  isVisible?: () => boolean;
-  internalUserOnly?: boolean;
-  disabled?: string; // If !undefined provides the reason why it's disabled.
-}
-
-interface Section {
-  title: string;
-  summary: string;
-  items: SectionItem[];
-  expanded?: boolean;
-  appendOpenedTraceTitle?: boolean;
-}
-
-function insertSidebarMenuitems(
-  groupSelector: SidebarMenuItem['group'],
-): ReadonlyArray<SectionItem> {
-  return AppImpl.instance.sidebar.menuItems
-    .valuesAsArray()
-    .filter(({group}) => group === groupSelector)
-    .sort((a, b) => {
-      const prioA = a.priority ?? 0;
-      const prioB = b.priority ?? 0;
-      return prioA - prioB;
-    })
-    .map((item) => {
-      const cmd = AppImpl.instance.commands.getCommand(item.commandId);
-      const title = cmd.defaultHotkey
-        ? `${cmd.name} [${formatHotkey(cmd.defaultHotkey)}]`
-        : cmd.name;
-      return {
-        t: cmd.name,
-        a: cmd.callback,
-        i: item.icon,
-        title,
-      };
-    });
-}
-
-function getSections(trace?: TraceImpl): Section[] {
-  const downloadDisabled = trace?.traceInfo.downloadable
-    ? undefined
-    : 'Cannot download external trace';
-  return removeFalsyValues([
-    {
-      title: 'Navigation',
-      summary: 'Open or record a new trace',
-      expanded: true,
-      items: [
-        ...insertSidebarMenuitems('navigation'),
-        {
-          t: 'Record new trace',
-          a: '#!/record',
-          i: 'fiber_smart_record',
-        },
-        {
-          t: 'Widgets',
-          a: '#!/widgets',
-          i: 'widgets',
-          isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
-        },
-        {
-          t: 'Plugins',
-          a: '#!/plugins',
-          i: 'extension',
-          isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
-        },
-      ],
-    },
-
-    trace && {
-      title: 'Current Trace',
-      summary: 'Actions on the current trace',
-      expanded: true,
-      appendOpenedTraceTitle: true,
-      items: [
-        {t: 'Show timeline', a: '#!/viewer', i: 'line_style'},
-        {
-          t: 'Share',
-          a: async () => await shareTrace(trace),
-          i: 'share',
-          internalUserOnly: true,
-        },
-        {
-          t: 'Download',
-          a: () => downloadTrace(trace),
-          i: 'file_download',
-          disabled: downloadDisabled,
-        },
-        {
-          t: 'Query (SQL)',
-          a: '#!/query',
-          i: 'database',
-        },
-        {
-          t: 'Explore',
-          a: '#!/explore',
-          i: 'data_exploration',
-          isVisible: () => EXPLORE_PAGE_IN_NAV_FLAG.get(),
-        },
-        {
-          t: 'Insights',
-          a: '#!/insights',
-          i: 'insights',
-          isVisible: () => INSIGHTS_PAGE_IN_NAV_FLAG.get(),
-        },
-        {
-          t: 'Viz',
-          a: '#!/viz',
-          i: 'area_chart',
-          isVisible: () => VIZ_PAGE_IN_NAV_FLAG.get(),
-        },
-        {t: 'Metrics', a: '#!/metrics', i: 'speed'},
-        {t: 'Info and stats', a: '#!/info', i: 'info'},
-      ],
-    },
-
-    trace && {
-      title: 'Convert trace',
-      summary: 'Convert to other formats',
-      expanded: true,
-      items: [
-        {
-          t: 'Switch to legacy UI',
-          a: async () => await openCurrentTraceWithOldUI(trace),
-          i: 'filter_none',
-          disabled: downloadDisabled,
-        },
-        {
-          t: 'Convert to .json',
-          a: async () => await convertTraceToJson(trace),
-          i: 'file_download',
-          disabled: downloadDisabled,
-        },
-
-        {
-          t: 'Convert to .systrace',
-          a: async () => await convertTraceToSystrace(trace),
-          i: 'file_download',
-          isVisible: () => Boolean(trace?.traceInfo.hasFtrace),
-          disabled: downloadDisabled,
-        },
-      ],
-    },
-
-    {
-      title: 'Example Traces',
-      expanded: true,
-      summary: 'Open an example trace',
-      items: [...insertSidebarMenuitems('example_traces')],
-    },
-
-    {
-      title: 'Support',
-      expanded: true,
-      summary: 'Documentation & Bugs',
-      items: removeFalsyValues([
-        {t: 'Keyboard shortcuts', a: toggleHelp, i: 'help'},
-        {t: 'Documentation', a: 'https://perfetto.dev/docs', i: 'find_in_page'},
-        {t: 'Flags', a: '#!/flags', i: 'emoji_flags'},
-        {
-          t: 'Report a bug',
-          a: getBugReportUrl(),
-          i: 'bug_report',
-        },
-        trace &&
-          (isMetatracingEnabled()
-            ? {
-                t: 'Finalise metatrace',
-                a: () => finaliseMetatrace(trace.engine),
-                i: 'file_download',
-              }
-            : {
-                t: 'Record metatrace',
-                a: () => recordMetatrace(trace.engine),
-                i: 'fiber_smart_record',
-              }),
-      ]),
-    },
-  ]);
 }
 
 async function openCurrentTraceWithOldUI(trace: Trace): Promise<void> {
@@ -384,6 +167,10 @@ Alternatively, connect to a trace_processor_shell --httpd instance.
   }
 }
 
+async function toggleMetatrace(e: Engine) {
+  return isMetatracingEnabled() ? finaliseMetatrace(e) : recordMetatrace(e);
+}
+
 async function finaliseMetatrace(engine: Engine) {
   AppImpl.instance.analytics.logEvent('Trace Actions', 'Finalise metatrace');
 
@@ -422,8 +209,8 @@ class EngineRPCWidget implements m.ClassComponent<OptionalTraceImplAttrs> {
     // this will eventually become  consistent once the engine is created.
     if (mode === undefined) {
       if (
-        globals.httpRpcState.connected &&
-        AppImpl.instance.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE'
+        AppImpl.instance.httpRpc.httpRpcAvailable &&
+        AppImpl.instance.httpRpc.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE'
       ) {
         mode = 'HTTP_RPC';
       } else {
@@ -455,7 +242,7 @@ const ServiceWorkerWidget: m.Component = {
     let cssClass = '';
     let title = 'Service Worker: ';
     let label = 'N/A';
-    const ctl = globals.serviceWorkerController;
+    const ctl = AppImpl.instance.serviceWorkerController;
     if (!('serviceWorker' in navigator)) {
       label = 'N/A';
       title += 'not supported by the browser (requires HTTPS)';
@@ -477,8 +264,8 @@ const ServiceWorkerWidget: m.Component = {
     }
 
     const toggle = async () => {
-      if (globals.serviceWorkerController.bypassed) {
-        globals.serviceWorkerController.setBypass(false);
+      if (ctl.bypassed) {
+        ctl.setBypass(false);
         return;
       }
       showModal({
@@ -510,11 +297,7 @@ const ServiceWorkerWidget: m.Component = {
           {
             text: 'Disable and reload',
             primary: true,
-            action: () => {
-              globals.serviceWorkerController
-                .setBypass(true)
-                .then(() => location.reload());
-            },
+            action: () => ctl.setBypass(true).then(() => location.reload()),
           },
           {text: 'Cancel'},
         ],
@@ -571,87 +354,19 @@ class HiringBanner implements m.ClassComponent {
 export class Sidebar implements m.ClassComponent<OptionalTraceImplAttrs> {
   private _redrawWhileAnimating = new Animation(() => raf.scheduleFullRedraw());
   private _asyncJobPending = new Set<string>();
+  private _sectionExpanded = new Map<string, boolean>();
+
+  constructor() {
+    registerMenuItems();
+  }
 
   view({attrs}: m.CVnode<OptionalTraceImplAttrs>) {
-    if (AppImpl.instance.sidebar.sidebarEnabled === 'DISABLED') {
-      return null;
-    }
-    const vdomSections = [];
-    const trace = attrs.trace;
-    for (const section of getSections(trace)) {
-      const vdomItems = [];
-      for (const item of section.items) {
-        if (item.isVisible !== undefined && !item.isVisible()) {
-          continue;
-        }
-        let css = '';
-        let attrs = {
-          onclick: this.wrapClickHandler(item),
-          href: isString(item.a) ? item.a : '#',
-          target: isString(item.a) && !item.a.startsWith('#') ? '_blank' : null,
-          disabled: false,
-          id: item.t.toLowerCase().replace(/[^\w]/g, '_'),
-        };
-
-        if (this._asyncJobPending.has(item.t)) {
-          css = '.pending';
-        }
-        if (item.internalUserOnly && !globals.isInternalUser) {
-          continue;
-        }
-        if (item.disabled !== undefined) {
-          attrs = {
-            onclick: (e: Event) => {
-              e.preventDefault();
-              alert(item.disabled);
-            },
-            href: '#',
-            target: null,
-            disabled: true,
-            id: '',
-          };
-        }
-        vdomItems.push(
-          m(
-            'li',
-            m(
-              `a${css}`,
-              {...attrs, title: item.tooltip},
-              m('i.material-icons', item.i),
-              item.t,
-            ),
-          ),
-        );
-      }
-      if (section.appendOpenedTraceTitle && attrs.trace?.traceInfo.traceTitle) {
-        const {traceTitle, traceUrl} = attrs.trace?.traceInfo;
-        vdomItems.unshift(m('li', createTraceLink(traceTitle, traceUrl)));
-      }
-      vdomSections.push(
-        m(
-          `section${section.expanded ? '.expanded' : ''}`,
-          m(
-            '.section-header',
-            {
-              onclick: () => {
-                section.expanded = !section.expanded;
-                raf.scheduleFullRedraw();
-              },
-            },
-            m('h1', {title: section.summary}, section.title),
-            m('h2', section.summary),
-          ),
-          m('.section-content', m('ul', vdomItems)),
-        ),
-      );
-    }
+    const sidebar = AppImpl.instance.sidebar;
+    if (!sidebar.enabled) return null;
     return m(
       'nav.sidebar',
       {
-        class:
-          AppImpl.instance.sidebar.sidebarVisibility === 'VISIBLE'
-            ? 'show-sidebar'
-            : 'hide-sidebar',
+        class: sidebar.visible ? 'show-sidebar' : 'hide-sidebar',
         // 150 here matches --sidebar-timing in the css.
         // TODO(hjd): Should link to the CSS variable.
         ontransitionstart: (e: TransitionEvent) => {
@@ -666,19 +381,16 @@ export class Sidebar implements m.ClassComponent<OptionalTraceImplAttrs> {
       shouldShowHiringBanner() ? m(HiringBanner) : null,
       m(
         `header.${getCurrentChannel()}`,
-        m(`img[src=${globals.root}assets/brand.png].brand`),
+        m(`img[src=${assetSrc('assets/brand.png')}].brand`),
         m(
           'button.sidebar-button',
           {
-            onclick: () => AppImpl.instance.sidebar.toggleSidebarVisbility(),
+            onclick: () => sidebar.toggleVisibility(),
           },
           m(
             'i.material-icons',
             {
-              title:
-                AppImpl.instance.sidebar.sidebarVisibility === 'VISIBLE'
-                  ? 'Hide menu'
-                  : 'Show menu',
+              title: sidebar.visible ? 'Hide menu' : 'Show menu',
             },
             'menu',
           ),
@@ -688,32 +400,118 @@ export class Sidebar implements m.ClassComponent<OptionalTraceImplAttrs> {
         '.sidebar-scroll',
         m(
           '.sidebar-scroll-container',
-          ...vdomSections,
+          ...(Object.keys(SIDEBAR_SECTIONS) as SidebarSections[]).map((s) =>
+            this.renderSection(s),
+          ),
           m(SidebarFooter, attrs),
         ),
       ),
     );
   }
 
-  // creates the onClick handlers for the items which provided an
-  // (async)function in the `a`. If `a` is a url, instead, just return null.
-  // We repeate this in view() passes and not in the constructor because new
-  // sidebar items can be added by plugins at any time.
+  private renderSection(sectionId: SidebarSections) {
+    const section = SIDEBAR_SECTIONS[sectionId];
+    const menuItems = AppImpl.instance.sidebar.menuItems
+      .valuesAsArray()
+      .filter((item) => item.section === sectionId)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((item) => this.renderItem(item));
+
+    // Don't render empty sections.
+    if (menuItems.length === 0) return undefined;
+
+    const expanded = getOrCreate(this._sectionExpanded, sectionId, () => true);
+    return m(
+      `section${expanded ? '.expanded' : ''}`,
+      m(
+        '.section-header',
+        {
+          onclick: () => {
+            this._sectionExpanded.set(sectionId, !expanded);
+            raf.scheduleFullRedraw();
+          },
+        },
+        m('h1', {title: section.title}, section.title),
+        m('h2', section.summary),
+      ),
+      m('.section-content', m('ul', menuItems)),
+    );
+  }
+
+  private renderItem(item: SidebarMenuItemInternal): m.Child {
+    let href = '#';
+    let disabled = false;
+    let target = null;
+    let command: Command | undefined = undefined;
+    let tooltip = valueOrCallback(item.tooltip);
+    let onclick: (() => unknown | Promise<unknown>) | undefined = undefined;
+    const commandId = 'commandId' in item ? item.commandId : undefined;
+    const action = 'action' in item ? item.action : undefined;
+    let text = valueOrCallback(item.text);
+    const disabReason: boolean | string | undefined = valueOrCallback(
+      item.disabled,
+    );
+
+    if (disabReason === true || typeof disabReason === 'string') {
+      disabled = true;
+      onclick = () => typeof disabReason === 'string' && alert(disabReason);
+    } else if (action !== undefined) {
+      onclick = action;
+    } else if (commandId !== undefined) {
+      const cmdMgr = AppImpl.instance.commands;
+      command = cmdMgr.hasCommand(commandId ?? '')
+        ? cmdMgr.getCommand(commandId)
+        : undefined;
+      if (command === undefined) {
+        disabled = true;
+      } else {
+        text = text !== undefined ? text : command.name;
+        if (command.defaultHotkey !== undefined) {
+          tooltip =
+            `${tooltip ?? command.name}` +
+            ` [${formatHotkey(command.defaultHotkey)}]`;
+        }
+        onclick = () => cmdMgr.runCommand(commandId);
+      }
+    }
+
+    // This is not an else if because in some rare cases the user might want
+    // to have both an href and onclick, with different behaviors. The only case
+    // today is the trace name / URL, where we want the URL in the href to
+    // support right-click -> copy URL, but the onclick does copyToClipboard().
+    if ('href' in item && item.href !== undefined) {
+      href = item.href;
+      target = href.startsWith('#') ? null : '_blank';
+    }
+    return m(
+      'li',
+      m(
+        'a',
+        {
+          className: classNames(
+            valueOrCallback(item.cssClass),
+            this._asyncJobPending.has(item.id) && 'pending',
+          ),
+          onclick: onclick && this.wrapClickHandler(item.id, onclick),
+          href,
+          target,
+          disabled,
+          title: tooltip,
+        },
+        exists(item.icon) && m('i.material-icons', valueOrCallback(item.icon)),
+        text,
+      ),
+    );
+  }
+
+  // Creates the onClick handlers for the items which provided a function in the
+  // `action` member. The function can be either sync or async.
   // What we want to achieve here is the following:
-  // - We want to allow plugins that contribute to the sidebar to just specify
-  //   either string URLs or (async) functions as actions for a sidebar menu.
-  // - When they specify an async function, we want to render a spinner, next
-  //   to the menu item, until the promise is resolved.
+  // - If the action is async (returns a Promise), we want to render a spinner,
+  //   next to the menu item, until the promise is resolved.
   // - [Minor] we want to call e.preventDefault() to override the behaviour of
   //   the <a href='#'> which gets rendered for accessibility reasons.
-  private wrapClickHandler(item: SectionItem) {
-    // item.a can be either a function or a URL. In the latter case, we
-    // don't need to generate any onclick handler.
-    const itemAction = item.a;
-    if (typeof itemAction !== 'function') {
-      return null;
-    }
-    const itemId = item.t;
+  private wrapClickHandler(itemId: string, itemAction: Function) {
     return (e: Event) => {
       e.preventDefault(); // Make the <a href="#"> a no-op.
       const res = itemAction();
@@ -729,4 +527,125 @@ export class Sidebar implements m.ClassComponent<OptionalTraceImplAttrs> {
       });
     };
   }
+}
+
+// TODO(primiano): The registrations below should be moved to dedicated
+// plugins (most of this really belongs to core_plugins/commads/index.ts).
+// For now i'm keeping everything here as splitting these require moving some
+// functions like share_trace() out of core, splitting out permalink, etc.
+
+let globalItemsRegistered = false;
+const traceItemsRegistered = new WeakSet<TraceImpl>();
+
+function registerMenuItems() {
+  if (!globalItemsRegistered) {
+    globalItemsRegistered = true;
+    registerGlobalSidebarEntries();
+  }
+  const trace = AppImpl.instance.trace;
+  if (trace !== undefined && !traceItemsRegistered.has(trace)) {
+    traceItemsRegistered.add(trace);
+    registerTraceMenuItems(trace);
+  }
+}
+
+function registerGlobalSidebarEntries() {
+  const app = AppImpl.instance;
+  // TODO(primiano): The Open file / Open with legacy entries are registered by
+  // the 'perfetto.CoreCommands' plugins. Make things consistent.
+  app.sidebar.addMenuItem({
+    section: 'support',
+    text: 'Keyboard shortcuts',
+    action: toggleHelp,
+    icon: 'help',
+  });
+  app.sidebar.addMenuItem({
+    section: 'support',
+    text: 'Documentation',
+    href: 'https://perfetto.dev/docs',
+    icon: 'find_in_page',
+  });
+  app.sidebar.addMenuItem({
+    section: 'support',
+    sortOrder: 4,
+    text: 'Report a bug',
+    href: getBugReportUrl(),
+    icon: 'bug_report',
+  });
+}
+
+function registerTraceMenuItems(trace: TraceImpl) {
+  const downloadDisabled = trace.traceInfo.downloadable
+    ? false
+    : 'Cannot download external trace';
+
+  const traceTitle = trace?.traceInfo.traceTitle;
+  traceTitle &&
+    trace.sidebar.addMenuItem({
+      section: 'current_trace',
+      text: traceTitle,
+      href: trace.traceInfo.traceUrl,
+      action: () => copyToClipboard(trace.traceInfo.traceUrl),
+      tooltip: 'Click to copy the URL',
+      cssClass: 'trace-file-name',
+    });
+  trace.sidebar.addMenuItem({
+    section: 'current_trace',
+    text: 'Show timeline',
+    href: '#!/viewer',
+    icon: 'line_style',
+  });
+  globals.isInternalUser &&
+    trace.sidebar.addMenuItem({
+      section: 'current_trace',
+      text: 'Share',
+      action: async () => await shareTrace(trace),
+      icon: 'share',
+    });
+  trace.sidebar.addMenuItem({
+    section: 'current_trace',
+    text: 'Download',
+    action: () => downloadTrace(trace),
+    icon: 'file_download',
+    disabled: downloadDisabled,
+  });
+  trace.sidebar.addMenuItem({
+    section: 'convert_trace',
+    text: 'Switch to legacy UI',
+    action: async () => await openCurrentTraceWithOldUI(trace),
+    icon: 'filter_none',
+    disabled: downloadDisabled,
+  });
+  trace.sidebar.addMenuItem({
+    section: 'convert_trace',
+    text: 'Convert to .json',
+    action: async () => await convertTraceToJson(trace),
+    icon: 'file_download',
+    disabled: downloadDisabled,
+  });
+  trace.traceInfo.hasFtrace &&
+    trace.sidebar.addMenuItem({
+      section: 'convert_trace',
+      text: 'Convert to .systrace',
+      action: async () => await convertTraceToSystrace(trace),
+      icon: 'file_download',
+      disabled: downloadDisabled,
+    });
+  trace.sidebar.addMenuItem({
+    section: 'support',
+    sortOrder: 5,
+    text: () =>
+      isMetatracingEnabled() ? 'Finalize metatrace' : 'Record metatrace',
+    action: () => toggleMetatrace(trace.engine),
+    icon: () => (isMetatracingEnabled() ? 'download' : 'fiber_smart_record'),
+  });
+}
+
+// Used to deal with fields like the entry name, which can be either a direct
+// string or a callback that returns the string.
+function valueOrCallback<T>(value: T | (() => T)): T;
+function valueOrCallback<T>(value: T | (() => T) | undefined): T | undefined;
+function valueOrCallback<T>(value: T | (() => T) | undefined): T | undefined {
+  if (value === undefined) return undefined;
+  return value instanceof Function ? value() : value;
 }

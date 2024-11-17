@@ -46,6 +46,10 @@ import {TraceInfoImpl} from './trace_info_impl';
 import {PageHandler, PageManager} from '../public/page';
 import {createProxy} from '../base/utils';
 import {PageManagerImpl} from './page_manager';
+import {FeatureFlagManager, FlagSettings} from '../public/feature_flag';
+import {featureFlags} from './feature_flags';
+import {SerializedAppState} from './state_serialization_schema';
+import {PostedTrace} from './trace_source';
 
 /**
  * Handles the per-trace state of the UI
@@ -407,8 +411,10 @@ export class TraceImpl implements Trace {
     return this.appImpl.initialRouteArgs;
   }
 
-  get rootUrl(): string {
-    return this.appImpl.rootUrl;
+  get featureFlags(): FeatureFlagManager {
+    return {
+      register: (settings: FlagSettings) => featureFlags.register(settings),
+    };
   }
 
   scheduleFullRedraw(): void {
@@ -417,6 +423,18 @@ export class TraceImpl implements Trace {
 
   navigate(newHash: string): void {
     this.appImpl.navigate(newHash);
+  }
+
+  openTraceFromFile(file: File): void {
+    this.appImpl.openTraceFromFile(file);
+  }
+
+  openTraceFromUrl(url: string, serializedAppState?: SerializedAppState) {
+    this.appImpl.openTraceFromUrl(url, serializedAppState);
+  }
+
+  openTraceFromBuffer(args: PostedTrace): void {
+    this.appImpl.openTraceFromBuffer(args);
   }
 
   addEventListener<T extends keyof EventListeners>(
