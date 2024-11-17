@@ -40,13 +40,19 @@ import {FILTER_OPTION_TO_OP, FilterOption} from './render_cell_utils';
 import {SqlTableState} from './state';
 import {SqlTableDescription} from './table_description';
 import {Intent} from '../../../../widgets/common';
-import {addHistogramTab} from '../../charts/histogram/tab';
 import {Form} from '../../../../widgets/form';
 import {TextInput} from '../../../../widgets/text_input';
 
 export interface SqlTableConfig {
   readonly state: SqlTableState;
+  // For additional menu items to add to the column header menus
+  readonly addColumnMenuItems?: (
+    column: TableColumn,
+    columnAlias: string,
+  ) => m.Children;
 }
+
+type AdditionalColumnMenuItems = Record<string, m.Children>;
 
 function renderCell(
   column: TableColumn,
@@ -65,7 +71,7 @@ function renderCell(
   return column.renderCell(sqlValue, getTableManager(state), additionalValues);
 }
 
-function columnTitle(column: TableColumn): string {
+export function columnTitle(column: TableColumn): string {
   if (column.getTitle !== undefined) {
     const title = column.getTitle();
     if (title !== undefined) return title;
@@ -274,7 +280,11 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
     );
   }
 
-  renderColumnHeader(column: TableColumn, index: number) {
+  renderColumnHeader(
+    column: TableColumn,
+    index: number,
+    additionalColumnHeaderMenuItems?: m.Children,
+  ) {
     const sorted = this.state.isSortedBy(column);
     const icon =
       sorted === 'ASC'
@@ -327,27 +337,7 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
         {label: 'Add filter', icon: Icons.Filter},
         this.renderColumnFilterOptions(column),
       ),
-      m(MenuItem, {
-        label: 'Create histogram',
-        icon: Icons.Chart,
-        onclick: () => {
-          const columnAlias =
-            this.state.getCurrentRequest().columns[
-              sqlColumnId(column.primaryColumn())
-            ];
-          addHistogramTab({
-            engine: this.state.trace.engine,
-            sqlColumn: [columnAlias],
-            columnTitle: columnTitle(column),
-            filters: this.state.getFilters(),
-            tableDisplay: this.table.displayName ?? this.table.name,
-            query: this.state.getSqlQuery(
-              Object.fromEntries([[columnAlias, column.primaryColumn()]]),
-            ),
-            aggregationType: column.aggregation?.().dataType,
-          });
-        },
-      }),
+      additionalColumnHeaderMenuItems,
       // Menu items before divider apply to selected column
       m(MenuDivider),
       // Menu items after divider apply to entire table
@@ -355,13 +345,49 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
     );
   }
 
-  view() {
+  getAdditionalColumnMenuItems(
+    addColumnMenuItems?: (
+      column: TableColumn,
+      columnAlias: string,
+    ) => m.Children,
+  ) {
+    if (addColumnMenuItems === undefined) return;
+
+    const additionalColumnMenuItems: AdditionalColumnMenuItems = {};
+    this.state.getSelectedColumns().forEach((column) => {
+      const columnAlias =
+        this.state.getCurrentRequest().columns[
+          sqlColumnId(column.primaryColumn())
+        ];
+
+      additionalColumnMenuItems[columnAlias] = addColumnMenuItems(
+        column,
+        columnAlias,
+      );
+    });
+
+    return additionalColumnMenuItems;
+  }
+
+  view({attrs}: m.Vnode<SqlTableConfig>) {
     const rows = this.state.getDisplayedRows();
+    const additionalColumnMenuItems = this.getAdditionalColumnMenuItems(
+      attrs.addColumnMenuItems,
+    );
 
     const columns = this.state.getSelectedColumns();
     const columnDescriptors = columns.map((column, i) => {
       return {
-        title: this.renderColumnHeader(column, i),
+        title: this.renderColumnHeader(
+          column,
+          i,
+          additionalColumnMenuItems &&
+            additionalColumnMenuItems[
+              this.state.getCurrentRequest().columns[
+                sqlColumnId(column.primaryColumn())
+              ]
+            ],
+        ),
         render: (row: Row) => renderCell(column, row, this.state),
       };
     });
