@@ -52,9 +52,9 @@ const OMNIBOX_INPUT_REF = 'omnibox';
 // This wrapper creates a new instance of UiMainPerTrace for each new trace
 // loaded (including the case of no trace at the beginning).
 export class UiMain implements m.ClassComponent {
-  view({children}: m.CVnode) {
+  view() {
     const currentTraceId = AppImpl.instance.trace?.engine.engineId ?? '';
-    return [m(UiMainPerTrace, {key: currentTraceId}, children)];
+    return [m(UiMainPerTrace, {key: currentTraceId})];
   }
 }
 
@@ -171,7 +171,8 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.TogglePerformanceMetrics',
         name: 'Toggle performance metrics',
-        callback: () => app.setPerfDebuggingEnabled(!app.perfDebugging),
+        callback: () =>
+          (app.perfDebugging.enabled = !app.perfDebugging.enabled),
       },
       {
         id: 'perfetto.ShareTrace',
@@ -628,12 +629,13 @@ export class UiMainPerTrace implements m.ClassComponent {
     this.maybeFocusOmnibar();
   }
 
-  view({children}: m.Vnode): m.Children {
+  view(): m.Children {
+    const app = AppImpl.instance;
     const hotkeys: HotkeyConfig[] = [];
-    for (const {id, defaultHotkey} of AppImpl.instance.commands.commands) {
+    for (const {id, defaultHotkey} of app.commands.commands) {
       if (defaultHotkey) {
         hotkeys.push({
-          callback: () => AppImpl.instance.commands.runCommand(id),
+          callback: () => app.commands.runCommand(id),
           hotkey: defaultHotkey,
         });
       }
@@ -649,10 +651,10 @@ export class UiMainPerTrace implements m.ClassComponent {
           omnibox: this.renderOmnibox(),
           trace: this.trace,
         }),
-        children,
+        app.pages.renderPageForCurrentRoute(app.trace),
         m(CookieConsent),
         maybeRenderFullscreenModalDialog(),
-        AppImpl.instance.perfDebugging && m('.perf-stats'),
+        app.perfDebugging.renderPerfStats(),
       ),
     );
   }
