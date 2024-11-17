@@ -22,6 +22,7 @@
 // - Be approved by one of Perfetto UI owners.
 export const defaultPlugins = [
   'com.android.GpuWorkPeriod',
+  'com.google.PixelCpmTrace',
   'com.google.PixelMemory',
   'dev.perfetto.AndroidBinderVizPlugin',
   'dev.perfetto.AndroidClientServer',
@@ -55,6 +56,7 @@ export const defaultPlugins = [
   'dev.perfetto.ProcessSummary',
   'dev.perfetto.ProcessThreadGroups',
   'dev.perfetto.QueryPage',
+  'dev.perfetto.RecordTrace',
   'dev.perfetto.RestorePinnedTrack',
   'dev.perfetto.Sched',
   'dev.perfetto.Screenshots',
