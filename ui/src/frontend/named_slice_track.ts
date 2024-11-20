@@ -16,7 +16,7 @@ import {getColorForSlice} from '../public/lib/colorizer';
 import {TrackEventDetailsPanel} from '../public/details_panel';
 import {TrackEventSelection} from '../public/selection';
 import {Slice} from '../public/track';
-import {STR_NULL} from '../trace_processor/query_result';
+import {LONG, NUM, STR, STR_NULL} from '../trace_processor/query_result';
 import {
   BASE_ROW,
   BaseSliceTrack,
@@ -26,10 +26,11 @@ import {
   SLICE_FLAGS_INSTANT,
 } from './base_slice_track';
 import {ThreadSliceDetailsPanel} from './thread_slice_details_tab';
-import {NewTrackArgs} from './track';
 import {renderDuration} from './widgets/duration';
 import {TraceImpl} from '../core/trace_impl';
 import {assertIsInstance} from '../base/logging';
+import {SourceDataset, Dataset} from '../trace_processor/dataset';
+import {Trace} from '../public/trace';
 
 export const NAMED_ROW = {
   // Base columns (tsq, ts, dur, id, depth).
@@ -44,8 +45,8 @@ export abstract class NamedSliceTrack<
   SliceType extends Slice = Slice,
   RowType extends NamedRow = NamedRow,
 > extends BaseSliceTrack<SliceType, RowType> {
-  constructor(args: NewTrackArgs) {
-    super(args);
+  constructor(trace: Trace, uri: string) {
+    super(trace, uri);
   }
 
   // Converts a SQL result row to an "Impl" Slice.
@@ -79,5 +80,17 @@ export abstract class NamedSliceTrack<
     // TraceImpl (because of flows) but here we must take a Trace interface,
     // because this class is exposed to plugins (which see only Trace).
     return new ThreadSliceDetailsPanel(assertIsInstance(this.trace, TraceImpl));
+  }
+
+  override getDataset(): Dataset | undefined {
+    return new SourceDataset({
+      src: this.getSqlSource(),
+      schema: {
+        id: NUM,
+        name: STR,
+        ts: LONG,
+        dur: LONG,
+      },
+    });
   }
 }
