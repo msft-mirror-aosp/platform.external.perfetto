@@ -20,19 +20,18 @@ import {PerfettoPlugin} from '../../public/plugin';
 import {getThreadUriPrefix, getTrackName} from '../../public/utils';
 import {NUM, NUM_NULL, STR, STR_NULL} from '../../trace_processor/query_result';
 import {AsyncSliceTrack} from './async_slice_track';
-import {
-  getOrCreateGroupForProcess,
-  getOrCreateGroupForThread,
-} from '../../public/standard_groups';
 import {exists} from '../../base/utils';
 import {assertExists, assertTrue} from '../../base/logging';
 import {SliceSelectionAggregator} from './slice_selection_aggregator';
 import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
 import {getSliceTable} from './table';
 import {extensions} from '../../public/lib/extensions';
+import ProcessThreadGroupsPlugin from '../dev.perfetto.ProcessThreadGroups';
 
 export default class implements PerfettoPlugin {
   static readonly id = 'dev.perfetto.AsyncSlices';
+  static readonly dependencies = [ProcessThreadGroupsPlugin];
+
   async onTraceLoad(ctx: Trace): Promise<void> {
     const trackIdsToUris = new Map<number, string>();
 
@@ -197,7 +196,7 @@ export default class implements PerfettoPlugin {
             kind: SLICE_TRACK_KIND,
             scope: 'global',
           },
-          track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+          track: new AsyncSliceTrack(ctx, uri, maxDepth, trackIds),
         });
         const trackNode = new TrackNode({
           uri,
@@ -283,7 +282,7 @@ export default class implements PerfettoPlugin {
           scope: 'process',
           upid,
         },
-        track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+        track: new AsyncSliceTrack(ctx, uri, maxDepth, trackIds),
       });
       const track = new TrackNode({uri, title, sortOrder: 30});
       trackIds.forEach((id) => {
@@ -298,8 +297,10 @@ export default class implements PerfettoPlugin {
       if (parent !== false && parent !== undefined) {
         parent.trackNode.addChildInOrder(t.trackNode);
       } else {
-        const processGroup = getOrCreateGroupForProcess(ctx.workspace, t.upid);
-        processGroup.addChildInOrder(t.trackNode);
+        const processGroup = ctx.plugins
+          .getPlugin(ProcessThreadGroupsPlugin)
+          .getGroupForProcess(t.upid);
+        processGroup?.addChildInOrder(t.trackNode);
       }
     });
   }
@@ -384,7 +385,7 @@ export default class implements PerfettoPlugin {
         chips: removeFalsyValues([
           isKernelThread === 0 && isMainThread === 1 && 'main thread',
         ]),
-        track: new AsyncSliceTrack({trace: ctx, uri}, maxDepth, trackIds),
+        track: new AsyncSliceTrack(ctx, uri, maxDepth, trackIds),
       });
       const track = new TrackNode({uri, title, sortOrder: 20});
       trackIds.forEach((id) => {
@@ -399,8 +400,10 @@ export default class implements PerfettoPlugin {
       if (parent !== false && parent !== undefined) {
         parent.trackNode.addChildInOrder(t.trackNode);
       } else {
-        const group = getOrCreateGroupForThread(ctx.workspace, t.utid);
-        group.addChildInOrder(t.trackNode);
+        const group = ctx.plugins
+          .getPlugin(ProcessThreadGroupsPlugin)
+          .getGroupForThread(t.utid);
+        group?.addChildInOrder(t.trackNode);
       }
     });
   }

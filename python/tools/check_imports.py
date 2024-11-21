@@ -133,6 +133,12 @@ DEPS_ALLOWLIST = [
         '/frontend/tracks/generic_slice_details_tab',
     ]),
 
+    # TODO(stevegolton): It's too much effort to change all the callsites of
+    # Timestamp and Duration widgets in order to inject trace into them.
+    ('/public/lib/widgets/*', [
+        '/core/app_impl',
+    ]),
+
     # TODO(primiano): controller-related tech debt.
     ('/frontend/index', '/controller/*'),
     ('/controller/*', ['/base/*', '/core/*', '/common/*']),

@@ -28,13 +28,13 @@ import {Slice} from '../public/track';
 import {LONG, NUM} from '../trace_processor/query_result';
 import {checkerboardExcept} from './checkerboard';
 import {DEFAULT_SLICE_LAYOUT, SliceLayout} from './slice_layout';
-import {NewTrackArgs} from './track';
 import {BUCKETS_PER_PIXEL, CacheKey} from '../core/timeline_cache';
 import {uuidv4Sql} from '../base/uuid';
 import {AsyncDisposableStack} from '../base/disposable_stack';
 import {TrackMouseEvent, TrackRenderContext} from '../public/track';
 import {Point2D, VerticalBounds} from '../base/geom';
 import {Trace} from '../public/trace';
+import {SourceDataset, Dataset} from '../trace_processor/dataset';
 
 // The common class that underpins all tracks drawing slices.
 
@@ -162,8 +162,6 @@ export abstract class BaseSliceTrack<
 > implements Track
 {
   protected sliceLayout: SliceLayout = {...DEFAULT_SLICE_LAYOUT};
-  protected trace: Trace;
-  protected uri: string;
   protected trackUuid = uuidv4Sql();
 
   // This is the over-skirted cached bounds:
@@ -239,9 +237,10 @@ export abstract class BaseSliceTrack<
     _selectedSlice?: SliceT,
   ): void {}
 
-  constructor(args: NewTrackArgs) {
-    this.trace = args.trace;
-    this.uri = args.uri;
+  constructor(
+    protected readonly trace: Trace,
+    protected readonly uri: string,
+  ) {
     // Work out the extra columns.
     // This is the union of the embedder-defined columns and the base columns
     // we know about (ts, dur, ...).
@@ -694,7 +693,7 @@ export abstract class BaseSliceTrack<
     this.onUpdatedSlices(slices);
     this.slices = slices;
 
-    raf.scheduleRedraw();
+    raf.scheduleCanvasRedraw();
   }
 
   private rowToSliceInternal(row: RowT): CastInternal<SliceT> {
@@ -971,6 +970,17 @@ export abstract class BaseSliceTrack<
       dur: LONG,
     });
     return {ts: Time.fromRaw(row.ts), dur: Duration.fromRaw(row.dur)};
+  }
+
+  getDataset(): Dataset | undefined {
+    return new SourceDataset({
+      src: this.getSqlSource(),
+      schema: {
+        id: NUM,
+        ts: LONG,
+        dur: LONG,
+      },
+    });
   }
 }
 

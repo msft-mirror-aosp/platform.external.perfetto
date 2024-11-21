@@ -55,7 +55,7 @@ export class ActualFramesTrack extends NamedSliceTrack<Slice, ActualFrameRow> {
     uri: string,
     private trackIds: number[],
   ) {
-    super({trace, uri});
+    super(trace, uri);
     this.sliceLayout = {
       ...SLICE_LAYOUT_FIT_CONTENT_DEFAULTS,
       depthGuess: maxDepth,
@@ -101,6 +101,15 @@ export class ActualFramesTrack extends NamedSliceTrack<Slice, ActualFrameRow> {
       ...baseDetails,
       tableName: 'slice',
     };
+  }
+
+  // Override dataset from base class NamedSliceTrack as we don't want these
+  // tracks to participate in generic area selection aggregation (frames tracks
+  // have their own dedicated aggregation panel).
+  // TODO(stevegolton): In future CLs this will be handled with aggregation keys
+  // instead, as this track will have to expose a dataset anyway.
+  override getDataset() {
+    return undefined;
   }
 }
 

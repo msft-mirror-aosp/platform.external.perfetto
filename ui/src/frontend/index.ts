@@ -63,19 +63,18 @@ const CSP_WS_PERMISSIVE_PORT = featureFlags.register({
 });
 
 function routeChange(route: Route) {
-  raf.scheduleFullRedraw();
-  maybeOpenTraceFromRoute(route);
-  if (route.fragment) {
-    // This needs to happen after the next redraw call. It's not enough
-    // to use setTimeout(..., 0); since that may occur before the
-    // redraw scheduled above.
-    raf.addPendingCallback(() => {
+  raf.scheduleFullRedraw('force', () => {
+    if (route.fragment) {
+      // This needs to happen after the next redraw call. It's not enough
+      // to use setTimeout(..., 0); since that may occur before the
+      // redraw scheduled above.
       const e = document.getElementById(route.fragment);
       if (e) {
         e.scrollIntoView();
       }
-    });
-  }
+    }
+  });
+  maybeOpenTraceFromRoute(route);
 }
 
 function setupContentSecurityPolicy() {
@@ -149,7 +148,7 @@ function main() {
   });
 
   // Wire up raf for widgets.
-  setScheduleFullRedraw(() => raf.scheduleFullRedraw());
+  setScheduleFullRedraw((force?: 'force') => raf.scheduleFullRedraw(force));
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
   // appendChild returns.
@@ -226,12 +225,8 @@ function onCssLoaded() {
   const router = new Router();
   router.onRouteChanged = routeChange;
 
-  raf.domRedraw = () => {
-    m.render(
-      document.body,
-      m(UiMain, pages.renderPageForCurrentRoute(AppImpl.instance.trace)),
-    );
-  };
+  // Mount the main mithril component. This also forces a sync render pass.
+  raf.mount(document.body, UiMain);
 
   if (
     (location.origin.startsWith('http://localhost:') ||
@@ -269,12 +264,6 @@ function onCssLoaded() {
     // cases.
     routeChange(route);
   });
-
-  // Force one initial render to get everything in place
-  m.render(
-    document.body,
-    m(UiMain, AppImpl.instance.pages.renderPageForCurrentRoute(undefined)),
-  );
 
   // Initialize plugins, now that we are ready to go.
   const pluginManager = AppImpl.instance.plugins;
