@@ -20,7 +20,7 @@ INCLUDE PERFETTO MODULE time.conversion;
 -- any state.
 CREATE PERFETTO TABLE cpu_idle_time_in_state_counters(
   -- Timestamp.
-  ts LONG,
+  ts TIMESTAMP,
   -- The machine this residency is calculated for.
   machine_id LONG,
   -- State name.
@@ -30,7 +30,7 @@ CREATE PERFETTO TABLE cpu_idle_time_in_state_counters(
   -- Incremental time spent in this state (residency), in microseconds.
   total_residency DOUBLE,
   -- Time all CPUS spent in any state, in microseconds.
-  time_slice INT
+  time_slice LONG
 ) AS
 WITH cpu_counts_per_machine AS (
   SELECT machine_id, count(1) AS cpu_count

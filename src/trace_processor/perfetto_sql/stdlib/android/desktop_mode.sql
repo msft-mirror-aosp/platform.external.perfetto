@@ -19,17 +19,17 @@ include perfetto module android.statsd;
 -- Desktop Windows with durations they were open.
 CREATE PERFETTO TABLE android_desktop_mode_windows (
 -- Window add timestamp; NULL if no add event in the trace.
-raw_add_ts INT,
+raw_add_ts TIMESTAMP,
 -- Window remove timestamp; NULL if no remove event in the trace.
-raw_remove_ts INT,
+raw_remove_ts TIMESTAMP,
 -- timestamp that the window was added; or trace_start() if no add event in the trace.
-ts INT,
+ts TIMESTAMP,
 -- duration the window was open; or until trace_end() if no remove event in the trace.
-dur INT,
+dur LONG,
 -- Desktop Window instance ID - unique per window.
-instance_id INT,
+instance_id LONG,
 -- UID of the app running in the window.
-uid INT
+uid LONG
 ) AS
 WITH
   atoms AS (
