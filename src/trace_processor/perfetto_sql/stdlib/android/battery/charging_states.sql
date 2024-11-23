@@ -20,9 +20,9 @@ CREATE PERFETTO TABLE android_charging_states(
   -- there will be a single row where id = 1.
   id LONG,
   -- Timestamp at which the device charging state began.
-  ts LONG,
+  ts TIMESTAMP,
   -- Duration of the device charging state.
-  dur LONG,
+  dur DURATION,
   -- Device charging state, one of: Charging, Discharging, Not charging
   -- (when the charger is present but battery is not charging),
   -- Full, Unknown
