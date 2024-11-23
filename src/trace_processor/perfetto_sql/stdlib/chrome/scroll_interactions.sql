@@ -11,9 +11,9 @@ CREATE PERFETTO TABLE chrome_scroll_interactions(
   -- Name of the scroll event.
   name STRING,
   -- Start timestamp of the scroll.
-  ts LONG,
+  ts TIMESTAMP,
   -- Duration of the scroll.
-  dur LONG,
+  dur DURATION,
   -- The total number of frames in the scroll.
   frame_count LONG,
   -- The total number of vsyncs in the scroll.

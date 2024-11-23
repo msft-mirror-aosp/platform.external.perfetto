@@ -17,10 +17,10 @@ CREATE PERFETTO TABLE android_screenshots(
   -- Slice id.
   id LONG,
   -- Slice timestamp.
-  ts LONG,
+  ts TIMESTAMP,
   -- Slice duration, should be typically 0 since screeenshot slices are of instant
   -- type.
-  dur LONG,
+  dur DURATION,
   -- Slice name.
   name STRING
 ) AS

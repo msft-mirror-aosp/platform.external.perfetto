@@ -28,9 +28,9 @@ SELECT name FROM _trace_metrics;
 -- functions rather than directly on `trace_bounds`.
 CREATE PERFETTO VIEW trace_bounds(
   -- First ts in the trace.
-  start_ts LONG,
+  start_ts TIMESTAMP,
   -- End of the trace.
-  end_ts LONG
+  end_ts TIMESTAMP
 ) AS
 SELECT start_ts, end_ts FROM _trace_bounds;
 
@@ -160,10 +160,10 @@ CREATE PERFETTO VIEW sched_slice (
   id LONG,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
-  -- The timestamp at the start of the slice (in nanoseconds).
-  ts LONG,
-  -- The duration of the slice (in nanoseconds).
-  dur LONG,
+  -- The timestamp at the start of the slice.
+  ts TIMESTAMP,
+  -- The duration of the slice.
+  dur DURATION,
   -- The CPU that the slice executed on (meaningful only in single machine
   -- traces). For multi-machine, join with the `cpu` table on `ucpu` to get the
   -- CPU identifier of each machine.
@@ -204,9 +204,9 @@ CREATE PERFETTO VIEW sched(
   -- Alias for `sched_slice.type`.
   type STRING,
   -- Alias for `sched_slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias for `sched_slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias for `sched_slice.cpu`.
   cpu LONG,
   -- Alias for `sched_slice.utid`.
@@ -233,10 +233,10 @@ CREATE PERFETTO VIEW thread_state (
   id LONG,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
-  -- The timestamp at the start of the slice (in nanoseconds).
-  ts LONG,
-  -- The duration of the slice (in nanoseconds).
-  dur LONG,
+  -- The timestamp at the start of the slice.
+  ts TIMESTAMP,
+  -- The duration of the slice.
+  dur DURATION,
   -- The CPU that the thread executed on (meaningful only in single machine
   -- traces). For multi-machine, join with the `cpu` table on `ucpu` to get the
   -- CPU identifier of each machine.
@@ -285,7 +285,7 @@ CREATE PERFETTO VIEW raw (
   -- The name of the "most-specific" child table containing this row.
   type STRING,
   -- The timestamp of this event.
-  ts LONG,
+  ts TIMESTAMP,
   -- The name of the event. For ftrace events, this will be the ftrace event
   -- name.
   name STRING,
@@ -326,7 +326,7 @@ CREATE PERFETTO VIEW ftrace_event (
   -- The name of the "most-specific" child table containing this row.
   type STRING,
   -- The timestamp of this event.
-  ts LONG,
+  ts TIMESTAMP,
   -- The ftrace event name.
   name STRING,
   -- The CPU this event was emitted on (meaningful only in single machine
@@ -362,10 +362,10 @@ CREATE PERFETTO VIEW experimental_sched_upid (
   id LONG,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
-  -- The timestamp at the start of the slice (in nanoseconds).
-  ts LONG,
-  -- The duration of the slice (in nanoseconds).
-  dur LONG,
+  -- The timestamp at the start of the slice.
+  ts TIMESTAMP,
+  -- The duration of the slice.
+  dur DURATION,
   -- The CPU that the slice executed on (meaningful only in single machine
   -- traces). For multi-machine, join with the `cpu` table on `ucpu` to get the
   -- CPU identifier of each machine.
