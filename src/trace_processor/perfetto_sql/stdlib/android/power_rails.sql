@@ -24,9 +24,9 @@ CREATE PERFETTO TABLE android_power_rails_counters (
     -- `counter.id`
     id LONG,
     -- Timestamp of the energy measurement.
-    ts LONG,
+    ts TIMESTAMP,
     -- Time until the next energy measurement.
-    dur LONG,
+    dur DURATION,
     -- Power rail name. Alias of `counter_track.name`.
     power_rail_name STRING,
     -- Raw power rail name.

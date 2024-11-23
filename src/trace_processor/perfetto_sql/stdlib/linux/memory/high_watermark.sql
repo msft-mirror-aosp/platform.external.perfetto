@@ -44,9 +44,9 @@ FROM counter_leading_intervals!(high_watermark_as_counter);
 CREATE PERFETTO VIEW memory_rss_high_watermark_per_process
 (
     -- Timestamp
-    ts LONG,
+    ts TIMESTAMP,
     -- Duration
-    dur LONG,
+    dur DURATION,
     -- Upid of the process
     upid LONG,
     -- Pid of the process

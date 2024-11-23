@@ -25,11 +25,11 @@ CREATE PERFETTO TABLE android_startups(
   -- Startup id.
   startup_id LONG,
   -- Timestamp of startup start.
-  ts LONG,
+  ts TIMESTAMP,
   -- Timestamp of startup end.
   ts_end LONG,
   -- Startup duration.
-  dur LONG,
+  dur DURATION,
   -- Package name.
   package STRING,
   -- Startup type.
@@ -73,8 +73,8 @@ SELECT ts, name, track_id
 FROM slice
 WHERE name IN ('bindApplication', 'activityStart', 'activityResume');
 
-CREATE PERFETTO FUNCTION _startup_indicator_slice_count(start_ts LONG,
-                                                                end_ts LONG,
+CREATE PERFETTO FUNCTION _startup_indicator_slice_count(start_ts TIMESTAMP,
+                                                                end_ts TIMESTAMP,
                                                                 utid LONG,
                                                                 name STRING)
 RETURNS LONG AS
@@ -152,9 +152,9 @@ CREATE PERFETTO VIEW android_startup_threads(
   -- Startup id.
   startup_id LONG,
   -- Timestamp of start.
-  ts LONG,
+  ts TIMESTAMP,
   -- Duration of startup.
-  dur LONG,
+  dur DURATION,
   -- Upid of process involved in startup.
   upid LONG,
   -- Pid if process involved in startup.
@@ -192,7 +192,7 @@ JOIN thread USING (upid);
 -- to the startup slices which are created from this table.
 CREATE PERFETTO VIEW android_thread_slices_for_all_startups(
   -- Timestamp of startup.
-  startup_ts LONG,
+  startup_ts TIMESTAMP,
   -- Timestamp of startup end.
   startup_ts_end LONG,
   -- Startup id.
@@ -212,7 +212,7 @@ CREATE PERFETTO VIEW android_thread_slices_for_all_startups(
   -- Name of slice.
   slice_name STRING,
   -- Timestamp of slice start.
-  slice_ts LONG,
+  slice_ts TIMESTAMP,
   -- Slice duration.
   slice_dur LONG
 ) AS
@@ -246,9 +246,9 @@ RETURNS TABLE(
   -- Name of the slice.
   slice_name STRING,
   -- Timestamp of start of the slice.
-  slice_ts LONG,
+  slice_ts TIMESTAMP,
   -- Duration of the slice.
-  slice_dur LONG,
+  slice_dur DURATION,
   -- Name of the thread with the slice.
   thread_name STRING,
   -- Tid of the thread with the slice.
@@ -270,7 +270,7 @@ RETURNS TABLE(
   -- Slice id.
   id LONG,
   -- Slice duration.
-  slice_dur LONG,
+  slice_dur DURATION,
   -- Name of the thread with slice.
   thread_name STRING,
   -- Name of the process with slice.

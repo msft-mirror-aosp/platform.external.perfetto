@@ -156,17 +156,17 @@ CREATE PERFETTO TABLE android_garbage_collection_events (
   -- Garbage collection id.
   gc_id LONG,
   -- Garbage collection timestamp.
-  gc_ts LONG,
+  gc_ts TIMESTAMP,
   -- Garbage collection wall duration.
-  gc_dur LONG,
+  gc_dur DURATION,
   -- Garbage collection duration spent executing on CPU.
-  gc_running_dur LONG,
+  gc_running_dur DURATION,
   -- Garbage collection duration spent waiting for CPU.
-  gc_runnable_dur LONG,
+  gc_runnable_dur DURATION,
   -- Garbage collection duration spent waiting in the Linux kernel on IO.
-  gc_unint_io_dur LONG,
+  gc_unint_io_dur DURATION,
   -- Garbage collection duration spent waiting in the Linux kernel without IO.
-  gc_unint_non_io_dur LONG,
+  gc_unint_non_io_dur DURATION,
     -- Garbage collection duration spent waiting in interruptible sleep.
   gc_int_dur LONG
   )
