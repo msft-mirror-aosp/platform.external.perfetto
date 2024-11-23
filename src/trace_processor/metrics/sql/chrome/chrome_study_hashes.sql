@@ -13,23 +13,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-INCLUDE PERFETTO MODULE linux.memory.general;
+DROP VIEW IF EXISTS chrome_study_hashes_output;
 
--- Counter for GPU memory per process with duration.
-CREATE PERFETTO TABLE android_gpu_memory_per_process(
-  -- Timestamp
-  ts TIMESTAMP,
-  -- Duration
-  dur DURATION,
-  -- Upid of the process
-  upid LONG,
-  -- GPU memory
-  gpu_memory LONG
-) AS
-SELECT
-  ts,
-  dur,
-  upid,
-  cast_int!(value) AS gpu_memory
-FROM _all_counters_per_process
-WHERE name = 'GPU Memory';
+CREATE PERFETTO VIEW chrome_study_hashes_output AS
+SELECT ChromeStudyHashes(
+  'hash', (
+    SELECT RepeatedField(int_value)
+    FROM args
+    WHERE key = 'chrome_trigger.name_hash'
+    ORDER BY int_value
+  )
+);
