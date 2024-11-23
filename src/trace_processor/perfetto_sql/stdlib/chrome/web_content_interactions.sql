@@ -19,10 +19,10 @@ CREATE PERFETTO TABLE chrome_web_content_interactions(
   id LONG,
   -- Start timestamp of the event. Because multiple events may occur for the
   -- same interaction, this is the start timestamp of the longest event.
-  ts LONG,
+  ts TIMESTAMP,
   -- Duration of the event. Because multiple events may occur for the same
   -- interaction, this is the duration of the longest event.
-  dur LONG,
+  dur DURATION,
   -- The interaction type.
   interaction_type STRING,
   -- The total duration of all events that occurred for the same interaction.

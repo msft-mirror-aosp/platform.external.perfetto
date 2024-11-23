@@ -24,9 +24,9 @@ RETURNS TABLE(
   -- Alias of `slice.type`.
   type STRING,
   -- Alias of `slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias of `slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias of `slice.track_id`.
   track_id LONG,
   -- Alias of `slice.category`.
@@ -40,7 +40,7 @@ RETURNS TABLE(
   -- Alias of `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias of `slice.thread_ts`.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- Alias of `slice.thread_dur`.
   thread_dur LONG
 ) AS
@@ -64,9 +64,9 @@ RETURNS TABLE(
   -- Alias of `slice.type`.
   type STRING,
   -- Alias of `slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias of `slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias of `slice.track_id`.
   track_id LONG,
   -- Alias of `slice.category`.
@@ -80,7 +80,7 @@ RETURNS TABLE(
   -- Alias of `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias of `slice.thread_ts`.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- Alias of `slice.thread_dur`.
   thread_dur LONG
 ) AS

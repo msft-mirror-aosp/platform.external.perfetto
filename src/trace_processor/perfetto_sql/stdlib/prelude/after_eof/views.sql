@@ -22,7 +22,7 @@ CREATE PERFETTO VIEW counters(
   -- Alias of `counter.type`.
   type STRING,
   -- Alias of `counter.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias of `counter.track_id`.
   track_id LONG,
   -- Alias of `counter.value`.
@@ -48,10 +48,10 @@ CREATE PERFETTO VIEW slice(
   id LONG,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
-  -- The timestamp at the start of the slice (in nanoseconds).
-  ts LONG,
-  -- The duration of the slice (in nanoseconds).
-  dur LONG,
+  -- The timestamp at the start of the slice.
+  ts TIMESTAMP,
+  -- The duration of the slice.
+  dur DURATION,
   -- The id of the track this slice is located on.
   track_id LONG,
   -- The "category" of the slice. If this slice originated with track_event,
@@ -74,10 +74,10 @@ CREATE PERFETTO VIEW slice(
   arg_set_id LONG,
   -- The thread timestamp at the start of the slice. This column will only be
   -- populated if thread timestamp collection is enabled with track_event.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- The thread time used by this slice. This column will only be populated if
   -- thread timestamp collection is enabled with track_event.
-  thread_dur LONG,
+  thread_dur DURATION,
   -- The value of the CPU instruction counter at the start of the slice. This
   -- column will only be populated if thread instruction collection is enabled
   -- with track_event.
@@ -97,8 +97,8 @@ FROM __intrinsic_slice;
 -- Contains instant events from userspace which indicates what happened at a
 -- single moment in time.
 CREATE PERFETTO VIEW instant(
-  -- The timestamp of the instant (in nanoseconds).
-  ts LONG,
+  -- The timestamp of the instant.
+  ts TIMESTAMP,
   -- The id of the track this instant is located on.
   track_id LONG,
   -- The name of the instant. The name describes what happened during the
@@ -118,9 +118,9 @@ CREATE PERFETTO VIEW slices(
   -- Alias of `slice.type`.
   type STRING,
   -- Alias of `slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias of `slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias of `slice.track_id`.
   track_id LONG,
   -- Alias of `slice.category`.
@@ -138,9 +138,9 @@ CREATE PERFETTO VIEW slices(
   -- Alias of `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias of `slice.thread_ts`.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- Alias of `slice.thread_dur`.
-  thread_dur LONG,
+  thread_dur DURATION,
   -- Alias of `slice.thread_instruction_count`.
   thread_instruction_count LONG,
   -- Alias of `slice.thread_instruction_delta`.
@@ -171,11 +171,11 @@ CREATE PERFETTO VIEW thread(
   -- The start timestamp of this thread (if known). Is null in most cases unless
   -- a thread creation event is enabled (e.g. task_newtask ftrace event on
   -- Linux/Android).
-  start_ts LONG,
+  start_ts TIMESTAMP,
   -- The end timestamp of this thread (if known). Is null in most cases unless
   -- a thread destruction event is enabled (e.g. sched_process_free ftrace event
   -- on Linux/Android).
-  end_ts LONG,
+  end_ts TIMESTAMP,
   -- The process hosting this thread.
   upid LONG,
   -- Boolean indicating if this thread is the main thread in the process.
@@ -205,11 +205,11 @@ CREATE PERFETTO VIEW process(
   -- The start timestamp of this process (if known). Is null in most cases
   -- unless a process creation event is enabled (e.g. task_newtask ftrace event
   -- on Linux/Android).
-  start_ts LONG,
+  start_ts TIMESTAMP,
   -- The end timestamp of this process (if known). Is null in most cases unless
   -- a process destruction event is enabled (e.g. sched_process_free ftrace
   -- event on Linux/Android).
-  end_ts LONG,
+  end_ts TIMESTAMP,
   -- The upid of the process which caused this process to be spawned.
   parent_upid LONG,
   -- The Unix user id of the process.

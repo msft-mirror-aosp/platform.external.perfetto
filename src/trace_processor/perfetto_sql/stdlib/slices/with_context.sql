@@ -21,9 +21,9 @@ CREATE PERFETTO VIEW thread_slice(
   -- Alias for `slice.type`.
   type STRING,
   -- Alias for `slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias for `slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias for `slice.category`.
   category STRING,
   -- Alias for `slice.name`.
@@ -53,7 +53,7 @@ CREATE PERFETTO VIEW thread_slice(
   -- Alias for `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias for `slice.thread_ts`.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- Alias for `slice.thread_dur`.
   thread_dur LONG
 ) AS
@@ -91,9 +91,9 @@ CREATE PERFETTO VIEW process_slice(
   -- Alias for `slice.type`.
   type STRING,
   -- Alias for `slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias for `slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias for `slice.category`.
   category STRING,
   -- Alias for `slice.name`.
@@ -115,7 +115,7 @@ CREATE PERFETTO VIEW process_slice(
   -- Alias for `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias for `slice.thread_ts`.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- Alias for `slice.thread_dur`.
   thread_dur LONG
 ) AS
