@@ -2541,6 +2541,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/chrome/chrome_args_class_names.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_event_metadata.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_histogram_hashes.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_histogram_summaries.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_input_to_browser_intervals.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_input_to_browser_intervals_base.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_input_to_browser_intervals_template.sql",
@@ -3166,6 +3167,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_sched_sched",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/sched/latency.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/runnable.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/states.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/thread_executing_span.sql",
@@ -5230,6 +5232,7 @@ perfetto_proto_library(
         "protos/perfetto/metrics/chrome/dropped_frames.proto",
         "protos/perfetto/metrics/chrome/frame_times.proto",
         "protos/perfetto/metrics/chrome/histogram_hashes.proto",
+        "protos/perfetto/metrics/chrome/histogram_summaries.proto",
         "protos/perfetto/metrics/chrome/long_latency.proto",
         "protos/perfetto/metrics/chrome/media_metric.proto",
         "protos/perfetto/metrics/chrome/performance_mark_hashes.proto",
@@ -5625,6 +5628,7 @@ perfetto_proto_library(
         "protos/perfetto/trace/ftrace/fastrpc.proto",
         "protos/perfetto/trace/ftrace/fence.proto",
         "protos/perfetto/trace/ftrace/filemap.proto",
+        "protos/perfetto/trace/ftrace/fs.proto",
         "protos/perfetto/trace/ftrace/ftrace.proto",
         "protos/perfetto/trace/ftrace/ftrace_event.proto",
         "protos/perfetto/trace/ftrace/ftrace_event_bundle.proto",

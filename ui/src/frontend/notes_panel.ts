@@ -23,7 +23,7 @@ import {TRACK_SHELL_WIDTH} from './css_constants';
 import {getMaxMajorTicks, generateTicks, TickType} from './gridline_helper';
 import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
-import {Timestamp} from './widgets/timestamp';
+import {Timestamp} from '../public/lib/widgets/timestamp';
 import {assertUnreachable} from '../base/logging';
 import {DetailsPanel} from '../public/details_panel';
 import {TimeScale} from '../base/time_scale';
@@ -89,11 +89,11 @@ export class NotesPanel implements Panel {
         onmousemove: (e: MouseEvent) => {
           this.mouseDragging = true;
           this.hoveredX = currentTargetOffset(e).x - TRACK_SHELL_WIDTH;
-          raf.scheduleRedraw();
+          raf.scheduleCanvasRedraw();
         },
         onmouseenter: (e: MouseEvent) => {
           this.hoveredX = currentTargetOffset(e).x - TRACK_SHELL_WIDTH;
-          raf.scheduleRedraw();
+          raf.scheduleCanvasRedraw();
         },
         onmouseout: () => {
           this.hoveredX = null;
