@@ -30,6 +30,7 @@
 @import "viz_page";
 @import "widgets_page";
 @import "plugins_page";
+@import "explore_page";
 
 // Widgets - keep these sorted (they should NOT have any inter-dependencies)
 @import "widgets/anchor";
@@ -41,6 +42,7 @@
 @import "widgets/editor";
 @import "widgets/empty_state";
 @import "widgets/error";
+@import "widgets/collapsible_panel.scss";
 @import "widgets/flamegraph";
 @import "widgets/form";
 @import "widgets/grid_layout";
