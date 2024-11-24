@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {assetSrc} from '../../base/assets';
-
-// Fetch the stdlib docs
-export async function getStdlibDocs(): Promise<string> {
-  const resp = await fetch(assetSrc('stdlib_docs.json'));
-  const json = await resp.json();
-  return JSON.parse(json);
+.collapsible-panel {
+  .details-panel-container {
+    box-shadow: #0000003b 0px 0px 3px 1px;
+    overflow: auto;
+  }
 }
