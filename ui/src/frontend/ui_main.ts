@@ -18,28 +18,24 @@ import {findRef} from '../base/dom_utils';
 import {FuzzyFinder} from '../base/fuzzy';
 import {assertExists, assertUnreachable} from '../base/logging';
 import {undoCommonChatAppReplacements} from '../base/string_utils';
-import {Actions} from '../common/actions';
 import {
-  DurationPrecision,
   setDurationPrecision,
   setTimestampFormat,
-  TimestampFormat,
 } from '../core/timestamp_format';
 import {raf} from '../core/raf_scheduler';
 import {Command} from '../public/command';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 import {maybeRenderFullscreenModalDialog, showModal} from '../widgets/modal';
-import {CookieConsent} from './cookie_consent';
-import {globals} from './globals';
+import {CookieConsent} from '../core/cookie_consent';
 import {toggleHelp} from './help_modal';
 import {Omnibox, OmniboxOption} from './omnibox';
-import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
+import {addQueryResultsTab} from '../components/query_table/query_result_tab';
 import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_share_utils';
 import {AggregationsTabs} from './aggregation_tab';
-import {OmniboxManagerImpl, OmniboxMode} from '../core/omnibox_manager';
+import {OmniboxMode} from '../core/omnibox_manager';
 import {PromptOption} from '../public/omnibox';
 import {DisposableStack} from '../base/disposable_stack';
 import {Spinner} from '../widgets/spinner';
@@ -48,15 +44,16 @@ import {AppImpl} from '../core/app_impl';
 import {NotesEditorTab} from './notes_panel';
 import {NotesListEditor} from './notes_list_editor';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../public/utils';
+import {DurationPrecision, TimestampFormat} from '../public/timeline';
 
 const OMNIBOX_INPUT_REF = 'omnibox';
 
 // This wrapper creates a new instance of UiMainPerTrace for each new trace
 // loaded (including the case of no trace at the beginning).
 export class UiMain implements m.ClassComponent {
-  view({children}: m.CVnode) {
+  view() {
     const currentTraceId = AppImpl.instance.trace?.engine.engineId ?? '';
-    return [m(UiMainPerTrace, {key: currentTraceId}, children)];
+    return [m(UiMainPerTrace, {key: currentTraceId})];
   }
 }
 
@@ -90,7 +87,7 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.ShowHelp',
         name: 'Show help',
-        callback: () => toggleHelp(app),
+        callback: () => toggleHelp(),
         defaultHotkey: '?',
       },
     ];
@@ -134,7 +131,7 @@ export class UiMainPerTrace implements m.ClassComponent {
               displayName: 'Realtime (Trace TZ)',
             },
             {key: TimestampFormat.Seconds, displayName: 'Seconds'},
-            {key: TimestampFormat.Milliseoncds, displayName: 'Milliseconds'},
+            {key: TimestampFormat.Milliseconds, displayName: 'Milliseconds'},
             {key: TimestampFormat.Microseconds, displayName: 'Microseconds'},
             {key: TimestampFormat.TraceNs, displayName: 'Trace nanoseconds'},
             {
@@ -173,9 +170,8 @@ export class UiMainPerTrace implements m.ClassComponent {
       {
         id: 'perfetto.TogglePerformanceMetrics',
         name: 'Toggle performance metrics',
-        callback: () => {
-          globals.dispatch(Actions.togglePerfDebug({}));
-        },
+        callback: () =>
+          (app.perfDebugging.enabled = !app.perfDebugging.enabled),
       },
       {
         id: 'perfetto.ShareTrace',
@@ -359,6 +355,12 @@ export class UiMainPerTrace implements m.ClassComponent {
         // TODO(stevegolton): Decide on a sensible hotkey.
         // defaultHotkey: 'L',
       },
+      {
+        id: 'perfetto.ToggleDrawer',
+        name: 'Toggle drawer',
+        defaultHotkey: 'Q',
+        callback: () => trace.tabs.toggleTabPanelVisibility(),
+      },
     ];
 
     // Register each command with the command manager
@@ -367,8 +369,8 @@ export class UiMainPerTrace implements m.ClassComponent {
     });
   }
 
-  private renderOmnibox(app: AppImpl): m.Children {
-    const {omnibox} = app;
+  private renderOmnibox(): m.Children {
+    const omnibox = AppImpl.instance.omnibox;
     const omniboxMode = omnibox.mode;
     const statusMessage = omnibox.statusMessage;
     if (statusMessage !== undefined) {
@@ -380,9 +382,9 @@ export class UiMainPerTrace implements m.ClassComponent {
         }),
       );
     } else if (omniboxMode === OmniboxMode.Command) {
-      return this.renderCommandOmnibox(app);
+      return this.renderCommandOmnibox();
     } else if (omniboxMode === OmniboxMode.Prompt) {
-      return this.renderPromptOmnibox(omnibox);
+      return this.renderPromptOmnibox();
     } else if (omniboxMode === OmniboxMode.Query) {
       return this.renderQueryOmnibox();
     } else if (omniboxMode === OmniboxMode.Search) {
@@ -392,7 +394,8 @@ export class UiMainPerTrace implements m.ClassComponent {
     }
   }
 
-  renderPromptOmnibox(omnibox: OmniboxManagerImpl): m.Children {
+  renderPromptOmnibox(): m.Children {
+    const omnibox = AppImpl.instance.omnibox;
     const prompt = assertExists(omnibox.pendingPrompt);
 
     let options: OmniboxOption[] | undefined = undefined;
@@ -437,8 +440,9 @@ export class UiMainPerTrace implements m.ClassComponent {
     });
   }
 
-  renderCommandOmnibox({commands, omnibox}: AppImpl): m.Children {
+  renderCommandOmnibox(): m.Children {
     // Fuzzy-filter commands by the filter string.
+    const {commands, omnibox} = AppImpl.instance;
     const filteredCmds = commands.fuzzyFilterCommands(omnibox.text);
 
     // Create an array of commands with attached heuristics from the recent
@@ -624,11 +628,10 @@ export class UiMainPerTrace implements m.ClassComponent {
     this.maybeFocusOmnibar();
   }
 
-  view({children}: m.Vnode): m.Children {
+  view(): m.Children {
     const app = AppImpl.instance;
     const hotkeys: HotkeyConfig[] = [];
-    const commands = app.commands.commands;
-    for (const {id, defaultHotkey} of commands) {
+    for (const {id, defaultHotkey} of app.commands.commands) {
       if (defaultHotkey) {
         hotkeys.push({
           callback: () => app.commands.runCommand(id),
@@ -642,15 +645,15 @@ export class UiMainPerTrace implements m.ClassComponent {
       {hotkeys},
       m(
         'main',
-        m(Sidebar, {app, trace: this.trace}),
+        m(Sidebar, {trace: this.trace}),
         m(Topbar, {
-          omnibox: this.renderOmnibox(app),
+          omnibox: this.renderOmnibox(),
           trace: this.trace,
         }),
-        children,
+        app.pages.renderPageForCurrentRoute(app.trace),
         m(CookieConsent),
         maybeRenderFullscreenModalDialog(),
-        globals.state.perfDebug && m('.perf-stats'),
+        app.perfDebugging.renderPerfStats(),
       ),
     );
   }
