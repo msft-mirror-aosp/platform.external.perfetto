@@ -599,6 +599,7 @@ message AndroidBatteryMetric {
     optional float capacity_percent = 3;
     optional double current_ua = 4;
     optional double current_avg_ua = 5;
+    optional double voltage_uv = 6;
   }
 
   message BatteryAggregates {
@@ -616,6 +617,8 @@ message AndroidBatteryMetric {
     optional int64 sleep_screen_doze_ns = 8;
     // Average power over the duration of the trace.
     optional double avg_power_mw = 9;
+    // Average power from charge difference at the start and end of the trace.
+    optional double avg_power_from_charge_diff_mw = 10;
   }
 
   // Period of time during the trace that the device went to sleep completely.
@@ -2539,8 +2542,8 @@ message AndroidStartupMetric {
     // sorted by the duration in descending order.
     // By checking out the top slices/threads, developers can identify specific
     // slices or threads for further investigation.
-    repeated TraceSliceSection trace_slice_sections = 7;
-    repeated TraceThreadSection trace_thread_sections = 8;
+    optional TraceSliceSectionInfo trace_slice_sections = 7;
+    optional TraceThreadSectionInfo trace_thread_sections = 8;
 
     // Details specific for a reason.
     optional string additional_info = 9;
@@ -2591,6 +2594,13 @@ message AndroidStartupMetric {
     optional uint32 thread_tid = 6;
   }
 
+  // Information for the SliceSections
+  message TraceSliceSectionInfo {
+    repeated TraceSliceSection slice_section = 1;
+    optional int64 start_timestamp = 2;
+    optional int64 end_timestamp = 3;
+  }
+
   // Contains information for a section of a thread.
   message TraceThreadSection {
     optional int64 start_timestamp = 1;
@@ -2605,6 +2615,13 @@ message AndroidStartupMetric {
     optional uint32 process_pid = 5;
 
     optional uint32 thread_tid = 6;
+  }
+
+  // Information for the ThreadSections
+  message TraceThreadSectionInfo {
+    repeated TraceThreadSection thread_section = 1;
+    optional int64 start_timestamp  = 2;
+    optional int64 end_timestamp = 3;
   }
 
   // Next id: 26
@@ -2979,7 +2996,13 @@ message AndroidWattsonTasksAttributionMetric {
   // different power model versions.
   optional int32 power_model_version = 2;
   // Lists tasks (e.g. threads, process, package) and associated estimates
-  repeated AndroidWattsonTaskInfo task_info = 3;
+  repeated AndroidWattsonTaskPeriodInfo period_info = 3;
+}
+
+// Groups of power per task for each period
+message AndroidWattsonTaskPeriodInfo {
+  optional int32 period_id = 1;
+  repeated AndroidWattsonTaskInfo task_info = 2;
 }
 
 message AndroidWattsonTaskInfo {
@@ -3001,11 +3024,13 @@ message AndroidWattsonTaskInfo {
 // Begin of protos/perfetto/metrics/metrics.proto
 
 // Trace processor metadata
+// Next id: 17
 message TraceMetadata {
   reserved 1;
   optional int64 trace_duration_ns = 2;
   optional string trace_uuid = 3;
   optional string android_build_fingerprint = 4;
+  optional string android_device_manufacturer = 16;
   optional int64 statsd_triggering_subscription_id = 5;
   optional int64 trace_size_bytes = 6;
   repeated string trace_trigger = 7;

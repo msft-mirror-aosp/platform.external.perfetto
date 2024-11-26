@@ -62,6 +62,7 @@ SELECT
   s.ts,
   s.id AS slice_id,
   extract_arg(arg_set_id, 'scheduled_job_state_changed.job_name') AS job_name,
+  extract_arg(arg_set_id, 'scheduled_job_state_changed.attribution_node[0].uid') AS uid,
   extract_arg(arg_set_id, 'scheduled_job_state_changed.state') AS state,
   extract_arg(arg_set_id, 'scheduled_job_state_changed.internal_stop_reason')
     AS internal_stop_reason,
@@ -126,21 +127,21 @@ WITH cte AS (
   SELECT
     *,
     LEAD(state, 1)
-      OVER (PARTITION BY job_name, job_id ORDER BY job_name, job_id, ts) AS lead_state,
+      OVER (PARTITION BY uid, job_name, job_id ORDER BY uid, job_name, job_id, ts) AS lead_state,
     LEAD(ts, 1, TRACE_END())
-      OVER (PARTITION BY job_name, job_id ORDER BY job_name, job_id, ts) AS ts_lead,
+      OVER (PARTITION BY uid, job_name, job_id ORDER BY uid, job_name, job_id, ts) AS ts_lead,
     --- Filter out statsd lossy issue.
     LEAD(ts, 1)
-      OVER (PARTITION BY job_name, job_id ORDER BY job_name, job_id, ts) IS NULL AS is_end_slice,
+      OVER (PARTITION BY uid, job_name, job_id ORDER BY uid, job_name, job_id, ts) IS NULL AS is_end_slice,
     LEAD(internal_stop_reason, 1, 'INTERNAL_STOP_REASON_UNKNOWN')
       OVER (
-        PARTITION BY job_name, job_id
-        ORDER BY job_name, job_id, ts
+        PARTITION BY uid, job_name, job_id
+        ORDER BY uid, job_name, job_id, ts
       ) AS lead_internal_stop_reason,
     LEAD(public_stop_reason, 1, 'PUBLIC_STOP_REASON_UNKNOWN')
       OVER (
-        PARTITION BY job_name, job_id
-        ORDER BY job_name, job_id, ts
+        PARTITION BY uid, job_name, job_id
+        ORDER BY uid, job_name, job_id, ts
       ) AS lead_public_stop_reason
   FROM _job_states
   WHERE state != 'CANCELLED'
@@ -200,24 +201,26 @@ JOIN _screen_states s ON s.id = ii.id_1;
 -- table in the `android.job_scheduler` module and how to populate this table.
 CREATE PERFETTO TABLE android_job_scheduler_states(
   -- Unique identifier for row.
-  id INT,
+  id LONG,
   -- Timestamp of job state slice.
-  ts INT,
+  ts TIMESTAMP,
   -- Duration of job state slice.
-  dur INT,
+  dur DURATION,
   -- Id of the slice.
-  slice_id INT,
+  slice_id LONG,
   -- Name of the job (as named by the app).
   job_name STRING,
+  -- Uid associated with job.
+  uid LONG,
   -- Id of job (assigned by app for T- builds and system generated in U+
   -- builds).
-  job_id INT,
+  job_id LONG,
   -- Package that the job belongs (ex: associated app).
   package_name STRING,
   -- Namespace of job.
   job_namespace STRING,
   -- Priority at which JobScheduler ran the job.
-  effective_priority INT,
+  effective_priority LONG,
   -- True if app requested job should run when the device battery is not low.
   has_battery_not_low_constraint BOOL,
   -- True if app requested job should run when the device is charging.
@@ -241,9 +244,9 @@ CREATE PERFETTO TABLE android_job_scheduler_states(
   -- The job is run as an expedited job.
   is_running_as_expedited_job BOOL,
   -- Number of previous attempts at running job.
-  num_previous_attempts INT,
+  num_previous_attempts TIMESTAMP,
   -- The requested priority at which the job should run.
-  requested_priority INT,
+  requested_priority LONG,
   -- The job's standby bucket (one of: Active, Working Set, Frequent, Rare,
   -- Never, Restricted, Exempt).
   standby_bucket STRING,
@@ -257,14 +260,19 @@ CREATE PERFETTO TABLE android_job_scheduler_states(
   is_running_as_user_initiated_job BOOL,
   -- Deadline that job has requested and valid if has_deadline_constraint is
   -- true.
-  deadline_ms INT,
+  deadline_ms LONG,
   -- The latency in ms between when a job is scheduled and when it actually
   -- starts.
-  job_start_latency_ms INT,
+  job_start_latency_ms LONG,
   -- Number of uncompleted job work items.
-  num_uncompleted_work_items INT,
+  num_uncompleted_work_items LONG,
   -- Process state of the process responsible for running the job.
-  proc_state STRING
+  proc_state STRING,
+  -- Internal stop reason for a job.
+  internal_stop_reason STRING,
+  -- Public stop reason for a job.
+  public_stop_reason STRING
+
 ) AS
 SELECT
   ROW_NUMBER() OVER (ORDER BY ts) AS id,
@@ -272,6 +280,7 @@ SELECT
   dur,
   slice_id,
   job_name,
+  uid,
   job_id,
   package_name,
   job_namespace,
@@ -297,7 +306,9 @@ SELECT
   deadline_ms,
   job_start_latency_ms,
   num_uncompleted_work_items,
-  proc_state
+  proc_state,
+  lead_internal_stop_reason AS internal_stop_reason,
+  lead_public_stop_reason AS public_stop_reason
 FROM _job_started;
 
 -- This table returns the constraint, charging,
@@ -323,18 +334,20 @@ FROM _job_started;
 -- `ATOM_SCHEDULED_JOB_STATE_CHANGED` is available in a trace.
 CREATE PERFETTO TABLE android_job_scheduler_with_screen_charging_states(
   -- Timestamp of job.
-  ts INT,
-  -- Duration of job in ns.
-  dur INT,
+  ts TIMESTAMP,
+  -- Duration of slice in ns.
+  dur DURATION,
   -- Id of the slice.
-  slice_id INT,
+  slice_id LONG,
   -- Name of the job (as named by the app).
   job_name STRING,
   -- Id of job (assigned by app for T- builds and system generated in U+
   -- builds).
-  job_id INT,
-  -- Duration of job in ns.
-  job_dur INT,
+  job_id LONG,
+  -- Uid associated with job.
+  uid LONG,
+  -- Duration of entire job in ns.
+  job_dur DURATION,
   -- Package that the job belongs (ex: associated app).
   package_name STRING,
   -- Namespace of job.
@@ -346,7 +359,7 @@ CREATE PERFETTO TABLE android_job_scheduler_with_screen_charging_states(
   -- (doze), Unknown).
   screen_state STRING,
   -- Priority at which JobScheduler ran the job.
-  effective_priority INT,
+  effective_priority LONG,
   -- True if app requested job should run when the device battery is not low.
   has_battery_not_low_constraint BOOL,
   -- True if app requested job should run when the device is charging.
@@ -370,9 +383,9 @@ CREATE PERFETTO TABLE android_job_scheduler_with_screen_charging_states(
   -- The job is run as an expedited job.
   is_running_as_expedited_job BOOL,
   -- Number of previous attempts at running job.
-  num_previous_attempts INT,
+  num_previous_attempts TIMESTAMP,
   -- The requested priority at which the job should run.
-  requested_priority INT,
+  requested_priority LONG,
   -- The job's standby bucket (one of: Active, Working Set, Frequent, Rare,
   -- Never, Restricted, Exempt).
   standby_bucket STRING,
@@ -386,20 +399,25 @@ CREATE PERFETTO TABLE android_job_scheduler_with_screen_charging_states(
   is_running_as_user_initiated_job BOOL,
   -- Deadline that job has requested and valid if has_deadline_constraint is
   -- true.
-  deadline_ms INT,
+  deadline_ms LONG,
   -- The latency in ms between when a job is scheduled and when it actually
   -- starts.
-  job_start_latency_ms INT,
+  job_start_latency_ms LONG,
   -- Number of uncompleted job work items.
-  num_uncompleted_work_items INT,
+  num_uncompleted_work_items LONG,
   -- Process state of the process responsible for running the job.
-  proc_state STRING
+  proc_state STRING,
+  -- Internal stop reason for a job.
+  internal_stop_reason STRING,
+  -- Public stop reason for a job.
+  public_stop_reason STRING
 ) AS
 SELECT
   ii.ts,
   ii.dur,
   js.slice_id,
   js.job_name || '_' || js.job_id AS job_name,
+  js.uid,
   js.job_id,
   js.dur AS job_dur,
   js.package_name,
@@ -428,7 +446,9 @@ SELECT
   js.deadline_ms,
   js.job_start_latency_ms,
   js.num_uncompleted_work_items,
-  js.proc_state
+  js.proc_state,
+  js.internal_stop_reason,
+  js.public_stop_reason
   FROM _interval_intersect!(
         (_charging_screen_states,
         android_job_scheduler_states),

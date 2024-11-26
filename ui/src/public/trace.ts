@@ -24,6 +24,7 @@ import {SelectionManager} from './selection';
 import {ScrollToArgs} from './scroll_helper';
 import {NoteManager} from './note';
 import {DisposableStack} from '../base/disposable_stack';
+import {Evt} from '../base/events';
 
 // Lists all the possible event listeners using the key as the event name and
 // the type as the type of the callback.
@@ -50,6 +51,9 @@ export interface Trace extends App {
   readonly workspaces: WorkspaceManager;
   readonly traceInfo: TraceInfo;
 
+  // Events.
+  onTraceReady: Evt<void>;
+
   // Scrolls to the given track and/or time. Does NOT change the current
   // selection.
   scrollTo(args: ScrollToArgs): void;
@@ -63,6 +67,11 @@ export interface Trace extends App {
   // the trace. It will throw if traceInfo.downloadable === false.
   getTraceFile(): Promise<Blob>;
 
+  // List of errors that were encountered while loading the trace by the TS
+  // code. These are on top of traceInfo.importErrors, which is a summary of
+  // what TraceProcessor reports on the stats table at import time.
+  get loadingErrors(): ReadonlyArray<string>;
+
   // When the trace is opened via postMessage deep-linking, returns the sub-set
   // of postMessageData.pluginArgs[pluginId] for the current plugin. If not
   // present returns undefined.
@@ -70,12 +79,6 @@ export interface Trace extends App {
 
   // Trace scoped disposables. Will be destroyed when the trace is unloaded.
   readonly trash: DisposableStack;
-
-  // Register event listeners for trace-level events, e.g. trace ready
-  addEventListener<T extends keyof EventListeners>(
-    event: T,
-    callback: EventListeners[T],
-  ): void;
 }
 
 /**
@@ -91,3 +94,5 @@ export interface Trace extends App {
 export interface TraceAttrs {
   trace: Trace;
 }
+
+export const TRACE_SUFFIX = '.perfetto-trace';

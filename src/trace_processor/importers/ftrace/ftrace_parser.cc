@@ -70,7 +70,9 @@
 #include "protos/perfetto/trace/ftrace/android_fs.pbzero.h"
 #include "protos/perfetto/trace/ftrace/bcl_exynos.pbzero.h"
 #include "protos/perfetto/trace/ftrace/binder.pbzero.h"
+#include "protos/perfetto/trace/ftrace/block.pbzero.h"
 #include "protos/perfetto/trace/ftrace/cma.pbzero.h"
+#include "protos/perfetto/trace/ftrace/cpm_trace.pbzero.h"
 #include "protos/perfetto/trace/ftrace/cpuhp.pbzero.h"
 #include "protos/perfetto/trace/ftrace/cros_ec.pbzero.h"
 #include "protos/perfetto/trace/ftrace/dcvsh.pbzero.h"
@@ -342,7 +344,6 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
       sched_wakeup_name_id_(context->storage->InternString("sched_wakeup")),
       sched_waking_name_id_(context->storage->InternString("sched_waking")),
       cpu_id_(context->storage->InternString("cpu")),
-      ucpu_id_(context->storage->InternString("ucpu")),
       linux_device_name_id_(
           context->storage->InternString("linux_device_name")),
       suspend_resume_name_id_(
@@ -467,7 +468,10 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
           context->storage->InternString("callback_phase")),
       suspend_resume_event_type_arg_name_(
           context->storage->InternString("event_type")),
-      device_name_id_(context->storage->InternString("device_name")) {
+      device_name_id_(context->storage->InternString("device_name")),
+      block_io_id_(context->storage->InternString("block_io")),
+      block_io_device_id_(context->storage->InternString("block_device")),
+      block_io_arg_sector_id_(context->storage->InternString("sector")) {
   // Build the lookup table for the strings inside ftrace events (e.g. the
   // name of ftrace event fields and the names of their args).
   for (size_t i = 0; i < GetDescriptorsSize(); i++) {
@@ -657,6 +661,28 @@ base::Status FtraceParser::ParseFtraceStats(ConstBytes blob,
     } else {
       storage->SetIndexedStats(stats::ftrace_cpu_oldest_event_ts_begin + phase,
                                cpu, static_cast<int64_t>(oldest_event_ts));
+    }
+  }
+
+  protos::pbzero::FtraceKprobeStats::Decoder kprobe_stats(evt.kprobe_stats());
+  storage->SetStats(stats::ftrace_kprobe_hits_begin + phase,
+                    kprobe_stats.hits());
+  storage->SetStats(stats::ftrace_kprobe_misses_begin + phase,
+                    kprobe_stats.misses());
+  if (is_end) {
+    auto kprobe_hits_begin = storage->GetStats(stats::ftrace_kprobe_hits_begin);
+    auto kprobe_hits_end = kprobe_stats.hits();
+    if (kprobe_hits_begin) {
+      int64_t delta_hits = kprobe_hits_end - kprobe_hits_begin;
+      storage->SetStats(stats::ftrace_kprobe_hits_delta, delta_hits);
+    }
+
+    auto kprobe_misses_begin =
+        storage->GetStats(stats::ftrace_kprobe_misses_begin);
+    auto kprobe_misses_end = kprobe_stats.misses();
+    if (kprobe_misses_begin) {
+      int64_t delta_misses = kprobe_misses_end - kprobe_misses_begin;
+      storage->SetStats(stats::ftrace_kprobe_misses_delta, delta_misses);
     }
   }
 
@@ -1348,6 +1374,18 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
       }
       case FtraceEvent::kKprobeEventFieldNumber: {
         ParseKprobe(ts, pid, fld_bytes);
+        break;
+      }
+      case FtraceEvent::kParamSetValueCpmFieldNumber: {
+        ParseParamSetValueCpm(fld_bytes);
+        break;
+      }
+      case FtraceEvent::kBlockIoStartFieldNumber: {
+        ParseBlockIoStart(ts, fld_bytes);
+        break;
+      }
+      case FtraceEvent::kBlockIoDoneFieldNumber: {
+        ParseBlockIoDone(ts, fld_bytes);
         break;
       }
       default:
@@ -2240,6 +2278,22 @@ void FtraceParser::ParseTaskNewTask(int64_t timestamp,
   // task_newtask is raised both in the case of a new process creation (fork()
   // family) and thread creation (clone(CLONE_THREAD, ...)).
   static const uint32_t kCloneThread = 0x00010000;  // From kernel's sched.h.
+
+  if (PERFETTO_UNLIKELY(new_tid == 0)) {
+    // In the case of boot-time tracing (kernel is started with tracing
+    // enabled), the ftrace buffer will see /bin/init creating swapper/0 tasks:
+    // event {
+    //  pid: 1
+    //  task_newtask {
+    //    pid: 0
+    //    comm: "swapper/0"
+    //  }
+    // }
+    // Skip these task_newtask events since they are kernel idle tasks.
+    PERFETTO_DCHECK(source_tid == 1);
+    PERFETTO_DCHECK(base::StartsWith(evt.comm().ToStdString(), "swapper"));
+    return;
+  }
 
   // If the process is a fork, start a new process.
   if ((clone_flags & kCloneThread) == 0) {
@@ -3463,8 +3517,7 @@ void FtraceParser::ParseSuspendResume(int64_t timestamp,
                          context_->process_tracker->GetOrCreateThread(tid)));
     inserter->AddArg(suspend_resume_event_type_arg_name_,
                      Variadic::String(suspend_resume_main_event_id_));
-    auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
-    inserter->AddArg(ucpu_id_, Variadic::UnsignedInteger(ucpu.value));
+    inserter->AddArg(cpu_id_, Variadic::UnsignedInteger(cpu));
 
     // These fields are set to null as this is not a device PM callback event.
     inserter->AddArg(suspend_resume_device_arg_name_,
@@ -3722,8 +3775,7 @@ void FtraceParser::ParseDevicePmCallbackStart(int64_t ts,
                          context_->process_tracker->GetOrCreateThread(tid)));
     inserter->AddArg(suspend_resume_event_type_arg_name_,
                      Variadic::String(suspend_resume_device_pm_event_id_));
-    auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
-    inserter->AddArg(ucpu_id_, Variadic::UnsignedInteger(ucpu.value));
+    inserter->AddArg(cpu_id_, Variadic::UnsignedInteger(cpu));
     inserter->AddArg(
         suspend_resume_device_arg_name_,
         Variadic::String(context_->storage->InternString(device_name.c_str())));
@@ -3812,6 +3864,50 @@ void FtraceParser::ParseDeviceFrequency(int64_t ts,
       Variadic::String(device_name));
   context_->event_tracker->PushCounter(ts, static_cast<double>(event.freq()),
                                        track_id);
+}
+
+void FtraceParser::ParseParamSetValueCpm(protozero::ConstBytes blob) {
+  protos::pbzero::ParamSetValueCpmFtraceEvent::Decoder event(blob);
+  TrackTracker::DimensionsBuilder dims_builder =
+      context_->track_tracker->CreateDimensionsBuilder();
+  // Store event body which denotes the name of the track.
+  dims_builder.AppendName(context_->storage->InternString(event.body()));
+  TrackId track_id = context_->track_tracker->InternTrack(
+      tracks::pixel_cpm_trace, std::move(dims_builder).Build());
+  context_->event_tracker->PushCounter(static_cast<int64_t>(event.timestamp()),
+                                       event.value(), track_id);
+}
+
+void FtraceParser::ParseBlockIoStart(int64_t ts, protozero::ConstBytes blob) {
+  protos::pbzero::BlockIoStartFtraceEvent::Decoder event(blob);
+
+  auto args_inserter = [this, &event](ArgsTracker::BoundInserter* inserter) {
+    inserter->AddArg(block_io_arg_sector_id_,
+                     Variadic::UnsignedInteger(event.sector()));
+  };
+
+  TrackTracker::DimensionsBuilder dims = context_->track_tracker->CreateDimensionsBuilder();
+  dims.AppendDimension(block_io_device_id_, Variadic::UnsignedInteger(event.dev()));
+  TrackId track_id =
+      context_->track_tracker->InternTrack(tracks::block_io, std::move(dims).Build());
+  context_->slice_tracker->Begin(ts, track_id, kNullStringId, block_io_id_,
+                                  args_inserter);
+}
+
+void FtraceParser::ParseBlockIoDone(int64_t ts, protozero::ConstBytes blob) {
+  protos::pbzero::BlockIoDoneFtraceEvent::Decoder event(blob);
+
+  auto args_inserter = [this, &event](ArgsTracker::BoundInserter* inserter) {
+    inserter->AddArg(block_io_arg_sector_id_,
+                     Variadic::UnsignedInteger(event.sector()));
+  };
+
+  TrackTracker::DimensionsBuilder dims = context_->track_tracker->CreateDimensionsBuilder();
+  dims.AppendDimension(block_io_device_id_, Variadic::UnsignedInteger(event.dev()));
+  TrackId track_id =
+      context_->track_tracker->InternTrack(tracks::block_io, std::move(dims).Build());
+  context_->slice_tracker->End(ts, track_id, kNullStringId, block_io_id_,
+                                  args_inserter);
 }
 
 }  // namespace perfetto::trace_processor
