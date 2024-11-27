@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TrackData} from '../../common/track_data';
+import {TrackData} from '../../components/tracks/track_data';
 import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../../public/track_kinds';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin} from '../../public/plugin';
@@ -107,7 +107,7 @@ export default class implements PerfettoPlugin {
       group?.addChildInOrder(track);
     }
 
-    ctx.addEventListener('traceready', async () => {
+    ctx.onTraceReady.addListener(async () => {
       await selectPerfSample(ctx);
     });
   }
