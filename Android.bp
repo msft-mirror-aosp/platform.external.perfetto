@@ -13216,6 +13216,7 @@ genrule {
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup_rails.sql",
+        "src/trace_processor/metrics/sql/android/wattson_atrace_apps_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_rail_relations.sql",
@@ -13624,6 +13625,7 @@ genrule {
         "src/trace_processor/perfetto_sql/stdlib/graphs/search.sql",
         "src/trace_processor/perfetto_sql/stdlib/intervals/intersect.sql",
         "src/trace_processor/perfetto_sql/stdlib/intervals/overlap.sql",
+        "src/trace_processor/perfetto_sql/stdlib/linux/block_io.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/frequency.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/idle.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/cpu/idle_stats.sql",
@@ -17992,7 +17994,10 @@ filegroup {
 
 filegroup {
     name: "perfetto-trace-processor-python-srcs",
-    srcs: ["python/perfetto/trace_processor/*.py"],
+    srcs: [
+        "python/perfetto/common/*.py",
+        "python/perfetto/trace_processor/*.py",
+    ],
     path: "python",
 }
 
