@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
+import {sqlTableRegistry} from '../../components/widgets/sql/table/sql_table_registry';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {getProcessTable} from './table';
-import {extensions} from '../../public/lib/extensions';
+import {extensions} from '../../components/extensions';
 
-class ProcessPlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.Process';
   async onTraceLoad(ctx: Trace) {
     sqlTableRegistry['process'] = getProcessTable();
     ctx.commands.registerCommand({
@@ -32,8 +33,3 @@ class ProcessPlugin implements PerfettoPlugin {
     });
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.Process',
-  plugin: ProcessPlugin,
-};

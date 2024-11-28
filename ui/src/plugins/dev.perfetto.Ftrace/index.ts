@@ -16,11 +16,10 @@ import m from 'mithril';
 import {FtraceExplorer, FtraceExplorerCache} from './ftrace_explorer';
 import {Engine} from '../../trace_processor/engine';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {NUM} from '../../trace_processor/query_result';
 import {FtraceFilter, FtracePluginState} from './common';
 import {FtraceRawTrack} from './ftrace_track';
-import {DisposableStack} from '../../base/disposable_stack';
 import {TrackNode} from '../../public/workspace';
 
 const VERSION = 1;
@@ -32,9 +31,8 @@ const DEFAULT_STATE: FtracePluginState = {
   },
 };
 
-class FtraceRawPlugin implements PerfettoPlugin {
-  private trash = new DisposableStack();
-
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.Ftrace';
   async onTraceLoad(ctx: Trace): Promise<void> {
     const store = ctx.mountStore<FtracePluginState>((init: unknown) => {
       if (
@@ -48,13 +46,13 @@ class FtraceRawPlugin implements PerfettoPlugin {
         return DEFAULT_STATE;
       }
     });
-    this.trash.use(store);
+    ctx.trash.use(store);
 
     const filterStore = store.createSubStore(
       ['filter'],
       (x) => x as FtraceFilter,
     );
-    this.trash.use(filterStore);
+    ctx.trash.use(filterStore);
 
     const cpus = await this.lookupCpuCores(ctx.engine);
     const group = new TrackNode({
@@ -115,10 +113,6 @@ class FtraceRawPlugin implements PerfettoPlugin {
     });
   }
 
-  async onTraceUnload(): Promise<void> {
-    this.trash[Symbol.dispose]();
-  }
-
   private async lookupCpuCores(engine: Engine): Promise<number[]> {
     const query = 'select distinct cpu from ftrace_event order by cpu';
 
@@ -134,8 +128,3 @@ class FtraceRawPlugin implements PerfettoPlugin {
     return cpuCores;
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.Ftrace',
-  plugin: FtraceRawPlugin,
-};

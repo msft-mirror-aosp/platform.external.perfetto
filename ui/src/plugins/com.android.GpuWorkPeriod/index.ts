@@ -13,16 +13,15 @@
 // limitations under the License.
 
 import {NUM, STR} from '../../trace_processor/query_result';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {Trace} from '../../public/trace';
 import {TrackNode} from '../../public/workspace';
 import {SLICE_TRACK_KIND} from '../../public/track_kinds';
-import {
-  SimpleSliceTrack,
-  SimpleSliceTrackConfig,
-} from '../../frontend/simple_slice_track';
+import {createQuerySliceTrack} from '../../components/tracks/query_slice_track';
 
-class GpuWorkPeriodPlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'com.android.GpuWorkPeriod';
+
   async onTraceLoad(ctx: Trace): Promise<void> {
     const {engine} = ctx;
     const result = await engine.query(`
@@ -57,19 +56,17 @@ class GpuWorkPeriodPlugin implements PerfettoPlugin {
     for (; it.valid(); it.next()) {
       const {trackId, gpuId, uid, packageName} = it;
       const uri = `/gpu_work_period_${gpuId}_${uid}`;
-      const config: SimpleSliceTrackConfig = {
+      const track = await createQuerySliceTrack({
+        trace: ctx,
+        uri,
         data: {
           sqlSource: `
             select ts, dur, name
             from slice
             where track_id = ${trackId}
           `,
-          columns: ['ts', 'dur', 'name'],
         },
-        columns: {ts: 'ts', dur: 'dur', name: 'name'},
-        argColumns: [],
-      };
-      const track = new SimpleSliceTrack(ctx, {trackUri: uri}, config);
+      });
       ctx.tracks.registerTrack({
         uri,
         title: packageName,
@@ -92,8 +89,3 @@ class GpuWorkPeriodPlugin implements PerfettoPlugin {
     }
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'com.android.GpuWorkPeriod',
-  plugin: GpuWorkPeriodPlugin,
-};

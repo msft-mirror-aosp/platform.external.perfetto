@@ -39,7 +39,6 @@
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/stack_profile_tracker.h"
 #include "src/trace_processor/importers/common/trace_file_tracker.h"
-#include "src/trace_processor/importers/perf/dso_tracker.h"
 #include "src/trace_processor/importers/proto/default_modules.h"
 #include "src/trace_processor/importers/proto/packet_analyzer.h"
 #include "src/trace_processor/importers/proto/perf_sample_tracker.h"
@@ -52,6 +51,7 @@
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/trace_reader_registry.h"
 #include "src/trace_processor/types/variadic.h"
+#include "src/trace_processor/util/descriptors.h"
 #include "src/trace_processor/util/status_macros.h"
 #include "src/trace_processor/util/trace_type.h"
 
@@ -134,9 +134,6 @@ base::Status TraceProcessorStorageImpl::NotifyEndOfFile() {
   context_.slice_tracker->FlushPendingSlices();
   context_.args_tracker->Flush();
   context_.process_tracker->NotifyEndOfFile();
-  if (context_.perf_dso_tracker) {
-    perf_importer::DsoTracker::GetOrCreate(&context_).SymbolizeFrames();
-  }
   return base::OkStatus();
 }
 
@@ -152,6 +149,9 @@ void TraceProcessorStorageImpl::DestroyContext() {
   // kernel version (inside system_info_tracker) to know how to textualise
   // sched_switch.prev_state bitflags.
   context.system_info_tracker = std::move(context_.system_info_tracker);
+  // "__intrinsic_winscope_proto_to_args_with_defaults" requires proto
+  // descriptors.
+  context.descriptor_pool_ = std::move(context_.descriptor_pool_);
 
   context_ = std::move(context);
 

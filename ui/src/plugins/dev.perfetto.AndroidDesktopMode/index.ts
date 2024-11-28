@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  SimpleSliceTrack,
-  SimpleSliceTrackConfig,
-} from '../../frontend/simple_slice_track';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {createQuerySliceTrack} from '../../components/tracks/query_slice_track';
+import {PerfettoPlugin} from '../../public/plugin';
 import {Trace} from '../../public/trace';
 import {TrackNode} from '../../public/workspace';
 
@@ -36,46 +33,38 @@ const COLUMNS = ['id', 'ts', 'dur', 'name'];
 const TRACK_NAME = 'Desktop Mode Windows';
 const TRACK_URI = '/desktop_windows';
 
-class AndroidDesktopMode implements PerfettoPlugin {
-  async onTraceReady(_ctx: Trace): Promise<void> {
-    await _ctx.engine.query(INCLUDE_DESKTOP_MODULE_QUERY);
-    this.registerTrack(
-      _ctx,
-      QUERY,
-    );
-    _ctx.commands.registerCommand({
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.AndroidDesktopMode';
+
+  async onTraceLoad(ctx: Trace): Promise<void> {
+    await ctx.engine.query(INCLUDE_DESKTOP_MODULE_QUERY);
+    await this.registerTrack(ctx, QUERY);
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.DesktopMode#AddTrackDesktopWindowss',
       name: 'Add Track: ' + TRACK_NAME,
-      callback: () => this.addSimpleTrack(_ctx),
+      callback: () => this.addSimpleTrack(ctx),
     });
   }
 
-  registerTrack(_ctx: Trace, sql: string) {
-    const config: SimpleSliceTrackConfig = {
+  private async registerTrack(ctx: Trace, sql: string) {
+    const track = await createQuerySliceTrack({
+      trace: ctx,
+      uri: TRACK_URI,
       data: {
         sqlSource: sql,
         columns: COLUMNS,
       },
-      columns: {ts: 'ts', dur: 'dur', name: 'name'},
-      argColumns: [],
-    };
-    const track = new SimpleSliceTrack(_ctx, {trackUri: TRACK_URI}, config);
-    _ctx.tracks.registerTrack({
+    });
+    ctx.tracks.registerTrack({
       uri: TRACK_URI,
       title: TRACK_NAME,
       track,
     });
   }
 
-  addSimpleTrack(_ctx: Trace) {
+  private addSimpleTrack(ctx: Trace) {
     const trackNode = new TrackNode({uri: TRACK_URI, title: TRACK_NAME});
-    _ctx.workspace.addChildInOrder(trackNode);
+    ctx.workspace.addChildInOrder(trackNode);
     trackNode.pin();
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.AndroidDesktopMode',
-  plugin: AndroidDesktopMode,
-};
-

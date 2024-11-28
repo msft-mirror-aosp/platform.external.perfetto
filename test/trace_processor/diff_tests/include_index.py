@@ -68,6 +68,7 @@ from diff_tests.parser.chrome.tests_memory_snapshots import ChromeMemorySnapshot
 from diff_tests.parser.chrome.tests_v8 import ChromeV8Parser
 from diff_tests.parser.cros.tests import Cros
 from diff_tests.parser.fs.tests import Fs
+from diff_tests.parser.ftrace.block_io_tests import BlockIo
 from diff_tests.parser.ftrace.ftrace_crop_tests import FtraceCrop
 from diff_tests.parser.ftrace.kprobes_tests import Kprobes
 from diff_tests.parser.fuchsia.tests import Fuchsia
@@ -112,12 +113,11 @@ from diff_tests.stdlib.android.desktop_mode_tests import DesktopMode
 from diff_tests.stdlib.android.frames_tests import Frames
 from diff_tests.stdlib.android.gpu import AndroidGpu
 from diff_tests.stdlib.android.heap_graph_tests import HeapGraph
+from diff_tests.stdlib.android.heap_profile_tests import HeapProfile
 from diff_tests.stdlib.android.memory import AndroidMemory
 from diff_tests.stdlib.android.startups_tests import Startups
 from diff_tests.stdlib.android.tests import AndroidStdlib
 from diff_tests.stdlib.chrome.chrome_stdlib_testsuites import CHROME_STDLIB_TESTSUITES
-from diff_tests.stdlib.common.tests import StdlibCommon
-from diff_tests.stdlib.common.tests import StdlibCommon
 from diff_tests.stdlib.counters.tests import StdlibCounterIntervals
 from diff_tests.stdlib.dynamic_tables.tests import DynamicTables
 from diff_tests.stdlib.export.tests import ExportTests
@@ -144,6 +144,7 @@ from diff_tests.stdlib.span_join.tests_regression import SpanJoinRegression
 from diff_tests.stdlib.span_join.tests_smoke import SpanJoinSmoke
 from diff_tests.stdlib.tests import StdlibSmoke
 from diff_tests.stdlib.timestamps.tests import Timestamps
+from diff_tests.stdlib.viz.tests import Viz
 from diff_tests.stdlib.wattson.tests import WattsonStdlib
 from diff_tests.syntax.filtering_tests import PerfettoFiltering
 from diff_tests.syntax.function_tests import PerfettoFunction
@@ -237,6 +238,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *ParsingSysStats(index_path, 'parser/parsing', 'ParsingSysStats').fetch(),
       *ParsingMemoryCounters(index_path, 'parser/parsing',
                              'ParsingMemoryCounters').fetch(),
+      *BlockIo(index_path, 'parser/ftrace', 'BlockIo').fetch(),
       *FtraceCrop(index_path, 'parser/ftrace', 'FtraceCrop').fetch(),
       *Kprobes(index_path, 'parser/ftrace', 'Kprobes').fetch(),
       *ParsingTracedStats(index_path, 'parser/parsing',
@@ -324,7 +326,6 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *Pkvm(index_path, 'stdlib/pkvm', 'Pkvm').fetch(),
       *PreludeSlices(index_path, 'stdlib/prelude', 'PreludeSlices').fetch(),
       *StdlibSmoke(index_path, 'stdlib', 'StdlibSmoke').fetch(),
-      *StdlibCommon(index_path, 'stdlib/common', 'StdlibCommon').fetch(),
       *Slices(index_path, 'stdlib/slices', 'Slices').fetch(),
       *SpanJoinLeftJoin(index_path, 'stdlib/span_join',
                         'SpanJoinLeftJoin').fetch(),
@@ -333,14 +334,15 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *SpanJoinRegression(index_path, 'stdlib/span_join',
                           'SpanJoinRegression').fetch(),
       *SpanJoinSmoke(index_path, 'stdlib/span_join', 'SpanJoinSmoke').fetch(),
-      *StdlibCommon(index_path, 'stdlib/common', 'StdlibCommon').fetch(),
       *StdlibIntervals(index_path, 'stdlib/intervals',
                        'StdlibIntervals').fetch(),
       *IntervalsIntersect(index_path, 'stdlib/intervals',
                           'StdlibIntervalsIntersect').fetch(),
       *Startups(index_path, 'stdlib/android', 'Startups').fetch(),
       *Timestamps(index_path, 'stdlib/timestamps', 'Timestamps').fetch(),
+      *Viz(index_path, 'stdlib/viz', 'Viz').fetch(),
       *WattsonStdlib(index_path, 'stdlib/wattson', 'WattsonStdlib').fetch(),
+      *HeapProfile(index_path, 'stdlib/android', 'HeapProfile').fetch(),
   ] + chrome_stdlib_tests
 
   syntax_tests = [

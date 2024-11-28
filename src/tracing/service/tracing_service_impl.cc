@@ -1417,7 +1417,19 @@ void TracingServiceImpl::StartDataSourceInstance(
     TracingSession* tracing_session,
     TracingServiceImpl::DataSourceInstance* instance) {
   PERFETTO_DCHECK(instance->state == DataSourceInstance::CONFIGURED);
-  if (instance->will_notify_on_start) {
+
+  bool start_immediately = !instance->will_notify_on_start;
+
+  if (producer->IsAndroidProcessFrozen()) {
+    PERFETTO_DLOG(
+        "skipping waiting of data source \"%s\" on producer \"%s\" (pid=%u) "
+        "because it is frozen",
+        instance->data_source_name.c_str(), producer->name_.c_str(),
+        producer->pid());
+    start_immediately = true;
+  }
+
+  if (!start_immediately) {
     instance->state = DataSourceInstance::STARTING;
   } else {
     instance->state = DataSourceInstance::STARTED;
@@ -1753,9 +1765,9 @@ void TracingServiceImpl::ActivateTriggers(
 
       const bool triggers_already_received =
           !tracing_session.received_triggers.empty();
-      tracing_session.received_triggers.push_back(
-          {static_cast<uint64_t>(now_ns), iter->name(), producer->name_,
-           producer->uid()});
+      const TriggerInfo trigger = {static_cast<uint64_t>(now_ns), iter->name(),
+                                   producer->name_, producer->uid()};
+      tracing_session.received_triggers.push_back(trigger);
       auto weak_this = weak_ptr_factory_.GetWeakPtr();
       switch (trigger_mode) {
         case TraceConfig::TriggerConfig::START_TRACING:
@@ -1811,14 +1823,13 @@ void TracingServiceImpl::ActivateTriggers(
               tracing_session.config, tracing_session.trace_uuid,
               PerfettoStatsdAtom::kTracedTriggerCloneSnapshot, iter->name());
           task_runner_->PostDelayedTask(
-              [weak_this, tsid, trigger_name = iter->name()] {
+              [weak_this, tsid, trigger] {
                 if (!weak_this)
                   return;
                 auto* tsess = weak_this->GetTracingSession(tsid);
                 if (!tsess || !tsess->consumer_maybe_null)
                   return;
-                tsess->consumer_maybe_null->NotifyCloneSnapshotTrigger(
-                    trigger_name);
+                tsess->consumer_maybe_null->NotifyCloneSnapshotTrigger(trigger);
               },
               iter->stop_delay_ms());
           break;
@@ -2010,7 +2021,7 @@ void TracingServiceImpl::NotifyFlushDoneForProducer(
         it++;
       }
     }  // for (pending_flushes)
-  }  // for (tracing_session)
+  }    // for (tracing_session)
 }
 
 void TracingServiceImpl::OnFlushTimeout(TracingSessionID tsid,
@@ -2501,6 +2512,7 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
 
   if (!tracing_session->config.builtin_data_sources().disable_trace_config()) {
     MaybeEmitTraceConfig(tracing_session, &packets);
+    MaybeEmitCloneTrigger(tracing_session, &packets);
     MaybeEmitReceivedTriggers(tracing_session, &packets);
   }
   if (!tracing_session->did_emit_initial_packets) {
@@ -2600,7 +2612,7 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
       did_hit_threshold = packets_bytes >= threshold;
       packets.emplace_back(std::move(packet));
     }  // for(packets...)
-  }  // for(buffers...)
+  }    // for(buffers...)
 
   *has_more = did_hit_threshold;
 
@@ -3326,6 +3338,25 @@ TracingServiceImpl::TracingSession* TracingServiceImpl::GetTracingSession(
 }
 
 TracingServiceImpl::TracingSession*
+TracingServiceImpl::GetTracingSessionByUniqueName(
+    const std::string& unique_session_name) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  if (unique_session_name.empty()) {
+    return nullptr;
+  }
+  for (auto& session_id_and_session : tracing_sessions_) {
+    TracingSession& session = session_id_and_session.second;
+    if (session.state == TracingSession::CLONED_READ_ONLY) {
+      continue;
+    }
+    if (session.config.unique_session_name() == unique_session_name) {
+      return &session;
+    }
+  }
+  return nullptr;
+}
+
+TracingServiceImpl::TracingSession*
 TracingServiceImpl::FindTracingSessionWithMaxBugreportScore() {
   TracingSession* max_session = nullptr;
   for (auto& session_id_and_session : tracing_sessions_) {
@@ -3677,8 +3708,8 @@ TraceStats TracingServiceImpl::GetTraceStats(TracingSession* tracing_session) {
           wri_stats->add_chunk_payload_histogram_sum(hist.GetBucketSum(i));
         }
       }  // for each sequence (writer).
-    }  // for each buffer.
-  }  // if (!disable_chunk_usage_histograms)
+    }    // for each buffer.
+  }      // if (!disable_chunk_usage_histograms)
 
   return trace_stats;
 }
@@ -3736,6 +3767,14 @@ void TracingServiceImpl::EmitSystemInfo(std::vector<TracePacket>* packets) {
     PERFETTO_ELOG("Unable to read ro.build.fingerprint");
   }
 
+  std::string device_manufacturer_value =
+      base::GetAndroidProp("ro.product.manufacturer");
+  if (!device_manufacturer_value.empty()) {
+    info->set_android_device_manufacturer(device_manufacturer_value);
+  } else {
+    PERFETTO_ELOG("Unable to read ro.product.manufacturer");
+  }
+
   std::string sdk_str_value = base::GetAndroidProp("ro.build.version.sdk");
   std::optional<uint64_t> sdk_value = base::StringToUInt64(sdk_str_value);
   if (sdk_value.has_value()) {
@@ -3753,7 +3792,7 @@ void TracingServiceImpl::EmitSystemInfo(std::vector<TracePacket>* packets) {
 
   // guest_soc model is not always present
   std::string guest_soc_model_value =
-      base::GetAndroidProp("ro.guest_soc.model");
+      base::GetAndroidProp("ro.boot.guest_soc.model");
   if (!guest_soc_model_value.empty()) {
     info->set_android_guest_soc_model(guest_soc_model_value);
   }
@@ -3882,6 +3921,24 @@ void TracingServiceImpl::MaybeEmitRemoteClockSync(
   tracing_session->did_emit_remote_clock_sync_ = true;
 }
 
+void TracingServiceImpl::MaybeEmitCloneTrigger(
+    TracingSession* tracing_session,
+    std::vector<TracePacket>* packets) {
+  if (tracing_session->clone_trigger.has_value()) {
+    protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
+    auto* trigger = packet->set_clone_snapshot_trigger();
+    const auto& info = tracing_session->clone_trigger.value();
+    trigger->set_trigger_name(info.trigger_name);
+    trigger->set_producer_name(info.producer_name);
+    trigger->set_trusted_producer_uid(static_cast<int32_t>(info.producer_uid));
+
+    packet->set_timestamp(info.boot_time_ns);
+    packet->set_trusted_uid(static_cast<int32_t>(uid_));
+    packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
+    SerializeAndAppendPacket(packets, packet.SerializeAsArray());
+  }
+}
+
 void TracingServiceImpl::MaybeEmitReceivedTriggers(
     TracingSession* tracing_session,
     std::vector<TracePacket>* packets) {
@@ -3945,33 +4002,37 @@ size_t TracingServiceImpl::PurgeExpiredAndCountTriggerInWindow(
 
 base::Status TracingServiceImpl::FlushAndCloneSession(
     ConsumerEndpointImpl* consumer,
-    TracingSessionID tsid,
-    bool skip_trace_filter,
-    bool for_bugreport) {
+    ConsumerEndpoint::CloneSessionArgs args) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   auto clone_target = FlushFlags::CloneTarget::kUnknown;
 
-  if (tsid == kBugreportSessionId) {
-    // This branch is only here to support the legacy protocol where we could
-    // clone only a single session using the magic ID kBugreportSessionId.
-    // The newer perfetto --clone-all-for-bugreport first queries the existing
-    // sessions and then issues individual clone requests specifying real
-    // session IDs, setting args.{for_bugreport,skip_trace_filter}=true.
-    PERFETTO_LOG("Looking for sessions for bugreport");
-    TracingSession* session = FindTracingSessionWithMaxBugreportScore();
-    if (!session) {
-      return base::ErrStatus(
-          "No tracing sessions eligible for bugreport found");
-    }
-    tsid = session->id;
-    clone_target = FlushFlags::CloneTarget::kBugreport;
-    skip_trace_filter = true;
-    for_bugreport = true;
-  } else if (for_bugreport) {
+  TracingSession* session = nullptr;
+  if (args.for_bugreport) {
     clone_target = FlushFlags::CloneTarget::kBugreport;
   }
+  if (args.tsid != 0) {
+    if (args.tsid == kBugreportSessionId) {
+      // This branch is only here to support the legacy protocol where we could
+      // clone only a single session using the magic ID kBugreportSessionId.
+      // The newer perfetto --clone-all-for-bugreport first queries the existing
+      // sessions and then issues individual clone requests specifying real
+      // session IDs, setting args.{for_bugreport,skip_trace_filter}=true.
+      PERFETTO_LOG("Looking for sessions for bugreport");
+      session = FindTracingSessionWithMaxBugreportScore();
+      if (!session) {
+        return base::ErrStatus(
+            "No tracing sessions eligible for bugreport found");
+      }
+      args.tsid = session->id;
+      clone_target = FlushFlags::CloneTarget::kBugreport;
+      args.skip_trace_filter = true;
+    } else {
+      session = GetTracingSession(args.tsid);
+    }
+  } else if (!args.unique_session_name.empty()) {
+    session = GetTracingSessionByUniqueName(args.unique_session_name);
+  }
 
-  TracingSession* session = GetTracingSession(tsid);
   if (!session) {
     return base::ErrStatus("Tracing session not found");
   }
@@ -4027,7 +4088,13 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
   clone_op.buffers =
       std::vector<std::unique_ptr<TraceBuffer>>(session->buffers_index.size());
   clone_op.weak_consumer = weak_consumer;
-  clone_op.skip_trace_filter = skip_trace_filter;
+  clone_op.skip_trace_filter = args.skip_trace_filter;
+  if (!args.clone_trigger_name.empty()) {
+    clone_op.clone_trigger = {args.clone_trigger_boot_time_ns,
+                              args.clone_trigger_name,
+                              args.clone_trigger_producer_name,
+                              args.clone_trigger_trusted_producer_uid};
+  }
 
   // Issue separate flush requests for separate buffer groups. The buffer marked
   // as transfer_on_clone will be flushed and cloned separately: even if they're
@@ -4053,7 +4120,7 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
     FlushDataSourceInstances(
         session, 0,
         GetFlushableDataSourceInstancesForBuffers(session, buf_group),
-        [tsid, clone_id, buf_group, weak_this](bool final_flush) {
+        [tsid = session->id, clone_id, buf_group, weak_this](bool final_flush) {
           if (!weak_this)
             return;
           weak_this->OnFlushDoneForClone(tsid, clone_id, buf_group,
@@ -4130,7 +4197,8 @@ void TracingServiceImpl::OnFlushDoneForClone(TracingSessionID tsid,
     if (clone_op.weak_consumer) {
       result = FinishCloneSession(
           &*clone_op.weak_consumer, tsid, std::move(clone_op.buffers),
-          clone_op.skip_trace_filter, !clone_op.flush_failed, &uuid);
+          clone_op.skip_trace_filter, !clone_op.flush_failed,
+          clone_op.clone_trigger, &uuid);
     }
   }  // if (result.ok())
 
@@ -4185,6 +4253,7 @@ base::Status TracingServiceImpl::FinishCloneSession(
     std::vector<std::unique_ptr<TraceBuffer>> buf_snaps,
     bool skip_trace_filter,
     bool final_flush_outcome,
+    std::optional<TriggerInfo> clone_trigger,
     base::Uuid* new_uuid) {
   PERFETTO_DLOG("CloneSession(%" PRIu64
                 ", skip_trace_filter=%d) started, consumer uid: %d",
@@ -4251,6 +4320,7 @@ base::Status TracingServiceImpl::FinishCloneSession(
   //    far back (see b/290799105).
   // 2. Bloating memory (see b/290798988).
   cloned_session->should_emit_stats = true;
+  cloned_session->clone_trigger = clone_trigger;
   cloned_session->received_triggers = std::move(src->received_triggers);
   src->received_triggers.clear();
   src->num_triggers_emitted_into_trace = 0;
@@ -4506,14 +4576,17 @@ void TracingServiceImpl::ConsumerEndpointImpl::OnAllDataSourcesStarted() {
 }
 
 void TracingServiceImpl::ConsumerEndpointImpl::NotifyCloneSnapshotTrigger(
-    const std::string& trigger_name) {
+    const TriggerInfo& trigger) {
   if (!(observable_events_mask_ & ObservableEvents::TYPE_CLONE_TRIGGER_HIT)) {
     return;
   }
   auto* observable_events = AddObservableEvents();
   auto* clone_trig = observable_events->mutable_clone_trigger_hit();
   clone_trig->set_tracing_session_id(static_cast<int64_t>(tracing_session_id_));
-  clone_trig->set_trigger_name(trigger_name);
+  clone_trig->set_trigger_name(trigger.trigger_name);
+  clone_trig->set_producer_name(trigger.producer_name);
+  clone_trig->set_producer_uid(trigger.producer_uid);
+  clone_trig->set_boot_time_ns(trigger.boot_time_ns);
 }
 
 ObservableEvents*
@@ -4558,6 +4631,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::QueryServiceState(
     producer->set_sdk_version(kv.second->sdk_version_);
     producer->set_uid(static_cast<int32_t>(kv.second->uid()));
     producer->set_pid(static_cast<int32_t>(kv.second->pid()));
+    producer->set_frozen(kv.second->IsAndroidProcessFrozen());
   }
 
   for (const auto& kv : service_->data_sources_) {
@@ -4639,12 +4713,10 @@ void TracingServiceImpl::ConsumerEndpointImpl::SaveTraceForBugreport(
 }
 
 void TracingServiceImpl::ConsumerEndpointImpl::CloneSession(
-    TracingSessionID tsid,
     CloneSessionArgs args) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   // FlushAndCloneSession will call OnSessionCloned after the async flush.
-  base::Status result = service_->FlushAndCloneSession(
-      this, tsid, args.skip_trace_filter, args.for_bugreport);
+  base::Status result = service_->FlushAndCloneSession(this, std::move(args));
 
   if (!result.ok()) {
     consumer_->OnSessionCloned({false, result.message(), {}});
@@ -4973,6 +5045,28 @@ void TracingServiceImpl::ProducerEndpointImpl::ClearIncrementalState(
 void TracingServiceImpl::ProducerEndpointImpl::Sync(
     std::function<void()> callback) {
   task_runner_->PostTask(callback);
+}
+
+bool TracingServiceImpl::ProducerEndpointImpl::IsAndroidProcessFrozen() {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  if (in_process_ || uid() == base::kInvalidUid || pid() == base::kInvalidPid)
+    return false;
+  base::StackString<255> path(
+      "/sys/fs/cgroup/uid_%" PRIu32 "/pid_%" PRIu32 "/cgroup.freeze",
+      static_cast<uint32_t>(uid()), static_cast<uint32_t>(pid()));
+  char frozen = '0';
+  auto fd = base::OpenFile(path.c_str(), O_RDONLY);
+  ssize_t rsize = 0;
+  if (fd) {
+    rsize = base::Read(*fd, &frozen, sizeof(frozen));
+    if (rsize > 0) {
+      return frozen == '1';
+    }
+  }
+  PERFETTO_DLOG("Failed to read %s (fd=%d, rsize=%d)", path.c_str(), !!fd,
+                static_cast<int>(rsize));
+#endif
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

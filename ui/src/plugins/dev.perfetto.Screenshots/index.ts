@@ -15,10 +15,11 @@
 import {TrackNode} from '../../public/workspace';
 import {NUM} from '../../trace_processor/query_result';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {ScreenshotsTrack} from './screenshots_track';
 
-class ScreenshotsPlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.Screenshots';
   async onTraceLoad(ctx: Trace): Promise<void> {
     const res = await ctx.engine.query(`
       INCLUDE PERFETTO MODULE android.screenshots;
@@ -34,10 +35,7 @@ class ScreenshotsPlugin implements PerfettoPlugin {
       ctx.tracks.registerTrack({
         uri,
         title,
-        track: new ScreenshotsTrack({
-          trace: ctx,
-          uri,
-        }),
+        track: new ScreenshotsTrack(ctx, uri),
         tags: {
           kind: ScreenshotsTrack.kind,
         },
@@ -47,8 +45,3 @@ class ScreenshotsPlugin implements PerfettoPlugin {
     }
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.Screenshots',
-  plugin: ScreenshotsPlugin,
-};

@@ -126,7 +126,6 @@ source_set("storage_minimal") {
     "importers/ftrace:minimal",
     "importers/fuchsia:fuchsia_record",
     "importers/memory_tracker:graph_processor",
-    "importers/perf:tracker",
     "importers/proto:gen_cc_android_track_event_descriptor",
     "importers/proto:gen_cc_chrome_track_event_descriptor",
     "importers/proto:gen_cc_track_event_descriptor",
@@ -247,7 +246,7 @@ if (enable_perfetto_trace_processor_sqlite) {
         "../../protos/perfetto/trace:descriptor",
         "../../protos/perfetto/trace:test_extensions_descriptor",
         "../../protos/perfetto/trace_processor:stack_descriptor",
-        "../../protos/third_party/pprof:profile_descriptor",
+        "../../protos/third_party/pprof:descriptor",
       ]
     }
   }
@@ -343,7 +342,7 @@ perfetto_unittest_source_set("unittests") {
 
 perfetto_cc_proto_descriptor("gen_cc_test_messages_descriptor") {
   descriptor_name = "test_messages.descriptor"
-  descriptor_target = "../protozero:test_messages_descriptor"
+  descriptor_target = "../protozero:testing_messages_descriptor"
 }
 
 source_set("integrationtests") {

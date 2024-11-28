@@ -193,9 +193,17 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
   // Clones an existing tracing session and attaches to it. The session is
   // cloned in read-only mode and can only be used to read a snapshot of an
   // existing tracing session. Will invoke Consumer::OnSessionCloned().
-  // If TracingSessionID == kBugreportSessionId (0xff...ff) the session with the
-  // highest bugreport score is cloned (if any exists).
   struct CloneSessionArgs {
+    // Exactly one between tsid and unique_session_name should be set.
+
+    // The id of the tracing session that should be cloned. If
+    // kBugreportSessionId (0xff...ff) the session with the highest bugreport
+    // score is cloned (if any exists).
+    TracingSessionID tsid = 0;
+
+    // The unique_session_name of the session that should be cloned.
+    std::string unique_session_name;
+
     // If set, the trace filter will not have effect on the cloned session.
     // Used for bugreports.
     bool skip_trace_filter = false;
@@ -203,8 +211,21 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
     // If set, affects the generation of the FlushFlags::CloneTarget to be set
     // to kBugreport when requesting the flush to the producers.
     bool for_bugreport = false;
+
+    // If not empty, this is stored in the trace as name of the trigger that
+    // caused the clone.
+    std::string clone_trigger_name;
+    // If not empty, this is stored in the trace as name of the producer that
+    // triggered the clone.
+    std::string clone_trigger_producer_name;
+    // If not zero, this is stored in the trace as uid of the producer that
+    // triggered the clone.
+    uid_t clone_trigger_trusted_producer_uid = 0;
+    // If not zero, this is stored in the trace as timestamp of the trigger that
+    // caused the clone.
+    uint64_t clone_trigger_boot_time_ns = 0;
   };
-  virtual void CloneSession(TracingSessionID, CloneSessionArgs) = 0;
+  virtual void CloneSession(CloneSessionArgs) = 0;
 
   // Requests all data sources to flush their data immediately and invokes the
   // passed callback once all of them have acked the flush (in which case

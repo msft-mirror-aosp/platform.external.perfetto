@@ -94,6 +94,7 @@ export class TrackPanel implements Panel {
       SHOW_TRACK_DETAILS_BUTTON.get() &&
         renderTrackDetailsButton(node, trackRenderer?.desc),
       trackRenderer?.track.getTrackShellButtons?.(),
+      node.removable && renderCloseButton(node),
       // Can't pin groups.. yet!
       !node.hasChildren && renderPinButton(node),
       this.renderAreaSelectionCheckbox(node),
@@ -132,15 +133,15 @@ export class TrackPanel implements Panel {
           ...pos,
           timescale,
         });
-        raf.scheduleRedraw();
+        raf.scheduleCanvasRedraw();
       },
       onTrackContentMouseOut: () => {
         trackRenderer?.track.onMouseOut?.();
-        raf.scheduleRedraw();
+        raf.scheduleCanvasRedraw();
       },
       onTrackContentClick: (pos, bounds) => {
         const timescale = this.getTimescaleForBounds(bounds);
-        raf.scheduleRedraw();
+        raf.scheduleCanvasRedraw();
         return (
           trackRenderer?.track.onMouseClick?.({
             ...pos,
@@ -232,7 +233,10 @@ export class TrackPanel implements Panel {
     if (searchIndex !== -1 && searchResults !== undefined) {
       const uri = searchResults.trackUris[searchIndex];
       // Highlight if this or any children match the search results
-      if (uri === node.uri || node.flatTracks.find((t) => t.uri === uri)) {
+      if (
+        uri === node.uri ||
+        node.flatTracksOrdered.find((t) => t.uri === uri)
+      ) {
         return true;
       }
     }
@@ -264,7 +268,7 @@ export class TrackPanel implements Panel {
     ) as ReadonlyArray<RequiredField<TrackNode, 'uri'>>;
 
     let selected = false;
-    if (node.hasChildren) {
+    if (node.isSummary) {
       selected = tracksWithUris.some((track) =>
         selection.trackUris.includes(track.uri),
       );
@@ -290,7 +294,7 @@ export class TrackPanel implements Panel {
     const selectionManager = this.attrs.trace.selection;
     const selection = selectionManager.selection;
     if (selection.kind === 'area') {
-      if (node.hasChildren) {
+      if (node.isSummary) {
         const tracksWithUris = node.flatTracks.filter(
           (t) => t.uri !== undefined,
         ) as ReadonlyArray<RequiredField<TrackNode, 'uri'>>;
@@ -381,6 +385,18 @@ function renderCrashButton(error: Error, pluginId?: string) {
       // relies on the plugin page being fully functional.
     ),
   );
+}
+
+function renderCloseButton(node: TrackNode) {
+  return m(Button, {
+    onclick: (e) => {
+      node.remove();
+      e.stopPropagation();
+    },
+    icon: Icons.Close,
+    title: 'Close track',
+    compact: true,
+  });
 }
 
 function renderPinButton(node: TrackNode): m.Children {

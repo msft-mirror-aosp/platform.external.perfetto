@@ -275,6 +275,12 @@ class TraceStorage {
     return std::nullopt;
   }
 
+  int64_t GetStats(size_t key) {
+    PERFETTO_DCHECK(key < stats::kNumKeys);
+    PERFETTO_DCHECK(stats::kTypes[key] == stats::kSingle);
+    return stats_[key].value;
+  }
+
   class ScopedStatsTracer {
    public:
     ScopedStatsTracer(TraceStorage* storage, size_t key)
@@ -795,6 +801,12 @@ class TraceStorage {
   }
   tables::JitFrameTable* mutable_jit_frame_table() { return &jit_frame_table_; }
 
+  tables::MmapRecordTable* mutable_mmap_record_table() {
+    return &mmap_record_table_;
+  }
+  const tables::MmapRecordTable& mmap_record_table() const {
+    return mmap_record_table_;
+  }
   const tables::SpeRecordTable& spe_record_table() const {
     return spe_record_table_;
   }
@@ -941,12 +953,8 @@ class TraceStorage {
   Variadic GetArgValue(uint32_t row) const {
     auto rr = arg_table_[row];
 
-    Variadic v;
+    Variadic v = Variadic::Null();
     v.type = *GetVariadicTypeForId(rr.value_type());
-
-    // Force initialization of union to stop GCC complaining.
-    v.int_value = 0;
-
     switch (v.type) {
       case Variadic::Type::kBool:
         v.bool_value = static_cast<bool>(*rr.int_value());
@@ -1151,6 +1159,7 @@ class TraceStorage {
   tables::JitFrameTable jit_frame_table_{&string_pool_};
 
   // Perf tables
+  tables::MmapRecordTable mmap_record_table_{&string_pool_};
   tables::SpeRecordTable spe_record_table_{&string_pool_};
 
   // Winscope tables

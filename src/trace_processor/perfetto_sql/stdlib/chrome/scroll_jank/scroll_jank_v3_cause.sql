@@ -8,27 +8,27 @@ CREATE PERFETTO FUNCTION _direct_children_slice(
   parent_id LONG)
 RETURNS TABLE(
   -- Alias for `slice.id`.
-  id LONG,
+  id JOINID(slice.id),
   -- Alias for `slice.type`.
   type STRING,
   -- Alias for `slice.ts`.
-  ts LONG,
+  ts TIMESTAMP,
   -- Alias for `slice.dur`.
-  dur LONG,
+  dur DURATION,
   -- Alias for `slice.category`.
   category LONG,
   -- Alias for `slice.name`.
   name STRING,
   -- Alias for `slice.track_id`.
-  track_id LONG,
+  track_id JOINID(track.id),
   -- Alias for `slice.depth`.
   depth LONG,
   -- Alias for `slice.parent_id`.
-  parent_id LONG,
+  parent_id JOINID(slice.id),
   -- Alias for `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias for `slice.thread_ts`.
-  thread_ts LONG,
+  thread_ts TIMESTAMP,
   -- Alias for `slice.thread_dur`.
   thread_dur LONG
 ) AS
@@ -56,10 +56,10 @@ WHERE parent_id = $parent_id;
 -- under B, making 5 - 0 = 5 the maximum delta between both slice's direct children
 CREATE PERFETTO FUNCTION chrome_get_v3_jank_cause_id(
   -- The slice id of the parent slice that we want to cause among it's children.
-  janky_slice_id LONG,
+  janky_slice_id JOINID(slice.id),
   -- The slice id of the parent slice that's the reference in comparison to
   -- |janky_slice_id|.
-  prev_slice_id LONG
+  prev_slice_id JOINID(slice.id)
 )
 -- The slice id of the breakdown that has the maximum duration delta.
 RETURNS LONG AS

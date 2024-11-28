@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TrackData} from '../../common/track_data';
+import {TrackData} from '../../components/tracks/track_data';
 import {PERF_SAMPLES_PROFILE_TRACK_KIND} from '../../public/track_kinds';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {NUM, NUM_NULL, STR_NULL} from '../../trace_processor/query_result';
 import {assertExists} from '../../base/logging';
 import {
@@ -23,11 +23,8 @@ import {
   ThreadPerfSamplesProfileTrack,
 } from './perf_samples_profile_track';
 import {getThreadUriPrefix} from '../../public/utils';
-import {
-  getOrCreateGroupForProcess,
-  getOrCreateGroupForThread,
-} from '../../public/standard_groups';
 import {TrackNode} from '../../public/workspace';
+import ProcessThreadGroupsPlugin from '../dev.perfetto.ProcessThreadGroups';
 
 export interface Data extends TrackData {
   tsStarts: BigInt64Array;
@@ -37,7 +34,10 @@ function makeUriForProc(upid: number) {
   return `/process_${upid}/perf_samples_profile`;
 }
 
-class PerfSamplesProfilePlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.PerfSamplesProfile';
+  static readonly dependencies = [ProcessThreadGroupsPlugin];
+
   async onTraceLoad(ctx: Trace): Promise<void> {
     const pResult = await ctx.engine.query(`
       select distinct upid
@@ -56,17 +56,13 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
           kind: PERF_SAMPLES_PROFILE_TRACK_KIND,
           upid,
         },
-        track: new ProcessPerfSamplesProfileTrack(
-          {
-            trace: ctx,
-            uri,
-          },
-          upid,
-        ),
+        track: new ProcessPerfSamplesProfileTrack(ctx, uri, upid),
       });
-      const group = getOrCreateGroupForProcess(ctx.workspace, upid);
+      const group = ctx.plugins
+        .getPlugin(ProcessThreadGroupsPlugin)
+        .getGroupForProcess(upid);
       const track = new TrackNode({uri, title, sortOrder: -40});
-      group.addChildInOrder(track);
+      group?.addChildInOrder(track);
     }
     const tResult = await ctx.engine.query(`
       select distinct
@@ -102,22 +98,18 @@ class PerfSamplesProfilePlugin implements PerfettoPlugin {
           utid,
           upid: upid ?? undefined,
         },
-        track: new ThreadPerfSamplesProfileTrack(
-          {
-            trace: ctx,
-            uri,
-          },
-          utid,
-        ),
+        track: new ThreadPerfSamplesProfileTrack(ctx, uri, utid),
       });
-      const group = getOrCreateGroupForThread(ctx.workspace, utid);
+      const group = ctx.plugins
+        .getPlugin(ProcessThreadGroupsPlugin)
+        .getGroupForThread(utid);
       const track = new TrackNode({uri, title, sortOrder: -50});
-      group.addChildInOrder(track);
+      group?.addChildInOrder(track);
     }
-  }
 
-  async onTraceReady(ctx: Trace): Promise<void> {
-    await selectPerfSample(ctx);
+    ctx.onTraceReady.addListener(async () => {
+      await selectPerfSample(ctx);
+    });
   }
 }
 
@@ -141,8 +133,3 @@ async function selectPerfSample(ctx: Trace) {
     trackUris: [makeUriForProc(upid)],
   });
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.PerfSamplesProfile',
-  plugin: PerfSamplesProfilePlugin,
-};

@@ -16,14 +16,14 @@ import m from 'mithril';
 import {LogFilteringCriteria, LogPanel} from './logs_panel';
 import {ANDROID_LOGS_TRACK_KIND} from '../../public/track_kinds';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
-import {sqlTableRegistry} from '../../frontend/widgets/sql/table/sql_table_registry';
+import {PerfettoPlugin} from '../../public/plugin';
+import {sqlTableRegistry} from '../../components/widgets/sql/table/sql_table_registry';
 import {NUM} from '../../trace_processor/query_result';
 import {AndroidLogTrack} from './logs_track';
 import {exists} from '../../base/utils';
 import {TrackNode} from '../../public/workspace';
 import {getAndroidLogsTable} from './table';
-import {extensions} from '../../public/lib/extensions';
+import {extensions} from '../../components/extensions';
 
 const VERSION = 1;
 
@@ -43,7 +43,8 @@ interface AndroidLogPluginState {
   filter: LogFilteringCriteria;
 }
 
-class AndroidLog implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.AndroidLog';
   async onTraceLoad(ctx: Trace): Promise<void> {
     const store = ctx.mountStore<AndroidLogPluginState>((init) => {
       return exists(init) && (init as {version: unknown}).version === VERSION
@@ -109,8 +110,3 @@ class AndroidLog implements PerfettoPlugin {
     });
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.AndroidLog',
-  plugin: AndroidLog,
-};

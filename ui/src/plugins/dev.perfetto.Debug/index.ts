@@ -15,12 +15,13 @@
 import {
   addDebugCounterTrack,
   addDebugSliceTrack,
-} from '../../public/lib/debug_tracks/debug_tracks';
+} from '../../components/tracks/debug_tracks';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {exists} from '../../base/utils';
 
-class DebugTracksPlugin implements PerfettoPlugin {
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.DebugTracks';
   async onTraceLoad(ctx: Trace): Promise<void> {
     ctx.commands.registerCommand({
       id: 'perfetto.DebugTracks#addDebugSliceTrack',
@@ -31,15 +32,13 @@ class DebugTracksPlugin implements PerfettoPlugin {
         // or is the wrong type, we prompt the user for it.
         const query = await getStringFromArgOrPrompt(ctx, arg);
         if (exists(query)) {
-          await addDebugSliceTrack(
-            ctx,
-            {
+          await addDebugSliceTrack({
+            trace: ctx,
+            data: {
               sqlSource: query,
             },
-            'Debug slice track',
-            {ts: 'ts', dur: 'dur', name: 'name'},
-            [],
-          );
+            title: 'Debug slice track',
+          });
         }
       },
     });
@@ -50,14 +49,13 @@ class DebugTracksPlugin implements PerfettoPlugin {
       callback: async (arg: unknown) => {
         const query = await getStringFromArgOrPrompt(ctx, arg);
         if (exists(query)) {
-          await addDebugCounterTrack(
-            ctx,
-            {
+          await addDebugCounterTrack({
+            trace: ctx,
+            data: {
               sqlSource: query,
             },
-            'Debug slice track',
-            {ts: 'ts', value: 'value'},
-          );
+            title: 'Debug slice track',
+          });
         }
       },
     });
@@ -77,8 +75,3 @@ async function getStringFromArgOrPrompt(
     return await ctx.omnibox.prompt('Enter a query...');
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.DebugTracks',
-  plugin: DebugTracksPlugin,
-};

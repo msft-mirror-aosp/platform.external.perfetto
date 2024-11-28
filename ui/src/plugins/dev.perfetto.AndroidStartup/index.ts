@@ -14,13 +14,14 @@
 
 import {LONG} from '../../trace_processor/query_result';
 import {Trace} from '../../public/trace';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
-import {
-  SimpleSliceTrack,
-  SimpleSliceTrackConfig,
-} from '../../frontend/simple_slice_track';
+import {PerfettoPlugin} from '../../public/plugin';
+import {createQuerySliceTrack} from '../../components/tracks/query_slice_track';
 import {TrackNode} from '../../public/workspace';
-class AndroidStartup implements PerfettoPlugin {
+import {optimizationsTrack} from './optimizations';
+
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.AndroidStartup';
+
   async onTraceLoad(ctx: Trace): Promise<void> {
     const e = ctx.engine;
     await e.query(`
@@ -45,38 +46,40 @@ class AndroidStartup implements PerfettoPlugin {
           FROM android_startup_opinionated_breakdown
     `;
 
-    const trackNode = this.loadStartupTrack(
+    const trackNode = await this.loadStartupTrack(
       ctx,
       trackSource,
       `/android_startups`,
       'Android App Startups',
     );
-    const trackBreakdownNode = this.loadStartupTrack(
+    const trackBreakdownNode = await this.loadStartupTrack(
       ctx,
       trackBreakdownSource,
       `/android_startups_breakdown`,
       'Android App Startups Breakdown',
     );
-
+    const optimizations = await optimizationsTrack(ctx);
     ctx.workspace.addChildInOrder(trackNode);
     trackNode.addChildLast(trackBreakdownNode);
+    if (!!optimizations) {
+      trackNode.addChildLast(optimizations);
+    }
   }
 
-  private loadStartupTrack(
+  private async loadStartupTrack(
     ctx: Trace,
     sqlSource: string,
     uri: string,
     title: string,
-  ): TrackNode {
-    const config: SimpleSliceTrackConfig = {
+  ): Promise<TrackNode> {
+    const track = await createQuerySliceTrack({
+      trace: ctx,
+      uri,
       data: {
         sqlSource,
         columns: ['ts', 'dur', 'name'],
       },
-      columns: {ts: 'ts', dur: 'dur', name: 'name'},
-      argColumns: [],
-    };
-    const track = new SimpleSliceTrack(ctx, {trackUri: uri}, config);
+    });
     ctx.tracks.registerTrack({
       uri,
       title,
@@ -86,8 +89,3 @@ class AndroidStartup implements PerfettoPlugin {
     return new TrackNode({title, uri, sortOrder: -6});
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.AndroidStartup',
-  plugin: AndroidStartup,
-};
