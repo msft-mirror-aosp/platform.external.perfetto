@@ -43,7 +43,9 @@ COLUMN_TYPES = [
 
     # Special types
     'TIMESTAMP',
-    'DURATION'
+    'DURATION',
+    'ID',
+    'JOINID'
 ]
 
 MACRO_ARG_TYPES = ['TABLEORSUBQUERY', 'EXPR', 'COLUMNNAME']
@@ -51,9 +53,10 @@ MACRO_ARG_TYPES = ['TABLEORSUBQUERY', 'EXPR', 'COLUMNNAME']
 NAME = r'[a-zA-Z_\d\{\}]+'
 ANY_WORDS = r'[^\s].*'
 ANY_NON_QUOTE = r'[^\']*.*'
-TYPE = r'[a-zA-Z]+'
+TYPE = r'[_a-zA-Z\(\)\.]+'
 SQL = r'[\s\S]*?'
 WS = r'\s*'
+
 COMMENT = r' --[^\n]*\n'
 COMMENTS = rf'(?:{COMMENT})*'
 ARG = rf'{COMMENTS} {NAME} {TYPE}'
