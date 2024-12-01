@@ -23,7 +23,7 @@ import {Trace} from '../../public/trace';
 import {COUNTER_TRACK_KIND} from '../../public/track_kinds';
 import {PerfettoPlugin} from '../../public/plugin';
 import {getThreadUriPrefix, getTrackName} from '../../public/utils';
-import {CounterOptions} from '../../frontend/base_counter_track';
+import {CounterOptions} from '../../components/tracks/base_counter_track';
 import {TraceProcessorCounterTrack} from './trace_processor_counter_track';
 import {exists} from '../../base/utils';
 import {TrackNode} from '../../public/workspace';
@@ -116,7 +116,7 @@ export default class implements PerfettoPlugin {
     await this.addThreadCounterTracks(ctx);
     await this.addProcessCounterTracks(ctx);
 
-    ctx.selection.registerAreaSelectionAggreagtor(
+    ctx.selection.registerAreaSelectionAggregator(
       new CounterSelectionAggregator(),
     );
   }
@@ -128,7 +128,7 @@ export default class implements PerfettoPlugin {
         select name, id, unit
         from counter_track
         join _counter_track_summary using (id)
-        where type = 'counter_track'
+        where is_legacy_global
         union
         select name, id, unit
         from gpu_counter_track

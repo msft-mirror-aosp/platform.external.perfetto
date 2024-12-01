@@ -15,37 +15,35 @@
 
 INCLUDE PERFETTO MODULE prelude.after_eof.casts;
 
--- Alias of the `counter` table.
-CREATE PERFETTO VIEW counters(
-  -- Alias of `counter.id`.
-  id LONG,
-  -- Alias of `counter.type`.
-  type STRING,
-  -- Alias of `counter.ts`.
+-- Counters are values put into tracks during parsing of the trace.
+CREATE PERFETTO VIEW counter(
+  -- Unique id of a counter value
+  id ID,
+  -- Time of fetching the counter value.
   ts TIMESTAMP,
-  -- Alias of `counter.track_id`.
-  track_id LONG,
-  -- Alias of `counter.value`.
+  -- Track this counter value belongs to.
+  track_id JOINID(track.id),
+  -- Value.
   value DOUBLE,
-  -- Alias of `counter.arg_set_id`.
+  -- Additional information about the counter value.
   arg_set_id LONG,
   -- Legacy column, should no longer be used.
-  name STRING,
-  -- Legacy column, should no longer be used.
-  unit STRING,
-  -- Legacy column, should no longer be used.
-  description STRING
+  type STRING
 ) AS
-SELECT v.*, t.name, t.unit, t.description
-FROM counter v
-JOIN counter_track t ON v.track_id = t.id
-ORDER BY ts;
+SELECT
+  id,
+  ts,
+  track_id,
+  value,
+  arg_set_id,
+  type
+FROM __intrinsic_counter;
 
 -- Contains slices from userspace which explains what threads were doing
 -- during the trace.
 CREATE PERFETTO VIEW slice(
   -- The id of the slice.
-  id LONG,
+  id ID,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
   -- The timestamp at the start of the slice.
@@ -53,7 +51,7 @@ CREATE PERFETTO VIEW slice(
   -- The duration of the slice.
   dur DURATION,
   -- The id of the track this slice is located on.
-  track_id LONG,
+  track_id JOINID(track.id),
   -- The "category" of the slice. If this slice originated with track_event,
   -- this column contains the category emitted.
   -- Otherwise, it is likely to be null (with limited exceptions).
@@ -89,7 +87,7 @@ CREATE PERFETTO VIEW slice(
   -- Alias of `category`.
   cat STRING,
   -- Alias of `id`.
-  slice_id LONG
+  slice_id JOINID(slice.id)
 ) AS
 SELECT *, category AS cat, id AS slice_id
 FROM __intrinsic_slice;
@@ -100,7 +98,7 @@ CREATE PERFETTO VIEW instant(
   -- The timestamp of the instant.
   ts TIMESTAMP,
   -- The id of the track this instant is located on.
-  track_id LONG,
+  track_id JOINID(track.id),
   -- The name of the instant. The name describes what happened during the
   -- instant.
   name STRING,
@@ -114,7 +112,7 @@ WHERE dur = 0;
 -- Alternative alias of table `slice`.
 CREATE PERFETTO VIEW slices(
   -- Alias of `slice.id`.
-  id LONG,
+  id JOINID(slice.id),
   -- Alias of `slice.type`.
   type STRING,
   -- Alias of `slice.ts`.
@@ -122,7 +120,7 @@ CREATE PERFETTO VIEW slices(
   -- Alias of `slice.dur`.
   dur DURATION,
   -- Alias of `slice.track_id`.
-  track_id LONG,
+  track_id JOINID(track.id),
   -- Alias of `slice.category`.
   category STRING,
   -- Alias of `slice.name`.
@@ -134,7 +132,7 @@ CREATE PERFETTO VIEW slices(
   -- Alias of `slice.parent_stack_id`.
   parent_stack_id LONG,
   -- Alias of `slice.parent_id`.
-  parent_id LONG,
+  parent_id JOINID(slice.id),
   -- Alias of `slice.arg_set_id`.
   arg_set_id LONG,
   -- Alias of `slice.thread_ts`.
@@ -148,20 +146,20 @@ CREATE PERFETTO VIEW slices(
   -- Alias of `slice.cat`.
   cat STRING,
   -- Alias of `slice.slice_id`.
-  slice_id LONG
+  slice_id JOINID(slice.id)
 ) AS
 SELECT * FROM slice;
 
 -- Contains information of threads seen during the trace.
 CREATE PERFETTO VIEW thread(
   -- The id of the thread. Prefer using `utid` instead.
-  id LONG,
+  id ID,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
   -- Unique thread id. This is != the OS tid. This is a monotonic number
   -- associated to each thread. The OS thread id (tid) cannot be used as primary
   -- key because tids and pids are recycled by most kernels.
-  utid LONG,
+  utid ID,
   -- The OS id for this thread. Note: this is *not* unique over the lifetime of
   -- the trace so cannot be used as a primary key. Use |utid| instead.
   tid LONG,
@@ -177,7 +175,7 @@ CREATE PERFETTO VIEW thread(
   -- on Linux/Android).
   end_ts TIMESTAMP,
   -- The process hosting this thread.
-  upid LONG,
+  upid JOINID(process.id),
   -- Boolean indicating if this thread is the main thread in the process.
   is_main_thread BOOL,
   -- Machine identifier, non-null for threads on a remote machine.
@@ -189,13 +187,13 @@ FROM __intrinsic_thread;
 -- Contains information of processes seen during the trace.
 CREATE PERFETTO VIEW process(
   -- The id of the process. Prefer using `upid` instead.
-  id LONG,
+  id ID,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
   -- Unique process id. This is != the OS pid. This is a monotonic number
   -- associated to each process. The OS process id (pid) cannot be used as
   -- primary key because tids and pids are recycled by most kernels.
-  upid LONG,
+  upid JOINID(process.id),
   -- The OS id for this process. Note: this is *not* unique over the lifetime of
   -- the trace so cannot be used as a primary key. Use |upid| instead.
   pid LONG,
@@ -211,7 +209,7 @@ CREATE PERFETTO VIEW process(
   -- event on Linux/Android).
   end_ts TIMESTAMP,
   -- The upid of the process which caused this process to be spawned.
-  parent_upid LONG,
+  parent_upid JOINID(process.id),
   -- The Unix user id of the process.
   uid LONG,
   -- Android appid of this process.
@@ -232,7 +230,7 @@ FROM __intrinsic_process;
 -- will be non-null.
 CREATE PERFETTO VIEW args(
   -- The id of the arg.
-  id LONG,
+  id ID,
   -- The name of the "most-specific" child table containing this row.
   type STRING,
   -- The id for a single set of arguments.
