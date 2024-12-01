@@ -358,7 +358,6 @@ perfetto_cc_library(
         ":src_trace_processor_importers_perf_text_perf_text",
         ":src_trace_processor_importers_perf_text_perf_text_event",
         ":src_trace_processor_importers_perf_text_perf_text_sample_line_parser",
-        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -2041,8 +2040,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/perf/auxtrace_info_record.h",
         "src/trace_processor/importers/perf/auxtrace_record.cc",
         "src/trace_processor/importers/perf/auxtrace_record.h",
-        "src/trace_processor/importers/perf/etm_tokenizer.cc",
-        "src/trace_processor/importers/perf/etm_tokenizer.h",
         "src/trace_processor/importers/perf/features.cc",
         "src/trace_processor/importers/perf/features.h",
         "src/trace_processor/importers/perf/itrace_start_record.cc",
@@ -2052,6 +2049,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/perf/perf_data_tokenizer.cc",
         "src/trace_processor/importers/perf/perf_data_tokenizer.h",
         "src/trace_processor/importers/perf/perf_file.h",
+        "src/trace_processor/importers/perf/perf_tracker.cc",
+        "src/trace_processor/importers/perf/perf_tracker.h",
         "src/trace_processor/importers/perf/record_parser.cc",
         "src/trace_processor/importers/perf/record_parser.h",
         "src/trace_processor/importers/perf/sample.cc",
@@ -2081,15 +2080,6 @@ perfetto_filegroup(
         "src/trace_processor/importers/perf/perf_session.h",
         "src/trace_processor/importers/perf/reader.h",
         "src/trace_processor/importers/perf/record.h",
-    ],
-)
-
-# GN target: //src/trace_processor/importers/perf:tracker
-perfetto_filegroup(
-    name = "src_trace_processor_importers_perf_tracker",
-    srcs = [
-        "src/trace_processor/importers/perf/dso_tracker.cc",
-        "src/trace_processor/importers/perf/dso_tracker.h",
     ],
 )
 
@@ -2523,6 +2513,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup_rails.sql",
+        "src/trace_processor/metrics/sql/android/wattson_atrace_apps_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_rail_relations.sql",
@@ -2555,6 +2546,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/chrome/chrome_scroll_jank_v3.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_slice_names.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_stack_samples_for_task.sql",
+        "src/trace_processor/metrics/sql/chrome/chrome_study_hashes.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_tasks.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_tasks_delaying_input_processing.sql",
         "src/trace_processor/metrics/sql/chrome/chrome_tasks_delaying_input_processing_base.sql",
@@ -3125,6 +3117,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_linux_linux",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/linux/block_io.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/devfreq.sql",
         "src/trace_processor/perfetto_sql/stdlib/linux/threads.sql",
     ],
@@ -5240,6 +5233,7 @@ perfetto_proto_library(
         "protos/perfetto/metrics/chrome/scroll_jank.proto",
         "protos/perfetto/metrics/chrome/scroll_jank_v3.proto",
         "protos/perfetto/metrics/chrome/slice_names.proto",
+        "protos/perfetto/metrics/chrome/study_hashes.proto",
         "protos/perfetto/metrics/chrome/test_chrome_metric.proto",
         "protos/perfetto/metrics/chrome/touch_jank.proto",
         "protos/perfetto/metrics/chrome/unsymbolized_args.proto",
@@ -6597,7 +6591,6 @@ perfetto_cc_library(
         ":src_trace_processor_importers_perf_text_perf_text",
         ":src_trace_processor_importers_perf_text_perf_text_event",
         ":src_trace_processor_importers_perf_text_perf_text_sample_line_parser",
-        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6802,7 +6795,6 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_perf_text_perf_text",
         ":src_trace_processor_importers_perf_text_perf_text_event",
         ":src_trace_processor_importers_perf_text_perf_text_sample_line_parser",
-        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",
@@ -6996,7 +6988,6 @@ perfetto_cc_binary(
         ":src_trace_processor_importers_perf_text_perf_text",
         ":src_trace_processor_importers_perf_text_perf_text_event",
         ":src_trace_processor_importers_perf_text_perf_text_sample_line_parser",
-        ":src_trace_processor_importers_perf_tracker",
         ":src_trace_processor_importers_proto_full",
         ":src_trace_processor_importers_proto_minimal",
         ":src_trace_processor_importers_proto_packet_sequence_state_generation_hdr",

@@ -26,18 +26,18 @@ JOIN thread_state USING (utid, ts, dur);
 -- For each time the thread was running, returns the duration of the runnable
 -- state directly before.
 CREATE PERFETTO TABLE sched_latency_for_running_interval(
-    -- Running state of the thread. Alias of `thread_state.id`.
-    thread_state_id INT,
-    -- Id of a corresponding slice in a `sched` table. Alias of `sched.id`.
-    sched_id INT,
-    -- Thread with running state. Alias of `thread.id`.
-    utid INT,
+    -- Running state of the thread.
+    thread_state_id JOINID(thread_state.id),
+    -- Id of a corresponding slice in a `sched` table.
+    sched_id JOINID(sched.id),
+    -- Thread with running state.
+    utid JOINID(thread.id),
     -- Runnable state before thread is "running". Duration of this thread state
     -- is `latency_dur`. One of `thread_state.id`.
-    runnable_latency_id INT,
+    runnable_latency_id JOINID(thread_state.id),
     -- Scheduling latency of thread state. Duration of thread state with
     -- `runnable_latency_id`.
-    latency_dur INT
+    latency_dur LONG
 ) AS
 SELECT
     r.id AS thread_state_id,

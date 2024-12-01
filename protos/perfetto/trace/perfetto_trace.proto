@@ -243,6 +243,10 @@ message TracingServiceState {
     // the build system and the repo (standalone vs AOSP).
     // This is intended for human debugging only.
     optional string sdk_version = 4;
+
+    // Returns true if the process appears to be frozen (Android only).
+    // Introduced in Perfetto V49 / Android 24Q4.
+    optional bool frozen = 6;
   }
 
   // Describes a data source registered by a producer. Data sources are listed
@@ -6352,6 +6356,8 @@ message ChromeTrigger {
   optional string trigger_name = 1;
   // SHA1 hash of the trigger name.
   optional fixed32 trigger_name_hash = 2;
+  // Flow id which should terminate on this trigger.
+  optional fixed64 flow_id = 3;
 }
 
 // End of protos/perfetto/trace/chrome/chrome_trigger.proto
@@ -7340,6 +7346,26 @@ message BlockTouchBufferFtraceEvent {
 message BlockUnplugFtraceEvent {
   optional int32 nr_rq = 1;
   optional string comm = 2;
+}
+message BlockIoStartFtraceEvent {
+  optional uint64 dev = 1;
+  optional uint64 sector = 2;
+  optional uint32 nr_sector = 3;
+  optional uint32 bytes = 4;
+  optional uint32 ioprio = 5;
+  optional string rwbs = 6;
+  optional string comm = 7;
+  optional string cmd = 8;
+}
+message BlockIoDoneFtraceEvent {
+  optional uint64 dev = 1;
+  optional uint64 sector = 2;
+  optional uint32 nr_sector = 3;
+  optional uint32 bytes = 4;
+  optional uint32 ioprio = 5;
+  optional string rwbs = 6;
+  optional string comm = 7;
+  optional string cmd = 8;
 }
 
 // End of protos/perfetto/trace/ftrace/block.proto
@@ -11441,6 +11467,8 @@ message FtraceEvent {
     ParamSetValueCpmFtraceEvent param_set_value_cpm = 543;
     DoSysOpenFtraceEvent do_sys_open = 544;
     OpenExecFtraceEvent open_exec = 545;
+    BlockIoStartFtraceEvent block_io_start = 546;
+    BlockIoDoneFtraceEvent block_io_done = 547;
   }
 }
 
@@ -12698,9 +12726,10 @@ message ChromeFrameReporter {
     SCROLL_NONE = 0;
     SCROLL_MAIN_THREAD = 1;
     SCROLL_COMPOSITOR_THREAD = 2;
+    SCROLL_RASTER = 3;
 
     // Used when it can't be determined whether a scroll is in progress or not.
-    SCROLL_UNKNOWN = 3;
+    SCROLL_UNKNOWN = 4;
   }
 
   // The type of active scroll.
@@ -15535,6 +15564,7 @@ message TranslationTable {
     ChromePerformanceMarkTranslationTable chrome_performance_mark = 3;
     SliceNameTranslationTable slice_name = 4;
     ProcessTrackNameTranslationTable process_track_name = 5;
+    ChromeStudyTranslationTable chrome_study = 6;
   }
 }
 
@@ -15562,6 +15592,11 @@ message SliceNameTranslationTable {
 // Raw -> deobfuscated process track name translation rules.
 message ProcessTrackNameTranslationTable {
   map<string, string> raw_to_deobfuscated_name = 1;
+};
+
+// Chrome study hash -> name translation rules.
+message ChromeStudyTranslationTable {
+  map<uint64, string> hash_to_name = 1;
 };
 
 // End of protos/perfetto/trace/translation/translation_table.proto
@@ -15644,7 +15679,7 @@ message UiState {
 // See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
 //
 // Next reserved id: 14 (up to 15).
-// Next id: 113.
+// Next id: 114.
 message TracePacket {
   // The timestamp of the TracePacket.
   // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
@@ -15783,6 +15818,8 @@ message TracePacket {
 
     PixelModemEvents pixel_modem_events = 110;
     PixelModemTokenDatabase pixel_modem_token_database = 111;
+
+    Trigger clone_snapshot_trigger = 113;
 
     // This field is only used for testing.
     // In previous versions of this proto this field had the id 268435455
