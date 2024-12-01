@@ -86,7 +86,7 @@ const cfg = {
   startHttpServer: false,
   httpServerListenHost: '127.0.0.1',
   httpServerListenPort: 10000,
-  wasmModules: ['trace_processor', 'traceconv'],
+  wasmModules: ['trace_processor', 'traceconv', 'trace_config_utils'],
   crossOriginIsolation: false,
   testFilter: '',
   noOverrideGnArgs: false,
@@ -248,12 +248,12 @@ async function main() {
     updateSymlinks();  // Links //ui/out -> //out/xxx/ui/
 
     buildWasm(args.no_wasm);
+    generateImports('ui/src/core_plugins', 'all_core_plugins');
+    generateImports('ui/src/plugins', 'all_plugins');
     scanDir('ui/src/assets');
     scanDir('ui/src/chrome_extension');
     scanDir('buildtools/typefaces');
     scanDir('buildtools/catapult_trace_viewer');
-    generateImports('ui/src/core_plugins', 'all_core_plugins.ts');
-    generateImports('ui/src/plugins', 'all_plugins.ts');
     compileProtos();
     genVersion();
     generateStdlibDocs();

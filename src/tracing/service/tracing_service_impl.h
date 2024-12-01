@@ -156,6 +156,7 @@ class TracingServiceImpl : public TracingService {
       return std::nullopt;
     }
 
+    bool IsAndroidProcessFrozen();
     uid_t uid() const { return client_identity_.uid(); }
     pid_t pid() const { return client_identity_.pid(); }
     const ClientIdentity& client_identity() const { return client_identity_; }
@@ -905,7 +906,6 @@ class TracingServiceImpl : public TracingService {
 
   std::multimap<std::string /*name*/, RegisteredDataSource> data_sources_;
   std::map<ProducerID, ProducerEndpointImpl*> producers_;
-  std::set<ConsumerEndpointImpl*> consumers_;
   std::map<RelayClientID, RelayEndpointImpl*> relay_clients_;
   std::map<TracingSessionID, TracingSession> tracing_sessions_;
   std::map<BufferID, std::unique_ptr<TraceBuffer>> buffers_;

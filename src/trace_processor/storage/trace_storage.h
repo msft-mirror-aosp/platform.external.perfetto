@@ -235,6 +235,9 @@ class TraceStorage {
   virtual StringId InternString(const std::string& str) {
     return InternString(base::StringView(str));
   }
+  virtual StringId InternString(std::string_view str) {
+    return InternString(base::StringView(str.data(), str.size()));
+  }
 
   // Example usage: SetStats(stats::android_log_num_failed, 42);
   void SetStats(size_t key, int64_t value) {
@@ -953,12 +956,8 @@ class TraceStorage {
   Variadic GetArgValue(uint32_t row) const {
     auto rr = arg_table_[row];
 
-    Variadic v;
+    Variadic v = Variadic::Null();
     v.type = *GetVariadicTypeForId(rr.value_type());
-
-    // Force initialization of union to stop GCC complaining.
-    v.int_value = 0;
-
     switch (v.type) {
       case Variadic::Type::kBool:
         v.bool_value = static_cast<bool>(*rr.int_value());
