@@ -21,28 +21,28 @@ import {Section} from '../../widgets/section';
 import {SqlRef} from '../../widgets/sql_ref';
 import {Tree, TreeNode} from '../../widgets/tree';
 import {Intent} from '../../widgets/common';
-import {SchedSqlId} from '../../trace_processor/sql_utils/core_types';
+import {SchedSqlId} from '../../components/sql_utils/core_types';
 import {
   getThreadState,
   getThreadStateFromConstraints,
   ThreadState,
-} from '../../trace_processor/sql_utils/thread_state';
-import {DurationWidget} from '../../public/lib/widgets/duration';
-import {Timestamp} from '../../public/lib/widgets/timestamp';
-import {getProcessName} from '../../trace_processor/sql_utils/process';
+} from '../../components/sql_utils/thread_state';
+import {DurationWidget} from '../../components/widgets/duration';
+import {Timestamp} from '../../components/widgets/timestamp';
+import {getProcessName} from '../../components/sql_utils/process';
 import {
   getFullThreadName,
   getThreadName,
-} from '../../trace_processor/sql_utils/thread';
-import {ThreadStateRef} from '../../frontend/widgets/thread_state';
+} from '../../components/sql_utils/thread';
+import {ThreadStateRef} from '../../components/widgets/thread_state';
 import {
   CRITICAL_PATH_CMD,
   CRITICAL_PATH_LITE_CMD,
 } from '../../public/exposed_commands';
-import {goToSchedSlice} from '../../frontend/widgets/sched';
+import {goToSchedSlice} from '../../components/widgets/sched';
 import {TrackEventDetailsPanel} from '../../public/details_panel';
 import {Trace} from '../../public/trace';
-import {formatDuration} from '../../public/lib/time_utils';
+import {formatDuration} from '../../components/time_utils';
 
 interface RelatedThreadStates {
   prev?: ThreadState;
@@ -88,6 +88,12 @@ export class ThreadStateDetailsPanel implements TrackEventDetailsPanel {
         limit: 1,
       })
     )[0];
+
+    // note: this might be valid even if there is no |waker| slice, in the case
+    // of an interrupt wakeup while in the idle process (which is omitted from
+    // the thread_state table).
+    relatedStates.wakerInterruptCtx = this.threadState.wakerInterruptCtx;
+
     if (this.threadState.wakerId !== undefined) {
       relatedStates.waker = await getThreadState(
         this.trace.engine,
@@ -97,15 +103,13 @@ export class ThreadStateDetailsPanel implements TrackEventDetailsPanel {
       this.threadState.state == 'Running' &&
       relatedStates.prev.wakerId != undefined
     ) {
+      // For running slices, extract waker info from the preceding runnable.
       relatedStates.waker = await getThreadState(
         this.trace.engine,
         relatedStates.prev.wakerId,
       );
+      relatedStates.wakerInterruptCtx = relatedStates.prev.wakerInterruptCtx;
     }
-    // note: this might be valid even if there is no |waker| slice, in the case
-    // of an interrupt wakeup while in the idle process (which is omitted from
-    // the thread_state table).
-    relatedStates.wakerInterruptCtx = this.threadState.wakerInterruptCtx;
 
     relatedStates.wakee = await getThreadStateFromConstraints(
       this.trace.engine,

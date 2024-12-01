@@ -485,8 +485,6 @@ TracingServiceImpl::ConnectConsumer(Consumer* consumer, uid_t uid) {
                 reinterpret_cast<void*>(consumer), static_cast<uint64_t>(uid));
   std::unique_ptr<ConsumerEndpointImpl> endpoint(
       new ConsumerEndpointImpl(this, task_runner_, consumer, uid));
-  auto it_and_inserted = consumers_.emplace(endpoint.get());
-  PERFETTO_DCHECK(it_and_inserted.second);
   // Consumer might go away before we're able to send the connect notification,
   // if that is the case just bail out.
   auto weak_ptr = endpoint->weak_ptr_factory_.GetWeakPtr();
@@ -500,11 +498,9 @@ TracingServiceImpl::ConnectConsumer(Consumer* consumer, uid_t uid) {
 void TracingServiceImpl::DisconnectConsumer(ConsumerEndpointImpl* consumer) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p disconnected", reinterpret_cast<void*>(consumer));
-  PERFETTO_DCHECK(consumers_.count(consumer));
 
   if (consumer->tracing_session_id_)
     FreeBuffers(consumer->tracing_session_id_);  // Will also DisableTracing().
-  consumers_.erase(consumer);
 
   // At this point no more pointers to |consumer| should be around.
   PERFETTO_DCHECK(!std::any_of(
@@ -518,7 +514,6 @@ bool TracingServiceImpl::DetachConsumer(ConsumerEndpointImpl* consumer,
                                         const std::string& key) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p detached", reinterpret_cast<void*>(consumer));
-  PERFETTO_DCHECK(consumers_.count(consumer));
 
   TracingSessionID tsid = consumer->tracing_session_id_;
   TracingSession* tracing_session;
@@ -561,7 +556,6 @@ bool TracingServiceImpl::AttachConsumer(ConsumerEndpointImpl* consumer,
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p attaching to session %s",
                 reinterpret_cast<void*>(consumer), key.c_str());
-  PERFETTO_DCHECK(consumers_.count(consumer));
 
   if (consumer->tracing_session_id_) {
     PERFETTO_ELOG(
@@ -1417,7 +1411,19 @@ void TracingServiceImpl::StartDataSourceInstance(
     TracingSession* tracing_session,
     TracingServiceImpl::DataSourceInstance* instance) {
   PERFETTO_DCHECK(instance->state == DataSourceInstance::CONFIGURED);
-  if (instance->will_notify_on_start) {
+
+  bool start_immediately = !instance->will_notify_on_start;
+
+  if (producer->IsAndroidProcessFrozen()) {
+    PERFETTO_DLOG(
+        "skipping waiting of data source \"%s\" on producer \"%s\" (pid=%u) "
+        "because it is frozen",
+        instance->data_source_name.c_str(), producer->name_.c_str(),
+        producer->pid());
+    start_immediately = true;
+  }
+
+  if (!start_immediately) {
     instance->state = DataSourceInstance::STARTING;
   } else {
     instance->state = DataSourceInstance::STARTED;
@@ -2009,7 +2015,7 @@ void TracingServiceImpl::NotifyFlushDoneForProducer(
         it++;
       }
     }  // for (pending_flushes)
-  }  // for (tracing_session)
+  }    // for (tracing_session)
 }
 
 void TracingServiceImpl::OnFlushTimeout(TracingSessionID tsid,
@@ -2123,18 +2129,18 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
 
   // Find and copy any uncommitted chunks from the SMB.
   //
-  // In nominal conditions, the page layout of the used SMB pages should never
-  // change because the service is the only one who is supposed to modify used
-  // pages (to make them free again).
+  // In nominal conditions, the page header bitmap of the used SMB pages should
+  // never change because the service is the only one who is supposed to modify
+  // used pages (to make them free again).
   //
   // However, the code here needs to deal with the case of a malicious producer
   // altering the SMB in unpredictable ways. Thankfully the SMB size is
   // immutable, so a chunk will always point to some valid memory, even if the
   // producer alters the intended layout and chunk header concurrently.
-  // Ultimately a malicious producer altering the SMB's chunk layout while we
-  // are iterating in this function is not any different from the case of a
-  // malicious producer asking to commit a chunk made of random data, which is
-  // something this class has to deal with regardless.
+  // Ultimately a malicious producer altering the SMB's chunk header bitamp
+  // while we are iterating in this function is not any different from the case
+  // of a malicious producer asking to commit a chunk made of random data,
+  // which is something this class has to deal with regardless.
   //
   // The only legitimate mutations that can happen from sane producers,
   // concurrently to this function, are:
@@ -2146,9 +2152,10 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
   // num_pages() is immutable after the SMB is initialized and cannot be changed
   // even by a producer even if malicious.
   for (size_t page_idx = 0; page_idx < abi->num_pages(); page_idx++) {
-    uint32_t layout = abi->GetPageLayout(page_idx);
+    uint32_t header_bitmap = abi->GetPageHeaderBitmap(page_idx);
 
-    uint32_t used_chunks = abi->GetUsedChunks(layout);  // Returns a bitmap.
+    uint32_t used_chunks =
+        abi->GetUsedChunks(header_bitmap);  // Returns a bitmap.
     // Skip empty pages.
     if (used_chunks == 0)
       continue;
@@ -2160,13 +2167,14 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
         continue;
 
       SharedMemoryABI::ChunkState state =
-          SharedMemoryABI::GetChunkStateFromLayout(layout, chunk_idx);
+          SharedMemoryABI::GetChunkStateFromHeaderBitmap(header_bitmap,
+                                                         chunk_idx);
       PERFETTO_DCHECK(state == SharedMemoryABI::kChunkBeingWritten ||
                       state == SharedMemoryABI::kChunkComplete);
       bool chunk_complete = state == SharedMemoryABI::kChunkComplete;
 
       SharedMemoryABI::Chunk chunk =
-          abi->GetChunkUnchecked(page_idx, layout, chunk_idx);
+          abi->GetChunkUnchecked(page_idx, header_bitmap, chunk_idx);
 
       uint16_t packet_count;
       uint8_t flags;
@@ -2600,7 +2608,7 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
       did_hit_threshold = packets_bytes >= threshold;
       packets.emplace_back(std::move(packet));
     }  // for(packets...)
-  }  // for(buffers...)
+  }    // for(buffers...)
 
   *has_more = did_hit_threshold;
 
@@ -3696,8 +3704,8 @@ TraceStats TracingServiceImpl::GetTraceStats(TracingSession* tracing_session) {
           wri_stats->add_chunk_payload_histogram_sum(hist.GetBucketSum(i));
         }
       }  // for each sequence (writer).
-    }  // for each buffer.
-  }  // if (!disable_chunk_usage_histograms)
+    }    // for each buffer.
+  }      // if (!disable_chunk_usage_histograms)
 
   return trace_stats;
 }
@@ -4619,6 +4627,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::QueryServiceState(
     producer->set_sdk_version(kv.second->sdk_version_);
     producer->set_uid(static_cast<int32_t>(kv.second->uid()));
     producer->set_pid(static_cast<int32_t>(kv.second->pid()));
+    producer->set_frozen(kv.second->IsAndroidProcessFrozen());
   }
 
   for (const auto& kv : service_->data_sources_) {
@@ -5032,6 +5041,28 @@ void TracingServiceImpl::ProducerEndpointImpl::ClearIncrementalState(
 void TracingServiceImpl::ProducerEndpointImpl::Sync(
     std::function<void()> callback) {
   task_runner_->PostTask(callback);
+}
+
+bool TracingServiceImpl::ProducerEndpointImpl::IsAndroidProcessFrozen() {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  if (in_process_ || uid() == base::kInvalidUid || pid() == base::kInvalidPid)
+    return false;
+  base::StackString<255> path(
+      "/sys/fs/cgroup/uid_%" PRIu32 "/pid_%" PRIu32 "/cgroup.freeze",
+      static_cast<uint32_t>(uid()), static_cast<uint32_t>(pid()));
+  char frozen = '0';
+  auto fd = base::OpenFile(path.c_str(), O_RDONLY);
+  ssize_t rsize = 0;
+  if (fd) {
+    rsize = base::Read(*fd, &frozen, sizeof(frozen));
+    if (rsize > 0) {
+      return frozen == '1';
+    }
+  }
+  PERFETTO_DLOG("Failed to read %s (fd=%d, rsize=%d)", path.c_str(), !!fd,
+                static_cast<int>(rsize));
+#endif
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

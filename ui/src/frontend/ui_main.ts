@@ -27,10 +27,10 @@ import {Command} from '../public/command';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 import {maybeRenderFullscreenModalDialog, showModal} from '../widgets/modal';
-import {CookieConsent} from './cookie_consent';
+import {CookieConsent} from '../core/cookie_consent';
 import {toggleHelp} from './help_modal';
 import {Omnibox, OmniboxOption} from './omnibox';
-import {addQueryResultsTab} from '../public/lib/query_table/query_result_tab';
+import {addQueryResultsTab} from '../components/query_table/query_result_tab';
 import {Sidebar} from './sidebar';
 import {Topbar} from './topbar';
 import {shareTrace} from './trace_share_utils';
@@ -454,10 +454,11 @@ export class UiMainPerTrace implements m.ClassComponent {
       };
     });
 
-    // Sort by recentsIndex then by alphabetical order
+    // Sort recentsIndex first
     const sorted = commandsWithHeuristics.sort((a, b) => {
       if (b.recentsIndex === a.recentsIndex) {
-        return a.cmd.name.localeCompare(b.cmd.name);
+        // If recentsIndex is the same, retain original sort order
+        return 0;
       } else {
         return b.recentsIndex - a.recentsIndex;
       }
