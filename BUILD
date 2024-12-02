@@ -266,13 +266,13 @@ perfetto_cc_binary(
         ":include_perfetto_base_base",
         ":include_perfetto_public_abi_base",
         ":include_perfetto_public_base",
-        ":src_perfetto_cmd_pbtxt_to_pb",
         ":src_protozero_filtering_bytecode_common",
         ":src_protozero_filtering_bytecode_generator",
         ":src_protozero_filtering_bytecode_parser",
         ":src_protozero_filtering_filter_util",
         ":src_protozero_filtering_message_filter",
         ":src_protozero_filtering_string_filter",
+        ":src_trace_config_utils_txt_to_pb",
         "src/tools/proto_filter/proto_filter.cc",
     ],
     deps = [
@@ -293,7 +293,7 @@ perfetto_cc_binary(
         ":protozero",
         ":src_base_base",
         ":src_base_version",
-        ":src_perfetto_cmd_gen_cc_config_descriptor",
+        ":src_trace_config_utils_gen_cc_config_descriptor",
     ] + PERFETTO_CONFIG.deps.protobuf_full,
 )
 
@@ -644,6 +644,7 @@ perfetto_cc_library(
         ":src_protozero_filtering_bytecode_parser",
         ":src_protozero_filtering_message_filter",
         ":src_protozero_filtering_string_filter",
+        ":src_traced_service_builtin_producer",
         ":src_traced_service_service",
         ":src_tracing_common",
         ":src_tracing_core_core",
@@ -1411,26 +1412,6 @@ perfetto_filegroup(
     ],
 )
 
-# GN target: //src/perfetto_cmd:gen_cc_config_descriptor
-perfetto_cc_proto_descriptor(
-    name = "src_perfetto_cmd_gen_cc_config_descriptor",
-    deps = [
-        ":protos_perfetto_config_descriptor",
-    ],
-    outs = [
-        "src/perfetto_cmd/config.descriptor.h",
-    ],
-)
-
-# GN target: //src/perfetto_cmd:pbtxt_to_pb
-perfetto_filegroup(
-    name = "src_perfetto_cmd_pbtxt_to_pb",
-    srcs = [
-        "src/perfetto_cmd/pbtxt_to_pb.cc",
-        "src/perfetto_cmd/pbtxt_to_pb.h",
-    ],
-)
-
 # GN target: //src/perfetto_cmd:perfetto_cmd
 perfetto_filegroup(
     name = "src_perfetto_cmd_perfetto_cmd",
@@ -1578,6 +1559,26 @@ perfetto_filegroup(
         "src/shared_lib/thread_utils.cc",
         "src/shared_lib/tracing_session.cc",
         "src/shared_lib/track_event.cc",
+    ],
+)
+
+# GN target: //src/trace_config_utils:gen_cc_config_descriptor
+perfetto_cc_proto_descriptor(
+    name = "src_trace_config_utils_gen_cc_config_descriptor",
+    deps = [
+        ":protos_perfetto_config_descriptor",
+    ],
+    outs = [
+        "src/trace_config_utils/config.descriptor.h",
+    ],
+)
+
+# GN target: //src/trace_config_utils:txt_to_pb
+perfetto_filegroup(
+    name = "src_trace_config_utils_txt_to_pb",
+    srcs = [
+        "src/trace_config_utils/txt_to_pb.cc",
+        "src/trace_config_utils/txt_to_pb.h",
     ],
 )
 
@@ -1805,6 +1806,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/common/track_tracker.cc",
         "src/trace_processor/importers/common/track_tracker.h",
         "src/trace_processor/importers/common/tracks.h",
+        "src/trace_processor/importers/common/tracks_common.h",
+        "src/trace_processor/importers/common/tracks_internal.h",
         "src/trace_processor/importers/common/virtual_memory_mapping.cc",
         "src/trace_processor/importers/common/virtual_memory_mapping.h",
     ],
@@ -2513,6 +2516,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup_rails.sql",
+        "src/trace_processor/metrics/sql/android/wattson_atrace_apps_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_rail_relations.sql",
@@ -3036,6 +3040,7 @@ perfetto_filegroup(
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_counters_counters",
     srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/counters/global_tracks.sql",
         "src/trace_processor/perfetto_sql/stdlib/counters/intervals.sql",
     ],
 )
@@ -4024,12 +4029,19 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/traced/service:builtin_producer
+perfetto_filegroup(
+    name = "src_traced_service_builtin_producer",
+    srcs = [
+        "src/traced/service/builtin_producer.cc",
+        "src/traced/service/builtin_producer.h",
+    ],
+)
+
 # GN target: //src/traced/service:service
 perfetto_filegroup(
     name = "src_traced_service_service",
     srcs = [
-        "src/traced/service/builtin_producer.cc",
-        "src/traced/service/builtin_producer.h",
         "src/traced/service/service.cc",
     ],
 )
@@ -6475,9 +6487,9 @@ perfetto_cc_binary(
         ":src_android_stats_android_stats",
         ":src_android_stats_perfetto_atoms",
         ":src_perfetto_cmd_bugreport_path",
-        ":src_perfetto_cmd_pbtxt_to_pb",
         ":src_perfetto_cmd_perfetto_cmd",
         ":src_perfetto_cmd_trigger_producer",
+        ":src_trace_config_utils_txt_to_pb",
         ":src_tracing_common",
         ":src_tracing_core_core",
         ":src_tracing_ipc_common",
@@ -6545,8 +6557,8 @@ perfetto_cc_binary(
         ":protozero",
         ":src_base_base",
         ":src_base_version",
-        ":src_perfetto_cmd_gen_cc_config_descriptor",
         ":src_perfetto_cmd_protos_cpp",
+        ":src_trace_config_utils_gen_cc_config_descriptor",
     ],
 )
 
