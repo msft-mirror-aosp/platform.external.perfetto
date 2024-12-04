@@ -61,15 +61,15 @@ CREATE PERFETTO VIEW track (
   --
   -- Join with the `args` table or use the `EXTRACT_ARG` helper function to
   -- expand the args.
-  dimension_arg_set_id LONG,
+  dimension_arg_set_id ARGSETID,
   -- The track which is the "parent" of this track. Only non-null for tracks
   -- created using Perfetto's track_event API.
-  parent_id LONG,
+  parent_id JOINID(track.id),
   -- Generic key-value pairs containing extra information about the track.
   --
   -- Join with the `args` table or use the `EXTRACT_ARG` helper function to
   -- expand the args.
-  source_arg_set_id LONG,
+  source_arg_set_id ARGSETID,
   -- Machine identifier, non-null for tracks on a remote machine.
   machine_id LONG
 ) AS
@@ -108,7 +108,7 @@ CREATE PERFETTO VIEW cpu (
   -- https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/cpu-capacity.txt
   capacity LONG,
   -- Extra key/value pairs associated with this cpu.
-  arg_set_id LONG
+  arg_set_id ARGSETID
 ) AS
 SELECT
   id,
@@ -253,7 +253,7 @@ CREATE PERFETTO VIEW thread_state (
   -- The unique thread id of the thread which caused a wakeup of this thread.
   waker_utid JOINID(thread.id),
   -- The unique thread state id which caused a wakeup of this thread.
-  waker_id LONG,
+  waker_id JOINID(thread_state.id),
   -- Whether the wakeup was from interrupt context or process context.
   irq_context LONG,
   -- The unique CPU identifier that the thread executed on.
@@ -296,7 +296,7 @@ CREATE PERFETTO VIEW raw (
   -- The thread this event was emitted on.
   utid JOINID(thread.id),
   -- The set of key/value pairs associated with this event.
-  arg_set_id LONG,
+  arg_set_id ARGSETID,
   -- Ftrace event flags for this event. Currently only emitted for sched_waking
   -- events.
   common_flags LONG,
@@ -336,7 +336,7 @@ CREATE PERFETTO VIEW ftrace_event (
   -- The thread this event was emitted on.
   utid JOINID(thread.id),
   -- The set of key/value pairs associated with this event.
-  arg_set_id LONG,
+  arg_set_id ARGSETID,
   -- Ftrace event flags for this event. Currently only emitted for
   -- sched_waking events.
   common_flags LONG,
@@ -414,7 +414,7 @@ CREATE PERFETTO VIEW cpu_track (
   -- Args for this track which store information about "source" of this track in
   -- the trace. For example: whether this track orginated from atrace, Chrome
   -- tracepoints etc.
-  source_arg_set_id LONG,
+  source_arg_set_id ARGSETID,
   -- Machine identifier, non-null for tracks on a remote machine.
   machine_id LONG,
   -- The CPU that the track is associated with.
@@ -432,7 +432,7 @@ FROM
   __intrinsic_cpu_track;
 
 -- Tracks containing counter-like events.
-CREATE PERFETTO TABLE counter_track (
+CREATE PERFETTO VIEW counter_track (
   -- Unique identifier for this cpu counter track.
   id ID,
   -- The name of the "most-specific" child table containing this row.
@@ -453,14 +453,11 @@ CREATE PERFETTO TABLE counter_track (
   classification STRING,
   -- The dimensions of the track which uniquely identify the track within a
   -- given classification.
-  --
-  -- Join with the `args` table or use the `EXTRACT_ARG` helper function to
-  -- expand the args.
-  dimension_arg_set_id LONG,
+  dimension_arg_set_id ARGSETID,
   -- Args for this track which store information about "source" of this track in
   -- the trace. For example: whether this track orginated from atrace, Chrome
   -- tracepoints etc.
-  source_arg_set_id LONG,
+  source_arg_set_id ARGSETID,
   -- Machine identifier, non-null for tracks on a remote machine.
   machine_id LONG,
   -- The units of the counter. This column is rarely filled.
@@ -480,20 +477,7 @@ SELECT
   counter_unit AS unit,
   EXTRACT_ARG(source_arg_set_id, 'description') AS description
 FROM __intrinsic_track
-WHERE event_type = 'counter'
-UNION ALL
-SELECT
-  id,
-  type,
-  name,
-  parent_id,
-  classification,
-  dimension_arg_set_id,
-  source_arg_set_id,
-  machine_id,
-  unit,
-  description
-FROM __intrinsic_counter_track;
+WHERE event_type = 'counter';
 
 -- Tracks containing counter-like events associated to a CPU.
 CREATE PERFETTO TABLE cpu_counter_track (
@@ -509,7 +493,7 @@ CREATE PERFETTO TABLE cpu_counter_track (
   -- Args for this track which store information about "source" of this track in
   -- the trace. For example: whether this track orginated from atrace, Chrome
   -- tracepoints etc.
-  source_arg_set_id LONG,
+  source_arg_set_id ARGSETID,
   -- Machine identifier, non-null for tracks on a remote machine.
   machine_id LONG,
   -- The units of the counter. This column is rarely filled.
@@ -646,6 +630,49 @@ SELECT
 FROM counter_track AS ct
 JOIN args ON ct.dimension_arg_set_id = args.arg_set_id
 WHERE args.key = 'utid';
+
+-- Tracks containing counter-like events collected from Linux perf.
+CREATE PERFETTO TABLE perf_counter_track (
+  -- Unique identifier for this thread counter track.
+  id ID,
+  -- The name of the "most-specific" child table containing this row.
+  type STRING,
+  -- Name of the track.
+  name STRING,
+  -- The track which is the "parent" of this track. Only non-null for tracks
+  -- created using Perfetto's track_event API.
+  parent_id JOINID(track.id),
+  -- Args for this track which store information about "source" of this track in
+  -- the trace. For example: whether this track orginated from atrace, Chrome
+  -- tracepoints etc.
+  source_arg_set_id LONG,
+  -- Machine identifier, non-null for tracks on a remote machine.
+  machine_id LONG,
+  -- The units of the counter. This column is rarely filled.
+  unit STRING,
+  -- The description for this track. For debugging purposes only.
+  description STRING,
+  -- The id of the perf session this counter was captured on.
+  perf_session_id LONG,
+  -- The CPU the counter is associated with.
+  cpu LONG,
+  -- Whether this counter is the sampling timebase for the session.
+  is_timebase BOOL
+) AS
+SELECT
+  ct.id,
+  ct.type,
+  ct.name,
+  ct.parent_id,
+  ct.source_arg_set_id,
+  ct.machine_id,
+  ct.unit,
+  ct.description,
+  extract_arg(ct.dimension_arg_set_id, 'perf_session_id') AS perf_session_id,
+  extract_arg(ct.dimension_arg_set_id, 'cpu') AS cpu,
+  extract_arg(ct.source_arg_set_id, 'is_timebase') AS is_timebase
+FROM counter_track AS ct
+WHERE ct.classification = 'perf_counter';
 
 -- Alias of the `counter` table.
 CREATE PERFETTO VIEW counters(
