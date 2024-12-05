@@ -14,13 +14,13 @@
 
 import m from 'mithril';
 import {duration, time} from '../base/time';
-import {UntypedEventSet} from '../core/event_set';
 import {Size2D, VerticalBounds} from '../base/geom';
 import {TimeScale} from '../base/time_scale';
 import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
 import {ColorScheme} from './color_scheme';
 import {TrackEventDetailsPanel} from './details_panel';
 import {TrackEventDetails, TrackEventSelection} from './selection';
+import {Dataset} from '../trace_processor/dataset';
 
 export interface TrackManager {
   /**
@@ -176,9 +176,10 @@ export interface Track {
   onMouseOut?(): void;
 
   /**
-   * Optional: Get the event set that represents this track's data.
+   * Optional: Returns a dataset that represents the events displayed on this
+   * track.
    */
-  getEventSet?(): UntypedEventSet;
+  getDataset?(): Dataset | undefined;
 
   /**
    * Optional: Get details of a track event given by eventId on this track.

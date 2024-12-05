@@ -18,6 +18,9 @@ import {OmniboxManager} from './omnibox';
 import {SidebarManager} from './sidebar';
 import {Analytics} from './analytics';
 import {PluginManager} from './plugin';
+import {Trace} from './trace';
+import {PageManager} from './page';
+import {FeatureFlagManager} from './feature_flag';
 
 /**
  * The API endpoint to interact programmaticaly with the UI before a trace has
@@ -34,6 +37,8 @@ export interface App {
   readonly omnibox: OmniboxManager;
   readonly analytics: Analytics;
   readonly plugins: PluginManager;
+  readonly pages: PageManager;
+  readonly featureFlags: FeatureFlagManager;
 
   /**
    * The parsed querystring passed when starting the app, before any navigation
@@ -41,14 +46,26 @@ export interface App {
    */
   readonly initialRouteArgs: RouteArgs;
 
-  readonly rootUrl: string;
+  /**
+   * Returns the current trace object, if any. The instance being returned is
+   * bound to the same plugin of App.pluginId.
+   */
+  readonly trace?: Trace;
 
   // TODO(primiano): this should be needed in extremely rare cases. We should
   // probably switch to mithril auto-redraw at some point.
-  scheduleFullRedraw(): void;
+  scheduleFullRedraw(force?: 'force'): void;
 
   /**
    * Navigate to a new page.
    */
   navigate(newHash: string): void;
+
+  openTraceFromFile(file: File): void;
+  openTraceFromUrl(url: string): void;
+  openTraceFromBuffer(args: {
+    buffer: ArrayBuffer;
+    title: string;
+    fileName: string;
+  }): void;
 }
