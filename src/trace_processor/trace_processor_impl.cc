@@ -46,6 +46,7 @@
 #include "perfetto/trace_processor/iterator.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor.h"
+#include "src/trace_processor/importers/android_bugreport/android_dumpstate_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_reader.h"
 #include "src/trace_processor/importers/archive/gzip_trace_parser.h"
@@ -65,6 +66,7 @@
 #include "src/trace_processor/importers/json/json_utils.h"
 #include "src/trace_processor/importers/ninja/ninja_log_parser.h"
 #include "src/trace_processor/importers/perf/perf_data_tokenizer.h"
+#include "src/trace_processor/importers/perf/perf_tracker.h"
 #include "src/trace_processor/importers/perf/record_parser.h"
 #include "src/trace_processor/importers/perf/spe_record_parser.h"
 #include "src/trace_processor/importers/perf_text/perf_text_trace_parser_impl.h"
@@ -115,6 +117,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_sched_upid.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/experimental_slice_layout.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/table_functions/table_info.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/table_functions/winscope_proto_to_args_with_defaults.h"
 #include "src/trace_processor/perfetto_sql/stdlib/stdlib.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_aggregate_function.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_result.h"
@@ -192,14 +195,14 @@ base::Status RegisterAllProtoBuilderFunctions(
 
 void BuildBoundsTable(sqlite3* db, std::pair<int64_t, int64_t> bounds) {
   char* error = nullptr;
-  sqlite3_exec(db, "DELETE FROM trace_bounds", nullptr, nullptr, &error);
+  sqlite3_exec(db, "DELETE FROM _trace_bounds", nullptr, nullptr, &error);
   if (error) {
     PERFETTO_ELOG("Error deleting from bounds table: %s", error);
     sqlite3_free(error);
     return;
   }
 
-  base::StackString<1024> sql("INSERT INTO trace_bounds VALUES(%" PRId64
+  base::StackString<1024> sql("INSERT INTO _trace_bounds VALUES(%" PRId64
                               ", %" PRId64 ")",
                               bounds.first, bounds.second);
   sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &error);
@@ -311,7 +314,7 @@ std::vector<std::string> SanitizeMetricMountPaths(
 
 void InsertIntoTraceMetricsTable(sqlite3* db, const std::string& metric_name) {
   char* insert_sql = sqlite3_mprintf(
-      "INSERT INTO trace_metrics(name) VALUES('%q')", metric_name.c_str());
+      "INSERT INTO _trace_metrics(name) VALUES('%q')", metric_name.c_str());
   char* insert_error = nullptr;
   sqlite3_exec(db, insert_sql, nullptr, nullptr, &insert_error);
   sqlite3_free(insert_sql);
@@ -395,6 +398,9 @@ std::pair<int64_t, int64_t> GetTraceTimestampBoundsNs(
 
 TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
     : TraceProcessorStorageImpl(cfg), config_(cfg) {
+  context_.android_dumpstate_event_parser =
+      std::make_unique<AndroidDumpstateEventParserImpl>(&context_);
+
   context_.reader_registry->RegisterTraceReader<AndroidLogReader>(
       kAndroidLogcatTraceType);
   context_.android_log_event_parser =
@@ -540,6 +546,9 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
   Flush();
 
   RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
+  if (context_.perf_tracker) {
+    perf_importer::PerfTracker::GetOrCreate(&context_)->NotifyEndOfFile();
+  }
   context_.storage->ShrinkToFitTables();
 
   // Rebuild the bounds table once everything has been completed: we do this
@@ -938,13 +947,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   RegisterStaticTable(storage->mutable_counter_table());
 
-  RegisterStaticTable(storage->mutable_counter_track_table());
-  RegisterStaticTable(storage->mutable_process_counter_track_table());
-  RegisterStaticTable(storage->mutable_thread_counter_track_table());
-  RegisterStaticTable(storage->mutable_cpu_counter_track_table());
-  RegisterStaticTable(storage->mutable_gpu_counter_track_table());
   RegisterStaticTable(storage->mutable_gpu_counter_group_table());
-  RegisterStaticTable(storage->mutable_perf_counter_track_table());
 
   RegisterStaticTable(storage->mutable_heap_graph_object_table());
   RegisterStaticTable(storage->mutable_heap_graph_reference_table());
@@ -991,6 +994,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   RegisterStaticTable(storage->mutable_jit_frame_table());
 
   RegisterStaticTable(storage->mutable_spe_record_table());
+  RegisterStaticTable(storage->mutable_mmap_record_table());
 
   RegisterStaticTable(storage->mutable_inputmethod_clients_table());
   RegisterStaticTable(storage->mutable_inputmethod_manager_service_table());
@@ -1061,6 +1065,9 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
       std::make_unique<ExperimentalFlatSlice>(&context_));
   engine_->RegisterStaticTableFunction(std::make_unique<DfsWeightBounded>(
       context_.storage->mutable_string_pool()));
+  engine_->RegisterStaticTableFunction(
+      std::make_unique<WinscopeProtoToArgsWithDefaults>(
+          context_.storage->mutable_string_pool(), engine_.get(), &context_));
 
   // Value table aggregate functions.
   engine_->RegisterSqliteAggregateFunction<DominatorTree>(

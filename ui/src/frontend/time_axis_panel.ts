@@ -14,9 +14,8 @@
 
 import m from 'mithril';
 import {Time, time, toISODateOnly} from '../base/time';
-import {TimestampFormat, timestampFormat} from '../core/timestamp_format';
+import {timestampFormat} from '../core/timestamp_format';
 import {TRACK_SHELL_WIDTH} from './css_constants';
-import {globals} from './globals';
 import {
   getMaxMajorTicks,
   MIN_PX_PER_STEP,
@@ -27,11 +26,16 @@ import {Size2D} from '../base/geom';
 import {Panel} from './panel_container';
 import {TimeScale} from '../base/time_scale';
 import {canvasClip} from '../base/canvas_utils';
+import {Trace} from '../public/trace';
+import {assertUnreachable} from '../base/logging';
+import {TimestampFormat} from '../public/timeline';
 
 export class TimeAxisPanel implements Panel {
   readonly kind = 'panel';
   readonly selectable = false;
   readonly id = 'time-axis-panel';
+
+  constructor(private readonly trace: Trace) {}
 
   render(): m.Children {
     return m('.time-axis-panel');
@@ -55,43 +59,48 @@ export class TimeAxisPanel implements Panel {
   }
 
   private renderOffsetTimestamp(ctx: CanvasRenderingContext2D): void {
-    const offset = globals.trace.timeline.timestampOffset();
-    switch (timestampFormat()) {
+    const offset = this.trace.timeline.timestampOffset();
+    const timestampFormat = this.trace.timeline.timestampFormat;
+    switch (timestampFormat) {
       case TimestampFormat.TraceNs:
       case TimestampFormat.TraceNsLocale:
         break;
       case TimestampFormat.Seconds:
+      case TimestampFormat.Milliseconds:
+      case TimestampFormat.Microseconds:
       case TimestampFormat.Timecode:
         const width = renderTimestamp(ctx, offset, 6, 10, MIN_PX_PER_STEP);
         ctx.fillText('+', 6 + width + 2, 10, 6);
         break;
       case TimestampFormat.UTC:
         const offsetDate = Time.toDate(
-          globals.traceContext.utcOffset,
-          globals.traceContext.realtimeOffset,
+          this.trace.traceInfo.utcOffset,
+          this.trace.traceInfo.realtimeOffset,
         );
         const dateStr = toISODateOnly(offsetDate);
         ctx.fillText(`UTC ${dateStr}`, 6, 10);
         break;
       case TimestampFormat.TraceTz:
         const offsetTzDate = Time.toDate(
-          globals.traceContext.traceTzOffset,
-          globals.traceContext.realtimeOffset,
+          this.trace.traceInfo.traceTzOffset,
+          this.trace.traceInfo.realtimeOffset,
         );
         const dateTzStr = toISODateOnly(offsetTzDate);
         ctx.fillText(dateTzStr, 6, 10);
         break;
+      default:
+        assertUnreachable(timestampFormat);
     }
   }
 
   private renderPanel(ctx: CanvasRenderingContext2D, size: Size2D): void {
-    const visibleWindow = globals.timeline.visibleWindow;
+    const visibleWindow = this.trace.timeline.visibleWindow;
     const timescale = new TimeScale(visibleWindow, {
       left: 0,
       right: size.width,
     });
     const timespan = visibleWindow.toTimeSpan();
-    const offset = globals.trace.timeline.timestampOffset();
+    const offset = this.trace.timeline.timestampOffset();
 
     // Draw time axis.
     if (size.width > 0 && timespan.duration > 0n) {
@@ -101,7 +110,7 @@ export class TimeAxisPanel implements Panel {
         if (type === TickType.MAJOR) {
           const position = Math.floor(timescale.timeToPx(time));
           ctx.fillRect(position, 0, 1, size.height);
-          const domainTime = globals.trace.timeline.toDomainTime(time);
+          const domainTime = this.trace.timeline.toDomainTime(time);
           renderTimestamp(ctx, domainTime, position + 5, 10, MIN_PX_PER_STEP);
         }
       }
@@ -128,7 +137,7 @@ function renderTimestamp(
       return renderRawTimestamp(ctx, time.toLocaleString(), x, y, minWidth);
     case TimestampFormat.Seconds:
       return renderRawTimestamp(ctx, Time.formatSeconds(time), x, y, minWidth);
-    case TimestampFormat.Milliseoncds:
+    case TimestampFormat.Milliseconds:
       return renderRawTimestamp(
         ctx,
         Time.formatMilliseconds(time),
