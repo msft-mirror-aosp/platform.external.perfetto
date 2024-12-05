@@ -28,6 +28,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -235,6 +236,9 @@ class TraceStorage {
   virtual StringId InternString(const std::string& str) {
     return InternString(base::StringView(str));
   }
+  virtual StringId InternString(std::string_view str) {
+    return InternString(base::StringView(str.data(), str.size()));
+  }
 
   // Example usage: SetStats(stats::android_log_num_failed, 42);
   void SetStats(size_t key, int64_t value) {
@@ -273,6 +277,12 @@ class TraceStorage {
       return kv->second;
     }
     return std::nullopt;
+  }
+
+  int64_t GetStats(size_t key) {
+    PERFETTO_DCHECK(key < stats::kNumKeys);
+    PERFETTO_DCHECK(stats::kTypes[key] == stats::kSingle);
+    return stats_[key].value;
   }
 
   class ScopedStatsTracer {
@@ -356,46 +366,11 @@ class TraceStorage {
   const tables::TrackTable& track_table() const { return track_table_; }
   tables::TrackTable* mutable_track_table() { return &track_table_; }
 
-  const tables::CounterTrackTable& counter_track_table() const {
-    return counter_track_table_;
-  }
-  tables::CounterTrackTable* mutable_counter_track_table() {
-    return &counter_track_table_;
-  }
-
-  const tables::CpuCounterTrackTable& cpu_counter_track_table() const {
-    return cpu_counter_track_table_;
-  }
-  tables::CpuCounterTrackTable* mutable_cpu_counter_track_table() {
-    return &cpu_counter_track_table_;
-  }
-
   const tables::GpuCounterGroupTable& gpu_counter_group_table() const {
     return gpu_counter_group_table_;
   }
   tables::GpuCounterGroupTable* mutable_gpu_counter_group_table() {
     return &gpu_counter_group_table_;
-  }
-
-  const tables::GpuCounterTrackTable& gpu_counter_track_table() const {
-    return gpu_counter_track_table_;
-  }
-  tables::GpuCounterTrackTable* mutable_gpu_counter_track_table() {
-    return &gpu_counter_track_table_;
-  }
-
-  const tables::PerfCounterTrackTable& perf_counter_track_table() const {
-    return perf_counter_track_table_;
-  }
-  tables::PerfCounterTrackTable* mutable_perf_counter_track_table() {
-    return &perf_counter_track_table_;
-  }
-
-  const tables::ProcessCounterTrackTable& process_counter_track_table() const {
-    return process_counter_track_table_;
-  }
-  tables::ProcessCounterTrackTable* mutable_process_counter_track_table() {
-    return &process_counter_track_table_;
   }
 
   const tables::ProcessTrackTable& process_track_table() const {
@@ -417,13 +392,6 @@ class TraceStorage {
   }
   tables::ThreadStateTable* mutable_thread_state_table() {
     return &thread_state_table_;
-  }
-
-  const tables::ThreadCounterTrackTable& thread_counter_track_table() const {
-    return thread_counter_track_table_;
-  }
-  tables::ThreadCounterTrackTable* mutable_thread_counter_track_table() {
-    return &thread_counter_track_table_;
   }
 
   const tables::SchedSliceTable& sched_slice_table() const {
@@ -795,6 +763,12 @@ class TraceStorage {
   }
   tables::JitFrameTable* mutable_jit_frame_table() { return &jit_frame_table_; }
 
+  tables::MmapRecordTable* mutable_mmap_record_table() {
+    return &mmap_record_table_;
+  }
+  const tables::MmapRecordTable& mmap_record_table() const {
+    return mmap_record_table_;
+  }
   const tables::SpeRecordTable& spe_record_table() const {
     return spe_record_table_;
   }
@@ -941,12 +915,8 @@ class TraceStorage {
   Variadic GetArgValue(uint32_t row) const {
     auto rr = arg_table_[row];
 
-    Variadic v;
+    Variadic v = Variadic::Null();
     v.type = *GetVariadicTypeForId(rr.value_type());
-
-    // Force initialization of union to stop GCC complaining.
-    v.int_value = 0;
-
     switch (v.type) {
       case Variadic::Type::kBool:
         v.bool_value = static_cast<bool>(*rr.int_value());
@@ -1025,18 +995,7 @@ class TraceStorage {
   tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
 
   // Track tables for counter events.
-  tables::CounterTrackTable counter_track_table_{&string_pool_, &track_table_};
-  tables::ThreadCounterTrackTable thread_counter_track_table_{
-      &string_pool_, &counter_track_table_};
-  tables::ProcessCounterTrackTable process_counter_track_table_{
-      &string_pool_, &counter_track_table_};
-  tables::CpuCounterTrackTable cpu_counter_track_table_{&string_pool_,
-                                                        &counter_track_table_};
-  tables::GpuCounterTrackTable gpu_counter_track_table_{&string_pool_,
-                                                        &counter_track_table_};
   tables::GpuCounterGroupTable gpu_counter_group_table_{&string_pool_};
-  tables::PerfCounterTrackTable perf_counter_track_table_{
-      &string_pool_, &counter_track_table_};
 
   // Args for all other tables.
   tables::ArgTable arg_table_{&string_pool_};
@@ -1151,6 +1110,7 @@ class TraceStorage {
   tables::JitFrameTable jit_frame_table_{&string_pool_};
 
   // Perf tables
+  tables::MmapRecordTable mmap_record_table_{&string_pool_};
   tables::SpeRecordTable spe_record_table_{&string_pool_};
 
   // Winscope tables

@@ -43,7 +43,7 @@ export default class implements PerfettoPlugin {
     const result = await ctx.engine.query(`
       select
         t.id as trackId,
-        extract_arg(t.dimension_arg_set_id, 'linux_device_name') as deviceName
+        extract_arg(t.dimension_arg_set_id, 'linux_device') as deviceName
       from track t
       join _slice_track_summary using (id)
       where classification = 'linux_rpm'
@@ -66,14 +66,7 @@ export default class implements PerfettoPlugin {
       ctx.tracks.registerTrack({
         uri,
         title,
-        track: new AsyncSliceTrack(
-          {
-            trace: ctx,
-            uri,
-          },
-          0,
-          [trackId],
-        ),
+        track: new AsyncSliceTrack(ctx, uri, 0, [trackId]),
         tags: {
           kind: SLICE_TRACK_KIND,
           trackIds: [trackId],

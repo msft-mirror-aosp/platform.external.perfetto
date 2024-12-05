@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {addDebugSliceTrack} from '../../components/tracks/debug_tracks';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin} from '../../public/plugin';
 import {getTimeSpanOfSelectionOrVisibleWindow} from '../../public/utils';
-import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
+import {addQueryResultsTab} from '../../components/query_table/query_result_tab';
 
 export default class implements PerfettoPlugin {
   static readonly id = 'dev.perfetto.AndroidPerf';
@@ -34,9 +34,9 @@ export default class implements PerfettoPlugin {
       'intent',
       'table_name',
     ];
-    await addDebugSliceTrack(
-      ctx,
-      {
+    await addDebugSliceTrack({
+      trace: ctx,
+      data: {
         sqlSource: `
                     SELECT
                       start_id AS id,
@@ -51,10 +51,9 @@ export default class implements PerfettoPlugin {
                  `,
         columns: sliceColumns,
       },
-      'app_' + sliceName + '_start reason: ' + reason,
-      {ts: 'ts', dur: 'dur', name: sliceName},
-      sliceColumns,
-    );
+      title: 'app_' + sliceName + '_start reason: ' + reason,
+      argColumns: sliceColumns,
+    });
   }
 
   async onTraceLoad(ctx: Trace): Promise<void> {

@@ -130,7 +130,7 @@ async function createEngine(
   // Check if there is any instance of the trace_processor_shell running in
   // HTTP RPC mode (i.e. trace_processor_shell -D).
   let useRpc = false;
-  if (app.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
+  if (app.httpRpc.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
     useRpc = (await HttpRpcEngine.checkConnection()).connected;
   }
   let engine;
@@ -147,7 +147,7 @@ async function createEngine(
       ftraceDropUntilAllCpusValid: FTRACE_DROP_UNTIL_FLAG.get(),
     });
   }
-  engine.onResponseReceived = () => raf.scheduleFullRedraw();
+  engine.onResponseReceived = () => raf.scheduleFullRedraw('force');
 
   if (isMetatracingEnabled()) {
     engine.enableMetatrace(assertExists(getEnabledMetatracingCategories()));
@@ -253,9 +253,8 @@ async function loadTraceIntoEngine(
     }
   }
 
-  for (const callback of trace.getEventListeners('traceready')) {
-    await callback();
-  }
+  // notify() will await that all listeners' promises have resolved.
+  await trace.onTraceReady.notify();
 
   if (serializedAppState !== undefined) {
     // Wait that plugins have completed their actions and then proceed with

@@ -36,16 +36,15 @@ import {
   PanelOrGroup,
   RenderedPanelInfo,
 } from './panel_container';
-import {publishShowPanningHint} from './publish';
 import {TabPanel} from './tab_panel';
 import {TickmarkPanel} from './tickmark_panel';
 import {TimeAxisPanel} from './time_axis_panel';
 import {TimeSelectionPanel} from './time_selection_panel';
-import {DISMISSED_PANNING_HINT_KEY} from './topbar';
 import {TrackPanel} from './track_panel';
 import {drawVerticalLineAtTime} from './vertical_line_helper';
-import {PageWithTraceAttrs} from './pages';
 import {TraceImpl} from '../core/trace_impl';
+import {PageWithTraceImplAttrs} from '../core/page_manager';
+import {AppImpl} from '../core/app_impl';
 
 const OVERVIEW_PANEL_FLAG = featureFlags.register({
   id: 'overviewVisible',
@@ -92,7 +91,7 @@ interface SelectedContainer {
  * Top-most level component for the viewer page. Holds tracks, brush timeline,
  * panels, and everything else that's part of the main trace viewer page.
  */
-export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
+export class ViewerPage implements m.ClassComponent<PageWithTraceImplAttrs> {
   private zoomContent?: PanAndZoomHandler;
   // Used to prevent global deselection if a pan/drag select occurred.
   private keepCurrentSelection = false;
@@ -104,10 +103,11 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
   private tickmarkPanel: TickmarkPanel;
   private timelineWidthPx?: number;
   private selectedContainer?: SelectedContainer;
+  private showPanningHint = false;
 
   private readonly PAN_ZOOM_CONTENT_REF = 'pan-and-zoom-content';
 
-  constructor(vnode: m.CVnode<PageWithTraceAttrs>) {
+  constructor(vnode: m.CVnode<PageWithTraceImplAttrs>) {
     this.notesPanel = new NotesPanel(vnode.attrs.trace);
     this.timeAxisPanel = new TimeAxisPanel(vnode.attrs.trace);
     this.timeSelectionPanel = new TimeSelectionPanel(vnode.attrs.trace);
@@ -117,7 +117,7 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
     this.timeSelectionPanel = new TimeSelectionPanel(vnode.attrs.trace);
   }
 
-  oncreate({dom, attrs}: m.CVnodeDOM<PageWithTraceAttrs>) {
+  oncreate({dom, attrs}: m.CVnodeDOM<PageWithTraceImplAttrs>) {
     const panZoomElRaw = findRef(dom, this.PAN_ZOOM_CONTENT_REF);
     const panZoomEl = toHTMLElement(assertExists(panZoomElRaw));
 
@@ -136,10 +136,6 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
         });
         const tDelta = timescale.pxToDuration(pannedPx);
         timeline.panVisibleWindow(tDelta);
-
-        // If the user has panned they no longer need the hint.
-        localStorage.setItem(DISMISSED_PANNING_HINT_KEY, 'true');
-        raf.scheduleRedraw();
       },
       onZoomed: (zoomedPositionPx: number, zoomRatio: number) => {
         const timeline = attrs.trace.timeline;
@@ -149,7 +145,7 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
         const rect = dom.getBoundingClientRect();
         const centerPoint = zoomPx / (rect.width - TRACK_SHELL_WIDTH);
         timeline.zoomVisibleWindow(1 - zoomRatio, centerPoint);
-        raf.scheduleRedraw();
+        raf.scheduleCanvasRedraw();
       },
       editSelection: (currentPx: number) => {
         if (this.timelineWidthPx === undefined) return false;
@@ -259,9 +255,9 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
               dragEndAbsY: -stackTop + boundedCurrentY,
             };
           }
-          publishShowPanningHint();
+          this.showPanningHint = true;
         }
-        raf.scheduleRedraw();
+        raf.scheduleCanvasRedraw();
       },
       endSelection: (edit: boolean) => {
         this.selectedContainer = undefined;
@@ -290,7 +286,7 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
     if (this.zoomContent) this.zoomContent[Symbol.dispose]();
   }
 
-  view({attrs}: m.CVnode<PageWithTraceAttrs>) {
+  view({attrs}: m.CVnode<PageWithTraceImplAttrs>) {
     const scrollingPanels = renderToplevelPanels(attrs.trace);
 
     const result = m(
@@ -327,50 +323,65 @@ export class ViewerPage implements m.ClassComponent<PageWithTraceAttrs> {
         m(PanelContainer, {
           trace: attrs.trace,
           className: 'pinned-panel-container',
-          panels: attrs.trace.workspace.pinnedTracks.map((trackNode) => {
-            if (trackNode.uri) {
-              const tr = attrs.trace.tracks.getTrackRenderer(trackNode.uri);
-              return new TrackPanel({
-                trace: attrs.trace,
-                reorderable: true,
-                node: trackNode,
-                trackRenderer: tr,
-                revealOnCreate: true,
-                indentationLevel: 0,
-                topOffsetPx: 0,
-              });
-            } else {
-              return new TrackPanel({
-                trace: attrs.trace,
-                node: trackNode,
-                revealOnCreate: true,
-                indentationLevel: 0,
-                topOffsetPx: 0,
-              });
-            }
-          }),
+          panels: AppImpl.instance.isLoadingTrace
+            ? []
+            : attrs.trace.workspace.pinnedTracks.map((trackNode) => {
+                if (trackNode.uri) {
+                  const tr = attrs.trace.tracks.getTrackRenderer(trackNode.uri);
+                  return new TrackPanel({
+                    trace: attrs.trace,
+                    reorderable: true,
+                    node: trackNode,
+                    trackRenderer: tr,
+                    revealOnCreate: true,
+                    indentationLevel: 0,
+                    topOffsetPx: 0,
+                  });
+                } else {
+                  return new TrackPanel({
+                    trace: attrs.trace,
+                    node: trackNode,
+                    revealOnCreate: true,
+                    indentationLevel: 0,
+                    topOffsetPx: 0,
+                  });
+                }
+              }),
           renderUnderlay: (ctx, size) => renderUnderlay(attrs.trace, ctx, size),
           renderOverlay: (ctx, size, panels) =>
-            renderOverlay(attrs.trace, ctx, size, panels),
+            renderOverlay(
+              attrs.trace,
+              ctx,
+              size,
+              panels,
+              attrs.trace.workspace.pinnedTracksNode,
+            ),
           selectedYRange: this.getYRange('pinned-panel-container'),
         }),
         m(PanelContainer, {
           trace: attrs.trace,
           className: 'scrolling-panel-container',
-          panels: scrollingPanels,
+          panels: AppImpl.instance.isLoadingTrace ? [] : scrollingPanels,
           onPanelStackResize: (width) => {
             const timelineWidth = width - TRACK_SHELL_WIDTH;
             this.timelineWidthPx = timelineWidth;
           },
           renderUnderlay: (ctx, size) => renderUnderlay(attrs.trace, ctx, size),
           renderOverlay: (ctx, size, panels) =>
-            renderOverlay(attrs.trace, ctx, size, panels),
+            renderOverlay(
+              attrs.trace,
+              ctx,
+              size,
+              panels,
+              attrs.trace.workspace.tracks,
+            ),
           selectedYRange: this.getYRange('scrolling-panel-container'),
         }),
       ),
       m(TabPanel, {
         trace: attrs.trace,
       }),
+      this.showPanningHint && m(HelpPanningNotification),
     );
 
     attrs.trace.tracks.flushOldTracks();
@@ -414,6 +425,7 @@ function renderOverlay(
   ctx: CanvasRenderingContext2D,
   canvasSize: Size2D,
   panels: ReadonlyArray<RenderedPanelInfo>,
+  trackContainer: TrackNode,
 ): void {
   const size = {
     width: canvasSize.width - TRACK_SHELL_WIDTH,
@@ -425,7 +437,7 @@ function renderOverlay(
   canvasClip(ctx, 0, 0, size.width, size.height);
 
   // TODO(primiano): plumb the TraceImpl obj throughout the viwer page.
-  renderFlows(trace, ctx, size, panels);
+  renderFlows(trace, ctx, size, panels, trackContainer);
 
   const timewindow = trace.timeline.visibleWindow;
   const timescale = new TimeScale(timewindow, {left: 0, right: size.width});
@@ -608,5 +620,38 @@ export function renderNoteVerticals(
         note.color,
       );
     }
+  }
+}
+
+class HelpPanningNotification implements m.ClassComponent {
+  private readonly PANNING_HINT_KEY = 'dismissedPanningHint';
+  private dismissed = localStorage.getItem(this.PANNING_HINT_KEY) === 'true';
+
+  view() {
+    // Do not show the help notification in embedded mode because local storage
+    // does not persist for iFrames. The host is responsible for communicating
+    // to users that they can press '?' for help.
+    if (AppImpl.instance.embeddedMode || this.dismissed) {
+      return;
+    }
+    return m(
+      '.helpful-hint',
+      m(
+        '.hint-text',
+        'Are you trying to pan? Use the WASD keys or hold shift to click ' +
+          "and drag. Press '?' for more help.",
+      ),
+      m(
+        'button.hint-dismiss-button',
+        {
+          onclick: () => {
+            this.dismissed = true;
+            localStorage.setItem(this.PANNING_HINT_KEY, 'true');
+            raf.scheduleFullRedraw();
+          },
+        },
+        'Dismiss',
+      ),
+    );
   }
 }

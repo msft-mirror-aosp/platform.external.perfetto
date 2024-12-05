@@ -23,7 +23,8 @@ import {
   openFileWithLegacyTraceViewer,
 } from '../../frontend/legacy_trace_viewer';
 import {AppImpl} from '../../core/app_impl';
-import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
+import {addQueryResultsTab} from '../../components/query_table/query_result_tab';
+import {featureFlags} from '../../core/feature_flags';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -91,15 +92,22 @@ group by
 order by total_self_size desc
 limit 100;`;
 
+const SHOW_OPEN_WITH_LEGACY_UI_BUTTON = featureFlags.register({
+  id: 'showOpenWithLegacyUiButton',
+  name: 'Show "Open with legacy UI" button',
+  description: 'Show "Open with legacy UI" button in the sidebar',
+  defaultValue: false,
+});
+
 export default class implements PerfettoPlugin {
   static readonly id = 'perfetto.CoreCommands';
   static onActivate(ctx: App) {
-    if (ctx.sidebar.sidebarEnabled) {
+    if (ctx.sidebar.enabled) {
       ctx.commands.registerCommand({
         id: 'perfetto.CoreCommands#ToggleLeftSidebar',
         name: 'Toggle left sidebar',
         callback: () => {
-          ctx.sidebar.toggleSidebarVisbility();
+          ctx.sidebar.toggleVisibility();
         },
         defaultHotkey: '!Mod+B',
       });
@@ -124,25 +132,26 @@ export default class implements PerfettoPlugin {
     });
     ctx.sidebar.addMenuItem({
       commandId: OPEN_TRACE_COMMAND_ID,
-      group: 'navigation',
+      section: 'navigation',
       icon: 'folder_open',
     });
 
-    const OPEN_LEGACY_TRACE_COMMAND_ID =
-      'perfetto.CoreCommands#openTraceInLegacyUi';
+    const OPEN_LEGACY_COMMAND_ID = 'perfetto.CoreCommands#openTraceInLegacyUi';
     ctx.commands.registerCommand({
-      id: OPEN_LEGACY_TRACE_COMMAND_ID,
+      id: OPEN_LEGACY_COMMAND_ID,
       name: 'Open with legacy UI',
       callback: () => {
         input.dataset['useCatapultLegacyUi'] = '1';
         input.click();
       },
     });
-    ctx.sidebar.addMenuItem({
-      commandId: OPEN_LEGACY_TRACE_COMMAND_ID,
-      group: 'navigation',
-      icon: 'filter_none',
-    });
+    if (SHOW_OPEN_WITH_LEGACY_UI_BUTTON.get()) {
+      ctx.sidebar.addMenuItem({
+        commandId: OPEN_LEGACY_COMMAND_ID,
+        section: 'navigation',
+        icon: 'filter_none',
+      });
+    }
   }
 
   async onTraceLoad(ctx: Trace): Promise<void> {
