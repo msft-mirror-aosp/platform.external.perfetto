@@ -17,6 +17,7 @@ import {PerfettoPlugin} from '../../public/plugin';
 import {METRIC_HANDLERS} from './handlers/handlerRegistry';
 import {MetricData, MetricHandlerMatch} from './handlers/metricUtils';
 import {PLUGIN_ID} from './pluginId';
+import AndroidCujsPlugin from '../dev.perfetto.AndroidCujs';
 
 const JANK_CUJ_QUERY_PRECONDITIONS = `
   SELECT RUN_METRIC('android/android_blocking_calls_cuj_metric.sql');
@@ -53,27 +54,26 @@ let metrics: string[];
  */
 export default class implements PerfettoPlugin {
   static readonly id = PLUGIN_ID;
+  static readonly dependencies = [AndroidCujsPlugin];
 
   static onActivate(): void {
     metrics = getMetricsFromHash();
   }
 
   async onTraceLoad(ctx: Trace) {
-    ctx.addEventListener('traceready', () => {
-      ctx.commands.registerCommand({
-        id: 'dev.perfetto.PinAndroidPerfMetrics#PinAndroidPerfMetrics',
-        name: 'Add and Pin: Jank Metric Slice',
-        callback: async (metric) => {
-          metric = prompt('Metrics names (separated by comma)', '');
-          if (metric === null) return;
-          const metricList = metric.split(',');
-          this.callHandlers(metricList, ctx);
-        },
-      });
-      if (metrics.length !== 0) {
-        this.callHandlers(metrics, ctx);
-      }
+    ctx.commands.registerCommand({
+      id: 'dev.perfetto.PinAndroidPerfMetrics#PinAndroidPerfMetrics',
+      name: 'Add and Pin: Jank Metric Slice',
+      callback: async (metric) => {
+        metric = prompt('Metrics names (separated by comma)', '');
+        if (metric === null) return;
+        const metricList = metric.split(',');
+        this.callHandlers(metricList, ctx);
+      },
     });
+    if (metrics.length !== 0) {
+      this.callHandlers(metrics, ctx);
+    }
   }
 
   private async callHandlers(metricsList: string[], ctx: Trace) {

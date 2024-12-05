@@ -15,7 +15,7 @@
 import {NUM, STR} from '../../trace_processor/query_result';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin} from '../../public/plugin';
-import {addDebugSliceTrack} from '../../public/debug_tracks';
+import {addDebugSliceTrack} from '../../components/tracks/debug_tracks';
 
 export default class implements PerfettoPlugin {
   static readonly id = 'dev.perfetto.AndroidClientServer';
@@ -188,19 +188,17 @@ export default class implements PerfettoPlugin {
           name: STR,
         });
         for (; it.valid(); it.next()) {
-          await addDebugSliceTrack(
-            ctx,
-            {
+          await addDebugSliceTrack({
+            trace: ctx,
+            data: {
               sqlSource: `
                 SELECT ts, dur, name
                 FROM __enhanced_binder_for_slice_${sliceId}
                 WHERE binder_id = ${it.id}
               `,
             },
-            it.name,
-            {ts: 'ts', dur: 'dur', name: 'name'},
-            [],
-          );
+            title: it.name,
+          });
         }
       },
     });
