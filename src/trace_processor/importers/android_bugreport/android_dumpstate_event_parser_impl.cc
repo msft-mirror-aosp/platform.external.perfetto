@@ -286,16 +286,101 @@ base::Status AndroidDumpstateEventParserImpl::ProcessBatteryStatsHistoryItem(
     }
     return base::OkStatus();
   } else if (!key.StartsWith("+") && !key.StartsWith("-") && !value.empty()) {
+    // AndroidProbesParser will use the empty string for the battery name if no
+    // battery name is associated with the data, which is common on most pixel
+    // phones. Adopt the same convention here. Battery stats does not provide
+    // a battery name in the checking format, so we'll always have an unknown
+    // battery.
+    const base::StringView kUnknownBatteryName = "";
+
     // process history state of form "state=12345" or "state=abcde"
+    TrackId counter_track;
     uint64_t counter_value;
-    ASSIGN_OR_RETURN(item_name,
-                     GetStateAndValueFromShortName(key, value, &counter_value));
-    TrackId track = context_->track_tracker->InternTrack(
-        tracks::kAndroidBatteryStatsBlueprint,
-        tracks::Dimensions(
-            base::StringView(std::string("battery_stats.").append(item_name))));
+    base::StatusOr<std::string> possible_history_state_item =
+        GetStateAndValueFromShortName(key, value, &counter_value);
+    if (possible_history_state_item.ok()) {
+      item_name = possible_history_state_item.value();
+      counter_track = context_->track_tracker->InternTrack(
+          tracks::kAndroidBatteryStatsBlueprint,
+          tracks::Dimensions(base::StringView(
+              std::string("battery_stats.").append(item_name))));
+    } else if (key == "Bl") {
+      counter_track = context_->track_tracker->InternTrack(
+          tracks::kBatteryCounterBlueprint,
+          tracks::Dimensions(kUnknownBatteryName, "capacity_pct"));
+      ASSIGN_OR_RETURN(counter_value, StringToStatusOrUInt64(value));
+    } else if (key == "Bcc") {
+      counter_track = context_->track_tracker->InternTrack(
+          tracks::kBatteryCounterBlueprint,
+          tracks::Dimensions(kUnknownBatteryName, "charge_uah"));
+      ASSIGN_OR_RETURN(counter_value, StringToStatusOrUInt64(value));
+      // battery stats gives us charge in milli-amp-hours, but the track
+      // expects the value to be in micro-amp-hours
+      counter_value *= 1000;
+    } else if (key == "Bv") {
+      counter_track = context_->track_tracker->InternTrack(
+          tracks::kBatteryCounterBlueprint,
+          tracks::Dimensions(kUnknownBatteryName, "voltage_uv"));
+      ASSIGN_OR_RETURN(counter_value, StringToStatusOrUInt64(value));
+      // battery stats gives us charge in milli-volts, but the track
+      // expects the value to be in micro-volts
+      counter_value *= 1000;
+    } else if (key == "Bs") {
+      static constexpr auto kBatteryStatusBlueprint = tracks::CounterBlueprint(
+          "battery_status", tracks::UnknownUnitBlueprint(),
+          tracks::DimensionBlueprints(),
+          tracks::StaticNameBlueprint("BatteryStatus"));
+      counter_track =
+          context_->track_tracker->InternTrack(kBatteryStatusBlueprint);
+      switch (value.at(0)) {
+        case '?':
+          counter_value = 1;  // BatteryManager.BATTERY_STATUS_UNKNOWN
+          break;
+        case 'c':
+          counter_value = 2;  // BatteryManager.BATTERY_STATUS_CHARGING
+          break;
+        case 'd':
+          counter_value = 3;  // BatteryManager.BATTERY_STATUS_DISCHARGING
+          break;
+        case 'n':
+          counter_value = 4;  // BatteryManager.BATTERY_STATUS_NOT_CHARGING
+          break;
+        case 'f':
+          counter_value = 5;  // BatteryManager.BATTERY_STATUS_FULL
+          break;
+        default:
+          PERFETTO_ELOG("unknown battery status: %c", value.at(0));
+          counter_value = 0;  // not a valid enum
+      }
+    } else if (key == "Bp") {
+      static constexpr auto kPluggedStatusBluePrint = tracks::CounterBlueprint(
+          "battery_plugged_status", tracks::UnknownUnitBlueprint(),
+          tracks::DimensionBlueprints(),
+          tracks::StaticNameBlueprint("PlugType"));
+      counter_track =
+          context_->track_tracker->InternTrack(kPluggedStatusBluePrint);
+      switch (value.at(0)) {
+        case 'n':
+          counter_value = 0;  // BatteryManager.BATTERY_PLUGGED_NONE
+          break;
+        case 'a':
+          counter_value = 1;  // BatteryManager.BATTERY_PLUGGED_AC
+          break;
+        case 'u':
+          counter_value = 2;  // BatteryManager.BATTERY_PLUGGED_USB
+          break;
+        case 'w':
+          counter_value = 4;  // BatteryManager.BATTERY_PLUGGED_WIRELESS
+          break;
+        default:
+          counter_value = 0;  // BatteryManager.BATTERY_PLUGGED_NONE
+      }
+    } else {
+      return base::ErrStatus("Unhandled event");
+    }
+
     context_->event_tracker->PushCounter(ts, static_cast<double>(counter_value),
-                                         track);
+                                         counter_track);
     return base::OkStatus();
   } else {
     return base::ErrStatus("Unhandled event");
