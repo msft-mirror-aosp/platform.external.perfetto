@@ -12,20 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {time} from '../base/time';
-import {Note, SpanNote} from '../public/note';
-import {randomColor} from './colorizer';
+import {
+  AddNoteArgs,
+  AddSpanNoteArgs,
+  Note,
+  NoteManager,
+  SpanNote,
+} from '../public/note';
+import {randomColor} from '../components/colorizer';
 import {raf} from './raf_scheduler';
-import {SelectionManagerImpl} from './selection_manager';
 
-export class NoteManagerImpl {
+export class NoteManagerImpl implements NoteManager {
   private _lastNodeId = 0;
   private _notes = new Map<string, Note | SpanNote>();
-  private _selectionManager: SelectionManagerImpl;
 
-  constructor(selectionManager: SelectionManagerImpl) {
-    this._selectionManager = selectionManager;
-  }
+  // This function is wired up to clear the SelectionManager state if the
+  // current selection is a note.
+  // TODO(primiano): figure out some better (de-)coupling here.
+  // We cannot pass SelectionManager in our constructor because doing so would
+  // create a cyclic ctor dependency (SelectionManager requires NoteManager in
+  // its ctor). There is a 2way logical dependency between NoteManager and
+  // SelectionManager:
+  // 1. SM needs NM to handle SM.findTimeRangeOfSelection(), for [M]ark.
+  // 2. NM needs SM to tell it that a note has been delete and should be
+  //   deselected if it was currently selected.
+  onNoteDeleted?: (nodeId: string) => void;
 
   get notes(): ReadonlyMap<string, Note | SpanNote> {
     return this._notes;
@@ -35,49 +46,27 @@ export class NoteManagerImpl {
     return this._notes.get(id);
   }
 
-  addNote(args: {
-    timestamp: time;
-    color: string;
-    id?: string;
-    text?: string;
-  }): string {
-    const {
-      timestamp,
-      color,
-      id = `note_${++this._lastNodeId}`,
-      text = '',
-    } = args;
+  addNote(args: AddNoteArgs): string {
+    const id = args.id ?? `note_${++this._lastNodeId}`;
     this._notes.set(id, {
+      ...args,
       noteType: 'DEFAULT',
       id,
-      timestamp,
-      color,
-      text,
+      color: args.color ?? randomColor(),
+      text: args.text ?? '',
     });
     raf.scheduleFullRedraw();
     return id;
   }
 
-  addSpanNote(args: {
-    start: time;
-    end: time;
-    id?: string;
-    color?: string;
-  }): string {
-    const {
-      id = `note_${++this._lastNodeId}`,
-      color = randomColor(),
-      end,
-      start,
-    } = args;
-
+  addSpanNote(args: AddSpanNoteArgs): string {
+    const id = args.id ?? `note_${++this._lastNodeId}`;
     this._notes.set(id, {
+      ...args,
       noteType: 'SPAN',
-      start,
-      end,
-      color,
       id,
-      text: '',
+      color: args.color ?? randomColor(),
+      text: args.text ?? '',
     });
     raf.scheduleFullRedraw();
     return id;
@@ -96,13 +85,8 @@ export class NoteManagerImpl {
   }
 
   removeNote(id: string) {
-    this._notes.delete(id);
-    if (
-      this._selectionManager.selection.kind === 'note' &&
-      this._selectionManager.selection.id === id
-    ) {
-      this._selectionManager.clear();
-    }
     raf.scheduleFullRedraw();
+    this._notes.delete(id);
+    this.onNoteDeleted?.(id);
   }
 }

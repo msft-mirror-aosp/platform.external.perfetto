@@ -23,21 +23,24 @@ CREATE PERFETTO FUNCTION _get_frame_table_with_id(
     -- String just before id.
     glob_str STRING
 ) RETURNS TABLE (
-    -- `slice.id` of the frame slice.
-    id INT,
+    -- Frame slice.
+    id JOINID(slice.id),
     -- Parsed frame id.
-    frame_id INT,
+    frame_id LONG,
     -- Utid.
-    utid INT,
+    utid JOINID(thread.id),
     -- Upid.
-    upid INT
+    upid JOINID(process.id),
+    -- Timestamp of the frame slice.
+    ts TIMESTAMP
 ) AS
 WITH all_found AS (
     SELECT
         id,
         cast_int!(STR_SPLIT(name, ' ', 1)) AS frame_id,
         utid,
-        upid
+        upid,
+        ts
     FROM thread_slice
     -- Mostly the frame slice is at depth 0. Though it could be pushed to depth 1 while users
     -- enable low layer trace e.g. atrace_app.
@@ -50,20 +53,25 @@ WHERE frame_id != 0;
 
 -- All of the `Choreographer#doFrame` slices with their frame id.
 CREATE PERFETTO TABLE android_frames_choreographer_do_frame(
-    -- `slice.id`
-    id INT,
-    -- Frame id
-    frame_id INT,
+    -- Choreographer#doFrame slice. Slice with the name "Choreographer#doFrame
+    -- {frame id}".
+    id JOINID(slice.id),
+    -- Frame id. Taken as the value behind "Choreographer#doFrame" in slice
+    -- name.
+    frame_id LONG,
     -- Utid of the UI thread
-    ui_thread_utid INT,
+    ui_thread_utid JOINID(thread.id),
     -- Upid of application process
-    upid INT
+    upid JOINID(process.id),
+    -- Timestamp of the slice.
+    ts TIMESTAMP
 ) AS
 SELECT
     id,
     frame_id,
     utid AS ui_thread_utid,
-    upid
+    upid,
+    ts
 -- Some OEMs have customized `doFrame` to add more information, but we've only
 -- observed it added after the frame ID (b/303823815).
 FROM _get_frame_table_with_id('Choreographer#doFrame*');
@@ -73,14 +81,15 @@ FROM _get_frame_table_with_id('Choreographer#doFrame*');
 -- This happens when we are drawing multiple layers (e.g. status bar and
 -- notifications).
 CREATE PERFETTO TABLE android_frames_draw_frame(
-    -- `slice.id`
-    id INT,
-    -- Frame id
-    frame_id INT,
+    -- DrawFrame slice. Slice with the name "DrawFrame {frame id}".
+    id JOINID(slice.id),
+    -- Frame id. Taken as the value behind "DrawFrame" in slice
+    -- name.
+    frame_id LONG,
     -- Utid of the render thread
-    render_thread_utid INT,
+    render_thread_utid JOINID(thread.id),
     -- Upid of application process
-    upid INT
+    upid JOINID(process.id)
 ) AS
 SELECT
     id,
@@ -118,31 +127,33 @@ GROUP BY 1;
 -- See https://perfetto.dev/docs/data-sources/frametimeline for details.
 CREATE PERFETTO TABLE android_frames(
     -- Frame id.
-    frame_id INT,
+    frame_id LONG,
     -- Timestamp of the frame. Start of the frame as defined by the start of
     -- "Choreographer#doFrame" slice and the same as the start of the frame in
     -- `actual_frame_timeline_slice if present.
-    ts INT,
+    ts TIMESTAMP,
     -- Duration of the frame, as defined by the duration of the corresponding
     -- `actual_frame_timeline_slice` or, if not present the time between the
     -- `ts` and the end of the final `DrawFrame`.
-    dur INT,
-    -- `slice.id` of "Choreographer#doFrame" slice.
-    do_frame_id INT,
-    -- `slice.id` of "DrawFrame" slice.
-    draw_frame_id INT,
-    -- `slice.id` from `actual_frame_timeline_slice`
-    actual_frame_timeline_id INT,
-    -- `slice.id` from `expected_frame_timeline_slice`
-    expected_frame_timeline_id INT,
+    dur DURATION,
+    -- "Choreographer#doFrame" slice. The slice with name 
+    -- "Choreographer#doFrame" corresponding to this frame.
+    do_frame_id JOINID(slice.id),
+    -- "DrawFrame" slice. The slice with name "DrawFrame" corresponding to this
+    -- frame.
+    draw_frame_id JOINID(slice.id),
+    -- actual_frame_timeline_slice` slice related to this frame.
+    actual_frame_timeline_id JOINID(slice.id),
+    -- `expected_frame_timeline_slice` slice related to this frame.
+    expected_frame_timeline_id JOINID(slice.id),
     -- `utid` of the render thread.
-    render_thread_utid INT,
+    render_thread_utid JOINID(thread.id),
     -- `utid` of the UI thread.
-    ui_thread_utid INT,
+    ui_thread_utid JOINID(thread.id),
     -- Count of slices in `actual_frame_timeline_slice` related to this frame.
-    actual_frame_timeline_count INT,
+    actual_frame_timeline_count LONG,
     -- Count of slices in `expected_frame_timeline_slice` related to this frame.
-    expected_frame_timeline_count INT
+    expected_frame_timeline_count LONG
 ) AS
 WITH fallback AS MATERIALIZED (
     SELECT
@@ -208,26 +219,28 @@ WHERE sdk = IIF(
 -- most one row.
 CREATE PERFETTO FUNCTION android_first_frame_after(
     -- Timestamp.
-    ts INT)
+    ts TIMESTAMP)
 RETURNS TABLE (
     -- Frame id.
-    frame_id INT,
+    frame_id LONG,
     -- Start of the frame, the timestamp of the "Choreographer#doFrame" slice.
-    ts INT,
+    ts TIMESTAMP,
     -- Duration of the frame.
-    dur INT,
-    -- `slice.id` of "Choreographer#doFrame" slice.
-    do_frame_id INT,
-    -- `slice.id` of "DrawFrame" slice.
-    draw_frame_id INT,
-    -- `slice.id` from `actual_frame_timeline_slice`
-    actual_frame_timeline_id INT,
-    -- `slice.id` from `expected_frame_timeline_slice`
-    expected_frame_timeline_id INT,
+    dur DURATION,
+    -- "Choreographer#doFrame" slice. The slice with name 
+    -- "Choreographer#doFrame" corresponding to this frame.
+    do_frame_id JOINID(slice.id),
+    -- "DrawFrame" slice. The slice with name "DrawFrame" corresponding to this
+    -- frame.
+    draw_frame_id JOINID(slice.id),
+    -- actual_frame_timeline_slice` slice related to this frame.
+    actual_frame_timeline_id JOINID(slice.id),
+    -- `expected_frame_timeline_slice` slice related to this frame.
+    expected_frame_timeline_id JOINID(slice.id),
     -- `utid` of the render thread.
-    render_thread_utid INT,
+    render_thread_utid JOINID(thread.id),
     -- `utid` of the UI thread.
-    ui_thread_utid INT
+    ui_thread_utid JOINID(thread.id)
 ) AS
 SELECT
     frame_id,

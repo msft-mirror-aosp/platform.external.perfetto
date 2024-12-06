@@ -16,24 +16,31 @@
 
 #include "src/trace_processor/importers/systrace/systrace_parser.h"
 
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
 #include "src/trace_processor/importers/common/async_track_set_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/common/tracks.h"
+#include "src/trace_processor/importers/common/tracks_common.h"
+#include "src/trace_processor/importers/common/tracks_internal.h"
+#include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/tables/slice_tables_py.h"
+#include "src/trace_processor/types/variadic.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 SystraceParser::SystraceParser(TraceProcessorContext* ctx)
     : context_(ctx),
       lmk_id_(ctx->storage->InternString("mem.lmk")),
-      oom_score_adj_id_(ctx->storage->InternString("oom_score_adj")),
-      screen_state_id_(ctx->storage->InternString("ScreenState")),
       cookie_id_(ctx->storage->InternString("cookie")) {}
 
 SystraceParser::~SystraceParser() = default;
@@ -270,24 +277,24 @@ void SystraceParser::ParseSystracePoint(
         if (killed_pid != 0) {
           UniquePid killed_upid =
               context_->process_tracker->GetOrCreateProcess(killed_pid);
-          TrackId track =
-              context_->track_tracker->InternProcessTrack(killed_upid);
+          TrackId track = context_->track_tracker->InternProcessTrack(
+              tracks::android_lmk, killed_upid);
           context_->slice_tracker->Scoped(ts, track, kNullStringId, lmk_id_, 0);
         }
         // TODO(lalitm): we should not add LMK events to the counters table
         // once the UI has support for displaying instants.
       } else if (point.name == "ScreenState") {
         // Promote ScreenState to its own top level counter.
-        TrackId track = context_->track_tracker->InternGlobalCounterTrack(
-            TrackTracker::Group::kDeviceState, screen_state_id_);
+        TrackId track = context_->track_tracker->InternTrack(
+            tracks::kAndroidScreenStateBlueprint);
         context_->event_tracker->PushCounter(
             ts, static_cast<double>(point.int_value), track);
         return;
       } else if (point.name.StartsWith("battery_stats.")) {
         // Promote battery_stats conters to global tracks.
-        StringId name_id = context_->storage->InternString(point.name);
-        TrackId track = context_->track_tracker->InternGlobalCounterTrack(
-            TrackTracker::Group::kPower, name_id);
+        TrackId track = context_->track_tracker->InternTrack(
+            tracks::kAndroidBatteryStatsBlueprint,
+            tracks::Dimensions(point.name));
         context_->event_tracker->PushCounter(
             ts, static_cast<double>(point.int_value), track);
         return;
@@ -296,11 +303,11 @@ void SystraceParser::ParseSystracePoint(
       // This is per upid on purpose. Some long-standing counters are pushed
       // from arbitrary threads but expect to be per process (b/123560328).
       // This affects both userspace and kernel counters.
-      StringId name_id = context_->storage->InternString(point.name);
       UniquePid upid =
           context_->process_tracker->GetOrCreateProcess(point.tgid);
-      TrackId track_id =
-          context_->track_tracker->InternProcessCounterTrack(name_id, upid);
+      TrackId track_id = context_->track_tracker->InternTrack(
+          tracks::kAndroidAtraceCounterBlueprint,
+          tracks::Dimensions(upid, point.name));
       context_->event_tracker->PushCounter(
           ts, static_cast<double>(point.int_value), track_id);
     }
@@ -325,16 +332,17 @@ void SystraceParser::PostProcessSpecialSliceBegin(int64_t ts,
 
     UniquePid killed_upid =
         context_->process_tracker->GetOrCreateProcess(*killed_pid);
+
     // Add the oom score entry
-    TrackId counter_track = context_->track_tracker->InternProcessCounterTrack(
-        oom_score_adj_id_, killed_upid);
+    TrackId counter_track = context_->track_tracker->InternTrack(
+        tracks::kOomScoreAdjBlueprint, tracks::Dimensions(killed_upid));
     context_->event_tracker->PushCounter(ts, *oom_score_adj, counter_track);
 
     // Add mem.lmk instant event for consistency with other methods.
-    TrackId track = context_->track_tracker->InternProcessTrack(killed_upid);
+    TrackId track = context_->track_tracker->InternProcessTrack(
+        tracks::android_lmk, killed_upid);
     context_->slice_tracker->Scoped(ts, track, kNullStringId, lmk_id_, 0);
   }
 }
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

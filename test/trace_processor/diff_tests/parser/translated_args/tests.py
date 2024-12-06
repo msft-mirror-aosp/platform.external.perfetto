@@ -93,6 +93,12 @@ class TranslatedArgs(TestSuite):
         query=Path('chrome_args_test.sql'),
         out=Path('chrome_performance_mark.out'))
 
+  def test_chrome_trigger(self):
+    return DiffTestBlueprint(
+        trace=Path('chrome_trigger.textproto'),
+        query=Path('chrome_args_test.sql'),
+        out=Path('chrome_trigger.out'))
+
   def test_slice_name(self):
     return DiffTestBlueprint(
         trace=Path('slice_name.textproto'),
@@ -125,12 +131,13 @@ class TranslatedArgs(TestSuite):
     return DiffTestBlueprint(
         trace=Path('process_track_name.textproto'),
         query="""
-        SELECT
-          name
-        FROM track
-        WHERE
-          name IS NOT NULL
-          AND type in ('process_track', 'process_counter_track')
+        SELECT name
+        FROM process_track
+        WHERE name IS NOT NULL
+        UNION ALL
+        SELECT name
+        FROM process_counter_track
+        WHERE name IS NOT NULL
         ORDER BY name;
         """,
         out=Csv("""

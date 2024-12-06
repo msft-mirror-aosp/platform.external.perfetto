@@ -18,6 +18,7 @@
 
 #include <bitset>
 
+#include "perfetto/base/thread_annotations.h"
 #include "perfetto/tracing/buffer_exhausted_policy.h"
 #include "perfetto/tracing/data_source.h"
 #include "perfetto/tracing/internal/basic_types.h"
@@ -68,8 +69,8 @@ struct PerfettoDsImpl {
   DataSourceType cpp_type;
   std::atomic<bool> enabled{false};
   std::mutex mu;
-  // Guarded by mu
-  std::bitset<perfetto::internal::kMaxDataSourceInstances> enabled_instances;
+  std::bitset<perfetto::internal::kMaxDataSourceInstances> enabled_instances
+      PERFETTO_GUARDED_BY(mu);
 
   bool IsRegistered() {
     return cpp_type.static_state()->index !=
@@ -401,8 +402,10 @@ void* PerfettoDsImplGetInstanceLocked(struct PerfettoDsImpl* ds_impl,
 
 void PerfettoDsImplReleaseInstanceLocked(struct PerfettoDsImpl* ds_impl,
                                          PerfettoDsInstanceIndex idx) {
-  auto* internal_state = ds_impl->cpp_type.static_state()->TryGet(idx);
-  PERFETTO_CHECK(internal_state);
+  // The `valid_instances` bitmap might have changed since the lock has been
+  // taken, but the instance must still be alive (we were holding the lock on
+  // it).
+  auto* internal_state = ds_impl->cpp_type.static_state()->GetUnsafe(idx);
   internal_state->lock.unlock();
 }
 

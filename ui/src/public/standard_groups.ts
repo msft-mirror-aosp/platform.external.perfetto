@@ -12,50 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {GroupNode, Workspace} from './workspace';
+import {TrackNode, TrackNodeArgs, Workspace} from './workspace';
 
 /**
- * Gets or creates a group for a given process given the normal grouping
- * conventions.
+ * Gets or creates a group for user interaction
  *
- * @param workspace - The workspace to search for the group on.
- * @param upid - The upid of teh process to find.
+ * @param workspace - The workspace on which to create the group.
  */
-export function getOrCreateGroupForProcess(
+export function getOrCreateUserInteractionGroup(
   workspace: Workspace,
-  upid: number,
-): GroupNode {
-  const uri = `process${upid}`;
-  const group = workspace.getGroupByUri(uri);
-  if (group) {
-    return group;
-  } else {
-    const group = new GroupNode(`Process ${upid}`);
-    group.uri = uri;
-    workspace.insertChildInOrder(group);
-    return group;
-  }
+): TrackNode {
+  return getOrCreateGroup(workspace, 'user_interaction', {
+    title: 'User Interaction',
+    collapsed: false, // Expand this by default
+    isSummary: true,
+  });
 }
 
-/**
- * Gets or creates a group for a given thread given the normal grouping
- * conventions.
- *
- * @param workspace - The workspace to search for the group on.
- * @param utid - The utid of the thread to find.
- */
-export function getOrCreateGroupForThread(
+// Internal utility function to avoid duplicating the logic to get or create a
+// group by ID.
+function getOrCreateGroup(
   workspace: Workspace,
-  utid: number,
-): GroupNode {
-  const uri = `thread${utid}`;
-  const group = workspace.getGroupByUri(uri);
+  id: string,
+  args?: Omit<Partial<TrackNodeArgs>, 'id'>,
+): TrackNode {
+  const group = workspace.getTrackById(id);
   if (group) {
     return group;
   } else {
-    const group = new GroupNode(`Thread ${utid}`);
-    group.uri = uri;
-    workspace.insertChildInOrder(group);
+    const group = new TrackNode({id, ...args});
+    workspace.addChildInOrder(group);
     return group;
   }
 }

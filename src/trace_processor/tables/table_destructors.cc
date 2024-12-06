@@ -16,10 +16,12 @@
 
 #include "src/trace_processor/tables/android_tables_py.h"
 #include "src/trace_processor/tables/counter_tables_py.h"
+#include "src/trace_processor/tables/etm_tables_py.h"
 #include "src/trace_processor/tables/flow_tables_py.h"
 #include "src/trace_processor/tables/jit_tables_py.h"
 #include "src/trace_processor/tables/memory_tables_py.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
+#include "src/trace_processor/tables/perf_tables_py.h"
 #include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/tables/sched_tables_py.h"
 #include "src/trace_processor/tables/slice_tables_py.h"
@@ -47,6 +49,11 @@ AndroidInputEventDispatchTable::~AndroidInputEventDispatchTable() = default;
 // counter_tables_py.h
 CounterTable::~CounterTable() = default;
 
+// etm_tables.py
+EtmV4ConfigurationTable::~EtmV4ConfigurationTable() = default;
+EtmV4SessionTable::~EtmV4SessionTable() = default;
+EtmV4TraceTable::~EtmV4TraceTable() = default;
+
 // jit_tables.py
 JitCodeTable::~JitCodeTable() = default;
 JitFrameTable::~JitFrameTable() = default;
@@ -65,6 +72,10 @@ FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 MachineTable::~MachineTable() = default;
 TraceFileTable::~TraceFileTable() = default;
+
+// perf_tables.py
+MmapRecordTable::~MmapRecordTable() = default;
+SpeRecordTable::~SpeRecordTable() = default;
 
 // profiler_tables_py.h
 StackProfileMappingTable::~StackProfileMappingTable() = default;
@@ -106,20 +117,6 @@ ProcessTrackTable::~ProcessTrackTable() = default;
 ThreadTrackTable::~ThreadTrackTable() = default;
 CpuTrackTable::~CpuTrackTable() = default;
 GpuTrackTable::~GpuTrackTable() = default;
-UidTrackTable::~UidTrackTable() = default;
-GpuWorkPeriodTrackTable::~GpuWorkPeriodTrackTable() = default;
-CounterTrackTable::~CounterTrackTable() = default;
-ThreadCounterTrackTable::~ThreadCounterTrackTable() = default;
-ProcessCounterTrackTable::~ProcessCounterTrackTable() = default;
-CpuCounterTrackTable::~CpuCounterTrackTable() = default;
-IrqCounterTrackTable::~IrqCounterTrackTable() = default;
-SoftirqCounterTrackTable::~SoftirqCounterTrackTable() = default;
-GpuCounterTrackTable::~GpuCounterTrackTable() = default;
-PerfCounterTrackTable::~PerfCounterTrackTable() = default;
-EnergyCounterTrackTable::~EnergyCounterTrackTable() = default;
-UidCounterTrackTable::~UidCounterTrackTable() = default;
-EnergyPerUidCounterTrackTable::~EnergyPerUidCounterTrackTable() = default;
-LinuxDeviceTrackTable::~LinuxDeviceTrackTable() = default;
 
 // trace_proto_tables_py.h
 ExperimentalProtoPathTable::~ExperimentalProtoPathTable() = default;
