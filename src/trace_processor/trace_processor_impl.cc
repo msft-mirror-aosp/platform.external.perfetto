@@ -46,6 +46,8 @@
 #include "perfetto/trace_processor/iterator.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor.h"
+#include "src/trace_processor/importers/android_bugreport/android_dumpstate_reader.h"
+#include "src/trace_processor/importers/android_bugreport/android_dumpstate_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_reader.h"
 #include "src/trace_processor/importers/archive/gzip_trace_parser.h"
@@ -140,6 +142,12 @@
 #if PERFETTO_BUILDFLAG(PERFETTO_TP_INSTRUMENTS)
 #include "src/trace_processor/importers/instruments/instruments_xml_tokenizer.h"
 #include "src/trace_processor/importers/instruments/row_parser.h"
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ENABLE_ETM_IMPORTER)
+#include "src/trace_processor/importers/etm/etm_tracker.h"
+#include "src/trace_processor/importers/etm/etm_v4_stream_demultiplexer.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/operators/etm_decode_trace_vtable.h"
 #endif
 
 #include "protos/perfetto/common/builtin_clock.pbzero.h"
@@ -397,6 +405,11 @@ std::pair<int64_t, int64_t> GetTraceTimestampBoundsNs(
 
 TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
     : TraceProcessorStorageImpl(cfg), config_(cfg) {
+  context_.reader_registry->RegisterTraceReader<AndroidDumpstateReader>(
+      kAndroidDumpstateTraceType);
+  context_.android_dumpstate_event_parser =
+      std::make_unique<AndroidDumpstateEventParserImpl>(&context_);
+
   context_.reader_registry->RegisterTraceReader<AndroidLogReader>(
       kAndroidLogcatTraceType);
   context_.android_log_event_parser =
@@ -466,6 +479,11 @@ TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
     context_.content_analyzer =
         std::make_unique<ProtoContentAnalyzer>(&context_);
   }
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ENABLE_ETM_IMPORTER)
+  perf_importer::PerfTracker::GetOrCreate(&context_)->RegisterAuxTokenizer(
+      PERF_AUXTRACE_CS_ETM, etm::CreateEtmV4StreamDemultiplexer);
+#endif
 
   // Add metrics to descriptor pool
   const std::vector<std::string> sanitized_extension_paths =
@@ -540,6 +558,12 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
 
   // Last opportunity to flush all pending data.
   Flush();
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ENABLE_ETM_IMPORTER)
+  if (context_.etm_tracker) {
+    RETURN_IF_ERROR(etm::EtmTracker::GetOrCreate(&context_)->Finalize());
+  }
+#endif
 
   RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
   if (context_.perf_tracker) {
@@ -879,6 +903,11 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   engine_->sqlite_engine()->RegisterVirtualTableModule<SliceMipmapOperator>(
       "__intrinsic_slice_mipmap",
       std::make_unique<SliceMipmapOperator::Context>(engine_.get()));
+#if PERFETTO_BUILDFLAG(PERFETTO_ENABLE_ETM_IMPORTER)
+  engine_->sqlite_engine()
+      ->RegisterVirtualTableModule<etm::EtmDecodeTraceVtable>(
+          "__intrinsic_etm_decode_trace", storage);
+#endif
 
   // Register stdlib packages.
   auto packages = GetStdlibPackages();
@@ -943,13 +972,7 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   RegisterStaticTable(storage->mutable_counter_table());
 
-  RegisterStaticTable(storage->mutable_counter_track_table());
-  RegisterStaticTable(storage->mutable_process_counter_track_table());
-  RegisterStaticTable(storage->mutable_thread_counter_track_table());
-  RegisterStaticTable(storage->mutable_cpu_counter_track_table());
-  RegisterStaticTable(storage->mutable_gpu_counter_track_table());
   RegisterStaticTable(storage->mutable_gpu_counter_group_table());
-  RegisterStaticTable(storage->mutable_perf_counter_track_table());
 
   RegisterStaticTable(storage->mutable_heap_graph_object_table());
   RegisterStaticTable(storage->mutable_heap_graph_reference_table());
@@ -994,6 +1017,10 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
 
   RegisterStaticTable(storage->mutable_jit_code_table());
   RegisterStaticTable(storage->mutable_jit_frame_table());
+
+  RegisterStaticTable(storage->mutable_etm_v4_configuration_table());
+  RegisterStaticTable(storage->mutable_etm_v4_session_table());
+  RegisterStaticTable(storage->mutable_etm_v4_trace_table());
 
   RegisterStaticTable(storage->mutable_spe_record_table());
   RegisterStaticTable(storage->mutable_mmap_record_table());
