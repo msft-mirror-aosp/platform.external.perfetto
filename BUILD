@@ -3450,6 +3450,7 @@ perfetto_cc_tp_tables(
     srcs = [
         "src/trace_processor/tables/android_tables.py",
         "src/trace_processor/tables/counter_tables.py",
+        "src/trace_processor/tables/etm_tables.py",
         "src/trace_processor/tables/flow_tables.py",
         "src/trace_processor/tables/jit_tables.py",
         "src/trace_processor/tables/memory_tables.py",
@@ -3466,6 +3467,7 @@ perfetto_cc_tp_tables(
     outs = [
         "src/trace_processor/tables/android_tables_py.h",
         "src/trace_processor/tables/counter_tables_py.h",
+        "src/trace_processor/tables/etm_tables_py.h",
         "src/trace_processor/tables/flow_tables_py.h",
         "src/trace_processor/tables/jit_tables_py.h",
         "src/trace_processor/tables/memory_tables_py.h",
