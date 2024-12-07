@@ -46,6 +46,7 @@
 #include "perfetto/trace_processor/iterator.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor.h"
+#include "src/trace_processor/importers/android_bugreport/android_dumpstate_reader.h"
 #include "src/trace_processor/importers/android_bugreport/android_dumpstate_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_event_parser_impl.h"
 #include "src/trace_processor/importers/android_bugreport/android_log_reader.h"
@@ -144,6 +145,7 @@
 #endif
 
 #if PERFETTO_BUILDFLAG(PERFETTO_ENABLE_ETM_IMPORTER)
+#include "src/trace_processor/importers/etm/etm_tracker.h"
 #include "src/trace_processor/importers/etm/etm_v4_stream_demultiplexer.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/operators/etm_decode_trace_vtable.h"
 #endif
@@ -403,6 +405,8 @@ std::pair<int64_t, int64_t> GetTraceTimestampBoundsNs(
 
 TraceProcessorImpl::TraceProcessorImpl(const Config& cfg)
     : TraceProcessorStorageImpl(cfg), config_(cfg) {
+  context_.reader_registry->RegisterTraceReader<AndroidDumpstateReader>(
+      kAndroidDumpstateTraceType);
   context_.android_dumpstate_event_parser =
       std::make_unique<AndroidDumpstateEventParserImpl>(&context_);
 
@@ -554,6 +558,12 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
 
   // Last opportunity to flush all pending data.
   Flush();
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ENABLE_ETM_IMPORTER)
+  if (context_.etm_tracker) {
+    RETURN_IF_ERROR(etm::EtmTracker::GetOrCreate(&context_)->Finalize());
+  }
+#endif
 
   RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
   if (context_.perf_tracker) {
