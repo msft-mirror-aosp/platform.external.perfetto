@@ -12,13 +12,13 @@ INCLUDE PERFETTO MODULE chrome.scroll_jank.utils;
 -- type.
 CREATE PERFETTO TABLE _chrome_scroll_update_refs(
   -- Id of the Chrome input pipeline (`LatencyInfo.Flow`).
-  scroll_update_latency_id INT,
+  scroll_update_latency_id LONG,
   -- Id of the touch move input corresponding to this scroll update.
-  touch_move_latency_id INT,
+  touch_move_latency_id LONG,
   -- Id of the frame pipeline (`Graphics.Pipeline`), pre-surface aggregation.
-  surface_frame_id INT,
+  surface_frame_id LONG,
   -- Id of the frame pipeline (`Graphics.Pipeline`), post-surface aggregation.
-  display_trace_id INT)
+  display_trace_id LONG)
 AS
 SELECT
   scroll_update.latency_id AS scroll_update_latency_id,
@@ -53,6 +53,8 @@ SELECT
   chrome_event_latency.is_janky_scrolled_frame AS is_janky,
   chrome_event_latency.event_type
     = 'INERTIAL_GESTURE_SCROLL_UPDATE' AS is_inertial,
+  chrome_event_latency.event_type
+    = 'FIRST_GESTURE_SCROLL_UPDATE' AS is_first,
   chrome_event_latency.ts AS generation_ts,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   touch_move_received_step.slice_id AS touch_move_received_slice_id,
@@ -237,6 +239,7 @@ SELECT
   is_presented,
   is_janky,
   is_inertial,
+  is_first,
   coalesced_into IS NOT NULL AS is_coalesced,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   -- Ids
@@ -388,7 +391,7 @@ GROUP BY sa.scroll_id;
 -- Timestamps and durations for the critical path stages during scrolling.
 CREATE PERFETTO TABLE chrome_scroll_update_info(
   -- Id of the `LatencyInfo.Flow` slices corresponding to this scroll event.
-  id INT,
+  id LONG,
   -- Vsync interval (in milliseconds).
   vsync_interval_ms DOUBLE,
   -- Whether this input event was presented.
@@ -400,121 +403,124 @@ CREATE PERFETTO TABLE chrome_scroll_update_info(
   -- If this is `true`, "generation" and "touch_move" related timestamps and
   -- durations will be null.
   is_inertial BOOL,
+  -- Whether this is the first update in a scroll.
+  -- First scroll update can never be janky.
+  is_first BOOL,
   -- Whether the corresponding input event was coalesced into another.
   is_coalesced BOOL,
   -- Input generation timestamp (from the Android system).
-  generation_ts INT,
+  generation_ts TIMESTAMP,
   -- Duration from input generation to when the browser received the input.
-  generation_to_browser_main_dur INT,
+  generation_to_browser_main_dur DURATION,
   -- Utid for the browser main thread.
-  browser_utid INT,
+  browser_utid LONG,
   -- Slice id for the `STEP_SEND_INPUT_EVENT_UI` slice for the touch move.
-  touch_move_received_slice_id INT,
+  touch_move_received_slice_id LONG,
   -- Timestamp for the `STEP_SEND_INPUT_EVENT_UI` slice for the touch move.
-  touch_move_received_ts INT,
+  touch_move_received_ts TIMESTAMP,
   -- Duration for processing  a `TouchMove` event.
-  touch_move_processing_dur INT,
+  touch_move_processing_dur DURATION,
   -- Slice id for the `STEP_SEND_INPUT_EVENT_UI` slice for the gesture scroll.
-  scroll_update_created_slice_id INT,
+  scroll_update_created_slice_id LONG,
   -- Timestamp for the `STEP_SEND_INPUT_EVENT_UI` slice for the gesture scroll.
-  scroll_update_created_ts INT,
+  scroll_update_created_ts TIMESTAMP,
   -- Duration for creating a `GestureScrollUpdate` from a `TouchMove` event.
-  scroll_update_processing_dur INT,
+  scroll_update_processing_dur DURATION,
   -- End timestamp for the `STEP_SEND_INPUT_EVENT_UI` slice for the above.
-  scroll_update_created_end_ts INT,
+  scroll_update_created_end_ts TIMESTAMP,
   -- Duration between the browser and compositor dispatch.
-  browser_to_compositor_delay_dur INT,
+  browser_to_compositor_delay_dur DURATION,
   -- Utid for the renderer compositor thread.
-  compositor_utid INT,
+  compositor_utid LONG,
   -- Slice id for the `STEP_HANDLE_INPUT_EVENT_IMPL` slice.
-  compositor_dispatch_slice_id INT,
+  compositor_dispatch_slice_id LONG,
   -- Timestamp for the `STEP_HANDLE_INPUT_EVENT_IMPL` slice or the
   -- containing task (if available).
-  compositor_dispatch_ts INT,
+  compositor_dispatch_ts TIMESTAMP,
   -- Duration for the compositor dispatch itself.
-  compositor_dispatch_dur INT,
+  compositor_dispatch_dur DURATION,
   -- End timestamp for the `STEP_HANDLE_INPUT_EVENT_IMPL` slice.
-  compositor_dispatch_end_ts INT,
+  compositor_dispatch_end_ts TIMESTAMP,
   -- Duration between compositor dispatch and input resampling work.
-  compositor_dispatch_to_on_begin_frame_delay_dur INT,
+  compositor_dispatch_to_on_begin_frame_delay_dur DURATION,
   -- Slice id for the `STEP_RESAMPLE_SCROLL_EVENTS` slice.
-  compositor_resample_slice_id INT,
+  compositor_resample_slice_id LONG,
   -- Slice id for the `STEP_DID_HANDLE_INPUT_AND_OVERSCROLL` slice.
-  compositor_coalesced_input_handled_slice_id INT,
+  compositor_coalesced_input_handled_slice_id LONG,
   -- Start timestamp for work done on the input during "OnBeginFrame".
-  compositor_on_begin_frame_ts INT,
+  compositor_on_begin_frame_ts TIMESTAMP,
   -- Duration of the "OnBeginFrame" work for this input.
-  compositor_on_begin_frame_dur INT,
+  compositor_on_begin_frame_dur DURATION,
   -- End timestamp for work done on the input during "OnBeginFrame".
-  compositor_on_begin_frame_end_ts INT,
+  compositor_on_begin_frame_end_ts TIMESTAMP,
   -- Delay until the compositor work for generating the frame begins.
-  compositor_on_begin_frame_to_generation_delay_dur INT,
+  compositor_on_begin_frame_to_generation_delay_dur DURATION,
   -- Slice id for the `STEP_GENERATE_COMPOSITOR_FRAME` slice.
-  compositor_generate_compositor_frame_slice_id INT,
+  compositor_generate_compositor_frame_slice_id LONG,
   -- Timestamp for the `STEP_GENERATE_COMPOSITOR_FRAME` slice or the
   -- containing task (if available).
-  compositor_generate_compositor_frame_ts INT,
+  compositor_generate_compositor_frame_ts TIMESTAMP,
   -- Duration between generating and submitting the compositor frame.
-  compositor_generate_frame_to_submit_frame_dur INT,
+  compositor_generate_frame_to_submit_frame_dur DURATION,
   -- Slice id for the `STEP_SUBMIT_COMPOSITOR_FRAME` slice.
-  compositor_submit_compositor_frame_slice_id INT,
+  compositor_submit_compositor_frame_slice_id LONG,
   -- Timestamp for the `STEP_SUBMIT_COMPOSITOR_FRAME` slice.
-  compositor_submit_compositor_frame_ts INT,
+  compositor_submit_compositor_frame_ts TIMESTAMP,
   -- Duration for submitting the compositor frame (to viz).
-  compositor_submit_frame_dur INT,
+  compositor_submit_frame_dur DURATION,
   -- End timestamp for the `STEP_SUBMIT_COMPOSITOR_FRAME` slice.
-  compositor_submit_compositor_frame_end_ts INT,
+  compositor_submit_compositor_frame_end_ts TIMESTAMP,
   -- Delay when a compositor frame is sent from the renderer to viz.
-  compositor_to_viz_delay_dur INT,
+  compositor_to_viz_delay_dur DURATION,
   -- Utid for the viz compositor thread.
-  viz_compositor_utid INT,
+  viz_compositor_utid LONG,
   -- Slice id for the `STEP_RECEIVE_COMPOSITOR_FRAME` slice.
-  viz_receive_compositor_frame_slice_id INT,
+  viz_receive_compositor_frame_slice_id LONG,
   -- Timestamp for the `STEP_RECEIVE_COMPOSITOR_FRAME` slice or the
   -- containing task (if available).
-  viz_receive_compositor_frame_ts INT,
+  viz_receive_compositor_frame_ts TIMESTAMP,
   -- Duration of the viz work done on receiving the compositor frame.
-  viz_receive_compositor_frame_dur INT,
+  viz_receive_compositor_frame_dur DURATION,
   -- End timestamp for the `STEP_RECEIVE_COMPOSITOR_FRAME` slice.
-  viz_receive_compositor_frame_end_ts INT,
+  viz_receive_compositor_frame_end_ts TIMESTAMP,
   -- Duration between viz receiving the compositor frame to frame draw.
-  viz_wait_for_draw_dur INT,
+  viz_wait_for_draw_dur DURATION,
   -- Slice id for the `STEP_DRAW_AND_SWAP` slice.
-  viz_draw_and_swap_slice_id INT,
+  viz_draw_and_swap_slice_id LONG,
   -- Timestamp for the `STEP_DRAW_AND_SWAP` slice or the
   -- containing task (if available).
-  viz_draw_and_swap_ts INT,
+  viz_draw_and_swap_ts TIMESTAMP,
   -- Duration for the viz drawing/swapping work for this frame.
-  viz_draw_and_swap_dur INT,
+  viz_draw_and_swap_dur DURATION,
   -- Slice id for the `STEP_SEND_BUFFER_SWAP` slice.
-  viz_send_buffer_swap_slice_id INT,
+  viz_send_buffer_swap_slice_id LONG,
   -- End timestamp for the `STEP_SEND_BUFFER_SWAP` slice.
-  viz_send_buffer_swap_end_ts INT,
+  viz_send_buffer_swap_end_ts TIMESTAMP,
   -- Delay between viz work on compositor thread and `CompositorGpuThread`.
-  viz_to_gpu_delay_dur INT,
+  viz_to_gpu_delay_dur DURATION,
   -- Utid for the viz `CompositorGpuThread`.
-  viz_gpu_thread_utid INT,
+  viz_gpu_thread_utid LONG,
   -- Slice id for the `STEP_BUFFER_SWAP_POST_SUBMIT` slice.
-  viz_swap_buffers_slice_id INT,
+  viz_swap_buffers_slice_id LONG,
   -- Timestamp for the `STEP_BUFFER_SWAP_POST_SUBMIT` slice or the
   -- containing task (if available).
-  viz_swap_buffers_ts INT,
+  viz_swap_buffers_ts TIMESTAMP,
   -- Duration of frame buffer swapping work on viz.
-  viz_swap_buffers_dur INT,
+  viz_swap_buffers_dur DURATION,
   -- End timestamp for the `STEP_BUFFER_SWAP_POST_SUBMIT` slice.
-  viz_swap_buffers_end_ts INT,
+  viz_swap_buffers_end_ts TIMESTAMP,
   -- Duration of `EventLatency`'s `BufferReadyToLatch` step.
-  viz_swap_buffers_to_latch_dur INT,
+  viz_swap_buffers_to_latch_dur DURATION,
   -- Timestamp for `EventLatency`'s `LatchToSwapEnd` step.
-  latch_timestamp INT,
+  latch_timestamp TIMESTAMP,
   -- Duration of `EventLatency`'s `LatchToSwapEnd` step.
-  viz_latch_to_swap_end_dur INT,
+  viz_latch_to_swap_end_dur DURATION,
   -- Timestamp for `EventLatency`'s `SwapEndToPresentationCompositorFrame` step.
-  swap_end_timestamp INT,
+  swap_end_timestamp TIMESTAMP,
   -- Duration of `EventLatency`'s `SwapEndToPresentationCompositorFrame` step.
-  swap_end_to_presentation_dur INT,
+  swap_end_to_presentation_dur DURATION,
   -- Presentation timestamp for the frame.
-  presentation_timestamp INT)
+  presentation_timestamp TIMESTAMP)
 AS
 SELECT
   id,
@@ -523,6 +529,7 @@ SELECT
   is_presented,
   is_janky,
   is_inertial,
+  is_first,
   -- TODO(b:380868337): Check/fix this for flings.
   is_coalesced,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
