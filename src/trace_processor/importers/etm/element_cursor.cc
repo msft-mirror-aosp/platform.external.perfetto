@@ -19,12 +19,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "src/trace_processor/importers/etm/etm_v4_decoder.h"
 #include "src/trace_processor/importers/etm/storage_handle.h"
-#include "src/trace_processor/importers/etm/target_memory.h"
 #include "src/trace_processor/importers/etm/target_memory_reader.h"
 #include "src/trace_processor/importers/etm/types.h"
 #include "src/trace_processor/storage/trace_storage.h"
@@ -33,9 +33,7 @@
 namespace perfetto::trace_processor::etm {
 
 ElementCursor::ElementCursor(TraceStorage* storage)
-    : storage_(storage),
-      reader_(
-          std::make_unique<TargetMemoryReader>(TargetMemory::Get(storage))) {}
+    : storage_(storage), reader_(std::make_unique<TargetMemoryReader>()) {}
 
 ElementCursor::~ElementCursor() = default;
 
@@ -52,7 +50,7 @@ base::Status ElementCursor::Filter(
       storage_->etm_v4_trace_table().FindById(*trace_id)->session_id());
   RETURN_IF_ERROR(ResetDecoder(session.configuration_id()));
 
-  reader_->SetTs(session.start_ts().value_or(0));
+  reader_->SetTs(session.start_ts());
   // We expect this to overflow to 0 in the Next() below
   element_index_ = std::numeric_limits<uint32_t>::max();
   const auto& data = StorageHandle(storage_).GetTrace(*trace_id);
@@ -121,7 +119,7 @@ base::Status ElementCursor::Next() {
 ocsd_datapath_resp_t ElementCursor::TraceElemIn(const ocsd_trc_index_t,
                                                 const uint8_t,
                                                 const OcsdTraceElement& elem,
-                                                const MappingVersion* mapping) {
+                                                const Mapping* mapping) {
   ++element_index_;
   if (!(type_mask_.matches(elem.getType()))) {
     return OCSD_RESP_CONT;

@@ -29,9 +29,7 @@
 #include "src/trace_processor/tables/etm_tables_py.h"
 
 namespace perfetto::trace_processor::etm {
-
-class MappingVersion;
-class TargetMemory;
+class Mapping;
 class TargetMemoryReader;
 
 class ElementTypeMask {
@@ -94,15 +92,13 @@ class ElementCursor : public EtmV4Decoder::Delegate {
 
   const TraceStorage* storage() const { return storage_; }
 
-  const MappingVersion* mapping() const { return mapping_; }
-
  private:
   void SetAtEof();
   base::Status ResetDecoder(tables::EtmV4ConfigurationTable::Id config_id);
   ocsd_datapath_resp_t TraceElemIn(const ocsd_trc_index_t index_sop,
                                    const uint8_t trc_chan_id,
                                    const OcsdTraceElement& elem,
-                                   const MappingVersion* mapping) override;
+                                   const Mapping* mapping) override;
 
   TraceStorage* storage_;
   ElementTypeMask type_mask_;
@@ -118,7 +114,7 @@ class ElementCursor : public EtmV4Decoder::Delegate {
   bool needs_flush_ = false;
   uint32_t element_index_;
   const OcsdTraceElement* element_;
-  const MappingVersion* mapping_;
+  const Mapping* mapping_;
 };
 
 }  // namespace perfetto::trace_processor::etm

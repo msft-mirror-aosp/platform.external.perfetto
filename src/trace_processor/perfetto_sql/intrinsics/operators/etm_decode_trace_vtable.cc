@@ -27,7 +27,6 @@
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/status_or.h"
 #include "src/trace_processor/importers/etm/element_cursor.h"
-#include "src/trace_processor/importers/etm/mapping_version.h"
 #include "src/trace_processor/importers/etm/opencsd.h"
 #include "src/trace_processor/importers/etm/util.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_result.h"
@@ -106,11 +105,10 @@ constexpr char kElementTypeEqArg = 'e';
 constexpr char kElementTypeInArg = 'E';
 
 }  // namespace
-
 class EtmDecodeTraceVtable::Cursor
     : public sqlite::Module<EtmDecodeTraceVtable>::Cursor {
  public:
-  explicit Cursor(Vtab* vtab) : cursor_(vtab->storage) {}
+  explicit Cursor(TraceStorage* storage) : cursor_(storage) {}
 
   base::Status Filter(int idxNum,
                       const char* idxStr,
@@ -233,9 +231,7 @@ int EtmDecodeTraceVtable::Cursor::Column(sqlite3_context* ctx, int raw_n) {
                            static_cast<int64_t>(cursor_.element().en_addr));
       break;
     case ColumnIndex::kMappingId:
-      if (cursor_.mapping()) {
-        sqlite::result::Long(ctx, cursor_.mapping()->id().value);
-      }
+      // TODO
       break;
   }
 
@@ -251,7 +247,8 @@ int EtmDecodeTraceVtable::Connect(sqlite3* db,
   if (int ret = sqlite3_declare_vtab(db, kSchema); ret != SQLITE_OK) {
     return ret;
   }
-  std::unique_ptr<Vtab> res = std::make_unique<Vtab>(GetContext(ctx));
+  std::unique_ptr<Vtab> res = std::make_unique<Vtab>();
+  res->storage = GetContext(ctx);
   *vtab = res.release();
   return SQLITE_OK;
 }
@@ -314,7 +311,7 @@ int EtmDecodeTraceVtable::BestIndex(sqlite3_vtab* tab,
 
 int EtmDecodeTraceVtable::Open(sqlite3_vtab* sql_vtab,
                                sqlite3_vtab_cursor** cursor) {
-  *cursor = new Cursor(GetVtab(sql_vtab));
+  *cursor = new Cursor(GetVtab(sql_vtab)->storage);
   return SQLITE_OK;
 }
 

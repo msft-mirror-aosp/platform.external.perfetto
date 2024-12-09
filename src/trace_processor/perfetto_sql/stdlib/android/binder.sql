@@ -400,19 +400,17 @@ LEFT JOIN _oom_score server_oom
 -- Breakdown binder transactions per txn.
 -- It returns data about the client and server ends of every binder transaction async.
 CREATE PERFETTO TABLE android_binder_txns(
-  -- Fully qualified name of the binder endpoint if existing.
+  -- name of the binder interface if existing.
   aidl_name STRING,
-  -- Interface of the binder endpoint if existing.
-  interface STRING,
   -- Timestamp the binder interface name was emitted. Proxy to 'ts' and 'dur' for async txns.
   aidl_ts TIMESTAMP,
   -- Duration of the binder interface name. Proxy to 'ts' and 'dur' for async txns.
   aidl_dur DURATION,
-  -- Slice id of the binder txn.
-  binder_txn_id JOINID(slice.id),
-  -- Name of the client process.
+  -- slice id of the binder txn.
+  binder_txn_id LONG,
+  -- name of the client process.
   client_process STRING,
-  -- Name of the client thread.
+  -- name of the client thread.
   client_thread STRING,
   -- Upid of the client process.
   client_upid JOINID(process.id),
@@ -424,15 +422,15 @@ CREATE PERFETTO TABLE android_binder_txns(
   client_pid LONG,
   -- Whether the txn was initiated from the main thread of the client process.
   is_main_thread BOOL,
-  -- Timestamp of the client txn.
+  -- timestamp of the client txn.
   client_ts TIMESTAMP,
-  -- Wall clock dur of the client txn.
+  -- wall clock dur of the client txn.
   client_dur DURATION,
-  -- Slice id of the binder reply.
-  binder_reply_id JOINID(slice.id),
-  -- Name of the server process.
+  -- slice id of the binder reply.
+  binder_reply_id LONG,
+  -- name of the server process.
   server_process STRING,
-  -- Name of the server thread.
+  -- name of the server thread.
   server_thread STRING,
   -- Upid of the server process.
   server_upid JOINID(process.id),
@@ -442,34 +440,33 @@ CREATE PERFETTO TABLE android_binder_txns(
   server_tid LONG,
   -- Pid of the server thread.
   server_pid LONG,
-  -- Timestamp of the server txn.
+  -- timestamp of the server txn.
   server_ts TIMESTAMP,
-  -- Wall clock dur of the server txn.
+  -- wall clock dur of the server txn.
   server_dur DURATION,
-  -- Oom score of the client process at the start of the txn.
+  -- oom score of the client process at the start of the txn.
   client_oom_score LONG,
-  -- Oom score of the server process at the start of the reply.
+  -- oom score of the server process at the start of the reply.
   server_oom_score LONG,
-  -- Whether the txn is synchronous or async (oneway).
+  -- whether the txn is synchronous or async (oneway).
   is_sync BOOL,
-  -- Monotonic clock dur of the client txn.
+  -- monotonic clock dur of the client txn.
   client_monotonic_dur DURATION,
-  -- Monotonic clock dur of the server txn.
+  -- monotonic clock dur of the server txn.
   server_monotonic_dur DURATION,
   -- Client package version_code.
   client_package_version_code LONG,
   -- Server package version_code.
   server_package_version_code LONG,
   -- Whether client package is debuggable.
-  is_client_package_debuggable BOOL,
+  is_client_package_debuggable LONG,
   -- Whether server package is debuggable.
-  is_server_package_debuggable BOOL
+  is_server_package_debuggable LONG
 ) AS WITH all_binder AS (
   SELECT *, 1 AS is_sync FROM _sync_binder_metrics_by_txn
 UNION ALL
 SELECT *, 0 AS is_sync FROM _async_binder_metrics_by_txn
 ) SELECT
-  STR_SPLIT(aidl_name, '::', 2) AS interface,
   all_binder.*,
   _extract_duration_without_suspend(client_ts, client_dur) AS client_monotonic_dur,
   _extract_duration_without_suspend(server_ts, server_dur) AS server_monotonic_dur,

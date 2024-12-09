@@ -248,10 +248,6 @@ TraceType GuessTraceType(const uint8_t* data, size_t size) {
   if (base::StartsWith(start, "\x0a"))
     return kProtoTraceType;
 
-  if (base::StartsWith(start, "9,0,i,vers,")) {
-    return kAndroidDumpstateTraceType;
-  }
-
   return kUnknownTraceType;
 }
 

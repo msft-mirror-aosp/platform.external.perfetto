@@ -14,16 +14,22 @@
  * limitations under the License.
  */
 
-#include "src/trace_processor/importers/etm/mapping_version.h"
-#include "perfetto/base/logging.h"
+#ifndef SRC_TRACE_PROCESSOR_IMPORTERS_ETM_MAPPING_H_
+#define SRC_TRACE_PROCESSOR_IMPORTERS_ETM_MAPPING_H_
+
+#include "src/trace_processor/importers/common/address_range.h"
 
 namespace perfetto::trace_processor::etm {
 
-MappingVersion MappingVersion::SplitFront(uint64_t mid) {
-  PERFETTO_CHECK(range_.start() < mid && mid < range_.end());
-  AddressRange head(range_.start(), mid);
-  AddressRange tail(mid, range_.end());
-  range_ = tail;
-  return MappingVersion(id_, create_ts_, head);
-}
+class Mapping {
+ public:
+  Mapping() {}
+  const AddressRange& range() const { return range_; }
+
+ private:
+  AddressRange range_;
+};
+
 }  // namespace perfetto::trace_processor::etm
+
+#endif  // SRC_TRACE_PROCESSOR_IMPORTERS_ETM_MAPPING_H_
