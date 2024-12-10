@@ -337,9 +337,12 @@ message AndroidGarbageCollectionUnaggMetric {
     optional int64 tid = 18;
     // monotonic duration of event.
     optional int64 gc_monotonic_dur = 19;
+    // Details about the process (uid, version, etc)
+    optional AndroidProcessMetadata process = 20;
   }
   repeated GarbageCollectionEvent gc_events = 1;
 }
+
 // End of protos/perfetto/metrics/android/android_garbage_collection_unagg_metric.proto
 
 // Begin of protos/perfetto/metrics/android/app_process_starts_metric.proto
@@ -2942,8 +2945,9 @@ message AndroidWattsonTimePeriodMetric {
 
 message AndroidWattsonEstimateInfo {
   optional int32 period_id = 1;
-  optional int64 period_dur = 2;
-  optional AndroidWattsonCpuSubsystemEstimate cpu_subsystem = 3;
+  optional string period_name = 2;
+  optional int64 period_dur = 3;
+  optional AndroidWattsonCpuSubsystemEstimate cpu_subsystem = 4;
 }
 
 message AndroidWattsonCpuSubsystemEstimate {
