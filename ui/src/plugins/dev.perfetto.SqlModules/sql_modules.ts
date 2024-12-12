@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TableColumn} from '../../components/widgets/sql/table/column';
-import {SqlTableDescription} from '../../components/widgets/sql/table/table_description';
+import {
+  LegacyTableColumn,
+  LegacyTableColumnSet,
+} from '../../components/widgets/sql/legacy_table/column';
+import {SqlTableDescription} from '../../components/widgets/sql/legacy_table/table_description';
+import {SimpleColumn} from '../../components/widgets/sql/table/table';
 
 // Handles the access to all of the Perfetto SQL modules accessible to Trace
 //  Processor.
@@ -65,7 +69,7 @@ export interface SqlTable {
   readonly columns: SqlColumn[];
 
   // Returns all columns as TableColumns.
-  getTableColumns(): TableColumn[];
+  getTableColumns(): (LegacyTableColumn | LegacyTableColumnSet)[];
 }
 
 // The definition of Perfetto SQL function.
@@ -99,8 +103,8 @@ export interface SqlColumn {
   readonly description: string;
   readonly type: string;
 
-  // Translates this column to TableColumn.
-  asTableColumn(): TableColumn;
+  // Translates this column to SimpleColumn.
+  asSimpleColumn(tableName: string): SimpleColumn;
 }
 
 // The definition of Perfetto SQL argument. Can be used for functions, table

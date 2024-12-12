@@ -63,6 +63,9 @@
 #include "src/trace_processor/types/variadic.h"
 
 namespace perfetto::trace_processor {
+namespace etm {
+class TargetMemory;
+}
 
 // UniquePid is an offset into |unique_processes_|. This is necessary because
 // Unix pids are reused and thus not guaranteed to be unique over a long
@@ -791,6 +794,10 @@ class TraceStorage {
   std::vector<TraceBlobView>* mutable_etm_v4_trace_data() {
     return &etm_v4_trace_data_;
   }
+  const tables::FileTable& file_table() const { return file_table_; }
+  tables::FileTable* mutable_file_table() { return &file_table_; }
+  const tables::ElfFileTable& elf_file_table() const { return elf_file_table_; }
+  tables::ElfFileTable* mutable_elf_file_table() { return &elf_file_table_; }
 
   const tables::JitCodeTable& jit_code_table() const { return jit_code_table_; }
   tables::JitCodeTable* mutable_jit_code_table() { return &jit_code_table_; }
@@ -1009,6 +1016,12 @@ class TraceStorage {
   TraceStorage(TraceStorage&&) = delete;
   TraceStorage& operator=(TraceStorage&&) = delete;
 
+  friend etm::TargetMemory;
+  Destructible* etm_target_memory() { return etm_target_memory_.get(); }
+  void set_etm_target_memory(std::unique_ptr<Destructible> target_memory) {
+    etm_target_memory_ = std::move(target_memory);
+  }
+
   // One entry for each unique string in the trace.
   StringPool string_pool_;
 
@@ -1154,6 +1167,9 @@ class TraceStorage {
   tables::EtmV4TraceTable etm_v4_trace_table_{&string_pool_};
   // Indexed by tables::EtmV4TraceTable::Id
   std::vector<TraceBlobView> etm_v4_trace_data_;
+  std::unique_ptr<Destructible> etm_target_memory_;
+  tables::FileTable file_table_{&string_pool_};
+  tables::ElfFileTable elf_file_table_{&string_pool_};
 
   // Perf tables
   tables::MmapRecordTable mmap_record_table_{&string_pool_};

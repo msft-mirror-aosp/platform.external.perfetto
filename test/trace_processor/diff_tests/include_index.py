@@ -50,6 +50,7 @@ from diff_tests.parser.android_fs.tests import AndroidFs
 from diff_tests.parser.android.tests import AndroidParser
 from diff_tests.parser.android.tests_android_input_event import AndroidInputEvent
 from diff_tests.parser.android.tests_bugreport import AndroidBugreport
+from diff_tests.parser.android.tests_dumpstate import AndroidDumpstate
 from diff_tests.parser.android.tests_games import AndroidGames
 from diff_tests.parser.android.tests_inputmethod_clients import InputMethodClients
 from diff_tests.parser.android.tests_inputmethod_manager_service import InputMethodManagerService
@@ -132,6 +133,7 @@ from diff_tests.stdlib.intervals.tests import StdlibIntervals
 from diff_tests.stdlib.linux.cpu import LinuxCpu
 from diff_tests.stdlib.linux.memory import Memory
 from diff_tests.stdlib.linux.tests import LinuxTests
+from diff_tests.stdlib.pixel.tests import PixelStdlib
 from diff_tests.stdlib.pkvm.tests import Pkvm
 from diff_tests.stdlib.prelude.math_functions_tests import PreludeMathFunctions
 from diff_tests.stdlib.prelude.pprof_functions_tests import PreludePprofFunctions
@@ -165,6 +167,8 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
   parser_tests = [
       *AndroidBugreport(index_path, 'parser/android',
                         'AndroidBugreport').fetch(),
+      *AndroidDumpstate(index_path, 'parser/android',
+                        'AndroidDumpstate').fetch(),
       *AndroidFs(index_path, 'parser/android_fs', 'AndroidFs').fetch(),
       *AndroidGames(index_path, 'parser/android', 'AndroidGames').fetch(),
       *AndroidParser(index_path, 'parser/android', 'AndroidParser').fetch(),
@@ -345,6 +349,7 @@ def fetch_all_diff_tests(index_path: str) -> List['testing.TestCase']:
       *Viz(index_path, 'stdlib/viz', 'Viz').fetch(),
       *WattsonStdlib(index_path, 'stdlib/wattson', 'WattsonStdlib').fetch(),
       *HeapProfile(index_path, 'stdlib/android', 'HeapProfile').fetch(),
+      *PixelStdlib(index_path, 'stdlib/pixel', 'PixelStdlib').fetch(),
   ] + chrome_stdlib_tests
 
   syntax_tests = [

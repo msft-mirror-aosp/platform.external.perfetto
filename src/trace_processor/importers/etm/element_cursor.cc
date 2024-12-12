@@ -19,12 +19,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <memory>
 
 #include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "src/trace_processor/importers/etm/etm_v4_decoder.h"
+#include "src/trace_processor/importers/etm/mapping_version.h"
+#include "src/trace_processor/importers/etm/sql_values.h"
 #include "src/trace_processor/importers/etm/storage_handle.h"
+#include "src/trace_processor/importers/etm/target_memory.h"
 #include "src/trace_processor/importers/etm/target_memory_reader.h"
 #include "src/trace_processor/importers/etm/types.h"
 #include "src/trace_processor/storage/trace_storage.h"
@@ -33,7 +35,9 @@
 namespace perfetto::trace_processor::etm {
 
 ElementCursor::ElementCursor(TraceStorage* storage)
-    : storage_(storage), reader_(std::make_unique<TargetMemoryReader>()) {}
+    : storage_(storage),
+      reader_(
+          std::make_unique<TargetMemoryReader>(TargetMemory::Get(storage))) {}
 
 ElementCursor::~ElementCursor() = default;
 
@@ -50,7 +54,7 @@ base::Status ElementCursor::Filter(
       storage_->etm_v4_trace_table().FindById(*trace_id)->session_id());
   RETURN_IF_ERROR(ResetDecoder(session.configuration_id()));
 
-  reader_->SetTs(session.start_ts());
+  reader_->SetTs(session.start_ts().value_or(0));
   // We expect this to overflow to 0 in the Next() below
   element_index_ = std::numeric_limits<uint32_t>::max();
   const auto& data = StorageHandle(storage_).GetTrace(*trace_id);
@@ -119,7 +123,7 @@ base::Status ElementCursor::Next() {
 ocsd_datapath_resp_t ElementCursor::TraceElemIn(const ocsd_trc_index_t,
                                                 const uint8_t,
                                                 const OcsdTraceElement& elem,
-                                                const Mapping* mapping) {
+                                                const MappingVersion* mapping) {
   ++element_index_;
   if (!(type_mask_.matches(elem.getType()))) {
     return OCSD_RESP_CONT;
@@ -127,6 +131,26 @@ ocsd_datapath_resp_t ElementCursor::TraceElemIn(const ocsd_trc_index_t,
   element_ = &elem;
   mapping_ = mapping;
   return OCSD_RESP_WAIT;
+}
+
+std::unique_ptr<InstructionRangeSqlValue> ElementCursor::GetInstructionRange()
+    const {
+  auto r = std::make_unique<InstructionRangeSqlValue>();
+  AddressRange range(element_->st_addr, element_->en_addr);
+  r->config_id = *config_id_;
+  r->isa = element_->isa;
+  r->st_addr = range.start();
+  // How did we get a range if there is no mapping.
+  PERFETTO_CHECK(mapping_);
+
+  if (!mapping_->Contains(range) || !mapping_->data()) {
+    r->start = nullptr;
+    r->end = nullptr;
+  } else {
+    r->start = mapping_->data() + (range.start() - mapping_->start());
+    r->end = r->start + range.size();
+  }
+  return r;
 }
 
 }  // namespace perfetto::trace_processor::etm

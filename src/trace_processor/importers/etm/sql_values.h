@@ -14,22 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef SRC_TRACE_PROCESSOR_IMPORTERS_ETM_MAPPING_H_
-#define SRC_TRACE_PROCESSOR_IMPORTERS_ETM_MAPPING_H_
+#ifndef SRC_TRACE_PROCESSOR_IMPORTERS_ETM_SQL_VALUES_H_
+#define SRC_TRACE_PROCESSOR_IMPORTERS_ETM_SQL_VALUES_H_
 
-#include "src/trace_processor/importers/common/address_range.h"
+#include <cstdint>
+
+#include "src/trace_processor/importers/etm/opencsd.h"
+#include "src/trace_processor/tables/etm_tables_py.h"
 
 namespace perfetto::trace_processor::etm {
 
-class Mapping {
- public:
-  Mapping() {}
-  const AddressRange& range() const { return range_; }
-
- private:
-  AddressRange range_;
+struct InstructionRangeSqlValue {
+  static constexpr const char kPtrType[] = "etm::InstructionRangeSqlValue";
+  tables::EtmV4ConfigurationTable::Id config_id;
+  ocsd_isa isa;
+  uint64_t st_addr;
+  const uint8_t* start;
+  const uint8_t* end;
 };
 
 }  // namespace perfetto::trace_processor::etm
 
-#endif  // SRC_TRACE_PROCESSOR_IMPORTERS_ETM_MAPPING_H_
+#endif  // SRC_TRACE_PROCESSOR_IMPORTERS_ETM_SQL_VALUES_H_
