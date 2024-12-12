@@ -63,6 +63,9 @@
 #include "src/trace_processor/types/variadic.h"
 
 namespace perfetto::trace_processor {
+namespace etm {
+class TargetMemory;
+}
 
 // UniquePid is an offset into |unique_processes_|. This is necessary because
 // Unix pids are reused and thus not guaranteed to be unique over a long
@@ -631,11 +634,6 @@ class TraceStorage {
   }
   tables::CpuTrackTable* mutable_cpu_track_table() { return &cpu_track_table_; }
 
-  const tables::GpuTrackTable& gpu_track_table() const {
-    return gpu_track_table_;
-  }
-  tables::GpuTrackTable* mutable_gpu_track_table() { return &gpu_track_table_; }
-
   const tables::VulkanMemoryAllocationsTable& vulkan_memory_allocations_table()
       const {
     return vulkan_memory_allocations_table_;
@@ -1009,6 +1007,12 @@ class TraceStorage {
   TraceStorage(TraceStorage&&) = delete;
   TraceStorage& operator=(TraceStorage&&) = delete;
 
+  friend etm::TargetMemory;
+  Destructible* etm_target_memory() { return etm_target_memory_.get(); }
+  void set_etm_target_memory(std::unique_ptr<Destructible> target_memory) {
+    etm_target_memory_ = std::move(target_memory);
+  }
+
   // One entry for each unique string in the trace.
   StringPool string_pool_;
 
@@ -1027,7 +1031,6 @@ class TraceStorage {
   tables::TrackTable track_table_{&string_pool_};
   tables::ThreadStateTable thread_state_table_{&string_pool_};
   tables::CpuTrackTable cpu_track_table_{&string_pool_, &track_table_};
-  tables::GpuTrackTable gpu_track_table_{&string_pool_, &track_table_};
   tables::ProcessTrackTable process_track_table_{&string_pool_, &track_table_};
   tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
 
@@ -1154,6 +1157,7 @@ class TraceStorage {
   tables::EtmV4TraceTable etm_v4_trace_table_{&string_pool_};
   // Indexed by tables::EtmV4TraceTable::Id
   std::vector<TraceBlobView> etm_v4_trace_data_;
+  std::unique_ptr<Destructible> etm_target_memory_;
 
   // Perf tables
   tables::MmapRecordTable mmap_record_table_{&string_pool_};

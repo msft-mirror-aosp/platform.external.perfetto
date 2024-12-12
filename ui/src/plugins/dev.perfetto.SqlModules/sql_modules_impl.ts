@@ -24,13 +24,23 @@ import {
   SqlTable,
   SqlTableFunction,
 } from './sql_modules';
-import {SqlTableDescription} from '../../components/widgets/sql/table/table_description';
-import {TableColumn} from '../../components/widgets/sql/table/column';
+import {SqlTableDescription} from '../../components/widgets/sql/legacy_table/table_description';
 import {
-  DurationColumn,
-  StandardColumn,
-  TimestampColumn,
-} from '../../components/widgets/sql/table/well_known_columns';
+  FromSimpleColumn,
+  LegacyTableColumn,
+  LegacyTableColumnSet,
+} from '../../components/widgets/sql/legacy_table/column';
+import {
+  createDurationColumn,
+  createProcessIdColumn,
+  createSchedIdColumn,
+  createSliceIdColumn,
+  createStandardColumn,
+  createThreadIdColumn,
+  createThreadStateIdColumn,
+  createTimestampColumn,
+  SimpleColumn,
+} from '../../components/widgets/sql/table/table';
 
 export class SqlModulesImpl implements SqlModules {
   readonly packages: SqlPackage[];
@@ -113,6 +123,7 @@ export class StdlibModuleImpl implements SqlModule {
     );
     this.macros = docs.macros.map((json) => new StdlibMacroImpl(json));
   }
+
   getTable(tableName: string): SqlTable | undefined {
     for (const obj of this.dataObjects) {
       if (obj.name == tableName) {
@@ -199,8 +210,10 @@ class StdlibDataObjectImpl implements SqlTable {
     this.columns = docs.cols.map((json) => new StdlibColumnImpl(json));
   }
 
-  getTableColumns(): TableColumn[] {
-    return this.columns.map((col) => col.asTableColumn());
+  getTableColumns(): (LegacyTableColumn | LegacyTableColumnSet)[] {
+    return this.columns.map(
+      (col) => new FromSimpleColumn(col.asSimpleColumn(this.name)),
+    );
   }
 }
 
@@ -215,15 +228,49 @@ class StdlibColumnImpl implements SqlColumn {
     this.name = docs.name;
   }
 
-  asTableColumn(): TableColumn {
-    // TODO(mayzner): Support JOINID and ID columns.
+  asSimpleColumn(tableName: string): SimpleColumn {
     if (this.type === 'TIMESTAMP') {
-      return new TimestampColumn(this.name);
+      return createTimestampColumn(this.name);
     }
     if (this.type === 'DURATION') {
-      return new DurationColumn(this.name);
+      return createDurationColumn(this.name);
     }
-    return new StandardColumn(this.name);
+
+    if (this.name === 'ID') {
+      if (tableName === 'slice') {
+        return createSliceIdColumn(this.name);
+      }
+      if (tableName === 'thread') {
+        return createThreadIdColumn(this.name);
+      }
+      if (tableName === 'process') {
+        return createProcessIdColumn(this.name);
+      }
+      if (tableName === 'thread_state') {
+        return createThreadStateIdColumn(this.name);
+      }
+      if (tableName === 'sched') {
+        return createSchedIdColumn(this.name);
+      }
+      return createStandardColumn(this.name);
+    }
+
+    if (this.type === 'JOINID(slice.id)') {
+      return createSliceIdColumn(this.name);
+    }
+    if (this.type === 'JOINID(thread.id)') {
+      return createThreadIdColumn(this.name);
+    }
+    if (this.type === 'JOINID(process.id)') {
+      return createProcessIdColumn(this.name);
+    }
+    if (this.type === 'JOINID(thread_state.id)') {
+      return createThreadStateIdColumn(this.name);
+    }
+    if (this.type === 'JOINID(sched.id)') {
+      return createSchedIdColumn(this.name);
+    }
+    return createStandardColumn(this.name);
   }
 }
 
