@@ -114,7 +114,7 @@ class TraceProcessorContext {
   // Keep the global tracker before the args tracker as we access the global
   // tracker in the destructor of the args tracker. Also keep it before other
   // trackers, as they may own ArgsTrackers themselves.
-  std::unique_ptr<GlobalArgsTracker> global_args_tracker;
+  std::shared_ptr<GlobalArgsTracker> global_args_tracker;
   std::unique_ptr<ArgsTracker> args_tracker;
   std::unique_ptr<ArgsTranslationTable> args_translation_table;
 
@@ -166,8 +166,6 @@ class TraceProcessorContext {
   std::unique_ptr<Destructible> instruments_row_data_tracker;           // RowDataTracker
   std::unique_ptr<Destructible> perf_tracker;                           // PerfTracker
   std::unique_ptr<Destructible> etm_tracker;                            // EtmTracker
-  std::unique_ptr<Destructible> elf_tracker;                            // ElfTracker
-  std::unique_ptr<Destructible> file_tracker;                           // FileTracker
   // clang-format on
 
   std::unique_ptr<ProtoTraceParser> proto_trace_parser;
