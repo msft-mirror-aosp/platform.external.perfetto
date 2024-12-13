@@ -53,10 +53,18 @@ class StringViewSplitter {
   // cur_token()), false if no more tokens are found.
   bool Next();
 
+  // Returns the next token if, found (in which case it will be stored in
+  // cur_token()), and the empty string if no more tokens are found.
+  base::StringView NextToken() { return Next() ? cur_token() : ""; }
+
   // Returns the current token iff last call to Next() returned true.
   // In all other cases (before the 1st call to Next() and after Next() returns
   // false) returns the empty string.
   base::StringView cur_token() { return cur_; }
+
+  // Returns the remainder of the current input string that has not yet been
+  // tokenized.
+  base::StringView remainder() { return next_; }
 
  private:
   StringViewSplitter(const StringViewSplitter&) = delete;
