@@ -629,16 +629,6 @@ class TraceStorage {
     return &heap_graph_reference_table_;
   }
 
-  const tables::CpuTrackTable& cpu_track_table() const {
-    return cpu_track_table_;
-  }
-  tables::CpuTrackTable* mutable_cpu_track_table() { return &cpu_track_table_; }
-
-  const tables::GpuTrackTable& gpu_track_table() const {
-    return gpu_track_table_;
-  }
-  tables::GpuTrackTable* mutable_gpu_track_table() { return &gpu_track_table_; }
-
   const tables::VulkanMemoryAllocationsTable& vulkan_memory_allocations_table()
       const {
     return vulkan_memory_allocations_table_;
@@ -794,10 +784,6 @@ class TraceStorage {
   std::vector<TraceBlobView>* mutable_etm_v4_trace_data() {
     return &etm_v4_trace_data_;
   }
-  const tables::FileTable& file_table() const { return file_table_; }
-  tables::FileTable* mutable_file_table() { return &file_table_; }
-  const tables::ElfFileTable& elf_file_table() const { return elf_file_table_; }
-  tables::ElfFileTable* mutable_elf_file_table() { return &elf_file_table_; }
 
   const tables::JitCodeTable& jit_code_table() const { return jit_code_table_; }
   tables::JitCodeTable* mutable_jit_code_table() { return &jit_code_table_; }
@@ -1039,8 +1025,6 @@ class TraceStorage {
   // Metadata for tracks.
   tables::TrackTable track_table_{&string_pool_};
   tables::ThreadStateTable thread_state_table_{&string_pool_};
-  tables::CpuTrackTable cpu_track_table_{&string_pool_, &track_table_};
-  tables::GpuTrackTable gpu_track_table_{&string_pool_, &track_table_};
   tables::ProcessTrackTable process_track_table_{&string_pool_, &track_table_};
   tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
 
@@ -1168,8 +1152,6 @@ class TraceStorage {
   // Indexed by tables::EtmV4TraceTable::Id
   std::vector<TraceBlobView> etm_v4_trace_data_;
   std::unique_ptr<Destructible> etm_target_memory_;
-  tables::FileTable file_table_{&string_pool_};
-  tables::ElfFileTable elf_file_table_{&string_pool_};
 
   // Perf tables
   tables::MmapRecordTable mmap_record_table_{&string_pool_};
