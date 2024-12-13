@@ -148,8 +148,9 @@ ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
 
 #define IOV_MAX 1024  // Linux compatible limit.
 
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) ||
-        // PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+#define IOV_MAX 1024  // Linux compatible limit.
+#endif
 
 // Partially encodes a CommitDataRequest in an int32 for the purposes of
 // metatracing. Note that it encodes only the bottom 10 bits of the producer id
@@ -1283,7 +1284,7 @@ void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
   }
 
   // We don't snapshot the clocks here because we just did this above.
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kTracingStartedFieldNumber,
       false /* snapshot_clocks */);
@@ -1603,7 +1604,7 @@ void TracingServiceImpl::MaybeNotifyAllDataSourcesStarted(
 
   PERFETTO_DLOG("All data sources started");
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kAllDataSourcesStartedFieldNumber,
       true /* snapshot_clocks */);
@@ -1855,7 +1856,7 @@ void TracingServiceImpl::DisableTracingNotifyConsumerAndFlushFile(
   for (auto& producer_id_and_producer : producers_)
     ScrapeSharedMemoryBuffers(tracing_session, producer_id_and_producer.second);
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kTracingDisabledFieldNumber,
       true /* snapshot_clocks */);
@@ -1883,7 +1884,7 @@ void TracingServiceImpl::Flush(TracingSessionID tsid,
     return;
   }
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
       false /* snapshot_clocks */);
@@ -1940,7 +1941,14 @@ void TracingServiceImpl::FlushDataSourceInstances(
   for (const auto& [producer_id, data_sources] : data_source_instances) {
     ProducerEndpointImpl* producer = GetProducer(producer_id);
     producer->Flush(flush_request_id, data_sources, flush_flags);
-    pending_flush.producers.insert(producer_id);
+    if (!producer->IsAndroidProcessFrozen()) {
+      pending_flush.producers.insert(producer_id);
+    } else {
+      PERFETTO_DLOG(
+          "skipping waiting flush for on producer \"%s\" (pid=%" PRIu32
+          ") because it is frozen",
+          producer->name_.c_str(), static_cast<uint32_t>(producer->pid()));
+    }
   }
 
   // If there are no producers to flush (realistically this happens only in
@@ -2053,7 +2061,7 @@ void TracingServiceImpl::CompleteFlush(TracingSessionID tsid,
   for (auto& producer_id_and_producer : producers_) {
     ScrapeSharedMemoryBuffers(tracing_session, producer_id_and_producer.second);
   }
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kAllDataSourcesFlushedFieldNumber,
       true /* snapshot_clocks */);
@@ -2568,10 +2576,10 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
     // We don't bother snapshotting clocks here because we wouldn't be able to
     // emit it and we shouldn't have significant drift from the last snapshot in
     // any case.
-    SnapshotLifecyleEvent(tracing_session,
-                          protos::pbzero::TracingServiceEvent::
-                              kReadTracingBuffersCompletedFieldNumber,
-                          false /* snapshot_clocks */);
+    SnapshotLifecycleEvent(tracing_session,
+                           protos::pbzero::TracingServiceEvent::
+                               kReadTracingBuffersCompletedFieldNumber,
+                           false /* snapshot_clocks */);
     EmitLifecycleEvents(tracing_session, &packets);
   }
 
@@ -2902,6 +2910,14 @@ void TracingServiceImpl::StopDataSourceInstance(ProducerEndpointImpl* producer,
                                                 DataSourceInstance* instance,
                                                 bool disable_immediately) {
   const DataSourceInstanceID ds_inst_id = instance->instance_id;
+  if (producer->IsAndroidProcessFrozen()) {
+    PERFETTO_DLOG(
+        "skipping waiting of data source \"%s\" on producer \"%s\" (pid=%u) "
+        "because it is frozen",
+        instance->data_source_name.c_str(), producer->name_.c_str(),
+        producer->pid());
+    disable_immediately = true;
+  }
   if (instance->will_notify_on_stop && !disable_immediately) {
     instance->state = DataSourceInstance::STOPPING;
   } else {
@@ -3404,9 +3420,9 @@ void TracingServiceImpl::PeriodicSnapshotTask(TracingSessionID tsid) {
   MaybeSnapshotClocksIntoRingBuffer(tracing_session);
 }
 
-void TracingServiceImpl::SnapshotLifecyleEvent(TracingSession* tracing_session,
-                                               uint32_t field_id,
-                                               bool snapshot_clocks) {
+void TracingServiceImpl::SnapshotLifecycleEvent(TracingSession* tracing_session,
+                                                uint32_t field_id,
+                                                bool snapshot_clocks) {
   // field_id should be an id of a field in TracingServiceEvent.
   auto& lifecycle_events = tracing_session->lifecycle_events;
   auto event_it =
@@ -4055,7 +4071,7 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
     }
   }
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       session, protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
       false /* snapshot_clocks */);
   clone_op.pending_flush_cnt = bufs_groups.size();
@@ -4281,7 +4297,7 @@ base::Status TracingServiceImpl::FinishCloneSession(
         new protozero::MessageFilter(src->trace_filter->config()));
   }
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       cloned_session,
       protos::pbzero::TracingServiceEvent::kTracingDisabledFieldNumber,
       true /* snapshot_clocks */);
