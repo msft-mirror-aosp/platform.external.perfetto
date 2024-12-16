@@ -289,34 +289,46 @@ class Tables(TestSuite):
         }
         """),
         query="""
-        SELECT
-          type,
-          cpu
+        SELECT cpu
         FROM cpu_track
         ORDER BY type, cpu;
         """,
         out=Csv("""
-        "type","cpu"
-        "__intrinsic_cpu_track",0
-        "__intrinsic_cpu_track",1
+        "cpu"
+        0
+        1
         """))
 
   def test_thread_state_flattened_aggregated(self):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      INCLUDE PERFETTO MODULE sched.thread_state_flattened;
-      select * from _get_flattened_thread_state_aggregated(11155, NULL);
-      """,
+          INCLUDE PERFETTO MODULE sched.thread_state_flattened;
+          select *
+          from _get_flattened_thread_state_aggregated(11155, NULL);
+        """,
         out=Path('thread_state_flattened_aggregated_csv.out'))
 
   def test_thread_state_flattened(self):
     return DiffTestBlueprint(
         trace=DataPath('android_monitor_contention_trace.atr'),
         query="""
-      INCLUDE PERFETTO MODULE sched.thread_state_flattened;
-      select * from _get_flattened_thread_state(11155, NULL);
-      """,
+          INCLUDE PERFETTO MODULE sched.thread_state_flattened;
+          SELECT
+            ts,
+            dur,
+            utid,
+            depth,
+            name,
+            slice_id,
+            cpu,
+            state,
+            io_wait,
+            blocked_function,
+            waker_utid,
+            irq_context
+          FROM _get_flattened_thread_state(11155, NULL);
+        """,
         out=Path('thread_state_flattened_csv.out'))
 
   def test_metadata(self):
@@ -460,7 +472,6 @@ class Tables(TestSuite):
         """),
         query="""
         SELECT
-          ct.type,
           c.ucpu,
           ct.cpu,
           c.machine_id
@@ -469,7 +480,20 @@ class Tables(TestSuite):
         ORDER BY ct.type, c.cpu
         """,
         out=Csv("""
-        "type","ucpu","cpu","machine_id"
-        "__intrinsic_cpu_track",4096,0,1
-        "__intrinsic_cpu_track",4097,1,1
+        "ucpu","cpu","machine_id"
+        4096,0,1
+        4097,1,1
+        """))
+
+  def test_async_slice_utid_arg_set_id(self):
+    return DiffTestBlueprint(
+        trace=DataPath('android_monitor_contention_trace.atr'),
+        query="""
+        SELECT COUNT(DISTINCT extract_arg(arg_set_id, 'utid')) AS utid_count,
+        COUNT(DISTINCT extract_arg(arg_set_id, 'end_utid')) AS end_utid_count
+        FROM counter
+        """,
+        out=Csv("""
+        "utid_count","end_utid_count"
+        89,0
         """))

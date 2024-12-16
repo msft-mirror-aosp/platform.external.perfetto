@@ -36,13 +36,13 @@ import {postMessageHandler} from './post_message_handler';
 import {Route, Router} from '../core/router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
-import {ViewerPage} from './viewer_page';
+import {ViewerPage} from './viewer_page/viewer_page';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {showModal} from '../widgets/modal';
 import {IdleDetector} from './idle_detector';
 import {IdleDetectorWindow} from './idle_detector_interface';
 import {AppImpl} from '../core/app_impl';
-import {addSqlTableTab} from '../components/details/sql_table_tab';
+import {addLegacyTableTab} from '../components/details/sql_table_tab';
 import {configureExtensions} from '../components/extensions';
 import {
   addDebugCounterTrack,
@@ -313,7 +313,7 @@ configureExtensions({
   addDebugCounterTrack,
   addDebugSliceTrack,
   addVisualizedArgTracks,
-  addSqlTableTab,
+  addLegacySqlTableTab: addLegacyTableTab,
   addQueryResultsTab,
 });
 

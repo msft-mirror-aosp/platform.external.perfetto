@@ -26,12 +26,14 @@
 #include <utility>
 #include <vector>
 
+#include "perfetto/base/logging.h"
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/string_view.h"
 #include "perfetto/protozero/scattered_heap_buffer.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/trace_blob.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
+#include "src/base/test/status_matchers.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/args_translation_table.h"
@@ -58,12 +60,13 @@
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
+#include "src/trace_processor/tables/slice_tables_py.h"
+#include "src/trace_processor/tables/track_tables_py.h"
 #include "src/trace_processor/types/variadic.h"
 #include "src/trace_processor/util/descriptors.h"
 #include "test/gtest_and_gmock.h"
 
 #include "protos/perfetto/common/builtin_clock.pbzero.h"
-#include "protos/perfetto/common/perf_events.gen.h"
 #include "protos/perfetto/common/perf_events.pbzero.h"
 #include "protos/perfetto/common/sys_stats_counters.pbzero.h"
 #include "protos/perfetto/config/trace_config.pbzero.h"
@@ -649,7 +652,11 @@ TEST_F(ProtoTraceParserTest, LoadCpuFreq) {
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->cpu_counter_track_table()[0].cpu(), 10u);
+  auto dim_set_id = context_.storage->track_table()[0].dimension_arg_set_id();
+  ASSERT_TRUE(dim_set_id.has_value());
+  std::optional<Variadic> cpu;
+  ASSERT_OK(context_.storage->ExtractArg(*dim_set_id, "cpu", &cpu));
+  EXPECT_EQ(cpu->int_value, 10u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadCpuFreqKHz) {
@@ -668,14 +675,20 @@ TEST_F(ProtoTraceParserTest, LoadCpuFreqKHz) {
   context_.sorter->ExtractEventsForced();
 
   EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
-  EXPECT_EQ(context_.storage->cpu_counter_track_table().row_count(), 2u);
 
-  auto row = context_.storage->cpu_counter_track_table().FindById(TrackId(0));
+  auto row = context_.storage->track_table().FindById(TrackId(0));
   EXPECT_EQ(context_.storage->GetString(row->name()), "cpufreq");
-  EXPECT_EQ(row->cpu(), 0u);
+  std::optional<Variadic> cpu;
+  ASSERT_OK(context_.storage->ExtractArg(row->dimension_arg_set_id().value(),
+                                         "cpu", &cpu));
+  ASSERT_EQ(cpu->type, Variadic::Type::kInt);
+  EXPECT_EQ(cpu->uint_value, 0u);
 
-  row = context_.storage->cpu_counter_track_table().FindById(TrackId(1));
-  EXPECT_EQ(row->cpu(), 1u);
+  row = context_.storage->track_table().FindById(TrackId(1));
+  ASSERT_OK(context_.storage->ExtractArg(row->dimension_arg_set_id().value(),
+                                         "cpu", &cpu));
+  ASSERT_EQ(cpu->type, Variadic::Type::kInt);
+  EXPECT_EQ(cpu->uint_value, 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadCpuIdleStats) {
@@ -703,11 +716,11 @@ TEST_F(ProtoTraceParserTest, LoadGpuFreqStats) {
   auto* bundle = packet->set_sys_stats();
   bundle->add_gpufreq_mhz(300);
   EXPECT_CALL(*event_, PushCounter(static_cast<int64_t>(ts),
-                                   static_cast<double>(300), TrackId{1u}));
+                                   static_cast<double>(300), TrackId{0u}));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
+  EXPECT_EQ(context_.storage->track_table().row_count(), 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadMemInfo) {
@@ -721,11 +734,11 @@ TEST_F(ProtoTraceParserTest, LoadMemInfo) {
   meminfo->set_value(value);
 
   EXPECT_CALL(*event_, PushCounter(static_cast<int64_t>(ts),
-                                   DoubleEq(value * 1024.0), TrackId{1u}));
+                                   DoubleEq(value * 1024.0), TrackId{0u}));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
+  EXPECT_EQ(context_.storage->track_table().row_count(), 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadVmStats) {
@@ -739,11 +752,11 @@ TEST_F(ProtoTraceParserTest, LoadVmStats) {
   meminfo->set_value(value);
 
   EXPECT_CALL(*event_, PushCounter(static_cast<int64_t>(ts), DoubleEq(value),
-                                   TrackId{1u}));
+                                   TrackId{0u}));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
+  EXPECT_EQ(context_.storage->track_table().row_count(), 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadThermal) {
@@ -758,11 +771,11 @@ TEST_F(ProtoTraceParserTest, LoadThermal) {
 
   EXPECT_CALL(*event_,
               PushCounter(static_cast<int64_t>(ts),
-                          DoubleEq(static_cast<double>(temp)), TrackId{1u}));
+                          DoubleEq(static_cast<double>(temp)), TrackId{0u}));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(context_.storage->track_table().row_count(), 2u);
+  EXPECT_EQ(context_.storage->track_table().row_count(), 1u);
 }
 
 TEST_F(ProtoTraceParserTest, LoadProcessPacket) {
@@ -1435,10 +1448,9 @@ TEST_F(ProtoTraceParserTest, TrackEventAsyncEvents) {
   EXPECT_EQ(storage_->track_table()[4].name(), ev_2);
   EXPECT_EQ(storage_->track_table()[5].name(), ev_2);
 
-  EXPECT_EQ(storage_->process_track_table().row_count(), 3u);
-  EXPECT_EQ(storage_->process_track_table()[0].upid(), 1u);
-  EXPECT_EQ(storage_->process_track_table()[1].upid(), 1u);
-  EXPECT_EQ(storage_->process_track_table()[2].upid(), 1u);
+  EXPECT_EQ(storage_->track_table()[1].upid(), 1u);
+  EXPECT_EQ(storage_->track_table()[4].upid(), 1u);
+  EXPECT_EQ(storage_->track_table()[5].upid(), 1u);
 
   EXPECT_EQ(storage_->virtual_track_slices().slice_count(), 1u);
   EXPECT_EQ(storage_->virtual_track_slices().slice_ids()[0], SliceId(0u));
@@ -1624,9 +1636,8 @@ TEST_F(ProtoTraceParserTest, TrackEventWithTrackDescriptors) {
             "Async track 1");
   EXPECT_EQ(storage_->GetString((storage_->track_table()[2].name())),
             "Thread track 2");
-  EXPECT_EQ(storage_->thread_track_table().row_count(), 2u);
-  EXPECT_EQ(storage_->thread_track_table()[0].utid(), 1u);
-  EXPECT_EQ(storage_->thread_track_table()[1].utid(), 2u);
+  EXPECT_EQ(storage_->track_table()[3].utid(), 1u);
+  EXPECT_EQ(storage_->track_table()[4].utid(), 2u);
 
   EXPECT_EQ(storage_->virtual_track_slices().slice_count(), 1u);
   EXPECT_EQ(storage_->virtual_track_slices().slice_ids()[0], SliceId(2u));
@@ -1742,8 +1753,7 @@ TEST_F(ProtoTraceParserTest, TrackEventWithResortedCounterDescriptor) {
 
   // First track is thread time track, second is "t1".
   EXPECT_EQ(storage_->track_table().row_count(), 2u);
-  EXPECT_EQ(storage_->thread_track_table().row_count(), 1u);
-  EXPECT_EQ(storage_->thread_track_table()[0].utid(), 1u);
+  EXPECT_EQ(storage_->track_table()[1].utid(), 1u);
 
   // Counter values should also be imported into thread slices.
   EXPECT_EQ(storage_->slice_table().row_count(), 1u);
@@ -2465,29 +2475,29 @@ TEST_F(ProtoTraceParserTest, TrackEventParseLegacyEventIntoRawTable) {
   const auto& cpu_table = storage_->cpu_table();
   EXPECT_EQ(cpu_table[ucpu.value].cpu(), 0u);
   EXPECT_EQ(raw_table[0].utid(), 1u);
-  EXPECT_EQ(raw_table[0].arg_set_id(), 3u);
+  EXPECT_EQ(raw_table[0].arg_set_id(), 2u);
 
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.category"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.category"),
                      Variadic::String(cat_1)));
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.name"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.name"),
                      Variadic::String(ev_1)));
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.phase"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.phase"),
                      Variadic::String(question)));
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.duration_ns"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.duration_ns"),
                      Variadic::Integer(23000)));
-  EXPECT_TRUE(HasArg(3u,
+  EXPECT_TRUE(HasArg(2u,
                      storage_->InternString("legacy_event.thread_timestamp_ns"),
                      Variadic::Integer(2005000)));
-  EXPECT_TRUE(HasArg(3u,
+  EXPECT_TRUE(HasArg(2u,
                      storage_->InternString("legacy_event.thread_duration_ns"),
                      Variadic::Integer(15000)));
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.use_async_tts"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.use_async_tts"),
                      Variadic::Boolean(true)));
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.global_id"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.global_id"),
                      Variadic::UnsignedInteger(99u)));
-  EXPECT_TRUE(HasArg(3u, storage_->InternString("legacy_event.id_scope"),
+  EXPECT_TRUE(HasArg(2u, storage_->InternString("legacy_event.id_scope"),
                      Variadic::String(scope_1)));
-  EXPECT_TRUE(HasArg(3u, debug_an_1, Variadic::UnsignedInteger(10u)));
+  EXPECT_TRUE(HasArg(2u, debug_an_1, Variadic::UnsignedInteger(10u)));
 }
 
 TEST_F(ProtoTraceParserTest, TrackEventLegacyTimestampsWithClockSnapshot) {
@@ -3093,19 +3103,26 @@ TEST_F(ProtoTraceParserTest, PerfEventWithMultipleCounter) {
   Tokenize();
   context_.sorter->ExtractEventsForced();
 
-  EXPECT_EQ(storage_->track_table().row_count(), 3u);
+  const auto& tracks = storage_->track_table();
+  EXPECT_EQ(tracks.row_count(), 3u);
 
-  // Validate the perf counter track table.
-  EXPECT_EQ(storage_->perf_counter_track_table().row_count(), 3u);
+  EXPECT_EQ(tracks[0].name(), storage_->InternString("leader"));
+  EXPECT_EQ(tracks[1].name(), storage_->InternString("cycle-follower"));
+  EXPECT_EQ(tracks[2].name(), storage_->InternString("cache-follower"));
 
-  const auto& perf_counter_names = storage_->perf_counter_track_table().name();
-  EXPECT_EQ(perf_counter_names[0], storage_->InternString("leader"));
-  EXPECT_EQ(perf_counter_names[1], storage_->InternString("cycle-follower"));
-  EXPECT_EQ(perf_counter_names[2], storage_->InternString("cache-follower"));
-  const auto& cpu_ids = storage_->perf_counter_track_table().cpu();
-  EXPECT_EQ(cpu_ids[0], 0u);
-  EXPECT_EQ(cpu_ids[1], 0u);
-  EXPECT_EQ(cpu_ids[2], 0u);
+  std::optional<Variadic> cpu;
+  auto get_cpu = [&, this](uint32_t i) {
+    auto dim_set_id = tracks[i].dimension_arg_set_id();
+    ASSERT_TRUE(dim_set_id.has_value());
+    ASSERT_OK(context_.storage->ExtractArg(*dim_set_id, "cpu", &cpu));
+    ASSERT_TRUE(cpu.has_value());
+  };
+  get_cpu(0);
+  EXPECT_EQ(cpu->int_value, 0u);
+  get_cpu(1);
+  EXPECT_EQ(cpu->int_value, 0u);
+  get_cpu(2);
+  EXPECT_EQ(cpu->int_value, 0u);
 }
 
 }  // namespace
