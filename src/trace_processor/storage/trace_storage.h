@@ -380,20 +380,6 @@ class TraceStorage {
     return &gpu_counter_group_table_;
   }
 
-  const tables::ProcessTrackTable& process_track_table() const {
-    return process_track_table_;
-  }
-  tables::ProcessTrackTable* mutable_process_track_table() {
-    return &process_track_table_;
-  }
-
-  const tables::ThreadTrackTable& thread_track_table() const {
-    return thread_track_table_;
-  }
-  tables::ThreadTrackTable* mutable_thread_track_table() {
-    return &thread_track_table_;
-  }
-
   const tables::ThreadStateTable& thread_state_table() const {
     return thread_state_table_;
   }
@@ -784,6 +770,10 @@ class TraceStorage {
   std::vector<TraceBlobView>* mutable_etm_v4_trace_data() {
     return &etm_v4_trace_data_;
   }
+  const tables::FileTable& file_table() const { return file_table_; }
+  tables::FileTable* mutable_file_table() { return &file_table_; }
+  const tables::ElfFileTable& elf_file_table() const { return elf_file_table_; }
+  tables::ElfFileTable* mutable_elf_file_table() { return &elf_file_table_; }
 
   const tables::JitCodeTable& jit_code_table() const { return jit_code_table_; }
   tables::JitCodeTable* mutable_jit_code_table() { return &jit_code_table_; }
@@ -1025,8 +1015,6 @@ class TraceStorage {
   // Metadata for tracks.
   tables::TrackTable track_table_{&string_pool_};
   tables::ThreadStateTable thread_state_table_{&string_pool_};
-  tables::ProcessTrackTable process_track_table_{&string_pool_, &track_table_};
-  tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
 
   // Track tables for counter events.
   tables::GpuCounterGroupTable gpu_counter_group_table_{&string_pool_};
@@ -1152,6 +1140,8 @@ class TraceStorage {
   // Indexed by tables::EtmV4TraceTable::Id
   std::vector<TraceBlobView> etm_v4_trace_data_;
   std::unique_ptr<Destructible> etm_target_memory_;
+  tables::FileTable file_table_{&string_pool_};
+  tables::ElfFileTable elf_file_table_{&string_pool_};
 
   // Perf tables
   tables::MmapRecordTable mmap_record_table_{&string_pool_};
