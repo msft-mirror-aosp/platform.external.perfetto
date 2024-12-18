@@ -58,6 +58,9 @@ import {Chip, ChipBar} from '../../widgets/chip';
 import {TrackWidget} from '../../widgets/track_widget';
 import {scheduleFullRedraw} from '../../widgets/raf';
 import {CopyableLink} from '../../widgets/copyable_link';
+import {VirtualOverlayCanvas} from '../../widgets/virtual_overlay_canvas';
+import {SplitPanel} from '../../widgets/split_panel';
+import {TabbedSplitPanel} from '../../widgets/tabbed_split_panel';
 
 const DATA_ENGLISH_LETTER_FREQUENCY = {
   table: [
@@ -1331,7 +1334,7 @@ export class WidgetsPage implements m.ClassComponent<PageAttrs> {
       }),
       m(WidgetShowcase, {
         label: 'Track',
-        description: `A track`,
+        description: `The shell and content DOM elements of a track.`,
         renderWidget: (opts) => {
           const {buttons, chips, multipleTracks, ...rest} = opts;
           const dummyButtons = () => [
@@ -1359,6 +1362,7 @@ export class WidgetsPage implements m.ClassComponent<PageAttrs> {
         },
         initialOpts: {
           title: 'This is the title of the track',
+          subtitle: 'This is the subtitle of the track',
           buttons: true,
           chips: true,
           heightPx: 32,
@@ -1370,6 +1374,110 @@ export class WidgetsPage implements m.ClassComponent<PageAttrs> {
           error: false,
           multipleTracks: false,
           reorderable: false,
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Virtual Overlay Canvas',
+        description: `A scrolling container that draws a virtual canvas over
+          the top of it's content and keeps it in the viewport to make it appear
+          like there is one big canvas over the top of the content.`,
+        renderWidget: () => {
+          const width = 200;
+          const rowCount = 65536;
+          const rowHeight = 20;
+          return m(
+            VirtualOverlayCanvas,
+            {
+              className: 'virtual-canvas',
+              scrollAxes: 'y',
+              onCanvasRedraw({ctx, canvasRect}) {
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 1;
+
+                ctx.font = '20px Arial';
+                ctx.fillStyle = 'black';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+
+                for (let i = 0; i < rowCount; i++) {
+                  const rect = {
+                    left: 0,
+                    top: i * rowHeight,
+                    right: width,
+                    bottom: i * rowHeight + rowHeight,
+                  };
+                  if (canvasRect.overlaps(rect)) {
+                    ctx.strokeRect(0, i * rowHeight, width, rowHeight);
+                    ctx.fillText(`Row: ${i}`, 0, i * rowHeight);
+                  }
+                }
+              },
+            },
+            m('', {
+              style: {height: `${rowCount * rowHeight}px`, width: `${width}px`},
+            }),
+          );
+        },
+        initialOpts: {},
+      }),
+
+      m(WidgetShowcase, {
+        label: 'SplitPanel',
+        description: `Horizontal split panel with draggable handle and controls.`,
+        renderWidget: (opts) => {
+          return m(
+            '',
+            {style: {height: '400px', width: '400px', border: 'solid 2px red'}},
+            m(
+              SplitPanel,
+              {
+                drawerContent: 'Drawer Content',
+                handleContent: Boolean(opts.handleContent) && 'Handle Content',
+              },
+              'Main Content',
+            ),
+          );
+        },
+        initialOpts: {
+          handleContent: false,
+        },
+      }),
+
+      m(WidgetShowcase, {
+        label: 'TabbedSplitPanel',
+        description: `SplitPanel + tabs.`,
+        renderWidget: (opts) => {
+          return m(
+            '',
+            {style: {height: '400px', width: '400px', border: 'solid 2px red'}},
+            m(
+              TabbedSplitPanel,
+              {
+                leftHandleContent:
+                  Boolean(opts.leftContent) &&
+                  m(Button, {icon: 'Menu', compact: true}),
+                tabs: [
+                  {
+                    key: 'foo',
+                    title: 'Foo',
+                    content: 'Foo content',
+                    hasCloseButton: opts.showCloseButtons,
+                  },
+                  {
+                    key: 'bar',
+                    title: 'Bar',
+                    content: 'Bar content',
+                    hasCloseButton: opts.showCloseButtons,
+                  },
+                ],
+              },
+              'Main Content',
+            ),
+          );
+        },
+        initialOpts: {
+          leftContent: true,
+          showCloseButtons: true,
         },
       }),
     );
