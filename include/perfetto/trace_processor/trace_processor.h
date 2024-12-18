@@ -18,14 +18,17 @@
 #define INCLUDE_PERFETTO_TRACE_PROCESSOR_TRACE_PROCESSOR_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/export.h"
+#include "perfetto/base/status.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "perfetto/trace_processor/iterator.h"
 #include "perfetto/trace_processor/metatrace_config.h"
 #include "perfetto/trace_processor/status.h"
+#include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor_storage.h"
 
 namespace perfetto {
@@ -55,15 +58,15 @@ class PERFETTO_EXPORT_COMPONENT TraceProcessor : public TraceProcessorStorage {
   // the returned iterator.
   virtual Iterator ExecuteQuery(const std::string& sql) = 0;
 
-  // Registers SQL files with the associated path under the module named
-  // |sql_module.name|. These modules can be run by using the |IMPORT| SQL
-  // function.
+  // Registers SQL files with the associated path under the package named
+  // |sql_package.name|.
   //
-  // For example, if you registered a module called "camera" with a file path
-  // "camera/cpu/metrics.sql" you can import it (run the file) using "SELECT
-  // IMPORT('camera.cpu.metrics');". The first word of the string has to be a
-  // module name and there can be only one module registered with a given name.
-  virtual base::Status RegisterSqlModule(SqlModule sql_module) = 0;
+  // For example, if you registered a package called "camera" with a file path
+  // "camera/cpu/metrics.sql" you can include it (run the file) using "INCLUDE
+  // PERFETTO MODULE camera.cpu.metrics". The first word of the string has to be
+  // a package name and there can be only one package registered with a given
+  // name.
+  virtual base::Status RegisterSqlPackage(SqlPackage) = 0;
 
   // Registers a metric at the given path which will run the specified SQL.
   virtual base::Status RegisterMetric(const std::string& path,
@@ -138,6 +141,19 @@ class PERFETTO_EXPORT_COMPONENT TraceProcessor : public TraceProcessorStorage {
   // loaded by trace processor shell at runtime. The message is encoded as
   // DescriptorSet, defined in perfetto/trace_processor/trace_processor.proto.
   virtual std::vector<uint8_t> GetMetricDescriptors() = 0;
+
+  // Deprecated. Use |RegisterSqlPackage()| instead, which is identical in
+  // functionality to |RegisterSqlModule()| and the only difference is in
+  // the argument, which is directly translatable to |SqlPackage|.
+  virtual base::Status RegisterSqlModule(SqlModule) = 0;
+
+  // Registers the contents of a file.
+  // This method can be used to pass out of band data to the trace processor
+  // which can be used by importers to do some advanced processing. For example
+  // if you pass binaries these are used to decode ETM traces.
+  // Registering the same file twice will return an error.
+  virtual base::Status RegisterFileContent(const std::string& path,
+                                           TraceBlobView content) = 0;
 };
 
 }  // namespace trace_processor

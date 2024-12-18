@@ -13,14 +13,24 @@
 // limitations under the License.
 
 import {Migrate, Store} from '../base/store';
-import {time, TimeSpan} from '../base/time';
-import {TraceContext} from '../frontend/trace_context';
+import {TraceInfo} from './trace_info';
 import {Engine} from '../trace_processor/engine';
 import {App} from './app';
-import {PromptOption} from './omnibox';
-import {TabDescriptor} from './tab';
-import {LegacyDetailsPanel, TrackDescriptor} from './track';
-import {Workspace} from './workspace';
+import {TabManager} from './tab';
+import {TrackManager} from './track';
+import {Timeline} from './timeline';
+import {Workspace, WorkspaceManager} from './workspace';
+import {SelectionManager} from './selection';
+import {ScrollToArgs} from './scroll_helper';
+import {NoteManager} from './note';
+import {DisposableStack} from '../base/disposable_stack';
+import {Evt} from '../base/events';
+
+// Lists all the possible event listeners using the key as the event name and
+// the type as the type of the callback.
+export interface EventListeners {
+  traceready: () => Promise<void> | void;
+}
 
 /**
  * The main API endpoint to interact programmaticaly with the UI and alter its
@@ -32,60 +42,57 @@ import {Workspace} from './workspace';
  */
 export interface Trace extends App {
   readonly engine: Engine;
+  readonly notes: NoteManager;
+  readonly timeline: Timeline;
+  readonly tabs: TabManager;
+  readonly tracks: TrackManager;
+  readonly selection: SelectionManager;
+  readonly workspace: Workspace;
+  readonly workspaces: WorkspaceManager;
+  readonly traceInfo: TraceInfo;
 
-  // Control over the main timeline.
-  timeline: {
-    // Bring a timestamp into view.
-    panToTimestamp(ts: time): void;
+  // Events.
+  onTraceReady: Evt<void>;
 
-    // Move the viewport
-    setViewportTime(start: time, end: time): void;
-
-    // A span representing the current viewport location
-    readonly viewport: TimeSpan;
-
-    // Access the default workspace - used for adding, removing and reorganizing
-    // tracks
-    readonly workspace: Workspace;
-  };
-
-  // Control over the bottom details pane.
-  tabs: {
-    // Creates a new tab running the provided query.
-    openQuery(query: string, title: string): void;
-
-    // Add a tab to the tab bar (if not already) and focus it.
-    showTab(uri: string): void;
-
-    // Remove a tab from the tab bar.
-    hideTab(uri: string): void;
-  };
-
-  // Register a new track against a unique key known as a URI. The track is not
-  // shown by default and callers need to either manually add it to a
-  // Workspace or use registerTrackAndShowOnTraceLoad() below.
-  registerTrack(trackDesc: TrackDescriptor): void;
-
-  // Register a new tab for this plugin. Will be unregistered when the plugin
-  // is deactivated or when the trace is unloaded.
-  registerTab(tab: TabDescriptor): void;
-
-  // Suggest that a tab should be shown immediately.
-  addDefaultTab(uri: string): void;
-
-  // Register a hook into the current selection tab rendering logic that allows
-  // customization of the current selection tab content.
-  registerDetailsPanel(sel: LegacyDetailsPanel): void;
+  // Scrolls to the given track and/or time. Does NOT change the current
+  // selection.
+  scrollTo(args: ScrollToArgs): void;
 
   // Create a store mounted over the top of this plugin's persistent state.
   mountStore<T>(migrate: Migrate<T>): Store<T>;
 
-  readonly trace: TraceContext;
+  // Returns the blob of the current trace file.
+  // If the trace is opened from a file or postmessage, the blob is returned
+  // immediately. If the trace is opened from URL, this causes a re-download of
+  // the trace. It will throw if traceInfo.downloadable === false.
+  getTraceFile(): Promise<Blob>;
+
+  // List of errors that were encountered while loading the trace by the TS
+  // code. These are on top of traceInfo.importErrors, which is a summary of
+  // what TraceProcessor reports on the stats table at import time.
+  get loadingErrors(): ReadonlyArray<string>;
 
   // When the trace is opened via postMessage deep-linking, returns the sub-set
   // of postMessageData.pluginArgs[pluginId] for the current plugin. If not
   // present returns undefined.
   readonly openerPluginArgs?: {[key: string]: unknown};
 
-  prompt(text: string, options?: PromptOption[]): Promise<string>;
+  // Trace scoped disposables. Will be destroyed when the trace is unloaded.
+  readonly trash: DisposableStack;
 }
+
+/**
+ * A convenience interface to inject the App in Mithril components.
+ * Example usage:
+ *
+ * class MyComponent implements m.ClassComponent<TraceAttrs> {
+ *   oncreate({attrs}: m.CVnodeDOM<AppAttrs>): void {
+ *     attrs.trace.engine.runQuery(...);
+ *   }
+ * }
+ */
+export interface TraceAttrs {
+  trace: Trace;
+}
+
+export const TRACE_SUFFIX = '.perfetto-trace';

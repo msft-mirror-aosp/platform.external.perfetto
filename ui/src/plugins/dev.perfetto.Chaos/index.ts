@@ -14,12 +14,14 @@
 
 import {Trace} from '../../public/trace';
 import {App} from '../../public/app';
-import {addDebugSliceTrack} from '../../public/debug_tracks';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {addDebugSliceTrack} from '../../components/tracks/debug_tracks';
+import {PerfettoPlugin} from '../../public/plugin';
 
-class Chaos implements PerfettoPlugin {
-  onActivate(ctx: App): void {
-    ctx.registerCommand({
+export default class implements PerfettoPlugin {
+  static readonly id = 'dev.perfetto.Chaos';
+
+  static onActivate(ctx: App): void {
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.Chaos#CrashNow',
       name: 'Chaos: crash now',
       callback: () => {
@@ -29,7 +31,7 @@ class Chaos implements PerfettoPlugin {
   }
 
   async onTraceLoad(ctx: Trace): Promise<void> {
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.Chaos#CrashNowQuery',
       name: 'Chaos: run crashing query',
       callback: () => {
@@ -44,35 +46,24 @@ class Chaos implements PerfettoPlugin {
       },
     });
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.Chaos#AddCrashingDebugTrack',
       name: 'Chaos: add crashing debug track',
       callback: () => {
-        addDebugSliceTrack(
-          ctx,
-          {
+        addDebugSliceTrack({
+          trace: ctx,
+          data: {
             sqlSource: `
-            syntactically
-            invalid
-            query
-            over
-            many
-          `,
+              syntactically
+              invalid
+              query
+              over
+              many
+            `,
           },
-          `Chaos track`,
-          {ts: 'ts', dur: 'dur', name: 'name'},
-          [],
-        );
+          title: `Chaos track`,
+        });
       },
     });
   }
-
-  async onTraceUnload(_: Trace): Promise<void> {}
-
-  onDeactivate(_: App): void {}
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'dev.perfetto.Chaos',
-  plugin: Chaos,
-};

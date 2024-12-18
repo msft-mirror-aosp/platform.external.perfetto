@@ -15,10 +15,6 @@
  */
 
 #include "perfetto/ext/trace_processor/export_json.h"
-#include "perfetto/base/status.h"
-#include "perfetto/ext/base/string_view.h"
-#include "perfetto/trace_processor/status.h"
-#include "src/trace_processor/export_json.h"
 
 #include <json/config.h>
 #include <json/reader.h>
@@ -34,8 +30,11 @@
 #include <utility>
 #include <vector>
 
+#include "perfetto/base/status.h"
 #include "perfetto/ext/base/string_utils.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/temp_file.h"
+#include "src/trace_processor/export_json.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/common/cpu_tracker.h"
 #include "src/trace_processor/importers/common/event_tracker.h"
@@ -44,6 +43,9 @@
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/common/tracks.h"
+#include "src/trace_processor/importers/common/tracks_common.h"
+#include "src/trace_processor/importers/common/tracks_internal.h"
 #include "src/trace_processor/importers/proto/track_event_tracker.h"
 #include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/stats.h"
@@ -251,8 +253,11 @@ TEST_F(ExportJsonTest, StorageWithThreadName) {
 }
 
 TEST_F(ExportJsonTest, SystemEventsIgnored) {
-  TrackId track = context_.track_tracker->CreateProcessAsyncTrack(
-      /*name=*/kNullStringId, /*upid=*/0, /*source=*/kNullStringId);
+  static constexpr auto kBlueprint = tracks::SliceBlueprint(
+      "unknown",
+      tracks::DimensionBlueprints(tracks::kProcessDimensionBlueprint));
+  TrackId track =
+      context_.track_tracker->InternTrack(kBlueprint, tracks::Dimensions(0));
   context_.args_tracker->Flush();  // Flush track args.
 
   // System events have no category.
@@ -768,8 +773,13 @@ TEST_F(ExportJsonTest, InstantEvent) {
   const char* kName = "name";
 
   // Global legacy track.
-  TrackId track = context_.track_tracker->InternGlobalTrack(
-      TrackTracker::GlobalTrackType::kChromeLegacyGlobalInstant);
+  TrackId track = context_.track_tracker->InternTrack(
+      tracks::kLegacyGlobalInstantsBlueprint, tracks::Dimensions(),
+      tracks::BlueprintName(), [this](ArgsTracker::BoundInserter& inserter) {
+        inserter.AddArg(
+            context_.storage->InternString("source"),
+            Variadic::String(context_.storage->InternString("chrome")));
+      });
   context_.args_tracker->Flush();  // Flush track args.
   StringId cat_id = context_.storage->InternString(base::StringView(kCategory));
   StringId name_id = context_.storage->InternString(base::StringView(kName));
@@ -784,7 +794,9 @@ TEST_F(ExportJsonTest, InstantEvent) {
       {kTimestamp2, 0, track2, cat_id, name_id, 0, 0, 0});
 
   // Async event track.
-  track_event_tracker.ReserveDescriptorChildTrack(1234, 0, kNullStringId);
+  TrackEventTracker::DescriptorTrackReservation reservation;
+  reservation.parent_uuid = 0;
+  track_event_tracker.ReserveDescriptorTrack(1234, reservation);
   TrackId track3 = *track_event_tracker.GetDescriptorTrack(1234);
   context_.args_tracker->Flush();  // Flush track args.
   context_.storage->mutable_slice_table()->Insert(
@@ -982,11 +994,11 @@ TEST_F(ExportJsonTest, AsyncEvents) {
   StringId name3_id = context_.storage->InternString(base::StringView(kName3));
 
   constexpr int64_t kSourceId = 235;
-  TrackId track = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track = context_.track_tracker->InternLegacyAsyncTrack(
       name_id, upid, kSourceId, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   constexpr int64_t kSourceId2 = 236;
-  TrackId track2 = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track2 = context_.track_tracker->InternLegacyAsyncTrack(
       name3_id, upid, kSourceId2, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   context_.args_tracker->Flush();  // Flush track args.
@@ -1129,11 +1141,11 @@ TEST_F(ExportJsonTest, LegacyAsyncEvents) {
   };
 
   constexpr int64_t kSourceId = 235;
-  TrackId track = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track = context_.track_tracker->InternLegacyAsyncTrack(
       name_id, upid, kSourceId, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   constexpr int64_t kSourceId2 = 236;
-  TrackId track2 = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track2 = context_.track_tracker->InternLegacyAsyncTrack(
       name3_id, upid, kSourceId2, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   context_.args_tracker->Flush();  // Flush track args.
@@ -1252,7 +1264,7 @@ TEST_F(ExportJsonTest, AsyncEventWithThreadTimestamp) {
   StringId name_id = context_.storage->InternString(base::StringView(kName));
 
   constexpr int64_t kSourceId = 235;
-  TrackId track = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track = context_.track_tracker->InternLegacyAsyncTrack(
       name_id, upid, kSourceId, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   context_.args_tracker->Flush();  // Flush track args.
@@ -1308,7 +1320,7 @@ TEST_F(ExportJsonTest, UnfinishedAsyncEvent) {
   StringId name_id = context_.storage->InternString(base::StringView(kName));
 
   constexpr int64_t kSourceId = 235;
-  TrackId track = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track = context_.track_tracker->InternLegacyAsyncTrack(
       name_id, upid, kSourceId, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   context_.args_tracker->Flush();  // Flush track args.
@@ -1353,7 +1365,7 @@ TEST_F(ExportJsonTest, AsyncInstantEvent) {
   StringId name_id = context_.storage->InternString(base::StringView(kName));
 
   constexpr int64_t kSourceId = 235;
-  TrackId track = context_.track_tracker->InternLegacyChromeAsyncTrack(
+  TrackId track = context_.track_tracker->InternLegacyAsyncTrack(
       name_id, upid, kSourceId, /*trace_id_is_process_scoped=*/true,
       /*source_scope=*/kNullStringId);
   context_.args_tracker->Flush();  // Flush track args.
@@ -1805,27 +1817,28 @@ TEST_F(ExportJsonTest, MemorySnapshotOsDumpEvent) {
   const char* kModuleDebugid = "debugid";
   const char* kModuleDebugPath = "debugpath";
 
+  static constexpr auto kBlueprint = tracks::SliceBlueprint(
+      "track_event",
+      tracks::DimensionBlueprints(tracks::kProcessDimensionBlueprint));
+
   UniquePid upid = context_.process_tracker->GetOrCreateProcess(kProcessID);
-  TrackId track = context_.track_tracker->InternProcessTrack(upid);
+  TrackId track =
+      context_.track_tracker->InternTrack(kBlueprint, tracks::Dimensions(upid));
   StringId level_of_detail_id =
       context_.storage->InternString(base::StringView(kLevelOfDetail));
   auto snapshot_id = context_.storage->mutable_memory_snapshot_table()
                          ->Insert({kTimestamp, track, level_of_detail_id})
                          .id;
 
-  StringId peak_resident_set_size_id =
-      context_.storage->InternString("chrome.peak_resident_set_kb");
-  TrackId peak_resident_set_size_counter =
-      context_.track_tracker->InternProcessCounterTrack(
-          peak_resident_set_size_id, upid);
+  TrackId peak_resident_set_size_counter = context_.track_tracker->InternTrack(
+      tracks::kChromeProcessStatsBlueprint,
+      tracks::Dimensions(upid, "peak_resident_set_kb"));
   context_.event_tracker->PushCounter(kTimestamp, kPeakResidentSetSize,
                                       peak_resident_set_size_counter);
 
-  StringId private_footprint_bytes_id =
-      context_.storage->InternString("chrome.private_footprint_kb");
-  TrackId private_footprint_bytes_counter =
-      context_.track_tracker->InternProcessCounterTrack(
-          private_footprint_bytes_id, upid);
+  TrackId private_footprint_bytes_counter = context_.track_tracker->InternTrack(
+      tracks::kChromeProcessStatsBlueprint,
+      tracks::Dimensions(upid, "private_footprint_kb"));
   context_.event_tracker->PushCounter(kTimestamp, kPrivateFootprintBytes,
                                       private_footprint_bytes_counter);
 
@@ -1925,9 +1938,14 @@ TEST_F(ExportJsonTest, MemorySnapshotChromeDumpEvent) {
   const std::string kScalarAttrName = "scalar_name";
   const std::string kStringAttrName = "string_name";
 
+  static constexpr auto kBlueprint = tracks::SliceBlueprint(
+      "track_event",
+      tracks::DimensionBlueprints(tracks::kProcessDimensionBlueprint));
+
   UniquePid os_upid =
       context_.process_tracker->GetOrCreateProcess(kOsProcessID);
-  TrackId track = context_.track_tracker->InternProcessTrack(os_upid);
+  TrackId track = context_.track_tracker->InternTrack(
+      kBlueprint, tracks::Dimensions(os_upid));
   StringId level_of_detail_id =
       context_.storage->InternString(base::StringView(kLevelOfDetail));
   auto snapshot_id = context_.storage->mutable_memory_snapshot_table()
