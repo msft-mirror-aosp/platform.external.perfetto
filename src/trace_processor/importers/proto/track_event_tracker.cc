@@ -32,13 +32,56 @@
 #include "src/trace_processor/importers/common/process_track_translation_table.h"
 #include "src/trace_processor/importers/common/process_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
+#include "src/trace_processor/importers/common/tracks.h"
+#include "src/trace_processor/importers/common/tracks_common.h"
+#include "src/trace_processor/importers/common/tracks_internal.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
-#include "src/trace_processor/tables/track_tables_py.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "src/trace_processor/types/variadic.h"
 
 namespace perfetto::trace_processor {
+
+namespace {
+
+constexpr auto kThreadCounterTrackBlueprint = tracks::CounterBlueprint(
+    "thread_counter_track_event",
+    tracks::DynamicUnitBlueprint(),
+    tracks::DimensionBlueprints(tracks::kThreadDimensionBlueprint,
+                                tracks::LongDimensionBlueprint("track_uuid")),
+    tracks::DynamicNameBlueprint());
+
+constexpr auto kProcessCounterTrackBlueprint = tracks::CounterBlueprint(
+    "process_counter_track_event",
+    tracks::DynamicUnitBlueprint(),
+    tracks::DimensionBlueprints(tracks::kProcessDimensionBlueprint,
+                                tracks::LongDimensionBlueprint("track_uuid")),
+    tracks::DynamicNameBlueprint());
+
+constexpr auto kGlobalCounterTrackBlueprint = tracks::CounterBlueprint(
+    "global_track_event",
+    tracks::DynamicUnitBlueprint(),
+    tracks::DimensionBlueprints(tracks::LongDimensionBlueprint("track_uuid")),
+    tracks::DynamicNameBlueprint());
+
+constexpr auto kThreadTrackBlueprint = tracks::SliceBlueprint(
+    "thread_track_event",
+    tracks::DimensionBlueprints(tracks::kThreadDimensionBlueprint,
+                                tracks::LongDimensionBlueprint("track_uuid")),
+    tracks::DynamicNameBlueprint());
+
+constexpr auto kProcessTrackBlueprint = tracks::SliceBlueprint(
+    "process_track_event",
+    tracks::DimensionBlueprints(tracks::kProcessDimensionBlueprint,
+                                tracks::LongDimensionBlueprint("track_uuid")),
+    tracks::DynamicNameBlueprint());
+
+constexpr auto kGlobalTrackBlueprint = tracks::SliceBlueprint(
+    "global_track_event",
+    tracks::DimensionBlueprints(tracks::LongDimensionBlueprint("track_uuid")),
+    tracks::DynamicNameBlueprint());
+
+}  // namespace
 
 TrackEventTracker::TrackEventTracker(TraceProcessorContext* context)
     : source_key_(context->storage->InternString("source")),
@@ -47,20 +90,20 @@ TrackEventTracker::TrackEventTracker(TraceProcessorContext* context)
       category_key_(context->storage->InternString("category")),
       has_first_packet_on_sequence_key_id_(
           context->storage->InternString("has_first_packet_on_sequence")),
+      child_ordering_key_(context->storage->InternString("child_ordering")),
+      explicit_id_(context->storage->InternString("explicit")),
+      lexicographic_id_(context->storage->InternString("lexicographic")),
+      chronological_id_(context->storage->InternString("chronological")),
+      sibling_order_rank_key_(
+          context->storage->InternString("sibling_order_rank")),
       descriptor_source_(context->storage->InternString("descriptor")),
       default_descriptor_track_name_(
           context->storage->InternString("Default Track")),
       context_(context) {}
 
-void TrackEventTracker::ReserveDescriptorProcessTrack(uint64_t uuid,
-                                                      StringId name,
-                                                      uint32_t pid,
-                                                      int64_t timestamp) {
-  DescriptorTrackReservation reservation;
-  reservation.min_timestamp = timestamp;
-  reservation.pid = pid;
-  reservation.name = name;
-
+void TrackEventTracker::ReserveDescriptorTrack(
+    uint64_t uuid,
+    const DescriptorTrackReservation& reservation) {
   std::map<uint64_t, DescriptorTrackReservation>::iterator it;
   bool inserted;
   std::tie(it, inserted) =
@@ -70,125 +113,14 @@ void TrackEventTracker::ReserveDescriptorProcessTrack(uint64_t uuid,
     return;
 
   if (!it->second.IsForSameTrack(reservation)) {
-    // Process tracks should not be reassigned to a different pid later (neither
-    // should the type of the track change).
     PERFETTO_DLOG("New track reservation for process track with uuid %" PRIu64
                   " doesn't match earlier one",
                   uuid);
     context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
     return;
   }
-  it->second.min_timestamp = std::min(it->second.min_timestamp, timestamp);
-}
-
-void TrackEventTracker::ReserveDescriptorThreadTrack(uint64_t uuid,
-                                                     uint64_t parent_uuid,
-                                                     StringId name,
-                                                     uint32_t pid,
-                                                     uint32_t tid,
-                                                     int64_t timestamp,
-                                                     bool use_separate_track) {
-  DescriptorTrackReservation reservation;
-  reservation.min_timestamp = timestamp;
-  reservation.parent_uuid = parent_uuid;
-  reservation.pid = pid;
-  reservation.tid = tid;
-  reservation.name = name;
-  reservation.use_separate_track = use_separate_track;
-
-  std::map<uint64_t, DescriptorTrackReservation>::iterator it;
-  bool inserted;
-  std::tie(it, inserted) =
-      reserved_descriptor_tracks_.insert(std::make_pair<>(uuid, reservation));
-
-  if (inserted)
-    return;
-
-  if (!it->second.IsForSameTrack(reservation)) {
-    // Thread tracks should not be reassigned to a different pid/tid later
-    // (neither should the type of the track change).
-    PERFETTO_DLOG("New track reservation for thread track with uuid %" PRIu64
-                  " doesn't match earlier one",
-                  uuid);
-    context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
-    return;
-  }
-
-  it->second.min_timestamp = std::min(it->second.min_timestamp, timestamp);
-}
-
-void TrackEventTracker::ReserveDescriptorCounterTrack(
-    uint64_t uuid,
-    uint64_t parent_uuid,
-    StringId name,
-    StringId category,
-    int64_t unit_multiplier,
-    bool is_incremental,
-    uint32_t packet_sequence_id) {
-  DescriptorTrackReservation reservation;
-  reservation.parent_uuid = parent_uuid;
-  reservation.is_counter = true;
-  reservation.name = name;
-  reservation.category = category;
-  reservation.unit_multiplier = unit_multiplier;
-  reservation.is_incremental = is_incremental;
-  // Incrementally encoded counters are only valid on a single sequence.
-  if (is_incremental)
-    reservation.packet_sequence_id = packet_sequence_id;
-
-  std::map<uint64_t, DescriptorTrackReservation>::iterator it;
-  bool inserted;
-  std::tie(it, inserted) =
-      reserved_descriptor_tracks_.insert(std::make_pair<>(uuid, reservation));
-
-  if (inserted || it->second.IsForSameTrack(reservation))
-    return;
-
-  // Counter tracks should not be reassigned to a different parent track later
-  // (neither should the type of the track change).
-  PERFETTO_DLOG("New track reservation for counter track with uuid %" PRIu64
-                " doesn't match earlier one",
-                uuid);
-  context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
-}
-
-void TrackEventTracker::ReserveDescriptorChildTrack(uint64_t uuid,
-                                                    uint64_t parent_uuid,
-                                                    StringId name) {
-  DescriptorTrackReservation reservation;
-  reservation.parent_uuid = parent_uuid;
-  reservation.name = name;
-
-  std::map<uint64_t, DescriptorTrackReservation>::iterator it;
-  bool inserted;
-  std::tie(it, inserted) =
-      reserved_descriptor_tracks_.insert(std::make_pair<>(uuid, reservation));
-
-  if (inserted || it->second.IsForSameTrack(reservation))
-    return;
-
-  // Child tracks should not be reassigned to a different parent track later
-  // (neither should the type of the track change).
-  PERFETTO_DLOG("New track reservation for child track with uuid %" PRIu64
-                " doesn't match earlier one",
-                uuid);
-  context_->storage->IncrementStats(stats::track_event_tokenizer_errors);
-}
-
-TrackId TrackEventTracker::InsertThreadTrack(UniqueTid utid) {
-  tables::ThreadTrackTable::Row row;
-  row.utid = utid;
-  row.machine_id = context_->machine_id();
-  auto* thread_tracks = context_->storage->mutable_thread_track_table();
-  return thread_tracks->Insert(row).id;
-}
-
-TrackId TrackEventTracker::InternThreadTrack(UniqueTid utid) {
-  auto it = thread_tracks_.find(utid);
-  if (it != thread_tracks_.end()) {
-    return it->second;
-  }
-  return thread_tracks_[utid] = InsertThreadTrack(utid);
+  it->second.min_timestamp =
+      std::min(it->second.min_timestamp, reservation.min_timestamp);
 }
 
 std::optional<TrackId> TrackEventTracker::GetDescriptorTrack(
@@ -202,8 +134,7 @@ std::optional<TrackId> TrackEventTracker::GetDescriptorTrack(
 
   // Update the name of the track if unset and the track is not the primary
   // track of a process/thread or a counter track.
-  auto* tracks = context_->storage->mutable_track_table();
-  auto rr = *tracks->FindById(*track_id);
+  auto rr = *context_->storage->mutable_track_table()->FindById(*track_id);
   if (!rr.name().is_null()) {
     return track_id;
   }
@@ -247,96 +178,113 @@ std::optional<TrackId> TrackEventTracker::GetDescriptorTrackImpl(
     parent_id = GetDescriptorTrackImpl(reservation.parent_uuid);
   }
 
-  TrackId track_id = CreateTrackFromResolved(*resolved_track);
+  TrackId track_id = CreateTrackFromResolved(uuid, packet_sequence_id,
+                                             reservation, *resolved_track);
   descriptor_tracks_[uuid] = track_id;
 
-  auto args = context_->args_tracker->AddArgsTo(track_id);
-  args.AddArg(source_key_, Variadic::String(descriptor_source_))
-      .AddArg(source_id_key_, Variadic::Integer(static_cast<int64_t>(uuid)))
-      .AddArg(is_root_in_scope_key_,
-              Variadic::Boolean(resolved_track->is_root_in_scope()));
-  if (!reservation.category.is_null())
-    args.AddArg(category_key_, Variadic::String(reservation.category));
-  if (packet_sequence_id &&
-      sequences_with_first_packet_.find(*packet_sequence_id) !=
-          sequences_with_first_packet_.end()) {
-    args.AddArg(has_first_packet_on_sequence_key_id_, Variadic::Boolean(true));
+  auto row_ref = *context_->storage->mutable_track_table()->FindById(track_id);
+  if (!row_ref.source_arg_set_id().has_value()) {
+    auto inserter = context_->args_tracker->AddArgsTo(track_id);
+    AddTrackArgs(uuid, packet_sequence_id, reservation, *resolved_track,
+                 inserter);
   }
-
-  auto* tracks = context_->storage->mutable_track_table();
-  auto row_ref = *tracks->FindById(track_id);
   if (parent_id) {
     row_ref.set_parent_id(*parent_id);
   }
-
-  if (reservation.name.is_null())
-    return track_id;
-
-  // Initialize the track name here, so that, if a name was given in the
-  // reservation, it is set immediately after resolution takes place.
-  row_ref.set_name(reservation.name);
+  if (!reservation.name.is_null()) {
+    // Initialize the track name here, so that, if a name was given in the
+    // reservation, it is set immediately after resolution takes place.
+    row_ref.set_name(reservation.name);
+  }
   return track_id;
 }
 
 TrackId TrackEventTracker::CreateTrackFromResolved(
+    uint64_t uuid,
+    std::optional<uint32_t> packet_sequence_id,
+    const DescriptorTrackReservation& reservation,
     const ResolvedDescriptorTrack& track) {
   if (track.is_root_in_scope()) {
     switch (track.scope()) {
       case ResolvedDescriptorTrack::Scope::kThread: {
         if (track.use_separate_track()) {
-          return InternThreadTrack(track.utid());
+          auto it = thread_tracks_.find(track.utid());
+          if (it != thread_tracks_.end()) {
+            return it->second;
+          }
+          TrackId id = context_->track_tracker->InternTrack(
+              kThreadTrackBlueprint,
+              tracks::Dimensions(track.utid(), static_cast<int64_t>(uuid)),
+              tracks::DynamicName(kNullStringId));
+          thread_tracks_[track.utid()] = id;
+          return id;
         }
         return context_->track_tracker->InternThreadTrack(track.utid());
       }
-      case ResolvedDescriptorTrack::Scope::kProcess:
-        return context_->track_tracker->InternProcessTrack(track.upid());
+      case ResolvedDescriptorTrack::Scope::kProcess: {
+        return context_->track_tracker->InternTrack(
+            kProcessTrackBlueprint,
+            tracks::Dimensions(track.upid(), static_cast<int64_t>(uuid)),
+            tracks::DynamicName(kNullStringId));
+      }
       case ResolvedDescriptorTrack::Scope::kGlobal:
         // Will be handled below.
         break;
     }
   }
 
+  if (track.is_counter()) {
+    switch (track.scope()) {
+      case ResolvedDescriptorTrack::Scope::kThread:
+        return context_->track_tracker->InternTrack(
+            kThreadCounterTrackBlueprint,
+            tracks::Dimensions(track.utid(), static_cast<int64_t>(uuid)),
+            tracks::DynamicName(kNullStringId),
+            [&, this](ArgsTracker::BoundInserter& inserter) {
+              AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                           inserter);
+            },
+            tracks::DynamicUnit(reservation.counter_details->unit));
+      case ResolvedDescriptorTrack::Scope::kProcess:
+        return context_->track_tracker->InternTrack(
+            kProcessCounterTrackBlueprint,
+            tracks::Dimensions(track.upid(), static_cast<int64_t>(uuid)),
+            tracks::DynamicName(kNullStringId),
+            [&, this](ArgsTracker::BoundInserter& inserter) {
+              AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                           inserter);
+            },
+            tracks::DynamicUnit(reservation.counter_details->unit));
+      case ResolvedDescriptorTrack::Scope::kGlobal:
+        return context_->track_tracker->InternTrack(
+            kGlobalCounterTrackBlueprint,
+            tracks::Dimensions(static_cast<int64_t>(uuid)),
+            tracks::DynamicName(kNullStringId),
+            [&, this](ArgsTracker::BoundInserter& inserter) {
+              AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                           inserter);
+            },
+            tracks::DynamicUnit(reservation.counter_details->unit));
+    }
+  }
+
   switch (track.scope()) {
     case ResolvedDescriptorTrack::Scope::kThread: {
-      if (track.is_counter()) {
-        tables::ThreadCounterTrackTable::Row row;
-        row.utid = track.utid();
-        row.machine_id = context_->machine_id();
-
-        auto* thread_counter_tracks =
-            context_->storage->mutable_thread_counter_track_table();
-        return thread_counter_tracks->Insert(row).id;
-      }
-
-      return InsertThreadTrack(track.utid());
+      return context_->track_tracker->InternTrack(
+          kThreadTrackBlueprint,
+          tracks::Dimensions(track.utid(), static_cast<int64_t>(uuid)),
+          tracks::DynamicName(kNullStringId));
     }
     case ResolvedDescriptorTrack::Scope::kProcess: {
-      if (track.is_counter()) {
-        tables::ProcessCounterTrackTable::Row row;
-        row.upid = track.upid();
-        row.machine_id = context_->machine_id();
-
-        auto* process_counter_tracks =
-            context_->storage->mutable_process_counter_track_table();
-        return process_counter_tracks->Insert(row).id;
-      }
-
-      tables::ProcessTrackTable::Row row;
-      row.upid = track.upid();
-      row.machine_id = context_->machine_id();
-
-      auto* process_tracks = context_->storage->mutable_process_track_table();
-      return process_tracks->Insert(row).id;
+      return context_->track_tracker->InternTrack(
+          kProcessTrackBlueprint,
+          tracks::Dimensions(track.upid(), static_cast<int64_t>(uuid)),
+          tracks::DynamicName(kNullStringId));
     }
     case ResolvedDescriptorTrack::Scope::kGlobal: {
-      if (track.is_counter()) {
-        tables::CounterTrackTable::Row row;
-        row.machine_id = context_->machine_id();
-        return context_->storage->mutable_counter_track_table()->Insert(row).id;
-      }
-      tables::TrackTable::Row row;
-      row.machine_id = context_->machine_id();
-      return context_->storage->mutable_track_table()->Insert(row).id;
+      return context_->track_tracker->InternTrack(
+          kGlobalTrackBlueprint, tracks::Dimensions(static_cast<int64_t>(uuid)),
+          tracks::DynamicName(kNullStringId));
     }
   }
   PERFETTO_FATAL("For GCC");
@@ -545,8 +493,10 @@ TrackId TrackEventTracker::GetOrCreateDefaultDescriptorTrack() {
     return *track_id;
 
   // Otherwise reserve a new track and resolve it.
-  ReserveDescriptorChildTrack(kDefaultDescriptorTrackUuid, /*parent_uuid=*/0,
-                              default_descriptor_track_name_);
+  DescriptorTrackReservation r;
+  r.parent_uuid = 0;
+  r.name = default_descriptor_track_name_;
+  ReserveDescriptorTrack(kDefaultDescriptorTrackUuid, r);
   return *GetDescriptorTrack(kDefaultDescriptorTrackUuid);
 }
 
@@ -567,23 +517,27 @@ std::optional<double> TrackEventTracker::ConvertToAbsoluteCounterValue(
                   counter_track_uuid);
     return std::nullopt;
   }
+  if (!reservation.counter_details) {
+    PERFETTO_FATAL("Counter tracks require `counter_details`.");
+  }
+  DescriptorTrackReservation::CounterDetails& c_details =
+      *reservation.counter_details;
 
-  if (reservation.unit_multiplier > 0)
-    value *= static_cast<double>(reservation.unit_multiplier);
+  if (c_details.unit_multiplier > 0)
+    value *= static_cast<double>(c_details.unit_multiplier);
 
-  if (reservation.is_incremental) {
-    if (reservation.packet_sequence_id != packet_sequence_id) {
+  if (c_details.is_incremental) {
+    if (c_details.packet_sequence_id != packet_sequence_id) {
       PERFETTO_DLOG(
           "Incremental counter track with uuid %" PRIu64
           " was updated from the wrong packet sequence (expected: %" PRIu32
           " got:%" PRIu32 ")",
-          counter_track_uuid, reservation.packet_sequence_id,
-          packet_sequence_id);
+          counter_track_uuid, c_details.packet_sequence_id, packet_sequence_id);
       return std::nullopt;
     }
 
-    reservation.latest_value += value;
-    value = reservation.latest_value;
+    c_details.latest_value += value;
+    value = c_details.latest_value;
   }
 
   return value;
@@ -597,17 +551,58 @@ void TrackEventTracker::OnIncrementalStateCleared(uint32_t packet_sequence_id) {
   for (auto& entry : reserved_descriptor_tracks_) {
     DescriptorTrackReservation& reservation = entry.second;
     // Only consider incremental counter tracks for current sequence.
-    if (!reservation.is_counter || !reservation.is_incremental ||
-        reservation.packet_sequence_id != packet_sequence_id) {
+    if (!reservation.is_counter || !reservation.counter_details ||
+        !reservation.counter_details->is_incremental ||
+        reservation.counter_details->packet_sequence_id != packet_sequence_id) {
       continue;
     }
     // Reset their value to 0, see CounterDescriptor's |is_incremental|.
-    reservation.latest_value = 0;
+    reservation.counter_details->latest_value = 0;
   }
 }
 
 void TrackEventTracker::OnFirstPacketOnSequence(uint32_t packet_sequence_id) {
   sequences_with_first_packet_.insert(packet_sequence_id);
+}
+
+void TrackEventTracker::AddTrackArgs(
+    uint64_t uuid,
+    std::optional<uint32_t> packet_sequence_id,
+    const DescriptorTrackReservation& reservation,
+    const ResolvedDescriptorTrack& track,
+    ArgsTracker::BoundInserter& args) {
+  args.AddArg(source_key_, Variadic::String(descriptor_source_))
+      .AddArg(source_id_key_, Variadic::Integer(static_cast<int64_t>(uuid)))
+      .AddArg(is_root_in_scope_key_,
+              Variadic::Boolean(track.is_root_in_scope()));
+  if (reservation.counter_details &&
+      !reservation.counter_details->category.is_null())
+    args.AddArg(category_key_,
+                Variadic::String(reservation.counter_details->category));
+  if (packet_sequence_id &&
+      sequences_with_first_packet_.find(*packet_sequence_id) !=
+          sequences_with_first_packet_.end()) {
+    args.AddArg(has_first_packet_on_sequence_key_id_, Variadic::Boolean(true));
+  }
+
+  switch (reservation.ordering) {
+    case DescriptorTrackReservation::ChildTracksOrdering::kLexicographic:
+      args.AddArg(child_ordering_key_, Variadic::String(lexicographic_id_));
+      break;
+    case DescriptorTrackReservation::ChildTracksOrdering::kChronological:
+      args.AddArg(child_ordering_key_, Variadic::String(chronological_id_));
+      break;
+    case DescriptorTrackReservation::ChildTracksOrdering::kExplicit:
+      args.AddArg(child_ordering_key_, Variadic::String(explicit_id_));
+      break;
+    case DescriptorTrackReservation::ChildTracksOrdering::kUnknown:
+      break;
+  }
+
+  if (reservation.sibling_order_rank) {
+    args.AddArg(sibling_order_rank_key_,
+                Variadic::Integer(*reservation.sibling_order_rank));
+  }
 }
 
 TrackEventTracker::ResolvedDescriptorTrack
