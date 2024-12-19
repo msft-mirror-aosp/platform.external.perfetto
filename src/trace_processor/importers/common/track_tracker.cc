@@ -40,6 +40,7 @@ TrackTracker::TrackTracker(TraceProcessorContext* context)
       trace_id_key_(context->storage->InternString("trace_id")),
       trace_id_is_process_scoped_key_(
           context->storage->InternString("trace_id_is_process_scoped")),
+      upid_(context->storage->InternString("upid")),
       source_scope_key_(context->storage->InternString("source_scope")),
       chrome_source_(context->storage->InternString("chrome")),
       context_(context),
@@ -58,6 +59,7 @@ TrackId TrackTracker::InternLegacyAsyncTrack(StringId raw_name,
         .AddArg(trace_id_key_, Variadic::Integer(trace_id))
         .AddArg(trace_id_is_process_scoped_key_,
                 Variadic::Boolean(trace_id_is_process_scoped))
+        .AddArg(upid_, Variadic::UnsignedInteger(upid))
         .AddArg(source_scope_key_, Variadic::String(source_scope));
   };
   TrackId track_id;
@@ -122,8 +124,8 @@ TrackId TrackTracker::AddTrack(const tracks::BlueprintBase& blueprint,
   }
 
   row.machine_id = context_->machine_id();
-  row.classification = context_->storage->InternString(base::StringView(
-      blueprint.classification.data(), blueprint.classification.size()));
+  row.type = context_->storage->InternString(
+      base::StringView(blueprint.type.data(), blueprint.type.size()));
   if (d_size > 0) {
     row.dimension_arg_set_id =
         context_->global_args_tracker->AddArgSet(d_args, 0, d_size);

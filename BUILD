@@ -1888,6 +1888,7 @@ perfetto_filegroup(
         "src/trace_processor/importers/etm/mapping_version.cc",
         "src/trace_processor/importers/etm/mapping_version.h",
         "src/trace_processor/importers/etm/opencsd.h",
+        "src/trace_processor/importers/etm/sql_values.h",
         "src/trace_processor/importers/etm/storage_handle.cc",
         "src/trace_processor/importers/etm/storage_handle.h",
         "src/trace_processor/importers/etm/target_memory.cc",
@@ -2495,6 +2496,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/android_batt.sql",
         "src/trace_processor/metrics/sql/android/android_binder.sql",
         "src/trace_processor/metrics/sql/android/android_blocking_calls_cuj_metric.sql",
+        "src/trace_processor/metrics/sql/android/android_blocking_calls_cuj_per_frame_metric.sql",
         "src/trace_processor/metrics/sql/android/android_blocking_calls_unagg.sql",
         "src/trace_processor/metrics/sql/android/android_boot.sql",
         "src/trace_processor/metrics/sql/android/android_boot_unagg.sql",
@@ -2870,6 +2872,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_intrinsics_operators_etm_hdr",
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/operators/etm_decode_trace_vtable.h",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/etm_iterate_range_vtable.h",
     ],
 )
 
@@ -2878,6 +2881,7 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_intrinsics_operators_etm_impl",
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/operators/etm_decode_trace_vtable.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/operators/etm_iterate_range_vtable.cc",
     ],
 )
 
@@ -5276,7 +5280,9 @@ perfetto_proto_library(
         "protos/perfetto/metrics/android/ad_services_metric.proto",
         "protos/perfetto/metrics/android/android_anomaly_metric.proto",
         "protos/perfetto/metrics/android/android_blocking_call.proto",
+        "protos/perfetto/metrics/android/android_blocking_call_per_frame.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_cuj_metric.proto",
+        "protos/perfetto/metrics/android/android_blocking_calls_cuj_per_frame_metric.proto",
         "protos/perfetto/metrics/android/android_blocking_calls_unagg.proto",
         "protos/perfetto/metrics/android/android_boot.proto",
         "protos/perfetto/metrics/android/android_boot_unagg.proto",

@@ -60,7 +60,7 @@ class TrackTracker {
   //   ```
   //   void ParseMySpecialThreadScopedSlice(UniqueTid utid, ...(other args)) {
   //     static constexpr auto kBlueprint = tracks::SliceBlueprint(
-  //       // The classification of the track.
+  //       // The type of the track.
   //       "my_special_thread_scoped_slice",
   //       // The dimensions of the track. Can be >1 if the track is broken down
   //       // by multiple fields.
@@ -78,7 +78,7 @@ class TrackTracker {
   //   void ParseMySpecialCustomScopedCounter(uint32_t custom_scope,
   //                                          ... other args) {
   //     static constexpr auto kBlueprint = tracks::CounterBlueprint(
-  //       // The classification of the track.
+  //       // The type of the track.
   //       "my_special_custom_scoped_counter",
   //       // The dimensions of the track. Can be >1 if the track is broken down
   //       // by multiple fields.
@@ -150,7 +150,7 @@ class TrackTracker {
       const SetArgsCallback& args = {},
       const typename BlueprintT::unit_t& unit = tracks::BlueprintUnit()) {
     uint64_t hash = tracks::HashFromBlueprintAndDimensions(bp, dims);
-    auto [it, inserted] = tracks_new_.Insert(hash, {});
+    auto [it, inserted] = tracks_.Insert(hash, {});
     if (inserted) {
       std::array<GlobalArgsTracker::CompactArg, 8> a;
       DimensionsToArgs<0>(dims, bp.dimension_blueprints.data(), a.data());
@@ -212,12 +212,12 @@ class TrackTracker {
     base::ignore_result(dimensions_schema);
   }
 
-  base::FlatHashMap<uint64_t, TrackId, base::AlreadyHashed<uint64_t>>
-      tracks_new_;
+  base::FlatHashMap<uint64_t, TrackId, base::AlreadyHashed<uint64_t>> tracks_;
 
   const StringId source_key_;
   const StringId trace_id_key_;
   const StringId trace_id_is_process_scoped_key_;
+  const StringId upid_;
   const StringId source_scope_key_;
   const StringId chrome_source_;
 
