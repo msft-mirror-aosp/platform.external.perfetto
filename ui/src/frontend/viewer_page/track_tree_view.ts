@@ -28,17 +28,25 @@ import {canvasClip, canvasSave} from '../../base/canvas_utils';
 import {classNames} from '../../base/classnames';
 import {DisposableStack} from '../../base/disposable_stack';
 import {findRef, toHTMLElement} from '../../base/dom_utils';
-import {Rect2D, Size2D, VerticalBounds} from '../../base/geom';
+import {
+  HorizontalBounds,
+  Rect2D,
+  Size2D,
+  VerticalBounds,
+} from '../../base/geom';
+import {HighPrecisionTime} from '../../base/high_precision_time';
 import {HighPrecisionTimeSpan} from '../../base/high_precision_time_span';
 import {assertExists} from '../../base/logging';
 import {Time} from '../../base/time';
 import {TimeScale} from '../../base/time_scale';
-import {ZonedInteractionHandler} from '../../base/zoned_interaction_handler';
+import {
+  DragEvent,
+  ZonedInteractionHandler,
+} from '../../base/zoned_interaction_handler';
 import {PerfStats, runningStatStr} from '../../core/perf_stats';
-import {raf} from '../../core/raf_scheduler';
 import {TraceImpl} from '../../core/trace_impl';
 import {TrackNode} from '../../public/workspace';
-import {VirtualOverlayCanvas} from '../../widgets/virtual_overlay_canvas';
+import {VirtualOverlayCanvas} from '../../components/widgets/virtual_overlay_canvas';
 import {
   SELECTION_STROKE_COLOR,
   TRACK_BORDER_COLOR,
@@ -52,6 +60,15 @@ import {
 } from './timeline_interactions';
 import {TrackView} from './track_view';
 import {drawVerticalLineAtTime} from './vertical_line_helper';
+import {featureFlags} from '../../core/feature_flags';
+
+const VIRTUAL_TRACK_SCROLLING = featureFlags.register({
+  id: 'virtualTrackScrolling',
+  name: 'Virtual track scrolling',
+  description: `[Experimental] Use virtual scrolling in the timeline view to
+    improve performance on large traces.`,
+  defaultValue: false,
+});
 
 export interface TrackTreeViewAttrs {
   // Access to the trace, for accessing the track registry / selection manager.
@@ -79,7 +96,6 @@ const TRACK_CONTAINER_REF = 'track-container';
 export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
   private readonly trace: TraceImpl;
   private readonly trash = new DisposableStack();
-  private currentSelectionRect?: Rect2D;
   private interactions?: ZonedInteractionHandler;
   private perfStatsEnabled = false;
   private trackPerfStats = new WeakMap<TrackNode, PerfStats>();
@@ -88,6 +104,9 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     tracksOnCanvas: 0,
     renderStats: new PerfStats(10),
   };
+  private areaDrag?: InProgressAreaSelection;
+  private handleDrag?: InProgressHandleDrag;
+  private canvasRect?: Rect2D;
 
   constructor({attrs}: m.Vnode<TrackTreeViewAttrs>) {
     this.trace = attrs.trace;
@@ -98,11 +117,11 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     const renderedTracks = new Array<TrackView>();
     let top = 0;
 
-    function renderTrack(
+    const renderTrack = (
       node: TrackNode,
       depth = 0,
       stickyTop = 0,
-    ): m.Children {
+    ): m.Children => {
       const trackView = new TrackView(trace, node, top);
       renderedTracks.push(trackView);
 
@@ -124,8 +143,21 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
       if (node.headless) {
         return children;
       } else {
+        const isTrackOnScreen = () => {
+          if (VIRTUAL_TRACK_SCROLLING.get()) {
+            return this.canvasRect?.overlaps({
+              left: 0,
+              right: 1,
+              ...trackView.verticalBounds,
+            });
+          } else {
+            return true;
+          }
+        };
+
         return trackView.renderDOM(
           {
+            lite: !Boolean(isTrackOnScreen()),
             scrollToOnCreate: scrollToNewTracks,
             reorderable,
             stickyTop,
@@ -134,11 +166,12 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
           children,
         );
       }
-    }
+    };
 
     return m(
       VirtualOverlayCanvas,
       {
+        raf: attrs.trace.raf,
         className: classNames(className, 'pf-track-tree'),
         scrollAxes: 'y',
         onCanvasRedraw: ({ctx, virtualCanvasSize, canvasRect}) => {
@@ -149,11 +182,22 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
             canvasRect,
             rootNode,
           );
-        },
-        onCanvasCreate: (overlay) => {
-          overlay.trash.use(
-            raf.addCanvasRedrawCallback(() => overlay.redrawCanvas()),
-          );
+
+          if (VIRTUAL_TRACK_SCROLLING.get()) {
+            // The VOC can ask us to redraw the canvas for any number of
+            // reasons, we're interested in the case where the canvas rect has
+            // moved (which indicates that the user has scrolled enough to
+            // warrant drawing more content). If so, we should redraw the DOM in
+            // order to keep the track nodes inside the viewport rendering in
+            // full-fat mode.
+            if (
+              this.canvasRect === undefined ||
+              !this.canvasRect.equals(canvasRect)
+            ) {
+              this.canvasRect = canvasRect;
+              m.redraw();
+            }
+          }
         },
       },
       m(
@@ -234,7 +278,7 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     this.drawHoveredCursorVertical(ctx, timescale, size);
     this.drawWakeupVertical(ctx, timescale, size);
     this.drawNoteVerticals(ctx, timescale, size);
-    this.drawTemporarySelectionRect(ctx);
+    this.drawAreaSelection(ctx, timescale, size);
     this.updateInteractions(timelineRect, timescale, size, renderedTracks);
 
     const renderTime = performance.now() - start;
@@ -321,6 +365,18 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
         }),
         cursor: 'col-resize',
         drag: {
+          cursorWhileDragging: 'col-resize',
+          onDrag: (e) => {
+            if (!this.handleDrag) {
+              this.handleDrag = new InProgressHandleDrag(
+                new HighPrecisionTime(areaSelection.end),
+              );
+            }
+            this.handleDrag.currentTime = timescale.pxToHpTime(e.dragCurrent.x);
+            trace.timeline.selectedSpan = this.handleDrag
+              .timeSpan()
+              .toTimeSpan();
+          },
           onDragEnd: (e) => {
             const newStartTime = timescale
               .pxToHpTime(e.dragCurrent.x)
@@ -330,6 +386,8 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
               end: Time.max(newStartTime, areaSelection.end),
               start: Time.min(newStartTime, areaSelection.end),
             });
+            trace.timeline.selectedSpan = undefined;
+            this.handleDrag = undefined;
           },
         },
       },
@@ -343,6 +401,18 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
         }),
         cursor: 'col-resize',
         drag: {
+          cursorWhileDragging: 'col-resize',
+          onDrag: (e) => {
+            if (!this.handleDrag) {
+              this.handleDrag = new InProgressHandleDrag(
+                new HighPrecisionTime(areaSelection.start),
+              );
+            }
+            this.handleDrag.currentTime = timescale.pxToHpTime(e.dragCurrent.x);
+            trace.timeline.selectedSpan = this.handleDrag
+              .timeSpan()
+              .toTimeSpan();
+          },
           onDragEnd: (e) => {
             const newEndTime = timescale
               .pxToHpTime(e.dragCurrent.x)
@@ -352,6 +422,8 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
               end: Time.max(newEndTime, areaSelection.start),
               start: Time.min(newEndTime, areaSelection.start),
             });
+            trace.timeline.selectedSpan = undefined;
+            this.handleDrag = undefined;
           },
         },
       },
@@ -367,29 +439,42 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
           minDistance: 1,
           cursorWhileDragging: 'crosshair',
           onDrag: (e) => {
-            const dragRect = Rect2D.fromPoints(e.dragStart, e.dragCurrent);
-            const timeSpan = timescale
-              .pxSpanToHpTimeSpan(dragRect)
-              .toTimeSpan();
-            trace.timeline.selectedSpan = timeSpan;
-            this.currentSelectionRect = dragRect;
+            if (!this.areaDrag) {
+              this.areaDrag = new InProgressAreaSelection(
+                timescale.pxToHpTime(e.dragStart.x),
+                e.dragStart.y,
+              );
+            }
+            this.areaDrag.update(e, timescale);
+            trace.timeline.selectedSpan = this.areaDrag.timeSpan().toTimeSpan();
           },
           onDragEnd: (e) => {
-            const dragRect = Rect2D.fromPoints(e.dragStart, e.dragCurrent);
-            const timeSpan = timescale
-              .pxSpanToHpTimeSpan(dragRect)
-              .toTimeSpan();
+            if (!this.areaDrag) {
+              this.areaDrag = new InProgressAreaSelection(
+                timescale.pxToHpTime(e.dragStart.x),
+                e.dragStart.y,
+              );
+            }
+            this.areaDrag?.update(e, timescale);
+
             // Find the list of tracks that intersect this selection
-            const trackUris = findTracksInRect(renderedTracks, dragRect, true)
+            const trackUris = findTracksInRect(
+              renderedTracks,
+              this.areaDrag.rect(timescale),
+              true,
+            )
               .map((t) => t.uri)
               .filter((uri) => uri !== undefined);
+
+            const timeSpan = this.areaDrag.timeSpan().toTimeSpan();
             trace.selection.selectArea({
               start: timeSpan.start,
               end: timeSpan.end,
               trackUris,
             });
+
             trace.timeline.selectedSpan = undefined;
-            this.currentSelectionRect = undefined;
+            this.areaDrag = undefined;
           },
         },
       },
@@ -408,12 +493,56 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     this.perfStats.tracksOnCanvas = tracksOnCanvas;
   }
 
-  private drawTemporarySelectionRect(ctx: CanvasRenderingContext2D) {
-    if (this.currentSelectionRect) {
+  private drawAreaSelection(
+    ctx: CanvasRenderingContext2D,
+    timescale: TimeScale,
+    size: Size2D,
+  ) {
+    if (this.areaDrag) {
       ctx.strokeStyle = SELECTION_STROKE_COLOR;
       ctx.lineWidth = 1;
-      const rect = this.currentSelectionRect;
+      const rect = this.areaDrag.rect(timescale);
       ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    }
+
+    if (this.handleDrag) {
+      const rect = this.handleDrag.hBounds(timescale);
+
+      ctx.strokeStyle = SELECTION_STROKE_COLOR;
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      ctx.moveTo(rect.left, 0);
+      ctx.lineTo(rect.left, size.height);
+      ctx.stroke();
+      ctx.closePath();
+
+      ctx.beginPath();
+      ctx.moveTo(rect.right, 0);
+      ctx.lineTo(rect.right, size.height);
+      ctx.stroke();
+      ctx.closePath();
+    }
+
+    const selection = this.trace.selection.selection;
+    if (selection.kind === 'area') {
+      const startPx = timescale.timeToPx(selection.start);
+      const endPx = timescale.timeToPx(selection.end);
+
+      ctx.strokeStyle = '#8398e6';
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(startPx, 0);
+      ctx.lineTo(startPx, size.height);
+      ctx.stroke();
+      ctx.closePath();
+
+      ctx.beginPath();
+      ctx.moveTo(endPx, 0);
+      ctx.lineTo(endPx, size.height);
+      ctx.stroke();
+      ctx.closePath();
     }
   }
 
@@ -534,4 +663,63 @@ function findTracksInRect(
     }
   }
   return tracks;
+}
+
+// Stores an in-progress area selection.
+class InProgressAreaSelection {
+  currentTime: HighPrecisionTime;
+  currentY: number;
+
+  constructor(
+    readonly startTime: HighPrecisionTime,
+    readonly startY: number,
+  ) {
+    this.currentTime = startTime;
+    this.currentY = startY;
+  }
+
+  update(e: DragEvent, timescale: TimeScale) {
+    this.currentTime = timescale.pxToHpTime(e.dragCurrent.x);
+    this.currentY = e.dragCurrent.y;
+  }
+
+  timeSpan() {
+    return HighPrecisionTimeSpan.fromHpTimes(this.startTime, this.currentTime);
+  }
+
+  rect(timescale: TimeScale) {
+    const horizontal = timescale.hpTimeSpanToPxSpan(this.timeSpan());
+    return Rect2D.fromPoints(
+      {
+        x: horizontal.left,
+        y: this.startY,
+      },
+      {
+        x: horizontal.right,
+        y: this.currentY,
+      },
+    );
+  }
+}
+
+// Stores an in-progress handle drag.
+class InProgressHandleDrag {
+  currentTime: HighPrecisionTime;
+
+  constructor(readonly startTime: HighPrecisionTime) {
+    this.currentTime = startTime;
+  }
+
+  timeSpan() {
+    return HighPrecisionTimeSpan.fromHpTimes(this.startTime, this.currentTime);
+  }
+
+  hBounds(timescale: TimeScale): HorizontalBounds {
+    const horizontal = timescale.hpTimeSpanToPxSpan(this.timeSpan());
+    return new Rect2D({
+      ...horizontal,
+      top: 0,
+      bottom: 0,
+    });
+  }
 }
