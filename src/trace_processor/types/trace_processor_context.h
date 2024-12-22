@@ -33,7 +33,7 @@ class AndroidLogEventParser;
 class ArgsTracker;
 class ArgsTranslationTable;
 class ArtMethodParser;
-class AsyncTrackSetTracker;
+class TrackCompressor;
 class ChunkedTraceReader;
 class ClockConverter;
 class ClockTracker;
@@ -114,12 +114,12 @@ class TraceProcessorContext {
   // Keep the global tracker before the args tracker as we access the global
   // tracker in the destructor of the args tracker. Also keep it before other
   // trackers, as they may own ArgsTrackers themselves.
-  std::unique_ptr<GlobalArgsTracker> global_args_tracker;
+  std::shared_ptr<GlobalArgsTracker> global_args_tracker;
   std::unique_ptr<ArgsTracker> args_tracker;
   std::unique_ptr<ArgsTranslationTable> args_translation_table;
 
   std::unique_ptr<TrackTracker> track_tracker;
-  std::unique_ptr<AsyncTrackSetTracker> async_track_set_tracker;
+  std::unique_ptr<TrackCompressor> track_compressor;
   std::unique_ptr<SliceTracker> slice_tracker;
   std::unique_ptr<SliceTranslationTable> slice_translation_table;
   std::unique_ptr<FlowTracker> flow_tracker;

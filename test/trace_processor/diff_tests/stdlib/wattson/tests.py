@@ -201,7 +201,9 @@ class WattsonStdlib(TestSuite):
         trace=DataPath('wattson_dsu_pmu.pb'),
         query=("""
             INCLUDE PERFETTO MODULE wattson.curves.estimates;
-              select * from _w_independent_cpus_calc
+              select
+              ts,dur,l3_hit_count,l3_miss_count,freq_0,idle_0,freq_1,idle_1,freq_2,idle_2,freq_3,idle_3,freq_4,idle_4,freq_5,idle_5,freq_6,idle_6,freq_7,idle_7,policy_4,policy_5,policy_6,policy_7,no_static,cpu0_curve,cpu1_curve,cpu2_curve,cpu3_curve,cpu4_curve,cpu5_curve,cpu6_curve,cpu7_curve,static_4,static_5,static_6,static_7
+              from _w_independent_cpus_calc
               WHERE ts > 359661672577
               ORDER by ts ASC
               LIMIT 10
@@ -349,7 +351,9 @@ class WattsonStdlib(TestSuite):
         trace=DataPath('wattson_tk4_pcmark.pb'),
         query=("""
             INCLUDE PERFETTO MODULE wattson.curves.w_dsu_dependence;
-            SELECT * FROM _cpu_curves
+            SELECT
+            ts,dur,freq_0,idle_0,freq_1,idle_1,freq_2,idle_2,freq_3,idle_3,cpu4_curve,cpu5_curve,cpu6_curve,cpu7_curve,l3_hit_count,l3_miss_count,no_static,all_cpu_deep_idle
+            FROM _cpu_curves
             WHERE ts > 4108586775197
             LIMIT 20
             """),
@@ -479,3 +483,49 @@ class WattsonStdlib(TestSuite):
             25150405200,15120,0.000000,176.280000,0.000000,176.280000,70.050000,0.000000,0.000000
             25150420320,15920,0.000000,176.280000,0.000000,0.000000,70.050000,0.000000,0.000000
             """))
+
+  # Tests suspend path with devfreq code path
+  def test_wattson_devfreq_suspend(self):
+    return DiffTestBlueprint(
+        trace=DataPath('wattson_cpuhp_devfreq_suspend.pb'),
+        query=("""
+            INCLUDE PERFETTO MODULE wattson.curves.estimates;
+               SELECT
+                 ts, dur, cpu0_mw, cpu1_mw, cpu2_mw, cpu3_mw, cpu4_mw, cpu5_mw,
+                 cpu6_mw, cpu7_mw, dsu_scu_mw
+               FROM _system_state_mw
+               WHERE ts > 165725472126
+              LIMIT 4
+            """),
+        out=Csv("""
+            "ts","dur","cpu0_mw","cpu1_mw","cpu2_mw","cpu3_mw","cpu4_mw","cpu5_mw","cpu6_mw","cpu7_mw","dsu_scu_mw"
+            165725475055,6999,0.000000,111.020000,111.020000,111.020000,267.180000,267.180000,267.180000,375.490000,14.560000
+            165725482054,1546,111.020000,111.020000,111.020000,111.020000,267.180000,267.180000,267.180000,375.490000,14.560000
+            165725483600,4468465,111.020000,111.020000,111.020000,111.020000,267.180000,267.180000,267.180000,375.490000,14.560000
+            165729952065,73480460119,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+            """))
+
+  # Tests remapping of idle states
+  def test_wattson_idle_remap(self):
+    return DiffTestBlueprint(
+        trace=DataPath('wattson_idle_map.pb'),
+        query=("""
+               INCLUDE PERFETTO MODULE wattson.curves.estimates;
+               SELECT ts, dur, cpu, idle
+               FROM _adjusted_deep_idle
+               WHERE ts > 1450338950433 AND cpu = 3
+               LIMIT 10
+               """),
+        out=Csv("""
+               "ts","dur","cpu","idle"
+               1450338950434,1395365,3,1
+               1450340345799,96927,3,-1
+               1450340442726,301250,3,0
+               1450340743976,24010,3,-1
+               1450340767986,3748386,3,1
+               1450344516372,70208,3,-1
+               1450344586580,2400521,3,1
+               1450346987101,306458,3,-1
+               1450347293559,715573,3,0
+               1450348009132,82292,3,-1
+               """))
