@@ -174,7 +174,8 @@ std::optional<TrackId> TrackEventTracker::GetDescriptorTrackImpl(
   // We resolve parent_id here to ensure that it's going to be smaller
   // than the id of the child.
   std::optional<TrackId> parent_id;
-  if (reservation.parent_uuid != 0) {
+  if (reservation.parent_uuid != kDefaultDescriptorTrackUuid &&
+      !resolved_track->is_root_in_scope()) {
     parent_id = GetDescriptorTrackImpl(reservation.parent_uuid);
   }
 
@@ -183,11 +184,6 @@ std::optional<TrackId> TrackEventTracker::GetDescriptorTrackImpl(
   descriptor_tracks_[uuid] = track_id;
 
   auto row_ref = *context_->storage->mutable_track_table()->FindById(track_id);
-  if (!row_ref.source_arg_set_id().has_value()) {
-    auto inserter = context_->args_tracker->AddArgsTo(track_id);
-    AddTrackArgs(uuid, packet_sequence_id, reservation, *resolved_track,
-                 inserter);
-  }
   if (parent_id) {
     row_ref.set_parent_id(*parent_id);
   }
@@ -215,7 +211,11 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
           TrackId id = context_->track_tracker->InternTrack(
               kThreadTrackBlueprint,
               tracks::Dimensions(track.utid(), static_cast<int64_t>(uuid)),
-              tracks::DynamicName(kNullStringId));
+              tracks::DynamicName(kNullStringId),
+              [&, this](ArgsTracker::BoundInserter& inserter) {
+                AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                             inserter);
+              });
           thread_tracks_[track.utid()] = id;
           return id;
         }
@@ -225,7 +225,11 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
         return context_->track_tracker->InternTrack(
             kProcessTrackBlueprint,
             tracks::Dimensions(track.upid(), static_cast<int64_t>(uuid)),
-            tracks::DynamicName(kNullStringId));
+            tracks::DynamicName(kNullStringId),
+            [&, this](ArgsTracker::BoundInserter& inserter) {
+              AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                           inserter);
+            });
       }
       case ResolvedDescriptorTrack::Scope::kGlobal:
         // Will be handled below.
@@ -273,18 +277,30 @@ TrackId TrackEventTracker::CreateTrackFromResolved(
       return context_->track_tracker->InternTrack(
           kThreadTrackBlueprint,
           tracks::Dimensions(track.utid(), static_cast<int64_t>(uuid)),
-          tracks::DynamicName(kNullStringId));
+          tracks::DynamicName(kNullStringId),
+          [&, this](ArgsTracker::BoundInserter& inserter) {
+            AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                         inserter);
+          });
     }
     case ResolvedDescriptorTrack::Scope::kProcess: {
       return context_->track_tracker->InternTrack(
           kProcessTrackBlueprint,
           tracks::Dimensions(track.upid(), static_cast<int64_t>(uuid)),
-          tracks::DynamicName(kNullStringId));
+          tracks::DynamicName(kNullStringId),
+          [&, this](ArgsTracker::BoundInserter& inserter) {
+            AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                         inserter);
+          });
     }
     case ResolvedDescriptorTrack::Scope::kGlobal: {
       return context_->track_tracker->InternTrack(
           kGlobalTrackBlueprint, tracks::Dimensions(static_cast<int64_t>(uuid)),
-          tracks::DynamicName(kNullStringId));
+          tracks::DynamicName(kNullStringId),
+          [&, this](ArgsTracker::BoundInserter& inserter) {
+            AddTrackArgs(uuid, packet_sequence_id, reservation, track,
+                         inserter);
+          });
     }
   }
   PERFETTO_FATAL("For GCC");

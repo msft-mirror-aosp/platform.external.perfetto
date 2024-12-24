@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ArrowHeadStyle, drawBezierArrow} from '../../base/canvas/bezier_arrow';
+import {ArrowHeadStyle, drawBezierArrow} from '../../base/bezier_arrow';
 import {
   HorizontalBounds,
   Point2D,
@@ -138,7 +138,7 @@ export function renderFlows(
       return undefined;
     }
 
-    const track = trackRoot.findTrackByUri(trackUri);
+    const track = trackRoot.getTrackByUri(trackUri);
     if (!track) {
       return undefined;
     }
