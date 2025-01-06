@@ -130,7 +130,7 @@ async function createEngine(
   // Check if there is any instance of the trace_processor_shell running in
   // HTTP RPC mode (i.e. trace_processor_shell -D).
   let useRpc = false;
-  if (app.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
+  if (app.httpRpc.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
     useRpc = (await HttpRpcEngine.checkConnection()).connected;
   }
   let engine;
@@ -253,9 +253,8 @@ async function loadTraceIntoEngine(
     }
   }
 
-  for (const callback of trace.getEventListeners('traceready')) {
-    await callback();
-  }
+  // notify() will await that all listeners' promises have resolved.
+  await trace.onTraceReady.notify();
 
   if (serializedAppState !== undefined) {
     // Wait that plugins have completed their actions and then proceed with
@@ -288,9 +287,6 @@ async function includeSummaryTables(trace: TraceImpl) {
 
   updateStatus(trace, 'Creating processes summaries');
   await engine.query(`include perfetto module viz.summary.processes;`);
-
-  updateStatus(trace, 'Creating track summaries');
-  await engine.query(`include perfetto module viz.summary.tracks;`);
 }
 
 function updateStatus(traceOrApp: TraceImpl | AppImpl, msg: string): void {

@@ -14,8 +14,8 @@
 
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin} from '../../public/plugin';
-import {addDebugSliceTrack} from '../../public/debug_tracks';
-import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
+import {addDebugSliceTrack} from '../../components/tracks/debug_tracks';
+import {addQueryResultsTab} from '../../components/query_table/query_result_tab';
 
 const PERF_TRACE_COUNTERS_PRECONDITION = `
   SELECT
@@ -85,18 +85,23 @@ export default class implements PerfettoPlugin {
             )
         `;
 
-        await addDebugSliceTrack(
-          ctx,
-          {
+        await addDebugSliceTrack({
+          trace: ctx,
+          data: {
             sqlSource:
               sqlPrefix +
               `
               SELECT * FROM target_thread_ipc_slice WHERE ts IS NOT NULL`,
           },
-          'Rutime IPC:' + tid,
-          {ts: 'ts', dur: 'dur', name: 'ipc'},
-          ['instruction', 'cycle', 'stall_backend_mem', 'l3_cache_miss'],
-        );
+          title: 'Rutime IPC:' + tid,
+          columns: {ts: 'ts', dur: 'dur', name: 'ipc'},
+          argColumns: [
+            'instruction',
+            'cycle',
+            'stall_backend_mem',
+            'l3_cache_miss',
+          ],
+        });
         addQueryResultsTab(ctx, {
           query:
             sqlPrefix +

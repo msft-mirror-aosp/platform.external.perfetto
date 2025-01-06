@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {HSLColor} from '../../public/color';
-import {makeColorScheme} from '../../public/lib/colorizer';
-import {ColorScheme} from '../../public/color_scheme';
-import {NAMED_ROW, NamedSliceTrack} from '../../frontend/named_slice_track';
-import {SLICE_LAYOUT_FIT_CONTENT_DEFAULTS} from '../../frontend/slice_layout';
-import {STR_NULL} from '../../trace_processor/query_result';
+import {HSLColor} from '../../base/color';
+import {makeColorScheme} from '../../components/colorizer';
+import {ColorScheme} from '../../base/color_scheme';
+import {
+  NAMED_ROW,
+  NamedSliceTrack,
+} from '../../components/tracks/named_slice_track';
+import {SLICE_LAYOUT_FIT_CONTENT_DEFAULTS} from '../../components/tracks/slice_layout';
+import {LONG, NUM, STR, STR_NULL} from '../../trace_processor/query_result';
 import {Slice} from '../../public/track';
 import {Trace} from '../../public/trace';
+import {TrackEventDetails} from '../../public/selection';
+import {SourceDataset} from '../../trace_processor/dataset';
 
 // color named and defined based on Material Design color palettes
 // 500 colors indicate a timeline slice is not a partial jank (not a jank or
@@ -54,7 +59,7 @@ export class ActualFramesTrack extends NamedSliceTrack<Slice, ActualFrameRow> {
     uri: string,
     private trackIds: number[],
   ) {
-    super({trace, uri});
+    super(trace, uri);
     this.sliceLayout = {
       ...SLICE_LAYOUT_FIT_CONTENT_DEFAULTS,
       depthGuess: maxDepth,
@@ -89,6 +94,36 @@ export class ActualFramesTrack extends NamedSliceTrack<Slice, ActualFrameRow> {
       ...baseSlice,
       colorScheme: getColorSchemeForJank(row.jankTag, row.jankSeverityType),
     };
+  }
+
+  override async getSelectionDetails(
+    id: number,
+  ): Promise<TrackEventDetails | undefined> {
+    const baseDetails = await super.getSelectionDetails(id);
+    if (!baseDetails) return undefined;
+    return {
+      ...baseDetails,
+      tableName: 'slice',
+    };
+  }
+
+  override getDataset() {
+    return new SourceDataset({
+      src: 'actual_frame_timeline_slice',
+      schema: {
+        id: NUM,
+        // Don't expose name to avoid this track getting selected by the generic
+        // slice aggregator, which is useless for frames tracks.
+        // name: STR,
+        ts: LONG,
+        dur: LONG,
+        jank_type: STR,
+      },
+      filter: {
+        col: 'track_id',
+        in: this.trackIds,
+      },
+    });
   }
 }
 

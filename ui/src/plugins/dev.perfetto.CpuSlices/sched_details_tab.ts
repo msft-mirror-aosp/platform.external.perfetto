@@ -19,21 +19,22 @@ import {GridLayout} from '../../widgets/grid_layout';
 import {Section} from '../../widgets/section';
 import {SqlRef} from '../../widgets/sql_ref';
 import {Tree, TreeNode} from '../../widgets/tree';
-import {DurationWidget} from '../../frontend/widgets/duration';
-import {Timestamp} from '../../frontend/widgets/timestamp';
-import {asSchedSqlId} from '../../trace_processor/sql_utils/core_types';
+import {DurationWidget} from '../../components/widgets/duration';
+import {Timestamp} from '../../components/widgets/timestamp';
+import {asSchedSqlId} from '../../components/sql_utils/core_types';
 import {
   getSched,
   getSchedWakeupInfo,
   Sched,
   SchedWakeupInfo,
-} from '../../trace_processor/sql_utils/sched';
+} from '../../components/sql_utils/sched';
 import {exists} from '../../base/utils';
-import {translateState} from '../../trace_processor/sql_utils/thread_state';
+import {translateState} from '../../components/sql_utils/thread_state';
 import {Trace} from '../../public/trace';
 import {TrackEventDetailsPanel} from '../../public/details_panel';
 import {TrackEventSelection} from '../../public/selection';
 import {ThreadDesc, ThreadMap} from '../dev.perfetto.Thread/threads';
+import {assetSrc} from '../../base/assets';
 
 const MIN_NORMAL_SCHED_PRIORITY = 100;
 
@@ -68,7 +69,6 @@ export class SchedSliceDetailsPanel implements TrackEventDetailsPanel {
     }
     const wakeup = await getSchedWakeupInfo(this.trace.engine, sched);
     this.details = {sched, wakeup};
-    this.trace.scheduleFullRedraw();
   }
 
   render() {
@@ -112,7 +112,7 @@ export class SchedSliceDetailsPanel implements TrackEventDetailsPanel {
       m(
         '.slice-details-latency-panel',
         m('img.slice-details-image', {
-          src: `${this.trace.rootUrl}assets/scheduling_latency.png`,
+          src: assetSrc('assets/scheduling_latency.png'),
         }),
         this.renderWakeupText(data),
         this.renderDisplayLatencyText(data),

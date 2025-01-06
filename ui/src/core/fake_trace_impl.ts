@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {getServingRoot} from '../base/http_utils';
 import {Time} from '../base/time';
 import {EngineBase} from '../trace_processor/engine';
 import {AppImpl} from './app_impl';
@@ -31,23 +30,14 @@ let appImplInitialized = false;
 export function initializeAppImplForTesting(): AppImpl {
   if (!appImplInitialized) {
     appImplInitialized = true;
-    AppImpl.initialize({
-      rootUrl: getServingRoot(), // NOTE: will be '' in unittests.
-      initialRouteArgs: {},
-      clearState: () => {},
-    });
+    AppImpl.initialize({initialRouteArgs: {}});
   }
   return AppImpl.instance;
 }
 
-// This is used:
-// - For testing.
-// - By globals.ts before we have an actual trace loaded, to avoid causing
-//   if (!= undefined) checks everywhere.
+// For testing purposes only.
 export function createFakeTraceImpl(args: FakeTraceImplArgs = {}) {
-  if (!AppImpl.initialized) {
-    initializeAppImplForTesting();
-  }
+  initializeAppImplForTesting();
   const fakeTraceInfo: TraceInfoImpl = {
     source: {type: 'URL', url: ''},
     traceTitle: '',

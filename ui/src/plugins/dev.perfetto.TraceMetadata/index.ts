@@ -15,11 +15,14 @@
 import {NUM} from '../../trace_processor/query_result';
 import {Trace} from '../../public/trace';
 import {PerfettoPlugin} from '../../public/plugin';
-import {SimpleSliceTrack} from '../../frontend/simple_slice_track';
+import {createQuerySliceTrack} from '../../components/tracks/query_slice_track';
 import {TrackNode} from '../../public/workspace';
+import StandardGroupsPlugin from '../dev.perfetto.StandardGroups';
 
 export default class implements PerfettoPlugin {
   static readonly id = 'dev.perfetto.TraceMetadata';
+  static readonly dependencies = [StandardGroupsPlugin];
+
   async onTraceLoad(ctx: Trace): Promise<void> {
     const res = await ctx.engine.query(`
       select count() as cnt from (select 1 from clock_snapshot limit 1)
@@ -30,27 +33,25 @@ export default class implements PerfettoPlugin {
     }
     const uri = `/clock_snapshots`;
     const title = 'Clock Snapshots';
-    const track = new SimpleSliceTrack(
-      ctx,
-      {trackUri: uri},
-      {
-        data: {
-          sqlSource: `
-            select ts, 0 as dur, 'Snapshot' as name
-            from clock_snapshot
+    const track = await createQuerySliceTrack({
+      trace: ctx,
+      uri,
+      data: {
+        sqlSource: `
+          select ts, 0 as dur, 'Snapshot' as name
+          from clock_snapshot
           `,
-          columns: ['ts', 'dur', 'name'],
-        },
-        columns: {ts: 'ts', dur: 'dur', name: 'name'},
-        argColumns: [],
       },
-    );
+    });
     ctx.tracks.registerTrack({
       uri,
       title,
       track,
     });
     const trackNode = new TrackNode({uri, title});
-    ctx.workspace.addChildInOrder(trackNode);
+    const group = ctx.plugins
+      .getPlugin(StandardGroupsPlugin)
+      .getOrCreateStandardGroup(ctx.workspace, 'SYSTEM');
+    group.addChildInOrder(trackNode);
   }
 }

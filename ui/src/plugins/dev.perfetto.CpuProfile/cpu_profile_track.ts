@@ -14,16 +14,13 @@
 
 import {assertExists} from '../../base/logging';
 import {TrackEventDetails, TrackEventSelection} from '../../public/selection';
-import {getColorForSample} from '../../public/lib/colorizer';
-import {
-  BaseSliceTrack,
-  OnSliceClickArgs,
-} from '../../frontend/base_slice_track';
-import {NAMED_ROW, NamedRow} from '../../frontend/named_slice_track';
-import {NewTrackArgs} from '../../frontend/track';
+import {getColorForSample} from '../../components/colorizer';
+import {BaseSliceTrack} from '../../components/tracks/base_slice_track';
+import {NAMED_ROW, NamedRow} from '../../components/tracks/named_slice_track';
 import {NUM} from '../../trace_processor/query_result';
 import {Slice} from '../../public/track';
 import {CpuProfileSampleFlamegraphDetailsPanel} from './cpu_profile_details_panel';
+import {Trace} from '../../public/trace';
 
 interface CpuProfileRow extends NamedRow {
   callsiteId: number;
@@ -31,10 +28,11 @@ interface CpuProfileRow extends NamedRow {
 
 export class CpuProfileTrack extends BaseSliceTrack<Slice, CpuProfileRow> {
   constructor(
-    args: NewTrackArgs,
+    trace: Trace,
+    uri: string,
     private utid: number,
   ) {
-    super(args);
+    super(trace, uri);
   }
 
   protected getRowSpec(): CpuProfileRow {
@@ -69,10 +67,6 @@ export class CpuProfileTrack extends BaseSliceTrack<Slice, CpuProfileRow> {
     `;
   }
 
-  onSliceClick({slice}: OnSliceClickArgs<Slice>) {
-    this.trace.selection.selectTrackEvent(this.uri, slice.id);
-  }
-
   async getSelectionDetails(
     id: number,
   ): Promise<TrackEventDetails | undefined> {
@@ -83,9 +77,8 @@ export class CpuProfileTrack extends BaseSliceTrack<Slice, CpuProfileRow> {
 
   detailsPanel(selection: TrackEventSelection) {
     const {ts, utid} = selection;
-
     return new CpuProfileSampleFlamegraphDetailsPanel(
-      this.trace.engine,
+      this.trace,
       ts,
       assertExists(utid),
     );
