@@ -155,7 +155,7 @@ CREATE PERFETTO TABLE chrome_scroll_update_input_info(
   -- Whether this is the first input that was presented in frame
   -- `presented_in_frame_id`.
   is_first_scroll_update_in_frame BOOL,
-  -- Whether the corresponding input event was coalesced into another.
+  -- Input generation timestamp (from the Android system).
   generation_ts TIMESTAMP,
   -- Duration from input generation to when the browser received the input.
   generation_to_browser_main_dur DURATION,
@@ -252,7 +252,13 @@ SELECT
   -- No applicable utid (duration between two threads).
   -- No applicable slice id (duration between two threads).
   generation_ts,
-  touch_move_received_ts - generation_ts AS generation_to_browser_main_dur,
+  -- Flings don't have a touch move event so make GenerationToBrowserMain span
+  -- all the way to the creation of the gesture scroll update.
+  IIF(
+    is_inertial AND touch_move_received_ts IS NULL,
+    scroll_update_created_ts,
+    touch_move_received_ts
+  ) - generation_ts AS generation_to_browser_main_dur,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   browser_utid,
   touch_move_received_slice_id,
@@ -355,7 +361,6 @@ SELECT
   chrome_event_latency.buffer_available_timestamp,
   chrome_event_latency.buffer_ready_timestamp,
   chrome_event_latency.latch_timestamp,
-  chrome_event_latency.swap_end_timestamp,
   chrome_event_latency.presentation_timestamp
 FROM _chrome_scroll_update_refs refs
 LEFT JOIN chrome_event_latencies chrome_event_latency
@@ -484,12 +489,10 @@ CREATE PERFETTO TABLE chrome_scroll_update_frame_info(
   viz_swap_buffers_to_latch_dur DURATION,
   -- Timestamp for `EventLatency`'s `LatchToSwapEnd` step.
   latch_timestamp TIMESTAMP,
-  -- Duration of `EventLatency`'s `LatchToSwapEnd` step.
-  viz_latch_to_swap_end_dur DURATION,
-  -- Timestamp for `EventLatency`'s `SwapEndToPresentationCompositorFrame` step.
-  swap_end_timestamp TIMESTAMP,
-  -- Duration of `EventLatency`'s `SwapEndToPresentationCompositorFrame` step.
-  swap_end_to_presentation_dur DURATION,
+  -- Duration of either `EventLatency`'s `LatchToSwapEnd` +
+  -- `SwapEndToPresentationCompositorFrame` steps or its `LatchToPresentation`
+  -- step.
+  viz_latch_to_presentation_dur DURATION,
   -- Presentation timestamp for the frame.
   presentation_timestamp TIMESTAMP
 ) AS
@@ -550,7 +553,6 @@ processed_timestamps_and_metadata AS (
     -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
     -- Timestamps
     latch_timestamp,
-    swap_end_timestamp,
     presentation_timestamp
   FROM _scroll_update_frame_timestamps_and_metadata
 )
@@ -615,10 +617,7 @@ SELECT
   latch_timestamp - viz_swap_buffers_end_ts AS viz_swap_buffers_to_latch_dur,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   latch_timestamp,
-  swap_end_timestamp - latch_timestamp AS viz_latch_to_swap_end_dur,
-  -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-  swap_end_timestamp,
-  presentation_timestamp - swap_end_timestamp AS swap_end_to_presentation_dur,
+  presentation_timestamp - latch_timestamp AS viz_latch_to_presentation_dur,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   presentation_timestamp
 FROM processed_timestamps_and_metadata;
@@ -841,12 +840,10 @@ CREATE PERFETTO TABLE chrome_scroll_update_info(
   viz_swap_buffers_to_latch_dur DURATION,
   -- Timestamp for `EventLatency`'s `LatchToSwapEnd` step.
   latch_timestamp TIMESTAMP,
-  -- Duration of `EventLatency`'s `LatchToSwapEnd` step.
-  viz_latch_to_swap_end_dur DURATION,
-  -- Timestamp for `EventLatency`'s `SwapEndToPresentationCompositorFrame` step.
-  swap_end_timestamp TIMESTAMP,
-  -- Duration of `EventLatency`'s `SwapEndToPresentationCompositorFrame` step.
-  swap_end_to_presentation_dur DURATION,
+  -- Duration of either `EventLatency`'s `LatchToSwapEnd` +
+  -- `SwapEndToPresentationCompositorFrame` steps or its `LatchToPresentation`
+  -- step.
+  viz_latch_to_presentation_dur DURATION,
   -- Presentation timestamp for the frame.
   presentation_timestamp TIMESTAMP)
 AS
@@ -961,12 +958,123 @@ SELECT
   frame.viz_swap_buffers_to_latch_dur,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   frame.latch_timestamp,
-  frame.viz_latch_to_swap_end_dur,
-  -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-  frame.swap_end_timestamp,
-  frame.swap_end_to_presentation_dur,
+  frame.viz_latch_to_presentation_dur,
   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
   frame.presentation_timestamp
 FROM chrome_scroll_update_input_info AS input
 LEFT JOIN chrome_scroll_update_frame_info AS frame
 ON input.presented_in_frame_id = frame.id;
+
+-- Source of truth for the definition of the stages of a scroll. Mainly intended
+-- for visualization purposes (e.g. in Chrome Scroll Jank plugin).
+CREATE PERFETTO TABLE chrome_scroll_update_info_step_templates(
+  -- The name of a stage of a scroll.
+  step_name STRING,
+  -- The name of the column in `chrome_scroll_update_info` which contains the
+  -- timestamp of the stage.
+  ts_column_name STRING,
+  -- The name of the column in `chrome_scroll_update_info` which contains the
+  -- duration of the stage. NULL if the stage doesn't have a duration.
+  dur_column_name STRING
+) AS
+WITH steps(step_name, ts_column_name, dur_column_name)
+AS (
+  VALUES
+  (
+    'GenerationToBrowserMain',
+    'generation_ts',
+    'generation_to_browser_main_dur'
+  ),
+  (
+    'TouchMoveProcessing',
+    'touch_move_received_ts',
+    'touch_move_processing_dur'
+  ),
+  (
+    'ScrollUpdateProcessing',
+    'scroll_update_created_ts',
+    'scroll_update_processing_dur'
+  ),
+  (
+    'BrowserMainToRendererCompositor',
+    'scroll_update_created_end_ts',
+    'browser_to_compositor_delay_dur'
+  ),
+  (
+    'RendererCompositorDispatch',
+    'compositor_dispatch_ts',
+    'compositor_dispatch_dur'
+  ),
+  (
+    'RendererCompositorDispatchToOnBeginFrame',
+    'compositor_dispatch_end_ts',
+    'compositor_dispatch_to_on_begin_frame_delay_dur'
+  ),
+  (
+    'RendererCompositorBeginFrame',
+    'compositor_on_begin_frame_ts',
+    'compositor_on_begin_frame_dur'
+  ),
+  (
+    'RendererCompositorBeginToGenerateFrame',
+    'compositor_on_begin_frame_end_ts',
+    'compositor_on_begin_frame_to_generation_delay_dur'
+  ),
+  (
+    'RendererCompositorGenerateToSubmitFrame',
+    'compositor_generate_compositor_frame_ts',
+    'compositor_generate_frame_to_submit_frame_dur'
+  ),
+  (
+    'RendererCompositorSubmitFrame',
+    'compositor_submit_compositor_frame_ts',
+    'compositor_submit_frame_dur'
+  ),
+  (
+    'RendererCompositorToViz',
+    'compositor_submit_compositor_frame_end_ts',
+    'compositor_to_viz_delay_dur'
+  ),
+  (
+    'VizReceiveFrame',
+    'viz_receive_compositor_frame_ts',
+    'viz_receive_compositor_frame_dur'
+  ),
+  (
+    'VizReceiveToDrawFrame',
+    'viz_receive_compositor_frame_end_ts',
+    'viz_wait_for_draw_dur'
+  ),
+  (
+    'VizDrawToSwapFrame',
+    'viz_draw_and_swap_ts',
+    'viz_draw_and_swap_dur'
+  ),
+  (
+    'VizToGpu',
+    'viz_send_buffer_swap_end_ts',
+    'viz_to_gpu_delay_dur'
+  ),
+  (
+    'VizSwapBuffers',
+    'viz_swap_buffers_ts',
+    'viz_swap_buffers_dur'
+  ),
+  (
+    'VizSwapBuffersToLatch',
+    'viz_swap_buffers_end_ts',
+    'viz_swap_buffers_to_latch_dur'
+  ),
+  (
+    'VizLatchToPresentation',
+    'latch_timestamp',
+    'viz_latch_to_presentation_dur'
+  ),
+  (
+    'Presentation',
+    'presentation_timestamp',
+    NULL
+  )
+)
+SELECT step_name, ts_column_name, dur_column_name
+FROM steps;

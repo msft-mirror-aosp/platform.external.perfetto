@@ -106,7 +106,6 @@ export class HeapProfileFlamegraphDetailsPanel
                 intent: Intent.Primary,
                 onclick: () => {
                   downloadPprof(this.trace, this.upid, ts);
-                  this.trace.scheduleFullRedraw();
                 },
               }),
           ],
@@ -144,7 +143,6 @@ export class HeapProfileFlamegraphDetailsPanel
           text: 'Skip',
           action: () => {
             this.flamegraphModalDismissed = true;
-            trace.scheduleFullRedraw();
           },
         },
       ],
@@ -329,6 +327,8 @@ function flamegraphMetrics(
       ];
     case ProfileType.PERF_SAMPLE:
       throw new Error('Perf sample not supported');
+    case ProfileType.INSTRUMENTS_SAMPLE:
+      throw new Error('Instruments sample not supported');
   }
 }
 
@@ -395,6 +395,9 @@ function getFlamegraphTitle(type: ProfileType) {
       return 'Native heap profile';
     case ProfileType.PERF_SAMPLE:
       assertFalse(false, 'Perf sample not supported');
+      return 'Impossible';
+    case ProfileType.INSTRUMENTS_SAMPLE:
+      assertFalse(false, 'Instruments sample not supported');
       return 'Impossible';
   }
 }

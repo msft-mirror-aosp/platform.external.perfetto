@@ -27,7 +27,7 @@ import {Section} from '../../widgets/section';
 import {SqlRef} from '../../widgets/sql_ref';
 import {MultiParagraphText, TextParagraph} from '../../widgets/text_paragraph';
 import {dictToTreeNodes, Tree, TreeNode} from '../../widgets/tree';
-import {EVENT_LATENCY_TRACK_URI, renderSliceRef} from './selection_utils';
+import {EVENT_LATENCY_TRACK_URI, renderSliceRef} from './utils';
 import {TrackEventDetailsPanel} from '../../public/details_panel';
 import {Trace} from '../../public/trace';
 
@@ -137,9 +137,7 @@ export class ScrollJankV3DetailsPanel implements TrackEventDetailsPanel {
     };
 
     await this.loadJankyFrames();
-
     await this.loadSlices();
-    this.trace.scheduleFullRedraw();
   }
 
   private hasCause(): boolean {

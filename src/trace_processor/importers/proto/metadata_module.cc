@@ -29,7 +29,6 @@
 #include "src/trace_processor/importers/common/slice_tracker.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/importers/common/tracks.h"
-#include "src/trace_processor/importers/proto/config.descriptor.h"
 #include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/importers/proto/proto_importer_module.h"
 #include "src/trace_processor/storage/metadata.h"
@@ -69,6 +68,7 @@ MetadataModule::MetadataModule(TraceProcessorContext* context)
   RegisterForField(TracePacket::kUiStateFieldNumber, context);
   RegisterForField(TracePacket::kTriggerFieldNumber, context);
   RegisterForField(TracePacket::kChromeTriggerFieldNumber, context);
+  RegisterForField(TracePacket::kCloneSnapshotTriggerFieldNumber, context);
   RegisterForField(TracePacket::kTraceUuidFieldNumber, context);
 }
 
@@ -117,14 +117,20 @@ void MetadataModule::ParseTracePacketData(
   // We handle triggers at parse time rather at tokenization because
   // we add slices to tables which need to happen post-sorting.
   if (field_id == TracePacket::kTriggerFieldNumber) {
-    ParseTrigger(ts, decoder.trigger());
+    ParseTrigger(ts, decoder.trigger(), TraceTriggerPacketType::kTraceTrigger);
   }
   if (field_id == TracePacket::kChromeTriggerFieldNumber) {
     ParseChromeTrigger(ts, decoder.chrome_trigger());
   }
+  if (field_id == TracePacket::kCloneSnapshotTriggerFieldNumber) {
+    ParseTrigger(ts, decoder.clone_snapshot_trigger(),
+                 TraceTriggerPacketType::kCloneSnapshot);
+  }
 }
 
-void MetadataModule::ParseTrigger(int64_t ts, ConstBytes blob) {
+void MetadataModule::ParseTrigger(int64_t ts,
+                                  ConstBytes blob,
+                                  TraceTriggerPacketType packetType) {
   protos::pbzero::Trigger::Decoder trigger(blob.data, blob.size);
   StringId cat_id = kNullStringId;
   TrackId track_id =
@@ -145,6 +151,18 @@ void MetadataModule::ParseTrigger(int64_t ts, ConstBytes blob) {
                              Variadic::Integer(trigger.trusted_producer_uid()));
         }
       });
+
+  if (packetType == TraceTriggerPacketType::kCloneSnapshot &&
+      trace_trigger_packet_type_ != TraceTriggerPacketType::kCloneSnapshot) {
+    trace_trigger_packet_type_ = TraceTriggerPacketType::kCloneSnapshot;
+    context_->metadata_tracker->SetMetadata(metadata::trace_trigger,
+                                            Variadic::String(name_id));
+  } else if (packetType == TraceTriggerPacketType::kTraceTrigger &&
+             trace_trigger_packet_type_ == TraceTriggerPacketType::kNone) {
+    trace_trigger_packet_type_ = TraceTriggerPacketType::kTraceTrigger;
+    context_->metadata_tracker->SetMetadata(metadata::trace_trigger,
+                                            Variadic::String(name_id));
+  }
 }
 
 void MetadataModule::ParseChromeTrigger(int64_t ts, ConstBytes blob) {
@@ -218,12 +236,8 @@ void MetadataModule::ParseTraceConfig(
                                             Variadic::String(id));
   }
 
-  DescriptorPool pool;
-  pool.AddFromFileDescriptorSet(kConfigDescriptor.data(),
-                                kConfigDescriptor.size());
-
   std::string text = protozero_to_text::ProtozeroToText(
-      pool, ".perfetto.protos.TraceConfig",
+      *context_->descriptor_pool_, ".perfetto.protos.TraceConfig",
       protozero::ConstBytes{
           trace_config.begin(),
           static_cast<uint32_t>(trace_config.end() - trace_config.begin())},
