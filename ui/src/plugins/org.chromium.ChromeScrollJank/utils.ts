@@ -16,6 +16,7 @@ import m from 'mithril';
 import {Anchor} from '../../widgets/anchor';
 import {Icons} from '../../base/semantic_icons';
 import {Trace} from '../../public/trace';
+import {QueryResult, Row} from '../../trace_processor/query_result';
 
 export const SCROLLS_TRACK_URI = 'perfetto.ChromeScrollJank#toplevelScrolls';
 export const EVENT_LATENCY_TRACK_URI = 'perfetto.ChromeScrollJank#eventLatency';
@@ -39,4 +40,38 @@ export function renderSliceRef(args: {
     },
     args.title,
   );
+}
+
+/**
+ * Returns an array of the rows in `queryResult`.
+ *
+ * Warning: Only use this function in contexts where the number of rows is
+ * guaranteed to be small. Prefer doing transformations in SQL where possible.
+ */
+export function rows<R extends Row>(queryResult: QueryResult, spec: R): R[] {
+  const results: R[] = [];
+  for (const it = queryResult.iter(spec); it.valid(); it.next()) {
+    const row: Row = {};
+    for (const key of Object.keys(spec)) {
+      row[key] = it[key];
+    }
+    results.push(row as R);
+  }
+  return results;
+}
+
+/**
+ * Converts a number to a boolean according to SQLite's conversion rules.
+ *
+ * See https://www.sqlite.org/lang_expr.html#boolean_expressions.
+ */
+export function fromSqlBool(value: number): boolean;
+export function fromSqlBool(value: null): undefined;
+export function fromSqlBool(value: number | null): boolean | undefined;
+export function fromSqlBool(value: number | null): boolean | undefined {
+  if (value === null) {
+    return undefined;
+  } else {
+    return value !== 0;
+  }
 }
