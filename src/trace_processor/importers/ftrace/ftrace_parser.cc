@@ -65,6 +65,7 @@
 #include "src/trace_processor/storage/metadata.h"
 #include "src/trace_processor/storage/stats.h"
 #include "src/trace_processor/storage/trace_storage.h"
+#include "src/trace_processor/tables/metadata_tables_py.h"
 #include "src/trace_processor/types/softirq_action.h"
 #include "src/trace_processor/types/tcp_state.h"
 #include "src/trace_processor/types/variadic.h"
@@ -452,7 +453,9 @@ FtraceParser::FtraceParser(TraceProcessorContext* context)
           context->storage->InternString("event_type")),
       device_name_id_(context->storage->InternString("device_name")),
       block_io_id_(context->storage->InternString("block_io")),
-      block_io_arg_sector_id_(context->storage->InternString("sector")) {
+      block_io_arg_sector_id_(context->storage->InternString("sector")),
+      cpuhp_action_cpu_id_(context->storage->InternString("action_cpu")),
+      cpuhp_idx_id_(context->storage->InternString("cpuhp_idx")) {
   // Build the lookup table for the strings inside ftrace events (e.g. the
   // name of ftrace event fields and the names of their args).
   for (size_t i = 0; i < GetDescriptorsSize(); i++) {
@@ -1341,6 +1344,17 @@ base::Status FtraceParser::ParseFtraceEvent(uint32_t cpu,
         ParseBlockIoDone(ts, fld_bytes);
         break;
       }
+      // Intentional fallthrough for Cpuhp multienter/enter, since they both
+      // have same fields and require identical processing.
+      case FtraceEvent::kCpuhpMultiEnterFieldNumber:
+      case FtraceEvent::kCpuhpEnterFieldNumber: {
+        ParseCpuhpEnter(fld.id(), ts, cpu, fld_bytes);
+        break;
+      }
+      case FtraceEvent::kCpuhpExitFieldNumber: {
+        ParseCpuhpExit(ts, fld_bytes);
+        break;
+      }
       default:
         break;
     }
@@ -1472,9 +1486,10 @@ void FtraceParser::ParseGenericFtrace(int64_t ts,
   StringId event_id = context_->storage->InternString(evt.event_name());
   UniqueTid utid = context_->process_tracker->GetOrCreateThread(tid);
   auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
-  RawId id = context_->storage->mutable_ftrace_event_table()
-                 ->Insert({ts, event_id, utid, {}, {}, ucpu})
-                 .id;
+  tables::FtraceEventTable::Id id =
+      context_->storage->mutable_ftrace_event_table()
+          ->Insert({ts, event_id, utid, {}, {}, ucpu})
+          .id;
   auto inserter = context_->args_tracker->AddArgsTo(id);
 
   for (auto it = evt.field(); it; ++it) {
@@ -1514,7 +1529,7 @@ void FtraceParser::ParseTypedFtraceToRaw(
   const auto& message_strings = ftrace_message_strings_[ftrace_id];
   UniqueTid utid = context_->process_tracker->GetOrCreateThread(tid);
   auto ucpu = context_->cpu_tracker->GetOrCreateCpu(cpu);
-  RawId id =
+  tables::FtraceEventTable::Id id =
       context_->storage->mutable_ftrace_event_table()
           ->Insert(
               {timestamp, message_strings.message_name_id, utid, {}, {}, ucpu})
@@ -1798,7 +1813,12 @@ void FtraceParser::ParseDpuTracingMarkWrite(int64_t timestamp,
     return;
   }
 
-  uint32_t tgid = static_cast<uint32_t>(evt.pid());
+  // dpu_tracing_mark_write can be buggy and can indicate that the swapper
+  // thread is parented to some random process (probably because of IRQs). We
+  // should ignore this as it causes bad cascading effects down the line.
+  //
+  // See b/388130600 for context.
+  uint32_t tgid = pid == 0 ? 0 : static_cast<uint32_t>(evt.pid());
   SystraceParser::GetOrCreate(context_)->ParseKernelTracingMarkWrite(
       timestamp, pid, static_cast<char>(evt.type()), false /*trace_begin*/,
       evt.name(), tgid, evt.value());
@@ -2054,7 +2074,8 @@ void FtraceParser::ParseDmaHeapStat(int64_t timestamp,
   protos::pbzero::DmaHeapStatFtraceEvent::Decoder dma_heap(data);
 
   static constexpr auto kBlueprint = tracks::CounterBlueprint(
-      "dma_heap", tracks::UnknownUnitBlueprint(), tracks::DimensionBlueprints(),
+      "android_dma_heap", tracks::UnknownUnitBlueprint(),
+      tracks::DimensionBlueprints(),
       tracks::StaticNameBlueprint("mem.dma_heap"));
 
   // Push the global counter.
@@ -2063,7 +2084,7 @@ void FtraceParser::ParseDmaHeapStat(int64_t timestamp,
       timestamp, static_cast<double>(dma_heap.total_allocated()), track);
 
   static constexpr auto kChangeBlueprint = tracks::CounterBlueprint(
-      "dma_heap_change", tracks::UnknownUnitBlueprint(),
+      "android_dma_heap_change", tracks::UnknownUnitBlueprint(),
       tracks::Dimensions(tracks::kThreadDimensionBlueprint),
       tracks::StaticNameBlueprint("mem.dma_heap_change"));
 
@@ -3948,4 +3969,60 @@ void FtraceParser::ParseBlockIoDone(int64_t ts, protozero::ConstBytes blob) {
       });
 }
 
+namespace {
+constexpr auto kCpuHpBlueprint = tracks::SliceBlueprint(
+    "cpu_hotplug",
+    tracks::DimensionBlueprints(tracks::kCpuDimensionBlueprint),
+    tracks::FnNameBlueprint([](uint32_t cpu) {
+      return base::StackString<255>("CPU Hotplug %u", cpu);
+    }));
+}  // namespace
+
+void FtraceParser::ParseCpuhpEnter(uint32_t fld_id,
+                                   int64_t ts,
+                                   uint32_t action_cpu,
+                                   protozero::ConstBytes blob) {
+  uint32_t hp_cpu = UINT32_MAX;
+  int32_t idx = INT32_MAX;
+  switch (fld_id) {
+    case protos::pbzero::FtraceEvent::kCpuhpEnterFieldNumber: {
+      protos::pbzero::CpuhpEnterFtraceEvent::Decoder cpuhp_event(blob);
+      hp_cpu = cpuhp_event.cpu();
+      idx = cpuhp_event.idx();
+      break;
+    }
+    case protos::pbzero::FtraceEvent::kCpuhpMultiEnterFieldNumber: {
+      protos::pbzero::CpuhpMultiEnterFtraceEvent::Decoder cpuhp_event(blob);
+      hp_cpu = cpuhp_event.cpu();
+      idx = cpuhp_event.idx();
+      break;
+    }
+    default:
+      // Only support hotplug_enter and hotplug_multi_enter
+      return;
+  }
+
+  // hp_cpu, the CPU being hotplugged, is stored in track dimension. action_cpu
+  // is the CPU assisting hp_cpu in the hotplug operation. action_cpu could be
+  // the hp_cpu itself or a different CPU, but the distinction is important
+  // since it helps indicate when exactly the hp_cpu is powered off.
+  StringId slice_name_id = context_->storage->InternString(
+      base::StackString<32>("cpuhp(%d)", idx).string_view());
+  TrackId track_id = context_->track_tracker->InternTrack(
+      kCpuHpBlueprint, tracks::Dimensions(hp_cpu));
+  context_->slice_tracker->Begin(
+      ts, track_id, cpu_id_, slice_name_id,
+      [&](ArgsTracker::BoundInserter* inserter) {
+        inserter->AddArg(cpuhp_action_cpu_id_,
+                         Variadic::UnsignedInteger(action_cpu));
+        inserter->AddArg(cpuhp_idx_id_, Variadic::Integer(idx));
+      });
+}
+
+void FtraceParser::ParseCpuhpExit(int64_t ts, protozero::ConstBytes blob) {
+  protos::pbzero::CpuhpExitFtraceEvent::Decoder cpuhp_event(blob);
+  TrackId track_id = context_->track_tracker->InternTrack(
+      kCpuHpBlueprint, tracks::Dimensions(cpuhp_event.cpu()));
+  context_->slice_tracker->End(ts, track_id);
+}
 }  // namespace perfetto::trace_processor
