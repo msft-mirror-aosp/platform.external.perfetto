@@ -15,22 +15,21 @@
 import {generateSqlWithInternalLayout} from '../../components/sql_utils/layout';
 import {
   NAMED_ROW,
-  NamedRow,
   NamedSliceTrack,
 } from '../../components/tracks/named_slice_track';
 import {Slice} from '../../public/track';
-import {SqlTableSliceTrackDetailsPanel} from '../../components/tracks/sql_table_slice_track_details_tab';
 import {Trace} from '../../public/trace';
 import {TrackEventDetailsPanel} from '../../public/details_panel';
 import {TrackEventSelection} from '../../public/selection';
-import {
-  QueryResult,
-  Row,
-  STR,
-  STR_NULL,
-} from '../../trace_processor/query_result';
+import {NUM, STR, STR_NULL} from '../../trace_processor/query_result';
 import {escapeQuery} from '../../trace_processor/query_utils';
 import {Engine} from '../../trace_processor/engine';
+import {rows} from './utils';
+import {ColorScheme} from '../../base/color_scheme';
+import {JANK_COLOR} from './jank_colors';
+import {makeColorScheme} from '../../components/colorizer';
+import {HSLColor} from '../../base/color';
+import {ScrollTimelineDetailsPanel} from './scroll_timeline_details_panel';
 
 interface StepTemplate {
   // The name of a stage of a scroll.
@@ -49,17 +48,60 @@ interface StepTemplate {
   durColumnName: string | null;
 }
 
-/** Returns an array of the rows in `queryResult`. */
-function rows<R extends Row>(queryResult: QueryResult, spec: R): R[] {
-  const results: R[] = [];
-  for (const it = queryResult.iter(spec); it.valid(); it.next()) {
-    const row: Row = {};
-    for (const key of Object.keys(spec)) {
-      row[key] = it[key];
-    }
-    results.push(row as R);
+/**
+ * Classification of a scroll update for the purposes of trace visualization.
+ *
+ * If a scroll update matches multiple classifications (e.g. janky and
+ * inertial), it should be classified with the highest-priority one (e.g.
+ * janky). With the exception of `DEFAULT` and `STEP`, the values are sorted in
+ * the order of descending priority (i.e. `JANKY` has the highest priority).
+ */
+enum ScrollUpdateClassification {
+  // None of the other classifications apply.
+  DEFAULT = 0,
+
+  // The corresponding frame was janky.
+  // See `chrome_scroll_update_input_info.is_janky`.
+  JANKY = 1,
+
+  // The input was coalesced into an earlier input's frame.
+  // See `chrome_scroll_update_input_info.is_first_scroll_update_in_frame`.
+  COALESCED = 2,
+
+  // It's the first scroll update in a scroll.
+  // Note: A first scroll update can never be janky.
+  // See `chrome_scroll_update_input_info.is_first_scroll_update_in_scroll`.
+  FIRST_SCROLL_UPDATE_IN_FRAME = 3,
+
+  // The corresponding scroll was inertial (i.e. a fling).
+  INERTIAL = 4,
+
+  // Sentinel value for slices which represent sub-steps of a scroll update.
+  STEP = -1,
+}
+
+const INDIGO = makeColorScheme(new HSLColor([231, 48, 48]));
+const GRAY = makeColorScheme(new HSLColor([0, 0, 62]));
+const DARK_GREEN = makeColorScheme(new HSLColor([120, 44, 34]));
+const TEAL = makeColorScheme(new HSLColor([187, 90, 42]));
+
+function toColorScheme(
+  classification: ScrollUpdateClassification,
+): ColorScheme | undefined {
+  switch (classification) {
+    case ScrollUpdateClassification.DEFAULT:
+      return INDIGO;
+    case ScrollUpdateClassification.JANKY:
+      return JANK_COLOR;
+    case ScrollUpdateClassification.COALESCED:
+      return GRAY;
+    case ScrollUpdateClassification.FIRST_SCROLL_UPDATE_IN_FRAME:
+      return DARK_GREEN;
+    case ScrollUpdateClassification.INERTIAL:
+      return TEAL;
+    case ScrollUpdateClassification.STEP:
+      return undefined;
   }
-  return results;
 }
 
 /**
@@ -82,7 +124,16 @@ function checkColumnNameIsValidOrReturnNull(
   }
 }
 
-export class ScrollTimelineTrack extends NamedSliceTrack<Slice, NamedRow> {
+const SCROLL_TIMELINE_TRACK_ROW = {
+  ...NAMED_ROW,
+  classification: NUM,
+};
+type ScrollTimelineTrackRow = typeof SCROLL_TIMELINE_TRACK_ROW;
+
+export class ScrollTimelineTrack extends NamedSliceTrack<
+  Slice,
+  ScrollTimelineTrackRow
+> {
   /**
    * Constructs a scroll timeline track for a given `trace`.
    *
@@ -105,18 +156,25 @@ export class ScrollTimelineTrack extends NamedSliceTrack<Slice, NamedRow> {
     return `SELECT * FROM ${this.tableName}`;
   }
 
-  override getRowSpec(): NamedRow {
-    return NAMED_ROW;
+  override getRowSpec(): ScrollTimelineTrackRow {
+    return SCROLL_TIMELINE_TRACK_ROW;
   }
 
-  override rowToSlice(row: NamedRow): Slice {
-    return super.rowToSliceBase(row);
+  override rowToSlice(row: ScrollTimelineTrackRow): Slice {
+    const baseSlice = super.rowToSliceBase(row);
+    const colorScheme = toColorScheme(row.classification);
+    if (colorScheme === undefined) {
+      return baseSlice;
+    } else {
+      return {...baseSlice, colorScheme};
+    }
   }
 
   override detailsPanel(sel: TrackEventSelection): TrackEventDetailsPanel {
-    return new SqlTableSliceTrackDetailsPanel(
+    return new ScrollTimelineDetailsPanel(
       this.trace,
       this.tableName,
+      this.uri,
       sel.eventId,
     );
   }
@@ -147,7 +205,7 @@ export class ScrollTimelineTrack extends NamedSliceTrack<Slice, NamedRow> {
           .map(
             (step) => `
               SELECT
-                id AS scroll_id,
+                id AS scroll_update_id,
                 ${step.tsColumnName ?? 'NULL'} AS ts,
                 ${step.durColumnName ?? 'NULL'} AS dur,
                 ${escapeQuery(step.stepName)} AS name
@@ -163,24 +221,61 @@ export class ScrollTimelineTrack extends NamedSliceTrack<Slice, NamedRow> {
         -- values) than the scalar MIN/MAX functions (which return null if any
         -- argument is null). That's why we do it in such a roundabout way by
         -- joining the top-level table with the individual steps.
-        scroll_update_bounds AS (
+        scroll_updates_with_bounds AS (
           SELECT
-            scroll_update.id AS scroll_id,
+            scroll_update.id AS scroll_update_id,
             MIN(scroll_steps.ts) AS ts,
-            MAX(scroll_steps.ts) - MIN(scroll_steps.ts) AS dur
+            MAX(scroll_steps.ts) - MIN(scroll_steps.ts) AS dur,
+            -- Combine all applicable scroll update classifications into the
+            -- name. For example, if a scroll update is both janky and inertial,
+            -- its name will be name 'Janky Inertial Scroll Update'.
+            CONCAT_WS(
+              ' ',
+              IIF(scroll_update.is_janky, 'Janky', NULL),
+              IIF(scroll_update.is_first_scroll_update_in_scroll, 'First', NULL),
+              IIF(
+                NOT scroll_update.is_first_scroll_update_in_frame,
+                'Coalesced',
+                NULL
+              ),
+              IIF(scroll_update.is_inertial, 'Inertial', NULL),
+              'Scroll Update'
+            ) AS name,
+            -- Pick the highest-priority applicable scroll update
+            -- classification. For example, if a scroll update is both janky and
+            -- inertial, classify it as janky.
+            CASE
+              WHEN scroll_update.is_janky
+                THEN ${ScrollUpdateClassification.JANKY}
+              WHEN scroll_update.is_first_scroll_update_in_scroll
+                THEN ${ScrollUpdateClassification.FIRST_SCROLL_UPDATE_IN_FRAME}
+              WHEN NOT scroll_update.is_first_scroll_update_in_frame
+                THEN ${ScrollUpdateClassification.COALESCED}
+              WHEN scroll_update.is_inertial
+                THEN ${ScrollUpdateClassification.INERTIAL}
+              ELSE ${ScrollUpdateClassification.DEFAULT}
+            END AS classification
           FROM
             chrome_scroll_update_info AS scroll_update
-            JOIN scroll_steps ON scroll_steps.scroll_id = scroll_update.id
+            JOIN scroll_steps ON scroll_steps.scroll_update_id = scroll_update.id
           GROUP BY scroll_update.id
         ),
         -- Now that we know the ts+dur of all scroll updates, we can lay them
         -- out efficiently (i.e. assign depths to them to avoid overlaps).
-        scroll_update_layouts AS (
+        scroll_updates_with_layouts AS (
           ${generateSqlWithInternalLayout({
-            columns: ['scroll_id', 'ts', 'dur'],
-            sourceTable: 'scroll_update_bounds',
+            columns: [
+              'scroll_update_id',
+              'ts',
+              'dur',
+              'name',
+              'classification',
+            ],
+            sourceTable: 'scroll_updates_with_bounds',
             ts: 'ts',
             dur: 'dur',
+            // Filter out scroll updates with no timestamps. See b/388756942.
+            whereClause: 'ts IS NOT NULL AND dur IS NOT NULL',
           })}
         ),
         -- We interleave the top-level scroll update slices (at even depths) and
@@ -190,16 +285,20 @@ export class ScrollTimelineTrack extends NamedSliceTrack<Slice, NamedRow> {
             ts,
             dur,
             2 * depth AS depth,
-            'Scroll Update' AS name
-          FROM scroll_update_layouts
+            name,
+            classification,
+            scroll_update_id
+          FROM scroll_updates_with_layouts
           UNION ALL
           SELECT
             scroll_steps.ts,
             MAX(scroll_steps.dur, 0) AS dur,
-            2 * scroll_update_layouts.depth + 1 AS depth,
-            scroll_steps.name
+            2 * scroll_updates_with_layouts.depth + 1 AS depth,
+            scroll_steps.name,
+            ${ScrollUpdateClassification.STEP} AS classification,
+            scroll_updates_with_layouts.scroll_update_id
           FROM scroll_steps
-          JOIN scroll_update_layouts USING(scroll_id)
+          JOIN scroll_updates_with_layouts USING(scroll_update_id)
           WHERE scroll_steps.ts IS NOT NULL AND scroll_steps.dur IS NOT NULL
         )
       -- Finally, we sort all slices chronologically and assign them

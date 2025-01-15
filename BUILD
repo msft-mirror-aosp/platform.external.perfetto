@@ -173,7 +173,6 @@ perfetto_cc_library(
         ":src_tracing_ipc_default_socket",
         ":src_tracing_ipc_producer_producer",
         ":src_tracing_ipc_service_service",
-        ":src_tracing_platform_impl",
         ":src_tracing_service_service",
         ":src_tracing_system_backend",
     ],
@@ -392,6 +391,7 @@ perfetto_cc_library(
         ":src_trace_processor_sqlite_sqlite",
         ":src_trace_processor_storage_minimal",
         ":src_trace_processor_storage_storage",
+        ":src_trace_processor_tables_macros_internal",
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_tables_tables_python",
         ":src_trace_processor_types_types",
@@ -3122,6 +3122,19 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/perfetto_sql/stdlib/appleos/instruments:instruments
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_appleos_instruments_instruments",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/appleos/instruments/samples.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/appleos:appleos
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_appleos_appleos",
+)
+
 # GN target: //src/trace_processor/perfetto_sql/stdlib/callstacks:callstacks
 perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_callstacks_callstacks",
@@ -3389,6 +3402,8 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_android_memory_memory",
         ":src_trace_processor_perfetto_sql_stdlib_android_startup_startup",
         ":src_trace_processor_perfetto_sql_stdlib_android_winscope_winscope",
+        ":src_trace_processor_perfetto_sql_stdlib_appleos_appleos",
+        ":src_trace_processor_perfetto_sql_stdlib_appleos_instruments_instruments",
         ":src_trace_processor_perfetto_sql_stdlib_callstacks_callstacks",
         ":src_trace_processor_perfetto_sql_stdlib_chrome_chrome_sql",
         ":src_trace_processor_perfetto_sql_stdlib_counters_counters",
@@ -3527,12 +3542,19 @@ perfetto_filegroup(
     ],
 )
 
+# GN target: //src/trace_processor/tables:macros_internal
+perfetto_filegroup(
+    name = "src_trace_processor_tables_macros_internal",
+    srcs = [
+        "src/trace_processor/tables/macros_internal.cc",
+        "src/trace_processor/tables/macros_internal.h",
+    ],
+)
+
 # GN target: //src/trace_processor/tables:tables
 perfetto_filegroup(
     name = "src_trace_processor_tables_tables",
     srcs = [
-        "src/trace_processor/tables/macros_internal.cc",
-        "src/trace_processor/tables/macros_internal.h",
         "src/trace_processor/tables/table_destructors.cc",
     ],
 )
@@ -4282,6 +4304,8 @@ perfetto_filegroup(
         "src/tracing/internal/track_event_internal.cc",
         "src/tracing/internal/track_event_interned_fields.cc",
         "src/tracing/platform.cc",
+        "src/tracing/platform_posix.cc",
+        "src/tracing/platform_windows.cc",
         "src/tracing/traced_value.cc",
         "src/tracing/tracing.cc",
         "src/tracing/tracing_policy.cc",
@@ -4306,15 +4330,6 @@ perfetto_filegroup(
     name = "src_tracing_in_process_backend",
     srcs = [
         "src/tracing/internal/in_process_tracing_backend.cc",
-    ],
-)
-
-# GN target: //src/tracing:platform_impl
-perfetto_filegroup(
-    name = "src_tracing_platform_impl",
-    srcs = [
-        "src/tracing/platform_posix.cc",
-        "src/tracing/platform_windows.cc",
     ],
 )
 
@@ -6516,7 +6531,6 @@ perfetto_cc_library(
         ":src_tracing_ipc_default_socket",
         ":src_tracing_ipc_producer_producer",
         ":src_tracing_ipc_service_service",
-        ":src_tracing_platform_impl",
         ":src_tracing_service_service",
         ":src_tracing_system_backend",
     ],
@@ -6767,6 +6781,7 @@ perfetto_cc_library(
         ":src_trace_processor_sqlite_sqlite",
         ":src_trace_processor_storage_minimal",
         ":src_trace_processor_storage_storage",
+        ":src_trace_processor_tables_macros_internal",
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_tables_tables_python",
         ":src_trace_processor_types_types",
@@ -6985,6 +7000,7 @@ perfetto_cc_binary(
         ":src_trace_processor_sqlite_sqlite",
         ":src_trace_processor_storage_minimal",
         ":src_trace_processor_storage_storage",
+        ":src_trace_processor_tables_macros_internal",
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_tables_tables_python",
         ":src_trace_processor_types_types",
@@ -7186,6 +7202,7 @@ perfetto_cc_binary(
         ":src_trace_processor_sqlite_sqlite",
         ":src_trace_processor_storage_minimal",
         ":src_trace_processor_storage_storage",
+        ":src_trace_processor_tables_macros_internal",
         ":src_trace_processor_tables_tables",
         ":src_trace_processor_tables_tables_python",
         ":src_trace_processor_types_types",
