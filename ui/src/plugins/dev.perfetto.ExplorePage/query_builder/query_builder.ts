@@ -14,18 +14,18 @@
 
 import m from 'mithril';
 
-import {PageWithTraceAttrs} from '../../public/page';
-import {Button} from '../../widgets/button';
-import {SqlModules, SqlTable} from '../dev.perfetto.SqlModules/sql_modules';
-import {Section} from '../../widgets/section';
-import {SegmentedButtons} from '../../widgets/segmented_buttons';
-import {JoinState, QueryBuilderJoin} from './query_builder_operations/join';
+import {PageWithTraceAttrs} from '../../../public/page';
+import {Button} from '../../../widgets/button';
+import {SqlModules, SqlTable} from '../../dev.perfetto.SqlModules/sql_modules';
+import {Section} from '../../../widgets/section';
+import {SegmentedButtons} from '../../../widgets/segmented_buttons';
 import {
   ColumnController,
   ColumnControllerDiff,
   ColumnControllerRows,
 } from './column_controller';
-import {QueryNode, StdlibTableState, NodeType} from './query_state';
+import {QueryNode, StdlibTableState, NodeType} from '../query_state';
+import {JoinState, QueryBuilderJoin} from './operations/join';
 
 export interface QueryBuilderTable {
   name: string;
@@ -76,15 +76,17 @@ export class QueryBuilder implements m.ClassComponent<QueryBuilderAttrs> {
       return (
         attrs.queryNode.columns &&
         m(ColumnController, {
+          hasValidColumns: true,
           options: attrs.queryNode.columns,
           onChange: (diffs: ColumnControllerDiff[]) => {
-            diffs.forEach(({id, checked}) => {
+            diffs.forEach(({id, checked, alias}) => {
               if (attrs.queryNode?.columns === undefined) {
                 return;
               }
               for (const option of attrs.queryNode?.columns) {
-                if (option.id == id) {
+                if (option.id === id) {
                   option.checked = checked;
+                  option.alias = alias;
                 }
               }
             });
