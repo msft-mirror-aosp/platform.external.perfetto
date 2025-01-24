@@ -294,6 +294,27 @@ export class UiMainPerTrace implements m.ClassComponent {
         callback: () => trace.flows.moveByFocusedFlow('Backward'),
         defaultHotkey: '[',
       },
+
+      // Provides a test bed for resolving events using a SQL table name and ID
+      // which is used in deep-linking, amongst other places.
+      {
+        id: 'perfetto.SelectEventByTableNameAndId',
+        name: 'Select event by table name and ID',
+        callback: async () => {
+          const rootTableName = await trace.omnibox.prompt('Enter table name');
+          if (rootTableName === undefined) return;
+
+          const id = await trace.omnibox.prompt('Enter ID');
+          if (id === undefined) return;
+
+          const num = Number(id);
+          if (!isFinite(num)) return; // Rules out NaN or +-Infinity
+
+          trace.selection.selectSqlEvent(rootTableName, num, {
+            scrollToSelection: true,
+          });
+        },
+      },
       {
         id: 'perfetto.SelectAll',
         name: 'Select all',
@@ -376,6 +397,30 @@ export class UiMainPerTrace implements m.ClassComponent {
           const ws = trace.workspaces.createEmptyWorkspace('Pinned Tracks');
           for (const pinnedTrack of pinnedTracks) {
             const clone = pinnedTrack.clone();
+            clone.removable = true;
+            ws.addChildLast(clone);
+          }
+          trace.workspaces.switchWorkspace(ws);
+        },
+      },
+      {
+        id: 'perfetto.CopyFilteredToWorkspace',
+        name: 'Copy filtered tracks to new workspace',
+        callback: () => {
+          // Copies all filtered tracks as a flat list to a new workspace. This
+          // means parents are not included.
+          const tracks = trace.workspace.flatTracks.filter((track) =>
+            track.title.toLowerCase().includes(trace.tracks.trackFilterTerm),
+          );
+
+          if (!tracks.length) {
+            window.alert('No filtered tracks to copy');
+            return;
+          }
+
+          const ws = trace.workspaces.createEmptyWorkspace('Filtered Tracks');
+          for (const track of tracks) {
+            const clone = track.clone();
             clone.removable = true;
             ws.addChildLast(clone);
           }
