@@ -31,11 +31,11 @@ import {ColumnType, SqlValue} from './query_result';
  * Users can also use the `schema` property and `implements()` to get and test
  * the schema of a given dataset.
  */
-export interface Dataset {
+export interface Dataset<T extends DatasetSchema = DatasetSchema> {
   /**
    * Get or calculate the resultant schema of this dataset.
    */
-  readonly schema: DatasetSchema;
+  readonly schema: T;
 
   /**
    * Produce a query for this dataset.
@@ -90,7 +90,7 @@ export interface Dataset {
    * },
    * ```
    */
-  optimize(): Dataset;
+  optimize(): Dataset<T>;
 
   /**
    * Returns true if this dataset implements a given schema.
@@ -130,9 +130,9 @@ type Filter = EqFilter | InFilter;
 /**
  * Named arguments for a SourceDataset.
  */
-interface SourceDatasetConfig {
+interface SourceDatasetConfig<T extends DatasetSchema> {
   readonly src: string;
-  readonly schema: DatasetSchema;
+  readonly schema: T;
   readonly filter?: Filter;
 }
 
@@ -140,12 +140,14 @@ interface SourceDatasetConfig {
  * Defines a dataset with a source SQL select statement of table name, a
  * schema describing the columns, and an optional filter.
  */
-export class SourceDataset implements Dataset {
+export class SourceDataset<T extends DatasetSchema = DatasetSchema>
+  implements Dataset<T>
+{
   readonly src: string;
-  readonly schema: DatasetSchema;
+  readonly schema: T;
   readonly filter?: Filter;
 
-  constructor(config: SourceDatasetConfig) {
+  constructor(config: SourceDatasetConfig<T>) {
     this.src = config.src;
     this.schema = config.schema;
     this.filter = config.filter;
@@ -154,8 +156,12 @@ export class SourceDataset implements Dataset {
   query(schema?: DatasetSchema) {
     schema = schema ?? this.schema;
     const cols = Object.keys(schema);
-    const whereClause = this.filter ? filterToQuery(this.filter) : '';
-    return `select ${cols.join(', ')} from (${this.src}) ${whereClause}`.trim();
+    const selectSql = `select ${cols.join(', ')} from (${this.src})`;
+    const filterSql = this.filterQuery();
+    if (filterSql === undefined) {
+      return selectSql;
+    }
+    return `${selectSql} where ${filterSql}`;
   }
 
   optimize() {
@@ -168,16 +174,19 @@ export class SourceDataset implements Dataset {
       return name in this.schema && this.schema[name] === kind;
     });
   }
-}
 
-// Convert a 'Filter' to a where clause.
-export function filterToQuery(filter: Filter) {
-  if ('eq' in filter) {
-    return `where ${filter.col} = ${filter.eq}`;
-  } else if ('in' in filter) {
-    return `where ${filter.col} in (${filter.in.join(',')})`;
-  } else {
-    assertUnreachable(filter);
+  // Convert filter to a SQL expression (without the where clause), or undefined
+  // if we have no filter.
+  private filterQuery() {
+    if (!this.filter) return undefined;
+
+    if ('eq' in this.filter) {
+      return `${this.filter.col} = ${this.filter.eq}`;
+    } else if ('in' in this.filter) {
+      return `${this.filter.col} in (${this.filter.in.join(',')})`;
+    } else {
+      assertUnreachable(this.filter);
+    }
   }
 }
 

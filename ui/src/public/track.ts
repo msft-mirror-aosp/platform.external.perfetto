@@ -20,7 +20,7 @@ import {HighPrecisionTimeSpan} from '../base/high_precision_time_span';
 import {ColorScheme} from '../base/color_scheme';
 import {TrackEventDetailsPanel} from './details_panel';
 import {TrackEventDetails, TrackEventSelection} from './selection';
-import {Dataset} from '../trace_processor/dataset';
+import {SourceDataset} from '../trace_processor/dataset';
 
 export interface TrackManager {
   /**
@@ -125,6 +125,14 @@ export interface TrackMouseEvent {
 
 export interface Track {
   /**
+   * Describes which root table the events on this track come from. This is
+   * mainly for use by flows (before they get refactored to be more generic) and
+   * will be used by the SQL table resolver mechanism along with dataset.
+   * TODO(stevegolton): Maybe move this onto dataset directly?
+   */
+  readonly rootTableName?: string;
+
+  /**
    * Optional lifecycle hook called on the first render cycle. Should be used to
    * create any required resources.
    *
@@ -179,7 +187,7 @@ export interface Track {
    * Optional: Returns a dataset that represents the events displayed on this
    * track.
    */
-  getDataset?(): Dataset | undefined;
+  getDataset?(): SourceDataset | undefined;
 
   /**
    * Optional: Get details of a track event given by eventId on this track.
@@ -189,7 +197,7 @@ export interface Track {
   // Optional: A factory that returns a details panel object for a given track
   // event selection. This is called each time the selection is changed (and the
   // selection is relevant to this track).
-  detailsPanel?(sel: TrackEventSelection): TrackEventDetailsPanel;
+  detailsPanel?(sel: TrackEventSelection): TrackEventDetailsPanel | undefined;
 }
 
 // An set of key/value pairs describing a given track. These are used for
@@ -262,7 +270,7 @@ export interface Slice {
   readonly fillRatio: number;
 
   // These can be changed by the Impl.
-  title: string;
+  title?: string;
   subTitle: string;
   colorScheme: ColorScheme;
   isHighlighted: boolean;
