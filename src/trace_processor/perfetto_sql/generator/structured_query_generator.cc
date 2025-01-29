@@ -222,11 +222,13 @@ base::StatusOr<std::string> GeneratorImpl::SimpleSlices(
     const StructuredQuery::SimpleSlices::Decoder& slices) {
   referenced_modules_.Insert("slices.slices", nullptr);
 
-  std::string sql = "SELECT * FROM _slice_with_thread_and_process_info";
+  std::string sql =
+      "SELECT id, ts, dur, name AS slice_name, thread_name, process_name, "
+      "track_name FROM _slice_with_thread_and_process_info";
 
   std::vector<std::string> conditions;
   if (slices.has_slice_name_glob()) {
-    conditions.push_back("name GLOB '" +
+    conditions.push_back("slice_name GLOB '" +
                          slices.slice_name_glob().ToStdString() + "'");
   }
   if (slices.has_thread_name_glob()) {
@@ -323,28 +325,34 @@ base::StatusOr<std::string> GeneratorImpl::Filters(
     }
 
     std::string column_name = filter.column_name().ToStdString();
+    auto op = static_cast<StructuredQuery::Filter::Operator>(filter.op());
+    ASSIGN_OR_RETURN(std::string op_str, OperatorToString(op));
 
-    ASSIGN_OR_RETURN(
-        std::string op,
-        OperatorToString(
-            static_cast<StructuredQuery::Filter::Operator>(filter.op())));
-    sql += column_name + " " + op + " ";
+    if (op == StructuredQuery::Filter::Operator::IS_NULL ||
+        op == StructuredQuery::Filter::Operator::IS_NOT_NULL) {
+      sql += column_name + " " + op_str;
+      continue;
+    }
+
+    sql += column_name + " " + op_str + " ";
 
     if (auto srhs = filter.string_rhs(); srhs) {
       sql += "'" + (*srhs++).ToStdString() + "'";
       for (; srhs; ++srhs) {
-        sql += " OR " + column_name + " " + op + " '" + (*srhs).ToStdString() +
-               "'";
+        sql += " OR " + column_name + " " + op_str + " '" +
+               (*srhs).ToStdString() + "'";
       }
     } else if (auto drhs = filter.double_rhs(); drhs) {
       sql += std::to_string((*drhs++));
       for (; drhs; ++drhs) {
-        sql += " OR " + column_name + " " + op + " " + std::to_string(*drhs);
+        sql +=
+            " OR " + column_name + " " + op_str + " " + std::to_string(*drhs);
       }
     } else if (auto irhs = filter.int64_rhs(); irhs) {
       sql += std::to_string(*irhs++);
       for (; irhs; ++irhs) {
-        sql += " OR " + column_name + " " + op + " " + std::to_string(*irhs);
+        sql +=
+            " OR " + column_name + " " + op_str + " " + std::to_string(*irhs);
       }
     } else {
       return base::ErrStatus("Filter must specify a right-hand side");
@@ -428,12 +436,16 @@ base::StatusOr<std::string> GeneratorImpl::SelectColumnsNoAggregates(
   }
   std::string sql;
   for (auto it = select_columns; it; ++it) {
-    StructuredQuery::SelectColumn::Decoder alias(*it);
+    StructuredQuery::SelectColumn::Decoder column(*it);
     if (!sql.empty()) {
       sql += ", ";
     }
-    sql += alias.column_name().ToStdString() + " AS " +
-           alias.alias().ToStdString();
+    if (column.has_alias()) {
+      sql += column.column_name().ToStdString() + " AS " +
+             column.alias().ToStdString();
+    } else {
+      sql += column.column_name().ToStdString();
+    }
   }
   return sql;
 }
@@ -455,6 +467,10 @@ base::StatusOr<std::string> GeneratorImpl::OperatorToString(
       return std::string(">=");
     case StructuredQuery::Filter::GLOB:
       return std::string("GLOB");
+    case StructuredQuery::Filter::IS_NULL:
+      return std::string("IS NULL");
+    case StructuredQuery::Filter::IS_NOT_NULL:
+      return std::string("IS NOT NULL");
     case StructuredQuery::Filter::UNKNOWN:
       return base::ErrStatus("Invalid filter operator %d", op);
   }
@@ -479,7 +495,8 @@ base::StatusOr<std::string> GeneratorImpl::AggregateToString(
     case StructuredQuery::GroupBy::Aggregate::MEDIAN:
       return "MEDIAN(" + column_name + ")";
     case StructuredQuery::GroupBy::Aggregate::DURATION_WEIGHTED_MEAN:
-      return "SUM(" + column_name + " * dur) / SUM(dur)";
+      return "SUM(cast_double!(" + column_name +
+             " * dur)) / cast_double!(SUM(dur))";
     case StructuredQuery::GroupBy::Aggregate::UNSPECIFIED:
       return base::ErrStatus("Invalid aggregate operator %d", op);
   }
