@@ -40,7 +40,7 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
   private prevSqString?: string;
   private curSqString?: string;
 
-  private currentSql?: string;
+  private currentSql?: Query;
 
   view({attrs}: m.CVnode<DataSourceAttrs>) {
     function renderPickColumns(node: QueryNode): m.Child {
@@ -77,7 +77,7 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
         this.currentSql &&
         m(QueryTable, {
           trace: attrs.trace,
-          query: this.currentSql,
+          query: queryToRun(this.currentSql),
           resp: this.queryResult,
           fillParent: false,
         })
@@ -98,53 +98,52 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
         },
       });
     };
+
     const lastNode = getLastFinishedNode(attrs.queryNode);
     if (lastNode === undefined) return;
 
     const sq = lastNode.getStructuredQuery();
-    if (sq === undefined) {
-      return;
-    }
+    if (sq === undefined) return;
+
     this.curSqString = JSON.stringify(sq.toJSON());
 
     if (this.curSqString !== this.prevSqString) {
       this.tableAsyncLimiter.schedule(async () => {
-        this.currentSql = await sqlToRun(lastNode, attrs.trace.engine);
+        this.currentSql = await analyzeNode(lastNode, attrs.trace.engine);
         if (this.currentSql === undefined) {
           return;
         }
-        this.queryResult = await runQuery(this.currentSql, attrs.trace.engine);
+        this.queryResult = await runQuery(
+          queryToRun(this.currentSql),
+          attrs.trace.engine,
+        );
         this.prevSqString = this.curSqString;
       });
     }
 
-    if (this.currentSql === undefined) {
-      return;
-    }
+    if (this.currentSql === undefined) return;
 
     const jsonSq = attrs.queryNode.getStructuredQuery()?.toJSON();
-    return (
-      this.currentSql && [
-        m(
-          Section,
-          {title: lastNode.getTitle()},
-          renderButtons(),
-          this.showDataSourceInfoPanel === 0 &&
-            m(TextParagraph, {
-              text: this.currentSql,
-              compressSpace: false,
-            }),
-          this.showDataSourceInfoPanel === 1 && renderPickColumns(lastNode),
-          this.showDataSourceInfoPanel === 2 &&
-            jsonSq &&
-            m(TextParagraph, {
-              text: JSON.stringify(jsonSq) || '',
-              compressSpace: false,
-            }),
-        ),
-        renderTable(),
-      ]
-    );
+    return [
+      m(
+        Section,
+        {title: lastNode.getTitle()},
+        renderButtons(),
+        this.showDataSourceInfoPanel === 0 &&
+          m(TextParagraph, {
+            text: queryToRun(this.currentSql),
+            compressSpace: false,
+          }),
+        this.showDataSourceInfoPanel === 1 && renderPickColumns(lastNode),
+        this.showDataSourceInfoPanel === 2 &&
+          jsonSq &&
+          m(TextParagraph, {
+            text: JSON.stringify(jsonSq) || '',
+            compressSpace: false,
+          }),
+      ),
+      renderTable(),
+    ];
   }
 }
 
@@ -170,21 +169,43 @@ function getStructuredQueries(
   return revStructuredQueries.reverse();
 }
 
-async function sqlToRun(
+export interface Query {
+  sql: string;
+  modules: string[];
+}
+
+export function queryToRun(sql: Query): string {
+  const includes = sql.modules.map((c) => `INCLUDE PERFETTO MODULE ${c};\n`);
+  return includes + sql.sql;
+}
+
+export async function analyzeNode(
   node: QueryNode,
   engine: Engine,
-): Promise<string | undefined> {
+): Promise<Query | undefined> {
   const structuredQueries = getStructuredQueries(node);
   if (structuredQueries === undefined) return;
 
   const res = await engine.analyzeStructuredQuery(structuredQueries);
-  if (
-    res.error ||
-    res.sql.length === 0 ||
-    res.sql.length !== structuredQueries.length
-  ) {
+
+  if (res.error) throw Error(res.error);
+  if (res.results.length === 0) throw Error('No structured query results');
+  if (res.results.length !== structuredQueries.length) {
+    throw Error(
+      `Wrong structured query results. Asked for ${structuredQueries.length}, received ${res.results.length}`,
+    );
+  }
+
+  const lastRes = res.results[res.results.length - 1];
+  if (lastRes.sql === null || lastRes.sql === undefined) {
     return;
   }
 
-  return res.sql[res.sql.length - 1];
+  const modules: string[] = lastRes.modules ?? [];
+
+  const sql: Query = {
+    sql: lastRes.sql,
+    modules,
+  };
+  return sql;
 }
