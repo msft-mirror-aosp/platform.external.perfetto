@@ -34,10 +34,8 @@ import {
   OnSliceOverArgs,
   SLICE_FLAGS_INCOMPLETE,
   SLICE_FLAGS_INSTANT,
+  SliceLayout,
 } from './base_slice_track';
-import {SLICE_LAYOUT_FIT_CONTENT_DEFAULTS} from './slice_layout';
-
-export type DepthProvider = (dataset: SourceDataset) => string;
 
 export interface DatasetSliceTrackAttrs<T extends DatasetSchema> {
   /**
@@ -102,10 +100,25 @@ export interface DatasetSliceTrackAttrs<T extends DatasetSchema> {
   readonly rootTableName?: string;
 
   /**
-   * This is a function that, given a dataset, returns a query that definitely
-   * contains a non-null depth column.
+   * Override the default geometry and layout of the slices rendered on the
+   * track.
    */
-  readonly depthProvider?: DepthProvider;
+  readonly sliceLayout?: Partial<SliceLayout>;
+
+  /**
+   * This function can optionally be used to override the query that is
+   * generated for querying the slices rendered on the track. This is typically
+   * used to provide a non-standard depth value, but can be used as an escape
+   * hatch to completely override the query if required.
+   *
+   * The returned query must be in the form of a select statement or table name
+   * with the following columns:
+   * - id: NUM
+   * - ts: LONG
+   * - dur: LONG
+   * - depth: NUM
+   */
+  queryGenerator?(dataset: SourceDataset): string;
 
   /**
    * An optional function to override the color scheme for each event.
@@ -154,28 +167,6 @@ const rowSchema = {
   ts: LONG,
 };
 
-/**
- * Pre-canned depth provider that lays out slices automatically to minimize
- * depth while avoiding overlaps. The source dataset requires ts and dur
- * columns.
- */
-export function internalLayoutDepthProvider(dataset: SourceDataset) {
-  return generateSqlWithInternalLayout({
-    columns: ['*'],
-    source: dataset.query(),
-    ts: 'ts',
-    dur: 'dur',
-    orderByClause: 'ts',
-  });
-}
-
-/**
- * Simple flat layout provider that just lays out all slices in one flat layer.
- */
-export function flatDepthProvider(dataset: SourceDataset) {
-  return `select 0 as depth, * from (${dataset.query()})`;
-}
-
 export type ROW_SCHEMA = typeof rowSchema;
 
 // We attach a copy of our rows to each slice, so that the tooltip can be
@@ -190,8 +181,14 @@ export class DatasetSliceTrack<T extends ROW_SCHEMA> extends BaseSliceTrack<
   readonly rootTableName?: string;
 
   constructor(private readonly attrs: DatasetSliceTrackAttrs<T>) {
-    super(attrs.trace, attrs.uri, {...BASE_ROW, ...attrs.dataset.schema});
-    const {dataset, depthProvider} = attrs;
+    super(
+      attrs.trace,
+      attrs.uri,
+      {...BASE_ROW, ...attrs.dataset.schema},
+      attrs.sliceLayout,
+      attrs.initialMaxDepth,
+    );
+    const {dataset, queryGenerator} = attrs;
 
     // This is the minimum viable implementation that the source dataset must
     // implement for the track to work properly. Typescript should enforce this
@@ -199,18 +196,9 @@ export class DatasetSliceTrack<T extends ROW_SCHEMA> extends BaseSliceTrack<
     // Better to error out early.
     assertTrue(this.attrs.dataset.implements(rowSchema));
 
-    const sqlSource = depthProvider?.(dataset) ?? this.getDepthSource(dataset);
-    if (dataset.implements({dur: LONG})) {
-      this.sqlSource = sqlSource;
-    } else {
-      this.sqlSource = `select 0 as dur, * from (${sqlSource})`;
-    }
+    this.sqlSource =
+      queryGenerator?.(dataset) ?? this.generateRenderQuery(dataset);
     this.rootTableName = attrs.rootTableName;
-
-    this.sliceLayout = {
-      ...SLICE_LAYOUT_FIT_CONTENT_DEFAULTS,
-      depthGuess: attrs.initialMaxDepth,
-    };
   }
 
   rowToSlice(row: BaseRow & T): SliceWithRow<T> {
@@ -233,13 +221,28 @@ export class DatasetSliceTrack<T extends ROW_SCHEMA> extends BaseSliceTrack<
     };
   }
 
-  private getDepthSource(dataset: SourceDataset<T>) {
-    if (dataset.implements({depth: NUM})) {
+  // Generate a query to use for generating slices to be rendered
+  private generateRenderQuery(dataset: SourceDataset<T>) {
+    if (dataset.implements({dur: LONG, depth: NUM})) {
+      // Both depth and dur provided, we can use the dataset as-is.
       return dataset.query();
+    } else if (dataset.implements({depth: NUM})) {
+      // Depth provided but no dur, assume each event is an instant event by
+      // hard coding dur to 0.
+      return `select 0 as dur, * from (${dataset.query()})`;
     } else if (dataset.implements({dur: LONG})) {
-      return internalLayoutDepthProvider(dataset);
+      // Dur provided but no depth, automatically calculate the depth using
+      // internal_layout().
+      return generateSqlWithInternalLayout({
+        columns: ['*'],
+        source: dataset.query(),
+        ts: 'ts',
+        dur: 'dur',
+        orderByClause: 'ts',
+      });
     } else {
-      return flatDepthProvider(dataset);
+      // No depth nor dur provided, use 0 for both.
+      return `select 0 as dur, 0 as depth, * from (${dataset.query()})`;
     }
   }
 
@@ -255,8 +258,30 @@ export class DatasetSliceTrack<T extends ROW_SCHEMA> extends BaseSliceTrack<
     return getColorForSlice(`${row.id}`);
   }
 
-  getSqlSource(): string {
+  override getSqlSource(): string {
     return this.sqlSource;
+  }
+
+  override getJoinSqlSource(): string {
+    // This is a little performance optimization. Internally BST joins the
+    // results of the mipmap table query with the sqlSource in order to get the
+    // original ts, dur and id. However this sqlSource can sometimes be a
+    // contrived, slow query, usually to calculate the depth (e.g. something
+    // based on experimental_slice_layout).
+    //
+    // We don't actually need a depth value at this point, so calculating it is
+    // worthless. We only need ts, id, and dur. We don't even need this query to
+    // be correctly filtered, as we are merely joining on this table. We do
+    // however need it to be fast.
+    //
+    // In conclusion, if the dataset source has a dur column present (ts, and id
+    // are mandatory), then we can take a shortcut and just use this much
+    // simpler query to join on.
+    if (this.attrs.dataset.implements({dur: LONG})) {
+      return this.attrs.dataset.src;
+    } else {
+      return this.sqlSource;
+    }
   }
 
   getDataset() {
@@ -264,15 +289,14 @@ export class DatasetSliceTrack<T extends ROW_SCHEMA> extends BaseSliceTrack<
   }
 
   detailsPanel(sel: TrackEventSelection): TrackEventDetailsPanel | undefined {
-    // This type assertion is required as a temporary patch while the specifics
-    // of selection details are being worked out. Eventually we will change the
-    // selection details to be purely based on dataset, but there are currently
-    // some use cases preventing us from doing so. For now, this type assertion
-    // is safe as we know we just returned the entire row from from
-    // getSelectionDetails() so we know it must at least implement the row's
-    // type `T`.
-
     if (this.attrs.detailsPanel) {
+      // This type assertion is required as a temporary patch while the
+      // specifics of selection details are being worked out. Eventually we will
+      // change the selection details to be purely based on dataset, but there
+      // are currently some use cases preventing us from doing so. For now, this
+      // type assertion is safe as we know we just returned the entire row from
+      // from getSelectionDetails() so we know it must at least implement the
+      // row's type `T`.
       return this.attrs.detailsPanel(sel as unknown as T);
     } else {
       // Rationale for the assertIsInstance: ThreadSliceDetailsPanel requires a
@@ -284,7 +308,7 @@ export class DatasetSliceTrack<T extends ROW_SCHEMA> extends BaseSliceTrack<
     }
   }
 
-  override async getSelectionDetails(
+  async getSelectionDetails(
     id: number,
   ): Promise<TrackEventDetails | undefined> {
     const {trace, dataset} = this.attrs;

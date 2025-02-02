@@ -27,8 +27,9 @@ import {
   MultiSelectDiff,
   MultiSelectOption,
 } from '../../../widgets/multiselect';
+import {Result} from '../../../base/result';
 
-type ChromeCatFunction = () => Promise<string[]>;
+type ChromeCatFunction = () => Promise<Result<string[]>>;
 
 export function chromeRecordSection(
   chromeCategoryGetter: ChromeCatFunction,
@@ -149,15 +150,15 @@ export class ChromeCategoriesWidget implements ProbeSetting {
     // Initialize first with the static list of builtin categories (in case
     // something goes wrong with the extension).
     this.initializeCategories(BUILTIN_CATEGORIES);
-    // But then try to fetch the updated list from the Tracing Extension and use
-    // that instead if available.
-    this.fetchRuntimeCategoriesIfNeeded();
   }
 
   private async fetchRuntimeCategoriesIfNeeded() {
     if (this.fetchedRuntimeCategories) return;
     const runtimeCategories = await this.chromeCategoryGetter();
-    this.initializeCategories(runtimeCategories);
+    if (runtimeCategories.ok) {
+      this.initializeCategories(runtimeCategories.value);
+      m.redraw();
+    }
     this.fetchedRuntimeCategories = true;
   }
 
@@ -234,6 +235,10 @@ export class ChromeCategoriesWidget implements ProbeSetting {
   }
 }
 
+function defaultAndDisabled(category: string) {
+  return [category, 'disabled-by-default-' + category];
+}
+
 const GROUPS = {
   'Task Scheduling': [
     'toplevel',
@@ -279,20 +284,20 @@ const GROUPS = {
   ],
   'Audio': [
     'base',
-    'disabled-by-default-audio',
-    'disabled-by-default-webaudio',
-    'disabled-by-default-webaudio.audionode',
-    'disabled-by-default-webrtc',
-    'disabled-by-default-audio-worklet',
-    'disabled-by-default-mediastream',
-    'disabled-by-default-v8.gc',
-    'disabled-by-default-toplevel',
-    'disabled-by-default-toplevel.flow',
-    'disabled-by-default-wakeup.flow',
-    'disabled-by-default-cpu_profiler',
-    'disabled-by-default-scheduler',
-    'disabled-by-default-p2p',
-    'disabled-by-default-net',
+    ...defaultAndDisabled('audio'),
+    ...defaultAndDisabled('webaudio'),
+    ...defaultAndDisabled('webaudio.audionode'),
+    ...defaultAndDisabled('webrtc'),
+    ...defaultAndDisabled('audio-worklet'),
+    ...defaultAndDisabled('mediastream'),
+    ...defaultAndDisabled('v8.gc'),
+    ...defaultAndDisabled('toplevel'),
+    ...defaultAndDisabled('toplevel.flow'),
+    ...defaultAndDisabled('wakeup.flow'),
+    ...defaultAndDisabled('cpu_profiler'),
+    ...defaultAndDisabled('scheduler'),
+    ...defaultAndDisabled('p2p'),
+    ...defaultAndDisabled('net'),
   ],
   'Video': [
     'base',

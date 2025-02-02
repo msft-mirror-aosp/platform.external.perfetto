@@ -29,6 +29,7 @@ import {CheckboxAttrs, Checkbox} from '../../../../widgets/checkbox';
 import {Section} from '../../../../widgets/section';
 import {Select} from '../../../../widgets/select';
 import {TextParagraph} from '../../../../widgets/text_paragraph';
+import protos from '../../../../protos';
 
 export interface JoinOperationAttrs {
   readonly sqlModules: SqlModules;
@@ -58,23 +59,15 @@ export class JoinState implements QueryNode {
     this.prevNode = prevNode;
     this.cte = false;
   }
+  getStructuredQuery(): protos.PerfettoSqlStructuredQuery | undefined {
+    throw new Error('Method not implemented.');
+  }
 
   getTitle(): string {
     if (this.finished === false || this.secondaryTable === undefined) {
       return '';
     }
     return `JOIN with ${this.secondaryTable.name}`;
-  }
-
-  getSourceSql(): string | undefined {
-    if (
-      this.primaryColumnsPicked === undefined ||
-      this.secondaryColumnsPicked === undefined
-    ) {
-      return;
-    }
-
-    return `JOIN ${this.secondaryTable?.name} ON ${this.prevNode.dataName}.${this.joinColumn?.name}=${this.secondaryTable?.name}.${this.secondaryJoinColumn?.name}`;
   }
 
   validate(): boolean {

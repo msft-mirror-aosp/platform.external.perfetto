@@ -2625,6 +2625,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/sysui_update_notif_on_ui_mode_changed_metric.sql",
         "src/trace_processor/metrics/sql/android/unsymbolized_frames.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup_rails.sql",
+        "src/trace_processor/metrics/sql/android/wattson_app_startup_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_atrace_apps_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_threads.sql",
@@ -7601,11 +7602,12 @@ perfetto_cc_library(
     srcs = [
         "src/java_sdk/main/cpp/example.cc",
         "src/java_sdk/main/cpp/example.h",
+        "src/java_sdk/main/cpp/utils.cc",
+        "src/java_sdk/main/cpp/utils.h",
     ],
     hdrs = ["src/java_sdk/main/cpp/example.h"],
     deps = [
-        ":libperfetto_client_experimental",
-        ":protos_perfetto_trace_track_event_cpp",
+        ":libperfetto_c",
     ],
 )
 
