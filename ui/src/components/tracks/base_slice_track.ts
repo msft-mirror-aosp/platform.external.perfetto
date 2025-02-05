@@ -280,6 +280,7 @@ export abstract class BaseSliceTrack<
     protected readonly rowSpec: RowT,
     sliceLayout: Partial<SliceLayout> = {},
     protected readonly depthGuess: number = 0,
+    protected readonly instantWidthPx: number = CHEVRON_WIDTH_PX,
   ) {
     // Work out the extra columns.
     // This is the union of the embedder-defined columns and the base columns
@@ -461,8 +462,8 @@ export abstract class BaseSliceTrack<
       if (slice.flags & SLICE_FLAGS_INSTANT) {
         // In the case of an instant slice, set the slice geometry on the
         // bounding box that will contain the chevron.
-        slice.x -= CHEVRON_WIDTH_PX / 2;
-        slice.w = CHEVRON_WIDTH_PX;
+        slice.x -= this.instantWidthPx / 2;
+        slice.w = this.instantWidthPx;
       } else if (slice.flags & SLICE_FLAGS_INCOMPLETE) {
         let widthPx;
         if (CROP_INCOMPLETE_SLICE_FLAG.get()) {
@@ -691,45 +692,43 @@ export abstract class BaseSliceTrack<
     const slices = new Array<CastInternal<SliceT>>();
 
     // The mipmap virtual table will error out when passed a 0 length time span.
-    if (rawSlicesKey.start !== rawSlicesKey.end) {
-      const resolution = slicesKey.bucketSize;
-      const extraCols = this.extraSqlColumns.join(',');
-      const queryRes = await this.engine.query(`
-        SELECT
-          (z.ts / ${resolution}) * ${resolution} as tsQ,
-          ((z.dur + ${resolution - 1n}) / ${resolution}) * ${resolution} as durQ,
-          s.ts as ts,
-          s.dur as dur,
-          s.id,
-          z.depth
-          ${extraCols ? ',' + extraCols : ''}
-        FROM ${this.getTableName()}(
-          ${slicesKey.start},
-          ${slicesKey.end},
-          ${resolution}
-        ) z
-        CROSS JOIN (${this.getJoinSqlSource()}) s using (id)
-      `);
+    const resolution = slicesKey.bucketSize;
+    const extraCols = this.extraSqlColumns.join(',');
+    const queryRes = await this.engine.query(`
+      SELECT
+        (z.ts / ${resolution}) * ${resolution} as tsQ,
+        ((z.dur + ${resolution - 1n}) / ${resolution}) * ${resolution} as durQ,
+        s.ts as ts,
+        s.dur as dur,
+        s.id,
+        z.depth
+        ${extraCols ? ',' + extraCols : ''}
+      FROM ${this.getTableName()}(
+        ${slicesKey.start},
+        ${slicesKey.end},
+        ${resolution}
+      ) z
+      CROSS JOIN (${this.getJoinSqlSource()}) s using (id)
+    `);
 
-      const it = queryRes.iter(this.rowSpec);
+    const it = queryRes.iter(this.rowSpec);
 
-      let maxDataDepth = this.maxDataDepth;
-      for (let i = 0; it.valid(); it.next(), ++i) {
-        if (it.dur === -1n) {
-          continue;
-        }
-
-        maxDataDepth = Math.max(maxDataDepth, it.depth);
-        // Construct the base slice. The Impl will construct and return
-        // the full derived T["slice"] (e.g. CpuSlice) in the
-        // rowToSlice() method.
-        slices.push(this.rowToSliceInternal(it));
+    let maxDataDepth = this.maxDataDepth;
+    for (let i = 0; it.valid(); it.next(), ++i) {
+      if (it.dur === -1n) {
+        continue;
       }
-      for (const incomplete of this.incomplete) {
-        maxDataDepth = Math.max(maxDataDepth, incomplete.depth);
-      }
-      this.maxDataDepth = maxDataDepth;
+
+      maxDataDepth = Math.max(maxDataDepth, it.depth);
+      // Construct the base slice. The Impl will construct and return
+      // the full derived T["slice"] (e.g. CpuSlice) in the
+      // rowToSlice() method.
+      slices.push(this.rowToSliceInternal(it));
     }
+    for (const incomplete of this.incomplete) {
+      maxDataDepth = Math.max(maxDataDepth, incomplete.depth);
+    }
+    this.maxDataDepth = maxDataDepth;
 
     this.slicesKey = slicesKey;
     this.onUpdatedSlices(slices);
@@ -914,7 +913,7 @@ export abstract class BaseSliceTrack<
     this.computedTrackHeight = trackHeight;
   }
 
-  private drawChevron(
+  protected drawChevron(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
