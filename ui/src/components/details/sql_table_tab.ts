@@ -25,14 +25,11 @@ import {SqlTableState} from '../widgets/sql/legacy_table/state';
 import {SqlTable} from '../widgets/sql/legacy_table/table';
 import {SqlTableDescription} from '../widgets/sql/legacy_table/table_description';
 import {Trace} from '../../public/trace';
-import {MenuItem, PopupMenu2} from '../../widgets/menu';
+import {MenuItem, PopupMenu} from '../../widgets/menu';
 import {addEphemeralTab} from './add_ephemeral_tab';
 import {Tab} from '../../public/tab';
 import {addChartTab} from '../widgets/charts/chart_tab';
-import {
-  ChartOption,
-  createChartConfigFromSqlTableState,
-} from '../widgets/charts/chart';
+import {ChartType} from '../widgets/charts/chart';
 import {AddChartMenuItem} from '../widgets/charts/add_chart_menu';
 
 export interface AddSqlTableTabParams {
@@ -106,7 +103,7 @@ class LegacySqlTableTab implements Tab {
           ...navigation,
           addDebugTrack,
           m(
-            PopupMenu2,
+            PopupMenu,
             {
               trigger: m(Button, {
                 icon: Icons.Menu,
@@ -128,16 +125,26 @@ class LegacySqlTableTab implements Tab {
       },
       m(SqlTable, {
         state: this.state,
-        addColumnMenuItems: (column, columnAlias) =>
-          m(AddChartMenuItem, {
-            chartConfig: createChartConfigFromSqlTableState(
-              column,
-              columnAlias,
-              this.state,
-            ),
-            chartOptions: [ChartOption.HISTOGRAM],
+        addColumnMenuItems: (_, columnAlias) => {
+          const chartAttrs = {
+            data: this.state.nonPaginatedData?.rows,
+            columns: [columnAlias],
+          };
+
+          return m(AddChartMenuItem, {
+            chartOptions: [
+              {
+                chartType: ChartType.BAR_CHART,
+                ...chartAttrs,
+              },
+              {
+                chartType: ChartType.HISTOGRAM,
+                ...chartAttrs,
+              },
+            ],
             addChart: (chart) => addChartTab(chart),
-          }),
+          });
+        },
       }),
     );
   }

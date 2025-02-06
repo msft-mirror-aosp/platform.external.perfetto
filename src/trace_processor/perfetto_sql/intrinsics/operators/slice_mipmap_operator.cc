@@ -97,8 +97,13 @@ int SliceMipmapOperator::Create(sqlite3* db,
     return SQLITE_ERROR;
   }
   do {
-    auto id =
-        static_cast<uint32_t>(sqlite3_column_int64(res->stmt.sqlite_stmt(), 0));
+    int64_t rawId = sqlite3_column_int64(res->stmt.sqlite_stmt(), 0);
+    uint32_t id = static_cast<uint32_t>(rawId);
+    if (PERFETTO_UNLIKELY(rawId != id)) {
+      *zErr = sqlite3_mprintf(
+          "slice_mipmap: id %lld is too large to fit in 32 bits", rawId);
+      return SQLITE_ERROR;
+    }
     int64_t ts = sqlite3_column_int64(res->stmt.sqlite_stmt(), 1);
     int64_t dur = sqlite3_column_int64(res->stmt.sqlite_stmt(), 2);
     auto depth =
@@ -191,10 +196,6 @@ int SliceMipmapOperator::Filter(sqlite3_vtab_cursor* cursor,
   int64_t start = sqlite3_value_int64(argv[0]);
   int64_t end = sqlite3_value_int64(argv[1]);
   int64_t step = sqlite3_value_int64(argv[2]);
-
-  if (start == end) {
-    return sqlite::utils::SetError(t, "slice_mipmap: empty range provided");
-  }
 
   for (uint32_t depth = 0; depth < state->by_depth.size(); ++depth) {
     auto& by_depth = state->by_depth[depth];

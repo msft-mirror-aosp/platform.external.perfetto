@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 import {canvasClip} from '../../base/canvas_utils';
-import {currentTargetOffset} from '../../base/dom_utils';
+import {currentTargetOffset, findRef} from '../../base/dom_utils';
 import {Size2D} from '../../base/geom';
 import {assertUnreachable} from '../../base/logging';
 import {Icons} from '../../base/semantic_icons';
@@ -24,10 +24,14 @@ import {raf} from '../../core/raf_scheduler';
 import {TraceImpl} from '../../core/trace_impl';
 import {Note, SpanNote} from '../../public/note';
 import {Button, ButtonBar} from '../../widgets/button';
-import {MenuItem, PopupMenu2} from '../../widgets/menu';
+import {MenuDivider, MenuItem, PopupMenu} from '../../widgets/menu';
 import {Select} from '../../widgets/select';
 import {TRACK_SHELL_WIDTH} from '../css_constants';
 import {generateTicks, getMaxMajorTicks, TickType} from './gridline_helper';
+import {TextInput} from '../../widgets/text_input';
+import {Popup} from '../../widgets/popup';
+import {TrackNode, Workspace} from '../../public/workspace';
+import {AreaSelection, Selection} from '../../public/selection';
 
 const FLAG_WIDTH = 16;
 const AREA_TRIANGLE_WIDTH = 10;
@@ -50,6 +54,8 @@ function getStartTimestamp(note: Note | SpanNote) {
   }
 }
 
+const FILTER_TEXT_BOX_REF = 'filter-text-box';
+
 export class NotesPanel {
   private readonly trace: TraceImpl;
   private timescale?: TimeScale; // The timescale from the last render()
@@ -67,6 +73,7 @@ export class NotesPanel {
     );
 
     const workspaces = this.trace.workspaces;
+    const selection = this.trace.selection.selection;
 
     return m(
       '',
@@ -132,6 +139,50 @@ export class NotesPanel {
           compact: true,
         }),
         m(
+          Popup,
+          {
+            trigger: m(Button, {
+              icon: 'filter_alt',
+              title: 'Track filter',
+              compact: true,
+              iconFilled: Boolean(this.trace.tracks.trackFilterTerm),
+            }),
+          },
+          m(
+            'pf-timeline-toolbar__track-filter',
+            {
+              oncreate({dom}) {
+                // Focus & select text box when the popup opens.
+                const input = findRef(
+                  dom,
+                  FILTER_TEXT_BOX_REF,
+                ) as HTMLInputElement;
+                input.focus();
+                input.select();
+              },
+            },
+            m(TextInput, {
+              ref: FILTER_TEXT_BOX_REF,
+              placeholder: 'Filter tracks...',
+              title:
+                'Track filter - enter one or more comma-separated search terms',
+              value: this.trace.tracks.trackFilterTerm,
+              oninput: (e: Event) => {
+                const value = (e.target as HTMLInputElement).value;
+                this.trace.tracks.trackFilterTerm = value;
+              },
+            }),
+            m(Button, {
+              type: 'reset',
+              icon: 'backspace',
+              onclick: () => {
+                this.trace.tracks.trackFilterTerm = '';
+              },
+              title: 'Clear track filter',
+            }),
+          ),
+        ),
+        m(
           Select,
           {
             className: 'pf-timeline-toolbar__workspace-selector',
@@ -163,7 +214,7 @@ export class NotesPanel {
             ]),
         ),
         m(
-          PopupMenu2,
+          PopupMenu,
           {
             trigger: m(Button, {
               icon: 'more_vert',
@@ -171,21 +222,17 @@ export class NotesPanel {
               compact: true,
             }),
           },
-          m(MenuItem, {
-            icon: Icons.Delete,
-            label: 'Delete current workspace',
-            disabled:
-              workspaces.currentWorkspace === workspaces.defaultWorkspace,
-            onclick: () => {
-              workspaces.removeWorkspace(workspaces.currentWorkspace);
-              raf.scheduleFullRedraw();
-            },
-          }),
+          this.renderCopySelectedTracksToWorkspace(selection),
+          m(MenuDivider),
+          this.renderNewGroupButton(),
+          m(MenuDivider),
           m(MenuItem, {
             icon: 'edit',
             label: 'Rename current workspace',
-            disabled:
-              workspaces.currentWorkspace === workspaces.defaultWorkspace,
+            disabled: !this.trace.workspace.userEditable,
+            title: this.trace.workspace.userEditable
+              ? 'Create new group'
+              : 'This workspace is not editable - please create a new workspace if you wish to modify it',
             onclick: async () => {
               const newName = await this.trace.omnibox.prompt(
                 'Enter a new name...',
@@ -193,33 +240,121 @@ export class NotesPanel {
               if (newName) {
                 workspaces.currentWorkspace.title = newName;
               }
-              raf.scheduleFullRedraw();
+            },
+          }),
+          m(MenuItem, {
+            icon: Icons.Delete,
+            label: 'Delete current workspace',
+            disabled: !this.trace.workspace.userEditable,
+            title: this.trace.workspace.userEditable
+              ? 'Create new group'
+              : 'This workspace is not editable - please create a new workspace if you wish to modify it',
+            onclick: () => {
+              workspaces.removeWorkspace(workspaces.currentWorkspace);
             },
           }),
         ),
-        // TODO(stevegolton): Re-introduce this when we fix track filtering
-        // m(TextInput, {
-        //   placeholder: 'Filter tracks...',
-        //   title:
-        //     'Track filter - enter one or more comma-separated search terms',
-        //   value: this.trace.state.trackFilterTerm,
-        //   oninput: (e: Event) => {
-        //     const filterTerm = (e.target as HTMLInputElement).value;
-        //     this.trace.dispatch(Actions.setTrackFilterTerm({filterTerm}));
-        //   },
-        // }),
-        // m(Button, {
-        //   type: 'reset',
-        //   icon: 'backspace',
-        //   onclick: () => {
-        //     this.trace.dispatch(
-        //       Actions.setTrackFilterTerm({filterTerm: undefined}),
-        //     );
-        //   },
-        //   title: 'Clear track filter',
-        // }),
       ),
     );
+  }
+
+  private renderNewGroupButton() {
+    return m(MenuItem, {
+      icon: 'create_new_folder',
+      label: 'Create new group track',
+      disabled: !this.trace.workspace.userEditable,
+      title: this.trace.workspace.userEditable
+        ? 'Create new group'
+        : 'This workspace is not editable - please create a new workspace if you wish to modify it',
+      onclick: async () => {
+        const result = await this.trace.omnibox.prompt('Group name...');
+        if (result) {
+          const group = new TrackNode({title: result, isSummary: true});
+          this.trace.workspace.addChildLast(group);
+        }
+      },
+    });
+  }
+
+  private renderCopySelectedTracksToWorkspace(selection: Selection) {
+    const isArea = selection.kind === 'area';
+    return [
+      m(
+        MenuItem,
+        {
+          label: 'Copy selected tracks to workspace',
+          disabled: !isArea,
+          title: isArea
+            ? 'Copy selected tracks to workspace'
+            : 'Please create an area selection to copy tracks',
+        },
+        this.trace.workspaces.all.map((ws) =>
+          m(MenuItem, {
+            label: ws.title,
+            disabled: !ws.userEditable,
+            onclick: isArea
+              ? () => this.copySelectedToWorkspace(ws, selection)
+              : undefined,
+          }),
+        ),
+        m(MenuDivider),
+        m(MenuItem, {
+          label: 'New workspace...',
+          onclick: isArea
+            ? () => this.copySelectedToWorkspace(undefined, selection)
+            : undefined,
+        }),
+      ),
+      m(
+        MenuItem,
+        {
+          label: 'Copy selected tracks & switch to workspace',
+          disabled: !isArea,
+          title: isArea
+            ? 'Copy selected tracks to workspace and switch to that workspace'
+            : 'Please create an area selection to copy tracks',
+        },
+        this.trace.workspaces.all.map((ws) =>
+          m(MenuItem, {
+            label: ws.title,
+            disabled: !ws.userEditable,
+            onclick: isArea
+              ? async () => {
+                  this.copySelectedToWorkspace(ws, selection);
+                  this.trace.workspaces.switchWorkspace(ws);
+                }
+              : undefined,
+          }),
+        ),
+        m(MenuDivider),
+        m(MenuItem, {
+          label: 'New workspace...',
+          onclick: isArea
+            ? async () => {
+                const ws = this.copySelectedToWorkspace(undefined, selection);
+                this.trace.workspaces.switchWorkspace(ws);
+              }
+            : undefined,
+        }),
+      ),
+    ];
+  }
+
+  private copySelectedToWorkspace(
+    ws: Workspace | undefined,
+    selection: AreaSelection,
+  ) {
+    // If no workspace provided, create a new one.
+    if (!ws) {
+      ws = this.trace.workspaces.createEmptyWorkspace('Untitled Workspace');
+    }
+    for (const track of selection.tracks) {
+      const node = this.trace.workspace.getTrackByUri(track.uri);
+      if (!node) continue;
+      const newNode = node.clone();
+      ws.addChildLast(newNode);
+    }
+    return ws;
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D, size: Size2D) {

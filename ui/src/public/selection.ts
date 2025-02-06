@@ -64,15 +64,6 @@ export interface SelectionManager {
 
   scrollToCurrentSelection(): void;
   registerAreaSelectionAggregator(aggr: AreaSelectionAggregator): void;
-
-  /**
-   * Register a new SQL selection resolver.
-   *
-   * A resolver consists of a SQL table name and a callback. When someone
-   * expresses an interest in selecting a slice on a matching table, the
-   * callback is called which can return a selection object or undefined.
-   */
-  registerSqlSelectionResolver(resolver: SqlSelectionResolver): void;
 }
 
 /**
@@ -154,19 +145,18 @@ export interface TrackSelection {
 export interface TrackEventDetails {
   // ts and dur are required by the core, and must be provided.
   readonly ts: time;
-  // Note: dur can be -1 for instant events.
-  readonly dur: duration;
+
+  // Note: dur can be 0 for instant events or -1 for DNF slices. Will be
+  // undefined if this selection has no duration, i.e. profile / counter
+  // samples.
+  readonly dur?: duration;
 
   // Optional additional information.
   // TODO(stevegolton): Find an elegant way of moving this information out of
   // the core.
   readonly wakeupTs?: time;
   readonly wakerCpu?: number;
-  readonly upid?: number;
   readonly utid?: number;
-  readonly tableName?: string;
-  readonly profileType?: ProfileType;
-  readonly interactionType?: string;
 }
 
 export interface Area {
@@ -193,28 +183,6 @@ export interface NoteSelection {
 
 export interface EmptySelection {
   readonly kind: 'empty';
-}
-
-export enum ProfileType {
-  HEAP_PROFILE = 'heap_profile',
-  MIXED_HEAP_PROFILE = 'heap_profile:com.android.art,libc.malloc',
-  NATIVE_HEAP_PROFILE = 'heap_profile:libc.malloc',
-  JAVA_HEAP_SAMPLES = 'heap_profile:com.android.art',
-  JAVA_HEAP_GRAPH = 'graph',
-  PERF_SAMPLE = 'perf',
-}
-
-export function profileType(s: string): ProfileType {
-  if (s === 'heap_profile:libc.malloc,com.android.art') {
-    s = 'heap_profile:com.android.art,libc.malloc';
-  }
-  if (Object.values(ProfileType).includes(s as ProfileType)) {
-    return s as ProfileType;
-  }
-  if (s.startsWith('heap_profile')) {
-    return ProfileType.HEAP_PROFILE;
-  }
-  throw new Error('Unknown type ${s}');
 }
 
 export interface SqlSelectionResolver {
