@@ -41,6 +41,7 @@ load(
     "perfetto_android_binary",
     "perfetto_android_jni_library",
     "perfetto_android_library",
+    "perfetto_android_instrumentation_test",
 )
 
 package(default_visibility = [PERFETTO_CONFIG.root + ":__subpackages__"])
@@ -4462,6 +4463,34 @@ perfetto_android_library(
     ],
 )
 
+# GN target: //src/java_sdk/test:perfetto_java_sdk_instrumentation_test
+perfetto_android_instrumentation_test(
+    name = "src_java_sdk_test_perfetto_java_sdk_instrumentation_test",
+    app = "src_java_sdk_main_perfetto_java_sdk_app",
+    test_app = "src_java_sdk_test_perfetto_java_sdk_test_app",
+)
+
+# GN target: //src/java_sdk/test:perfetto_java_sdk_test_app
+perfetto_android_binary(
+    name = "src_java_sdk_test_perfetto_java_sdk_test_app",
+    manifest = "src/java_sdk/test/AndroidTestManifest.xml",
+    instruments = ":src_java_sdk_main_perfetto_java_sdk_app",
+    deps = [
+        ":src_java_sdk_test_perfetto_test_lib",
+    ],
+)
+
+# GN target: //src/java_sdk/test:perfetto_test_lib
+perfetto_android_library(
+    name = "src_java_sdk_test_perfetto_test_lib",
+    srcs = [
+        "src/java_sdk/test/java/com/google/perfetto/sdk/test/SimpleInstrumentationTest.java",
+    ],
+    deps = [
+        ":src_java_sdk_main_perfetto_lib",
+    ] + PERFETTO_CONFIG.deps.android_test_common,
+)
+
 # ##############################################################################
 # Proto libraries
 # ##############################################################################
@@ -5134,6 +5163,7 @@ perfetto_proto_library(
     name = "protos_perfetto_config_protos",
     srcs = [
         "protos/perfetto/config/chrome/chrome_config.proto",
+        "protos/perfetto/config/chrome/histogram_samples.proto",
         "protos/perfetto/config/chrome/scenario_config.proto",
         "protos/perfetto/config/chrome/system_metrics.proto",
         "protos/perfetto/config/chrome/v8_config.proto",
