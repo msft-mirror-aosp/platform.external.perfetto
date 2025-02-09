@@ -17,7 +17,7 @@ import m from 'mithril';
 import {PageWithTraceAttrs} from '../../../public/page';
 import {Button} from '../../../widgets/button';
 import {SqlModules, SqlTable} from '../../dev.perfetto.SqlModules/sql_modules';
-import {ColumnControllerRows} from './column_controller';
+import {ColumnControllerRow} from './column_controller';
 import {QueryNode} from '../query_state';
 import {JoinState, QueryBuilderJoin} from './operations/join';
 import {Intent} from '../../../widgets/common';
@@ -32,12 +32,19 @@ import {
   StdlibTableState,
   SimpleSlicesAttrs,
   SimpleSlicesState,
+  SqlSourceAttrs,
+  SqlSourceState,
 } from './source_nodes';
+import {
+  GroupByAttrs,
+  GroupByNode,
+  GroupByOperation,
+} from './operations/groupy_by';
 
 export interface QueryBuilderTable {
   name: string;
   asSqlTable: SqlTable;
-  columnOptions: ColumnControllerRows[];
+  columnOptions: ColumnControllerRow[];
   sql: string;
 }
 
@@ -100,8 +107,19 @@ export class QueryBuilder implements m.ClassComponent<QueryBuilderAttrs> {
             });
           },
         }),
+        m(MenuItem, {
+          label: 'SQL',
+          onclick: () => {
+            const sqlAttrs: SqlSourceAttrs = {};
+            sqlSourceModal(sqlAttrs, () => {
+              const newSlices = new SqlSourceState(sqlAttrs);
+              if (newSlices.validate()) {
+                attrs.onRootNodeCreated(new SqlSourceState(sqlAttrs));
+              }
+            });
+          },
+        }),
         m(MenuItem, {label: 'Interval intersect', disabled: true}),
-        m(MenuItem, {label: 'SQL', disabled: true}),
       );
     }
 
@@ -133,8 +151,44 @@ export class QueryBuilder implements m.ClassComponent<QueryBuilderAttrs> {
             });
           },
         }),
-        m(MenuItem, {label: 'INTERSECT', disabled: true}),
+        m(MenuItem, {
+          label: 'GROUP BY',
+          onclick: () => {
+            if (attrs.rootNode === undefined) return;
+
+            const curNode = getLastFinishedNode(attrs.rootNode);
+            if (curNode === undefined) return;
+
+            const newGroupByAttrs: GroupByAttrs = {prevNode: curNode};
+            groupByModal(newGroupByAttrs, () => {
+              curNode.nextNode = new GroupByNode(newGroupByAttrs);
+            });
+          },
+        }),
       );
+    }
+
+    function groupByModal(attrs: GroupByAttrs, f: () => void) {
+      function Operations() {
+        return {
+          view: () => {
+            return m(GroupByOperation, attrs);
+          },
+        };
+      }
+
+      const content = () => m(Operations);
+
+      showModal({
+        title: `GROUP BY`,
+        buttons: [
+          {
+            text: 'Add node',
+            action: f,
+          },
+        ],
+        content,
+      });
     }
 
     function joinModal(joinState: JoinState, f: () => void) {
@@ -244,6 +298,78 @@ export class QueryBuilder implements m.ClassComponent<QueryBuilderAttrs> {
       });
     }
 
+    function sqlSourceModal(attrs: SqlSourceAttrs, f: () => void) {
+      function Operations() {
+        return {
+          view: () => {
+            return m(
+              '',
+              m(
+                '',
+                'Preamble',
+                m(TextInput, {
+                  id: 'preamble',
+                  type: 'string',
+                  oninput: (e: KeyboardEvent) => {
+                    if (!e.target) return;
+                    attrs.preamble = (
+                      e.target as HTMLInputElement
+                    ).value.trim();
+                  },
+                }),
+              ),
+              m(
+                '',
+                'Sql ',
+                m(TextInput, {
+                  id: 'sql_source',
+                  type: 'string',
+                  oninput: (e: KeyboardEvent) => {
+                    if (!e.target) return;
+                    attrs.sql = (e.target as HTMLInputElement).value
+                      .trim()
+                      .split(';')[0];
+                  },
+                }),
+              ),
+              m(
+                '',
+                'Column names (comma separated strings) ',
+                m(TextInput, {
+                  id: 'columns',
+                  type: 'string',
+                  oninput: (e: KeyboardEvent) => {
+                    if (!e.target) return;
+                    const colsStr = (e.target as HTMLInputElement).value.trim();
+                    attrs.columns = [];
+                    colsStr.split(',').forEach((col) => {
+                      if (!attrs.columns) {
+                        attrs.columns = [];
+                      }
+                      attrs.columns.push(col.trim());
+                    });
+                  },
+                }),
+              ),
+            );
+          },
+        };
+      }
+
+      const content = () => m(Operations);
+
+      showModal({
+        title: `Sql source`,
+        buttons: [
+          {
+            text: 'Add node',
+            action: f,
+          },
+        ],
+        content,
+      });
+    }
+
     function renderNodesPanel(): m.Children {
       function renderNodes() {
         let row = 1;
@@ -262,7 +388,7 @@ export class QueryBuilder implements m.ClassComponent<QueryBuilderAttrs> {
 
         let curNode: QueryNode | undefined = attrs.rootNode;
         const nodes: m.Child[] = [];
-        while (curNode && curNode.finished) {
+        while (curNode) {
           nodes.push(
             m(
               '',
@@ -337,7 +463,7 @@ export class QueryBuilder implements m.ClassComponent<QueryBuilderAttrs> {
             gridColumn: 2,
           },
         },
-        attrs.rootNode?.finished && [
+        attrs.rootNode && [
           m(DataSourceViewer, {
             trace: attrs.trace,
             queryNode: attrs.rootNode,

@@ -14,25 +14,26 @@
 
 import protos from '../../protos';
 
-import {ColumnControllerRows} from './query_builder/column_controller';
+import {ColumnControllerRow} from './query_builder/column_controller';
 
 export enum NodeType {
   // Sources
   kStdlibTable,
   kSimpleSlices,
+  kSqlSource,
 
   // Operations
   kJoinOperator,
+  kGroupByOperator,
 }
 
 export interface QueryNode {
   readonly type: NodeType;
   readonly prevNode?: QueryNode;
   nextNode?: QueryNode;
-  finished: boolean;
 
   dataName?: string;
-  columns?: ColumnControllerRows[];
+  columns?: ColumnControllerRow[];
 
   validate(): boolean;
   getTitle(): string;
@@ -40,26 +41,14 @@ export interface QueryNode {
 }
 
 export function getLastFinishedNode(node: QueryNode): QueryNode | undefined {
-  if (!node.finished) {
-    return;
-  }
   while (node.nextNode) {
-    if (!node.nextNode.finished) {
-      return node;
-    }
     node = node.nextNode;
   }
   return node;
 }
 
 export function getFirstNode(node: QueryNode): QueryNode | undefined {
-  if (!node.finished) {
-    return;
-  }
   while (node.prevNode) {
-    if (!node.finished) {
-      return;
-    }
     node = node.prevNode;
   }
   return node;
