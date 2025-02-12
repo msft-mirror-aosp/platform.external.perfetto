@@ -3300,6 +3300,7 @@ perfetto_filegroup(
         "src/trace_processor/perfetto_sql/stdlib/sched/thread_level_parallelism.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/thread_state_flattened.sql",
         "src/trace_processor/perfetto_sql/stdlib/sched/time_in_state.sql",
+        "src/trace_processor/perfetto_sql/stdlib/sched/with_context.sql",
     ],
 )
 
@@ -4427,6 +4428,9 @@ perfetto_android_library(
     deps = [
         ":src_java_sdk_main_cpp_perfetto_example_jni_lib",
     ],
+    tags = [
+        "notap",
+    ],
 )
 
 # GN target: //src/java_sdk/test:perfetto_java_sdk_instrumentation_test
@@ -4455,6 +4459,9 @@ perfetto_android_library(
     deps = [
         ":src_java_sdk_main_perfetto_lib",
     ] + PERFETTO_CONFIG.deps.android_test_common,
+    tags = [
+        "notap",
+    ],
 )
 
 # ##############################################################################
