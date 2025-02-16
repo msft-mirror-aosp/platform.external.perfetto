@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  LegacyTableColumn,
-  LegacyTableColumnSet,
-} from '../../components/widgets/sql/legacy_table/column';
+import {LegacyTableColumn} from '../../components/widgets/sql/legacy_table/column';
 import {SqlTableDescription} from '../../components/widgets/sql/legacy_table/table_description';
 import {
   createDurationColumn,
@@ -97,7 +94,7 @@ export interface SqlTable {
   readonly joinIdColumns: SqlColumn[];
 
   // Returns all columns as TableColumns.
-  getTableColumns(): (LegacyTableColumn | LegacyTableColumnSet)[];
+  getTableColumns(): LegacyTableColumn[];
 
   getIdColumns(): SqlColumn[];
   getJoinIdColumns(): SqlColumn[];
@@ -160,14 +157,14 @@ export interface SqlType {
 }
 
 export function SqlColumnAsSimpleColumn(col: SqlColumn, tableName: string) {
-  if (col.type.shortName === 'TIMESTAMP') {
+  if (col.type.shortName === 'timestamp') {
     return createTimestampColumn(col.name);
   }
-  if (col.type.shortName === 'DURATION') {
+  if (col.type.shortName === 'duration') {
     return createDurationColumn(col.name);
   }
 
-  if (col.type.shortName === 'ID') {
+  if (col.type.shortName === 'id') {
     switch (tableName.toLowerCase()) {
       case 'slice':
         return createSliceIdColumn(col.name);
@@ -183,7 +180,7 @@ export function SqlColumnAsSimpleColumn(col: SqlColumn, tableName: string) {
     return createStandardColumn(col.name);
   }
 
-  if (col.type.shortName === 'JOINID') {
+  if (col.type.shortName === 'joinid') {
     if (col.type.tableAndColumn === undefined) {
       return createStandardColumn(col.name);
     }

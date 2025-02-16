@@ -30,6 +30,7 @@ import {assertTrue} from '../../../../base/logging';
 import {SqlTableDescription} from './table_description';
 import {Trace} from '../../../../public/trace';
 import {runQuery} from '../../../query_table/queries';
+import {AsyncLimiter} from '../../../../base/async_limiter';
 
 const ROW_LIMIT = 100;
 
@@ -74,6 +75,7 @@ function areFiltersEqual(a: Filter[], b: Filter[]) {
 
 export class SqlTableState {
   private readonly additionalImports: string[];
+  private readonly asyncLimiter = new AsyncLimiter();
 
   // Columns currently displayed to the user. All potential columns can be found `this.table.columns`.
   private columns: LegacyTableColumn[];
@@ -116,16 +118,8 @@ export class SqlTableState {
       this.columns.push(...args.initialColumns);
     } else {
       for (const column of this.config.columns) {
-        if (column instanceof LegacyTableColumn) {
-          if (column.startsHidden !== true) {
-            this.columns.push(column);
-          }
-        } else {
-          const cols = column.initialColumns?.();
-          for (const col of cols ?? []) {
-            this.columns.push(col);
-          }
-        }
+        const columns = column.initialColumns?.() ?? [column];
+        this.columns.push(...columns);
       }
       if (args?.additionalColumns !== undefined) {
         this.columns.push(...args.additionalColumns);
@@ -315,11 +309,19 @@ export class SqlTableState {
   }
 
   private async loadData(): Promise<Data> {
-    const queryRes = await runQuery(this.request.query, this.trace.engine);
+    const queryRes = await this.trace.engine.query(this.request.query);
+    const rows: Row[] = [];
+    for (const it = queryRes.iter({}); it.valid(); it.next()) {
+      const row: Row = {};
+      for (const column of queryRes.columns()) {
+        row[column] = it.get(column);
+      }
+      rows.push(row);
+    }
 
     return {
-      rows: queryRes.rows,
-      error: queryRes.error,
+      rows,
+      error: queryRes.error(),
     };
   }
 
@@ -362,17 +364,19 @@ export class SqlTableState {
   }
 
   private async getNonPaginatedData() {
-    const queryRes = await runQuery(
-      this.getNonPaginatedSQLQuery(),
-      this.trace.engine,
-    );
+    this.asyncLimiter.schedule(async () => {
+      const queryRes = await runQuery(
+        this.getNonPaginatedSQLQuery(),
+        this.trace.engine,
+      );
 
-    this._nonPaginatedData = {
-      rows: queryRes.rows,
-      error: queryRes.error,
-    };
+      this._nonPaginatedData = {
+        rows: queryRes.rows,
+        error: queryRes.error,
+      };
 
-    raf.scheduleFullRedraw();
+      raf.scheduleFullRedraw();
+    });
   }
 
   getTotalRowCount(): number | undefined {

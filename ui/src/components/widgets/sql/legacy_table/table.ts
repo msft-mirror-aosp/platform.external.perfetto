@@ -59,11 +59,7 @@ export interface SqlTableConfig {
     column: string,
     value?: string,
   ) => void;
-  readonly extraRemoveFilterActions?: (
-    op: string,
-    column: string,
-    value?: string,
-  ) => void;
+  readonly extraRemoveFilterActions?: (filterSqlStr: string) => void;
 }
 
 type AdditionalColumnMenuItems = Record<string, m.Children>;
@@ -235,11 +231,7 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
   }
 
   renderFilters(
-    extraRemoveFilterActions?: (
-      op: string,
-      column: string,
-      value?: string,
-    ) => void,
+    extraRemoveFilterActions?: (filterSqlStr: string) => void,
   ): m.Children {
     const filters: m.Child[] = [];
     for (const filter of this.state.getFilters()) {
@@ -253,12 +245,7 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
             this.state.removeFilter(filter);
 
             if (extraRemoveFilterActions) {
-              const [column, op, value] = label.split(' ');
-              extraRemoveFilterActions(
-                op,
-                column,
-                value !== undefined ? value.replaceAll("'", '') : value,
-              );
+              extraRemoveFilterActions(label);
             }
           },
         }),
@@ -282,7 +269,9 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
 
     const result = [];
     for (const column of this.table.columns) {
-      if (column instanceof LegacyTableColumn) {
+      if (
+        column.listDerivedColumns?.(getTableManager(this.state)) === undefined
+      ) {
         if (existingColumnIds.has(tableColumnId(column))) continue;
         result.push(
           m(MenuItem, {
@@ -295,12 +284,13 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
           m(
             MenuItem,
             {
-              label: column.getTitle(),
+              label: columnTitle(column),
             },
             m(ArgumentSelector, {
+              title: columnTitle(column),
+              column,
               alreadySelectedColumnIds: existingColumnIds,
               tableManager: getTableManager(this.state),
-              columnSet: column,
               onArgumentSelected: (column: LegacyTableColumn) => {
                 addColumn(column);
               },
@@ -470,10 +460,13 @@ export class SqlTable implements m.ClassComponent<SqlTableConfig> {
   }
 }
 
-function getTableManager(state: SqlTableState): LegacyTableManager {
+export function getTableManager(state: SqlTableState): LegacyTableManager {
   return {
     addFilter: (filter) => {
       state.addFilter(filter);
+    },
+    removeFilter: (filter) => {
+      state.removeFilter(filter);
     },
     trace: state.trace,
     getSqlQuery: (columns: {[key: string]: SqlColumn}) =>

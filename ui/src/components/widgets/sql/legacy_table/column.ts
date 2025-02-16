@@ -97,6 +97,7 @@ function sqlColumnName(column: SqlColumn): string {
 // Interface which allows TableColumn and TableColumnSet to interact with the table (e.g. add filters, or run the query).
 export interface LegacyTableManager {
   addFilter(filter: Filter): void;
+  removeFilter(filter: Filter): void;
 
   trace: Trace;
   getSqlQuery(data: {[key: string]: SqlColumn}): string;
@@ -111,17 +112,12 @@ export interface TableColumnParams {
   startsHidden?: boolean;
 }
 
-export interface AggregationConfig {
-  dataType?: 'nominal' | 'quantitative';
-}
-
 // Class which represents a column in a table, which can be displayed to the user.
 // It is based on the primary SQL column, but also contains additional information needed for displaying it as a part of a table.
 export abstract class LegacyTableColumn {
   constructor(params?: TableColumnParams) {
     this.tag = params?.tag;
     this.alias = params?.alias;
-    this.startsHidden = params?.startsHidden ?? false;
   }
 
   // Column title to be displayed.
@@ -137,9 +133,6 @@ export abstract class LegacyTableColumn {
   // Preferred alias to be used in the SQL query. If omitted, column name will be used instead, including postfixing it with an integer if necessary.
   // However, e.g. explicit aliases like `process_name` and `thread_name` are typically preferred to `name_1`, `name_2`, hence the need for explicit aliasing.
   readonly alias?: string;
-
-  // Whether the column should be hidden by default.
-  readonly startsHidden: boolean;
 
   // The SQL column this data corresponds to. Will be also used for sorting and aggregation purposes.
   abstract primaryColumn(): SqlColumn;
@@ -157,10 +150,17 @@ export abstract class LegacyTableColumn {
     dependentColumns: {[key: string]: SqlValue},
   ): m.Children;
 
-  // Specifies how this column should be aggregated. If not set, then all
-  // numeric columns will be treated as quantitative, and all other columns as
-  // nominal.
-  aggregation?(): AggregationConfig;
+  // A set of columns to be added when opening this table.
+  // It has two primary purposes:
+  // - Allow some columns to be hidden by default (by returning an empty array).
+  // - Expand some columns (e.g. utid and upid are not meaningful by themselves, so the corresponding columns might add a "name" column by default).
+  initialColumns?(): LegacyTableColumn[];
+
+  // Some columns / values (arg_set_ids, table ids, etc) are primarily used to reference other data.
+  // This method allows showing the user list of additional columns which can be fetched using this column.
+  listDerivedColumns?(
+    manager: LegacyTableManager,
+  ): undefined | (() => Promise<Map<string, LegacyTableColumn>>);
 }
 
 export class FromSimpleColumn extends LegacyTableColumn {
@@ -195,26 +195,6 @@ export function tableColumnId(column: LegacyTableColumn): string {
 
 export function tableColumnAlias(column: LegacyTableColumn): string {
   return column.alias ?? sqlColumnName(column.primaryColumn());
-}
-
-// This class represents a set of columns, from which the user can choose which columns to display. It is typically impossible or impractical to list all possible columns, so this class allows to discover them dynamically.
-// Two examples of canonical TableColumnSet usage are:
-// - Argument sets, where the set of arguments can be arbitrary large (and can change when the user changes filters on the table).
-// - Dependent columns, where the id.
-export abstract class LegacyTableColumnSet {
-  // TODO(altimin): This should return m.Children, same comment as in TableColumn.getTitle applies here.
-  abstract getTitle(): string;
-
-  // Returns a list of columns from this TableColumnSet which should be displayed by default.
-  initialColumns?(): LegacyTableColumn[];
-
-  // Returns a list of columns which can be added to the table from the current TableColumnSet.
-  abstract discover(manager: LegacyTableManager): Promise<
-    {
-      key: string;
-      column: LegacyTableColumn | LegacyTableColumnSet;
-    }[]
-  >;
 }
 
 // A filter which can be applied to the table.
