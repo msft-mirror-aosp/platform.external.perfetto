@@ -26,9 +26,18 @@ import {ColumnController, ColumnControllerDiff} from './column_controller';
 import {Section} from '../../../widgets/section';
 import {Engine} from '../../../trace_processor/engine';
 import protos from '../../../protos';
+import {copyToClipboard} from '../../../base/clipboard';
+import {Button} from '../../../widgets/button';
+import {Icons} from '../../../base/semantic_icons';
 
 export interface DataSourceAttrs extends PageWithTraceAttrs {
   readonly queryNode: QueryNode;
+}
+
+enum SelectedView {
+  COLUMNS = 0,
+  SQL = 1,
+  PROTO = 2,
 }
 
 export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
@@ -87,8 +96,8 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
       return m(SegmentedButtons, {
         ...attrs,
         options: [
-          {label: 'Show SQL'},
           {label: 'Show columns'},
+          {label: 'Show SQL'},
           {label: 'Show proto'},
         ],
         selectedOption: this.showDataSourceInfoPanel,
@@ -128,19 +137,23 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
         {title: attrs.queryNode.getTitle()},
         attrs.queryNode.getDetails(),
         renderButtons(),
-        this.showDataSourceInfoPanel === 0 &&
+        this.showDataSourceInfoPanel === SelectedView.SQL &&
           m(TextParagraph, {
             text: queryToRun(this.currentSql),
             compressSpace: false,
           }),
-        this.showDataSourceInfoPanel === 1 &&
+        this.showDataSourceInfoPanel === SelectedView.COLUMNS &&
           renderPickColumns(attrs.queryNode),
-        this.showDataSourceInfoPanel === 2 &&
-          this.curSqString &&
-          m(TextParagraph, {
-            text: this.curSqString || '',
-            compressSpace: false,
-          }),
+        this.showDataSourceInfoPanel === SelectedView.PROTO &&
+          m(
+            '.code-snippet',
+            m(Button, {
+              title: 'Copy to clipboard',
+              onclick: () => copyToClipboard(this.currentSql?.textproto ?? ''),
+              icon: Icons.Copy,
+            }),
+            m('code', this.currentSql.textproto),
+          ),
       ),
       renderTable(),
     ];
@@ -171,6 +184,7 @@ function getStructuredQueries(
 
 export interface Query {
   sql: string;
+  textproto: string;
   modules: string[];
   preambles: string[];
 }
@@ -201,9 +215,13 @@ export async function analyzeNode(
   if (lastRes.sql === null || lastRes.sql === undefined) {
     return;
   }
+  if (!lastRes.textproto) {
+    throw Error('No textproto in structured query results');
+  }
 
   const sql: Query = {
     sql: lastRes.sql,
+    textproto: lastRes.textproto ?? '',
     modules: lastRes.modules ?? [],
     preambles: lastRes.preambles ?? [],
   };
