@@ -13,7 +13,17 @@
 // limitations under the License.
 
 import {SourceDataset, UnionDataset} from './dataset';
-import {LONG, NUM, STR} from './query_result';
+import {
+  BLOB,
+  BLOB_NULL,
+  LONG,
+  LONG_NULL,
+  NUM,
+  NUM_NULL,
+  STR,
+  STR_NULL,
+  UNKNOWN,
+} from './query_result';
 
 test('get query for simple dataset', () => {
   const dataset = new SourceDataset({
@@ -107,7 +117,7 @@ test('union dataset batches large numbers of unions', () => {
   expect(batchMatches?.length).toBe(799);
 });
 
-test('doesImplement', () => {
+test('implements', () => {
   const dataset = new SourceDataset({
     src: 'slice',
     schema: {id: NUM, ts: LONG},
@@ -117,6 +127,44 @@ test('doesImplement', () => {
   expect(dataset.implements({id: NUM, ts: LONG})).toBe(true);
   expect(dataset.implements({id: NUM, ts: LONG, name: STR})).toBe(false);
   expect(dataset.implements({id: LONG})).toBe(false);
+});
+
+test('implements with relaxed compat checks on optional types', () => {
+  expect(
+    new SourceDataset({
+      src: 'slice',
+      schema: {foo: NUM_NULL, bar: LONG_NULL, baz: STR_NULL, qux: BLOB_NULL},
+    }).implements({
+      foo: NUM_NULL,
+      bar: LONG_NULL,
+      baz: STR_NULL,
+      qux: BLOB_NULL,
+    }),
+  ).toBe(true);
+
+  expect(
+    new SourceDataset({
+      src: 'slice',
+      schema: {foo: NUM, bar: LONG, baz: STR, qux: BLOB},
+    }).implements({
+      foo: NUM_NULL,
+      bar: LONG_NULL,
+      baz: STR_NULL,
+      qux: BLOB_NULL,
+    }),
+  ).toBe(true);
+
+  expect(
+    new SourceDataset({
+      src: 'slice',
+      schema: {foo: NUM_NULL, bar: LONG_NULL, baz: STR_NULL, qux: BLOB_NULL},
+    }).implements({
+      foo: NUM,
+      bar: LONG,
+      baz: STR,
+      qux: BLOB,
+    }),
+  ).toBe(false);
 });
 
 test('find the schema of a simple dataset', () => {
@@ -254,5 +302,24 @@ test('optimize a union dataset with different schemas', () => {
       foo: NUM,
       bar: NUM,
     },
+  });
+});
+
+test('union type widening', () => {
+  const dataset = new UnionDataset([
+    new SourceDataset({
+      src: 'slice',
+      schema: {foo: NUM, bar: STR_NULL, baz: BLOB, missing: UNKNOWN},
+    }),
+    new SourceDataset({
+      src: 'slice',
+      schema: {foo: NUM_NULL, bar: STR, baz: LONG},
+    }),
+  ]);
+
+  expect(dataset.schema).toEqual({
+    foo: NUM_NULL,
+    bar: STR_NULL,
+    baz: UNKNOWN,
   });
 });

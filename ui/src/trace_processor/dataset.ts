@@ -14,7 +14,7 @@
 
 import {assertUnreachable} from '../base/logging';
 import {getOrCreate} from '../base/utils';
-import {ColumnType, SqlValue} from './query_result';
+import {checkExtends, ColumnType, SqlValue, unionTypes} from './query_result';
 import {sqlValueToSqliteString} from './sql_utils';
 
 /**
@@ -170,9 +170,9 @@ export class SourceDataset<T extends DatasetSchema = DatasetSchema>
     return this;
   }
 
-  implements(schema: DatasetSchema) {
-    return Object.entries(schema).every(([name, kind]) => {
-      return name in this.schema && this.schema[name] === kind;
+  implements(required: DatasetSchema) {
+    return Object.entries(required).every(([name, required]) => {
+      return name in this.schema && checkExtends(required, this.schema[name]);
     });
   }
 
@@ -207,23 +207,26 @@ export class UnionDataset implements Dataset {
   get schema(): DatasetSchema {
     // Find the minimal set of columns that are supported by all datasets of
     // the union
-    let sch: Record<string, ColumnType> | undefined = undefined;
+    let unionSchema: Record<string, ColumnType> | undefined = undefined;
     this.union.forEach((ds) => {
       const dsSchema = ds.schema;
-      if (sch === undefined) {
+      if (unionSchema === undefined) {
         // First time just use this one
-        sch = dsSchema;
+        unionSchema = dsSchema;
       } else {
         const newSch: Record<string, ColumnType> = {};
-        for (const [key, kind] of Object.entries(sch)) {
-          if (key in dsSchema && dsSchema[key] === kind) {
-            newSch[key] = kind;
+        for (const [key, value] of Object.entries(unionSchema)) {
+          if (key in dsSchema) {
+            const commonType = unionTypes(value, dsSchema[key]);
+            if (commonType !== undefined) {
+              newSch[key] = commonType;
+            }
           }
         }
-        sch = newSch;
+        unionSchema = newSch;
       }
     });
-    return sch ?? {};
+    return unionSchema ?? {};
   }
 
   query(schema?: DatasetSchema): string {
@@ -320,9 +323,9 @@ export class UnionDataset implements Dataset {
     }
   }
 
-  implements(schema: DatasetSchema) {
-    return Object.entries(schema).every(([name, kind]) => {
-      return name in this.schema && this.schema[name] === kind;
+  implements(required: DatasetSchema) {
+    return Object.entries(required).every(([name, required]) => {
+      return name in this.schema && checkExtends(required, this.schema[name]);
     });
   }
 }

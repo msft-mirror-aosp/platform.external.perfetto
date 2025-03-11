@@ -96,6 +96,7 @@
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/math.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.h"
+#include "src/trace_processor/perfetto_sql/intrinsics/functions/replace_numbers_function.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/sqlite3_str_split.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/stack_functions.h"
 #include "src/trace_processor/perfetto_sql/intrinsics/functions/structural_tree_partition.h"
@@ -666,14 +667,26 @@ void TraceProcessorImpl::EnableMetatrace(MetatraceConfig config) {
 base::Status TraceProcessorImpl::AnalyzeStructuredQueries(
     const std::vector<StructuredQueryBytes>& sqs,
     std::vector<AnalyzedStructuredQuery>* output) {
+  auto opt_idx = metrics_descriptor_pool_.FindDescriptorIdx(
+      ".perfetto.protos.TraceSummarySpec");
+  if (!opt_idx) {
+    metrics_descriptor_pool_.AddFromFileDescriptorSet(
+        kTraceSummaryDescriptor.data(), kTraceSummaryDescriptor.size());
+  }
   perfetto_sql::generator::StructuredQueryGenerator sqg;
   for (const auto& sq : sqs) {
-    AnalyzedStructuredQuery newAnalyzedSq;
-    ASSIGN_OR_RETURN(newAnalyzedSq.sql, sqg.Generate(sq.ptr, sq.size));
-    newAnalyzedSq.modules = sqg.ComputeReferencedModules();
-    newAnalyzedSq.preambles = sqg.ComputePreambles();
+    AnalyzedStructuredQuery analyzed_sq;
+    ASSIGN_OR_RETURN(analyzed_sq.sql, sqg.Generate(sq.ptr, sq.size));
+    analyzed_sq.textproto =
+        perfetto::trace_processor::protozero_to_text::ProtozeroToText(
+            metrics_descriptor_pool_,
+            ".perfetto.protos.PerfettoSqlStructuredQuery",
+            protozero::ConstBytes{sq.ptr, sq.size},
+            perfetto::trace_processor::protozero_to_text::kIncludeNewLines);
+    analyzed_sq.modules = sqg.ComputeReferencedModules();
+    analyzed_sq.preambles = sqg.ComputePreambles();
     sqg.AddQuery(sq.ptr, sq.size);
-    output->push_back(newAnalyzedSq);
+    output->push_back(analyzed_sq);
   }
   return base::OkStatus();
 }
@@ -981,6 +994,11 @@ void TraceProcessorImpl::InitPerfettoSqlEngine() {
   }
   {
     base::Status status = RegisterStackFunctions(engine_.get(), &context_);
+    if (!status.ok())
+      PERFETTO_FATAL("%s", status.c_message());
+  }
+  {
+    base::Status status = RegisterStripHexFunction(engine_.get(), &context_);
     if (!status.ok())
       PERFETTO_FATAL("%s", status.c_message());
   }
