@@ -21,7 +21,7 @@ import {runQuery} from '../../../components/query_table/queries';
 import {AsyncLimiter} from '../../../base/async_limiter';
 import {QueryResponse} from '../../../components/query_table/queries';
 import {SegmentedButtons} from '../../../widgets/segmented_buttons';
-import {QueryNode} from '../query_node';
+import {NodeType, QueryNode} from '../query_node';
 import {ColumnController, ColumnControllerDiff} from './column_controller';
 import {Section} from '../../../widgets/section';
 import {Engine} from '../../../trace_processor/engine';
@@ -119,7 +119,9 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
           return;
         }
         this.queryResult = await runQuery(
-          queryToRun(this.currentSql),
+          attrs.queryNode.type === NodeType.kSqlSource
+            ? queryToRun(this.currentSql)
+            : `${queryToRun(this.currentSql)} LIMIT 50`,
           attrs.trace.engine,
         );
         this.prevSqString = this.curSqString;
@@ -152,7 +154,7 @@ export class DataSourceViewer implements m.ClassComponent<DataSourceAttrs> {
             m('code', this.currentSql.textproto),
           ),
       ),
-      renderTable(),
+      m(Section, {title: 'Sample data'}, renderTable()),
     ];
   }
 }
