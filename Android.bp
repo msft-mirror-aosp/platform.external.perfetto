@@ -2830,6 +2830,25 @@ android_app {
     jni_uses_platform_apis: true,
 }
 
+// GN: //src/java_sdk/test:perfetto_java_sdk_instrumentation_test
+android_test {
+    name: "perfetto_java_sdk_instrumentation_test",
+    manifest: "src/java_sdk/test/AndroidSelfInstrumentTestManifest.xml",
+    static_libs: [
+        "perfetto_src_java_sdk_main_perfetto_lib",
+        "perfetto_src_java_sdk_test_perfetto_test_lib",
+    ],
+    sdk_version: "30",
+    test_suites: [
+        "general-tests",
+    ],
+    test_config: "src/java_sdk/test/PerfettoJavaSdkTest.xml",
+    jni_libs: [
+        "libperfetto_jni_wrapper_lib",
+    ],
+    jni_uses_platform_apis: true,
+}
+
 // GN: [//protos/perfetto/metrics:source_set]
 python_library_host {
     name: "perfetto_metrics_python_protos",
@@ -11496,6 +11515,21 @@ android_library {
     sdk_version: "30",
 }
 
+// GN: //src/java_sdk/test:perfetto_test_lib
+android_library {
+    name: "perfetto_src_java_sdk_test_perfetto_test_lib",
+    srcs: [
+        "src/java_sdk/test/java/com/google/perfetto/sdk/test/SimpleInstrumentationTest.java",
+    ],
+    manifest: "src/java_sdk/test/TestLibraryAndroidManifest.xml",
+    static_libs: [
+        "androidx.test.runner",
+        "junit",
+        "perfetto_src_java_sdk_main_perfetto_lib",
+    ],
+    sdk_version: "30",
+}
+
 // GN: //src/kallsyms:kallsyms
 filegroup {
     name: "perfetto_src_kallsyms_kallsyms",
@@ -13680,6 +13714,7 @@ filegroup {
         "src/trace_processor/perfetto_sql/intrinsics/functions/layout_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/math.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/pprof_functions.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/replace_numbers_function.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/sqlite3_str_split.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/stack_functions.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/structural_tree_partition.cc",
@@ -13728,6 +13763,7 @@ python_binary_host {
 filegroup {
     name: "perfetto_src_trace_processor_perfetto_sql_intrinsics_functions_unittests",
     srcs: [
+        "src/trace_processor/perfetto_sql/intrinsics/functions/replace_numbers_function_unittest.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/sqlite3_str_split_unittest.cc",
     ],
 }
