@@ -24,9 +24,26 @@ import {QueryNode} from './query_node';
 import {MenuItem} from '../../widgets/menu';
 import {Icons} from '../../base/semantic_icons';
 import {VisViewSource} from './data_visualiser/view_source';
+import {PopupMenu} from '../../widgets/menu';
+import {createModal} from './query_builder/builder';
+import {
+  StdlibTableAttrs,
+  StdlibTableNode,
+  StdlibTableSource,
+} from './query_builder/sources/stdlib_table';
+import {
+  SlicesSource,
+  SlicesSourceAttrs,
+  SlicesSourceNode,
+} from './query_builder/sources/slices_source';
+import {
+  SqlSource,
+  SqlSourceAttrs,
+  SqlSourceNode,
+} from './query_builder/sources/sql_source';
 
 export interface ExplorePageState {
-  rootNode?: QueryNode; // Root Query Node
+  rootNodes: QueryNode[];
   selectedNode?: QueryNode; // Selected Query Node on which to perform actions
   activeViewSource?: VisViewSource; // View Source of activeQueryNode
   mode: ExplorePageModes;
@@ -59,6 +76,82 @@ export class ExplorePage implements m.ClassComponent<ExplorePageAttrs> {
     });
   }
 
+  addSourcePopupMenu(attrs: ExplorePageAttrs): m.Children {
+    const {trace, state} = attrs;
+    const sqlModules = attrs.sqlModulesPlugin.getSqlModules();
+    return [
+      m(MenuItem, {
+        label: 'Standard library table',
+        onclick: async () => {
+          const stdlibTableAttrs: StdlibTableAttrs = {
+            filters: [],
+            sourceCols: [],
+            groupByColumns: [],
+            aggregations: [],
+            trace,
+            sqlModules,
+            modal: () =>
+              createModal(
+                'Standard library table',
+                () => m(StdlibTableSource, stdlibTableAttrs),
+                () => {
+                  const newNode = new StdlibTableNode(stdlibTableAttrs);
+                  state.rootNodes.push(newNode);
+                  state.selectedNode = newNode;
+                },
+              ),
+          };
+          // Adding trivial modal to open the table selection.
+          createModal(
+            'Standard library table',
+            () => m(StdlibTableSource, stdlibTableAttrs),
+            () => {},
+          );
+        },
+      }),
+      m(MenuItem, {
+        label: 'Custom slices',
+        onclick: () => {
+          const newSimpleSlicesAttrs: SlicesSourceAttrs = {
+            sourceCols: [],
+            filters: [],
+            groupByColumns: [],
+            aggregations: [],
+          };
+          createModal(
+            'Slices',
+            () => m(SlicesSource, newSimpleSlicesAttrs),
+            () => {
+              const newNode = new SlicesSourceNode(newSimpleSlicesAttrs);
+              state.rootNodes.push(newNode);
+              state.selectedNode = newNode;
+            },
+          );
+        },
+      }),
+      m(MenuItem, {
+        label: 'Custom SQL',
+        onclick: () => {
+          const newSqlSourceAttrs: SqlSourceAttrs = {
+            sourceCols: [],
+            filters: [],
+            groupByColumns: [],
+            aggregations: [],
+          };
+          createModal(
+            'SQL',
+            () => m(SqlSource, newSqlSourceAttrs),
+            () => {
+              const newNode = new SqlSourceNode(newSqlSourceAttrs);
+              state.rootNodes.push(newNode);
+              state.selectedNode = newNode;
+            },
+          );
+        },
+      }),
+    ];
+  }
+
   view({attrs}: m.CVnode<ExplorePageAttrs>) {
     const {trace, state} = attrs;
 
@@ -69,14 +162,29 @@ export class ExplorePage implements m.ClassComponent<ExplorePageAttrs> {
         m('h1', `${ExplorePageModeToLabel[state.mode]}`),
         m('span', {style: {flexGrow: 1}}),
         state.mode === ExplorePageModes.QUERY_BUILDER
-          ? m(Button, {
-              label: 'Clear All Query Nodes',
-              intent: Intent.Primary,
-              onclick: () => {
-                state.rootNode = undefined;
-                state.selectedNode = undefined;
-              },
-            })
+          ? m(
+              '',
+              m(
+                PopupMenu,
+                {
+                  trigger: m(Button, {
+                    label: 'Add new node',
+                    icon: Icons.Add,
+                    intent: Intent.Primary,
+                  }),
+                },
+                this.addSourcePopupMenu(attrs),
+              ),
+              m(Button, {
+                label: 'Clear All Query Nodes',
+                intent: Intent.Primary,
+                onclick: () => {
+                  state.rootNodes = [];
+                  state.selectedNode = undefined;
+                },
+                style: {marginLeft: '10px'},
+              }),
+            )
           : m(Button, {
               label: 'Back to Query Builder',
               intent: Intent.Primary,
@@ -91,7 +199,7 @@ export class ExplorePage implements m.ClassComponent<ExplorePageAttrs> {
           trace,
           sqlModules: attrs.sqlModulesPlugin.getSqlModules(),
           onRootNodeCreated(arg) {
-            state.rootNode = arg;
+            state.rootNodes.push(arg);
             state.selectedNode = arg;
           },
           onNodeSelected(arg) {
@@ -99,11 +207,12 @@ export class ExplorePage implements m.ClassComponent<ExplorePageAttrs> {
           },
           visualiseDataMenuItems: (node: QueryNode) =>
             this.renderVisualiseDataMenuItems(node, state),
-          rootNode: state.rootNode,
+          rootNodes: state.rootNodes,
           selectedNode: state.selectedNode,
+          addSourcePopupMenu: () => this.addSourcePopupMenu(attrs),
         }),
       state.mode === ExplorePageModes.DATA_VISUALISER &&
-        state.rootNode &&
+        state.rootNodes.length !== 0 &&
         m(DataVisualiser, {
           trace,
           state,
