@@ -79,7 +79,7 @@ struct EnumDescriptorComp {
 };
 
 inline std::string ProtoStubName(const FileDescriptor* proto) {
-  return StripSuffix(proto->name(), ".proto") + ".pzc";
+  return StripSuffix(std::string(proto->name()), ".proto") + ".pzc";
 }
 
 std::string IntLiteralString(int number) {
@@ -353,7 +353,7 @@ class GeneratorJob {
   }
 
   std::string GenerateGuard() {
-    std::string guard = StripSuffix(source_->name(), ".proto");
+    std::string guard = StripSuffix(std::string(source_->name()), ".proto");
     guard = ToUpper(guard);
     guard = StripChars(guard, ".-/\\", '_');
     guard = StripPrefix(guard, guard_strip_prefix_);

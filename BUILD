@@ -2282,6 +2282,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/proto/android_camera_event_module.h",
         "src/trace_processor/importers/proto/android_kernel_wakelocks_module.cc",
         "src/trace_processor/importers/proto/android_kernel_wakelocks_module.h",
+        "src/trace_processor/importers/proto/android_kernel_wakelocks_state.cc",
+        "src/trace_processor/importers/proto/android_kernel_wakelocks_state.h",
         "src/trace_processor/importers/proto/android_probes_module.cc",
         "src/trace_processor/importers/proto/android_probes_module.h",
         "src/trace_processor/importers/proto/android_probes_parser.cc",
@@ -2633,6 +2635,7 @@ perfetto_filegroup(
         "src/trace_processor/metrics/sql/android/wattson_app_startup_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_app_startup_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_atrace_apps_rails.sql",
+        "src/trace_processor/metrics/sql/android/wattson_atrace_apps_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_rails.sql",
         "src/trace_processor/metrics/sql/android/wattson_markers_threads.sql",
         "src/trace_processor/metrics/sql/android/wattson_rail_relations.sql",
@@ -3014,6 +3017,14 @@ perfetto_filegroup(
     name = "src_trace_processor_perfetto_sql_stdlib_android_cpu_cpu",
     srcs = [
         "src/trace_processor/perfetto_sql/stdlib/android/cpu/cluster_type.sql",
+    ],
+)
+
+# GN target: //src/trace_processor/perfetto_sql/stdlib/android/dumpsys:dumpsys
+perfetto_filegroup(
+    name = "src_trace_processor_perfetto_sql_stdlib_android_dumpsys_dumpsys",
+    srcs = [
+        "src/trace_processor/perfetto_sql/stdlib/android/dumpsys/show_map.sql",
     ],
 )
 
@@ -3408,6 +3419,7 @@ perfetto_cc_amalgamated_sql(
         ":src_trace_processor_perfetto_sql_stdlib_android_auto_auto",
         ":src_trace_processor_perfetto_sql_stdlib_android_battery_battery",
         ":src_trace_processor_perfetto_sql_stdlib_android_cpu_cpu",
+        ":src_trace_processor_perfetto_sql_stdlib_android_dumpsys_dumpsys",
         ":src_trace_processor_perfetto_sql_stdlib_android_frames_frames",
         ":src_trace_processor_perfetto_sql_stdlib_android_gpu_gpu",
         ":src_trace_processor_perfetto_sql_stdlib_android_memory_heap_graph_heap_graph",
@@ -4456,6 +4468,7 @@ perfetto_android_instrumentation_test(
 # GN target: //src/java_sdk/test:perfetto_java_sdk_test_app
 perfetto_android_binary(
     name = "src_java_sdk_test_perfetto_java_sdk_test_app",
+    testonly = True,
     manifest = "src/java_sdk/test/AndroidTestManifest.xml",
     instruments = ":src_java_sdk_main_perfetto_java_sdk_app",
     deps = [
@@ -4466,6 +4479,7 @@ perfetto_android_binary(
 # GN target: //src/java_sdk/test:perfetto_test_lib
 perfetto_android_library(
     name = "src_java_sdk_test_perfetto_test_lib",
+    testonly = True,
     srcs = [
         "src/java_sdk/test/java/com/google/perfetto/sdk/test/SimpleInstrumentationTest.java",
     ],
