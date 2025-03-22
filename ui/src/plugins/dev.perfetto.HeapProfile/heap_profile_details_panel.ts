@@ -15,8 +15,10 @@
 import m from 'mithril';
 
 import {assertExists, assertFalse} from '../../base/logging';
+import {createPerfettoTable} from '../../trace_processor/sql_utils';
 import {extensions} from '../../components/extensions';
 import {time} from '../../base/time';
+import {uuidv4Sql} from '../../base/uuid';
 import {
   QueryFlamegraph,
   QueryFlamegraphMetric,
@@ -290,6 +292,7 @@ function flamegraphMetrics(
               name: 'path_hash_stable',
               displayName: 'Path Hash',
               mergeAggregation: 'CONCAT_WITH_COMMA',
+              isVisible: false,
             },
           ],
           optionalNodeActions: getHeapGraphNodeOptionalActions(trace, false),
@@ -322,6 +325,7 @@ function flamegraphMetrics(
               name: 'path_hash_stable',
               displayName: 'Path Hash',
               mergeAggregation: 'CONCAT_WITH_COMMA',
+              isVisible: false,
             },
           ],
           optionalNodeActions: getHeapGraphNodeOptionalActions(trace, false),
@@ -359,6 +363,7 @@ function flamegraphMetrics(
               name: 'path_hash_stable',
               displayName: 'Path Hash',
               mergeAggregation: 'CONCAT_WITH_COMMA',
+              isVisible: false,
             },
           ],
           optionalNodeActions: getHeapGraphNodeOptionalActions(trace, true),
@@ -391,6 +396,7 @@ function flamegraphMetrics(
               name: 'path_hash_stable',
               displayName: 'Path Hash',
               mergeAggregation: 'CONCAT_WITH_COMMA',
+              isVisible: false,
             },
           ],
           optionalNodeActions: getHeapGraphNodeOptionalActions(trace, true),
@@ -603,10 +609,18 @@ function getHeapGraphNodeOptionalActions(
       execute: async (kv: ReadonlyMap<string, string>) => {
         const value = kv.get('path_hash_stable');
         if (value !== undefined) {
-          const viewName = `_heap_graph${tableModifier(isDominator)}object_references`;
-          const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${value}`;
+          const uuid = uuidv4Sql();
+          const pathHashTableName = `_heap_graph_filtered_path_hashes_${uuid}`;
+          await createPerfettoTable(
+            trace.engine,
+            pathHashTableName,
+            pathHashesToTableStatement(value),
+          );
+
+          const tableName = `_heap_graph${tableModifier(isDominator)}object_references`;
+          const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${pathHashTableName}`;
           const macroExpr = `_heap_graph_object_references_agg!(${macroArgs})`;
-          const statement = `CREATE OR REPLACE PERFETTO VIEW ${viewName} AS SELECT * FROM ${macroExpr};`;
+          const statement = `CREATE OR REPLACE PERFETTO TABLE ${tableName} AS SELECT * FROM ${macroExpr};`;
 
           // Create view to be returned
           await trace.engine.query(statement);
@@ -627,10 +641,18 @@ function getHeapGraphNodeOptionalActions(
           execute: async (kv: ReadonlyMap<string, string>) => {
             const value = kv.get('path_hash_stable');
             if (value !== undefined) {
-              const viewName = `_heap_graph${tableModifier(isDominator)}incoming_references`;
-              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${value}`;
+              const uuid = uuidv4Sql();
+              const pathHashTableName = `_heap_graph_filtered_path_hashes_${uuid}`;
+              await createPerfettoTable(
+                trace.engine,
+                pathHashTableName,
+                pathHashesToTableStatement(value),
+              );
+
+              const tableName = `_heap_graph${tableModifier(isDominator)}incoming_references`;
+              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${pathHashTableName}`;
               const macroExpr = `_heap_graph_incoming_references_agg!(${macroArgs})`;
-              const statement = `CREATE OR REPLACE PERFETTO VIEW ${viewName} AS SELECT * FROM ${macroExpr};`;
+              const statement = `CREATE OR REPLACE PERFETTO TABLE ${tableName} AS SELECT * FROM ${macroExpr};`;
 
               // Create view to be returned
               await trace.engine.query(statement);
@@ -645,10 +667,18 @@ function getHeapGraphNodeOptionalActions(
           execute: async (kv: ReadonlyMap<string, string>) => {
             const value = kv.get('path_hash_stable');
             if (value !== undefined) {
-              const viewName = `_heap_graph${tableModifier(isDominator)}outgoing_references`;
-              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${value}`;
+              const uuid = uuidv4Sql();
+              const pathHashTableName = `_heap_graph_filtered_path_hashes_${uuid}`;
+              await createPerfettoTable(
+                trace.engine,
+                pathHashTableName,
+                pathHashesToTableStatement(value),
+              );
+
+              const tableName = `_heap_graph${tableModifier(isDominator)}outgoing_references`;
+              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${pathHashTableName}`;
               const macroExpr = `_heap_graph_outgoing_references_agg!(${macroArgs})`;
-              const statement = `CREATE OR REPLACE PERFETTO VIEW ${viewName} AS SELECT * FROM ${macroExpr};`;
+              const statement = `CREATE OR REPLACE PERFETTO TABLE ${tableName} AS SELECT * FROM ${macroExpr};`;
 
               // Create view to be returned
               await trace.engine.query(statement);
@@ -671,10 +701,18 @@ function getHeapGraphNodeOptionalActions(
           execute: async (kv: ReadonlyMap<string, string>) => {
             const value = kv.get('path_hash_stable');
             if (value !== undefined) {
-              const viewName = `_heap_graph${tableModifier(isDominator)}retained_object_counts`;
-              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${value}`;
+              const uuid = uuidv4Sql();
+              const pathHashTableName = `_heap_graph_filtered_path_hashes_${uuid}`;
+              await createPerfettoTable(
+                trace.engine,
+                pathHashTableName,
+                pathHashesToTableStatement(value),
+              );
+
+              const tableName = `_heap_graph${tableModifier(isDominator)}retained_object_counts`;
+              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${pathHashTableName}`;
               const macroExpr = `_heap_graph_retained_object_count_agg!(${macroArgs})`;
-              const statement = `CREATE OR REPLACE PERFETTO VIEW ${viewName} AS SELECT * FROM ${macroExpr};`;
+              const statement = `CREATE OR REPLACE PERFETTO TABLE ${tableName} AS SELECT * FROM ${macroExpr};`;
 
               // Create view to be returned
               await trace.engine.query(statement);
@@ -689,10 +727,18 @@ function getHeapGraphNodeOptionalActions(
           execute: async (kv: ReadonlyMap<string, string>) => {
             const value = kv.get('path_hash_stable');
             if (value !== undefined) {
-              const viewName = `_heap_graph${tableModifier(isDominator)}retaining_object_counts`;
-              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${value}`;
+              const uuid = uuidv4Sql();
+              const pathHashTableName = `_heap_graph_filtered_path_hashes_${uuid}`;
+              await createPerfettoTable(
+                trace.engine,
+                pathHashTableName,
+                pathHashesToTableStatement(value),
+              );
+
+              const tableName = `_heap_graph${tableModifier(isDominator)}retaining_object_counts`;
+              const macroArgs = `_heap_graph${tableModifier(isDominator)}path_hashes, ${pathHashTableName}`;
               const macroExpr = `_heap_graph_retaining_object_count_agg!(${macroArgs})`;
-              const statement = `CREATE OR REPLACE PERFETTO VIEW ${viewName} AS SELECT * FROM ${macroExpr};`;
+              const statement = `CREATE OR REPLACE PERFETTO TABLE ${tableName} AS SELECT * FROM ${macroExpr};`;
 
               // Create view to be returned
               await trace.engine.query(statement);
@@ -732,4 +778,16 @@ function getHeapGraphRootOptionalActions(
 
 function tableModifier(isDominator: boolean): string {
   return isDominator ? '_dominator_' : '_';
+}
+
+function pathHashesToTableStatement(commaSeparatedValues: string): string {
+  // Split the string by commas and trim whitespace
+  const individualValues = commaSeparatedValues.split(',').map((v) => v.trim());
+
+  // Wrap each value with parentheses
+  const wrappedValues = individualValues.map((value) => `(${value})`);
+
+  // Join with commas and create the complete WITH clause
+  const valuesClause = `values${wrappedValues.join(', ')}`;
+  return `WITH temp_table(path_hash) AS (${valuesClause}) SELECT * FROM temp_table`;
 }
