@@ -328,6 +328,7 @@ perfetto_cc_library(
         ":src_kernel_utils_syscall_table",
         ":src_protozero_proto_ring_buffer",
         ":src_protozero_text_to_proto_text_to_proto",
+        ":src_trace_processor_dataframe_dataframe",
         ":src_trace_processor_db_column_column",
         ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
@@ -1654,6 +1655,14 @@ perfetto_cc_library(
     linkstatic = True,
 )
 
+# GN target: //src/trace_processor/dataframe:dataframe
+perfetto_filegroup(
+    name = "src_trace_processor_dataframe_dataframe",
+    srcs = [
+        "src/trace_processor/dataframe/type_set.h",
+    ],
+)
+
 # GN target: //src/trace_processor/db/column:column
 perfetto_filegroup(
     name = "src_trace_processor_db_column_column",
@@ -2398,6 +2407,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/importers/proto/active_chrome_processes_tracker.cc",
         "src/trace_processor/importers/proto/active_chrome_processes_tracker.h",
+        "src/trace_processor/importers/proto/app_wakelock_module.cc",
+        "src/trace_processor/importers/proto/app_wakelock_module.h",
         "src/trace_processor/importers/proto/args_parser.cc",
         "src/trace_processor/importers/proto/args_parser.h",
         "src/trace_processor/importers/proto/chrome_string_lookup.cc",
@@ -7199,6 +7210,7 @@ perfetto_cc_library(
     srcs = [
         ":src_kernel_utils_syscall_table",
         ":src_protozero_text_to_proto_text_to_proto",
+        ":src_trace_processor_dataframe_dataframe",
         ":src_trace_processor_db_column_column",
         ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
@@ -7422,6 +7434,7 @@ perfetto_cc_binary(
         ":src_profiling_symbolizer_symbolizer",
         ":src_protozero_proto_ring_buffer",
         ":src_protozero_text_to_proto_text_to_proto",
+        ":src_trace_processor_dataframe_dataframe",
         ":src_trace_processor_db_column_column",
         ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
@@ -7634,6 +7647,7 @@ perfetto_cc_binary(
         ":src_profiling_symbolizer_symbolizer",
         ":src_protozero_proto_ring_buffer",
         ":src_protozero_text_to_proto_text_to_proto",
+        ":src_trace_processor_dataframe_dataframe",
         ":src_trace_processor_db_column_column",
         ":src_trace_processor_db_compare",
         ":src_trace_processor_db_db",
