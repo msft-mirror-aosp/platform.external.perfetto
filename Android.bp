@@ -3066,6 +3066,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/irq_vectors.proto",
         "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
@@ -7508,6 +7509,7 @@ genrule {
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/irq_vectors.proto",
         "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
@@ -7939,6 +7941,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/irq_vectors.proto",
         "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
@@ -8033,6 +8036,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/ion.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/ipi.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/irq.gen.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/irq_vectors.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kgsl.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kmem.gen.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kvm.gen.cc",
@@ -8127,6 +8131,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/ion.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/ipi.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/irq.gen.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/irq_vectors.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kgsl.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kmem.gen.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kvm.gen.h",
@@ -8217,6 +8222,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/irq_vectors.proto",
         "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
@@ -8310,6 +8316,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/ion.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/ipi.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/irq.pb.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/irq_vectors.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kgsl.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kmem.pb.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kvm.pb.cc",
@@ -8403,6 +8410,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/ion.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/ipi.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/irq.pb.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/irq_vectors.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kgsl.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kmem.pb.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kvm.pb.h",
@@ -8493,6 +8501,7 @@ filegroup {
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/irq_vectors.proto",
         "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
@@ -8587,6 +8596,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/ion.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/ipi.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/irq.pbzero.cc",
+        "external/perfetto/protos/perfetto/trace/ftrace/irq_vectors.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kgsl.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kmem.pbzero.cc",
         "external/perfetto/protos/perfetto/trace/ftrace/kvm.pbzero.cc",
@@ -8681,6 +8691,7 @@ genrule {
         "external/perfetto/protos/perfetto/trace/ftrace/ion.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/ipi.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/irq.pbzero.h",
+        "external/perfetto/protos/perfetto/trace/ftrace/irq_vectors.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kgsl.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kmem.pbzero.h",
         "external/perfetto/protos/perfetto/trace/ftrace/kvm.pbzero.h",
@@ -14160,7 +14171,6 @@ genrule {
         "src/trace_processor/metrics/sql/android/jank/internal/counters.sql",
         "src/trace_processor/metrics/sql/android/jank/internal/query_base.sql",
         "src/trace_processor/metrics/sql/android/jank/internal/query_frame_slice.sql",
-        "src/trace_processor/metrics/sql/android/jank/params.sql",
         "src/trace_processor/metrics/sql/android/jank/query_functions.sql",
         "src/trace_processor/metrics/sql/android/jank/relevant_slices.sql",
         "src/trace_processor/metrics/sql/android/jank/relevant_threads.sql",
@@ -16304,6 +16314,7 @@ java_library {
         "protos/perfetto/trace/ftrace/ion.proto",
         "protos/perfetto/trace/ftrace/ipi.proto",
         "protos/perfetto/trace/ftrace/irq.proto",
+        "protos/perfetto/trace/ftrace/irq_vectors.proto",
         "protos/perfetto/trace/ftrace/kgsl.proto",
         "protos/perfetto/trace/ftrace/kmem.proto",
         "protos/perfetto/trace/ftrace/kvm.proto",
@@ -19021,7 +19032,12 @@ gensrcs {
     cmd: "mkdir -p $(genDir)/$(in) " +
         "&& $(location aprotoc) " +
         "--plugin=$(location protoc-gen-javastream) " +
-        "--javastream_opt=include_filter:perfetto.protos.TracePacket,perfetto.protos.ShellTransition,perfetto.protos.ShellHandlerMappings,perfetto.protos.ProtoLogMessage,perfetto.protos.ProtoLogViewerConfig,perfetto.protos.ShellHandlerMapping,perfetto.protos.ShellHandlerMappings,perfetto.protos.ProtoLogGroup,perfetto.protos.ProtoLogConfig,perfetto.protos.DataSourceConfig,perfetto.protos.InternedString,perfetto.protos.InternedData,perfetto.protos.ProtoLogLevel,perfetto.protos.TestEvent,perfetto.protos.TestEvent.TestPayload,perfetto.protos.TestConfig,perfetto.protos.TestConfig.DummyFields,perfetto.protos.WinscopeExtensionsImpl,perfetto.protos.InputMethodClientsTraceProto,perfetto.protos.InputMethodManagerServiceTraceProto,perfetto.protos.InputMethodServiceTraceProto,perfetto.protos.ViewCapture,perfetto.protos.WindowManagerConfig,perfetto.protos.WindowManagerTraceEntry,perfetto.protos.AppWakelocksConfig,perfetto.protos.AppWakelockInfo,perfetto.protos.AppWakelockBundle " +
+
+        "--javastream_opt=include_filter:perfetto.protos.TracePacket,perfetto.protos.ShellTransition,perfetto.protos.ShellHandlerMappings,perfetto.protos.ProtoLogMessage,perfetto.protos.ProtoLogViewerConfig,perfetto.protos.ShellHandlerMapping,perfetto.protos.ShellHandlerMappings,perfetto.protos.ProtoLogGroup,perfetto.protos.ProtoLogConfig,perfetto.protos.DataSourceConfig,perfetto.protos.InternedString,perfetto.protos.InternedData,perfetto.protos.ProtoLogLevel,perfetto.protos.TestEvent,perfetto.protos.TestEvent.TestPayload,perfetto.protos.TestConfig,perfetto.protos.TestConfig.DummyFields,perfetto.protos.WinscopeExtensionsImpl,perfetto.protos.InputMethodClientsTraceProto,perfetto.protos.InputMethodManagerServiceTraceProto,perfetto.protos.InputMethodServiceTraceProto,perfetto.protos.ViewCapture,perfetto.protos.AppWakelocksConfig,perfetto.protos.AppWakelockInfo,perfetto.protos.AppWakelockBundle," +
+
+        // WindowManager protos
+        "perfetto.protos.ActivityInfoProto,perfetto.protos.ActivityRecordProto,perfetto.protos.AlphaAnimationSpecProto,perfetto.protos.AnimationAdapterProto,perfetto.protos.AnimationSpecProto,perfetto.protos.AppTransitionProto,perfetto.protos.BackNavigationProto,perfetto.protos.ConfigurationContainerProto,perfetto.protos.ConfigurationProto,perfetto.protos.DeviceConfigurationProto,perfetto.protos.DisplayAreaProto,perfetto.protos.DisplayContentProto,perfetto.protos.DisplayInfoProto,perfetto.protos.DisplayRotationProto,perfetto.protos.GlobalConfigurationProto,perfetto.protos.IdentifierProto,perfetto.protos.ImeInsetsSourceProviderProto,perfetto.protos.InsetsSourceProviderProto,perfetto.protos.KeyguardControllerProto,perfetto.protos.KeyguardPerDisplayProto,perfetto.protos.KeyguardServiceDelegateProto,perfetto.protos.LocalAnimationAdapterProto,perfetto.protos.LocaleProto,perfetto.protos.MoveAnimationSpecProto,perfetto.protos.PointProto,perfetto.protos.RemoteAnimationTargetProto,perfetto.protos.RemoteInsetsControlTargetProto,perfetto.protos.ResourcesConfigurationProto,perfetto.protos.RootWindowContainerProto,perfetto.protos.SurfaceAnimatorProto,perfetto.protos.TaskFragmentProto,perfetto.protos.TaskProto,perfetto.protos.WindowAnimationSpecProto,perfetto.protos.WindowConfigurationProto,perfetto.protos.WindowContainerChildProto,perfetto.protos.WindowContainerProto,perfetto.protos.WindowFramesProto,perfetto.protos.WindowManagerConfig,perfetto.protos.WindowManagerPolicyProto,perfetto.protos.WindowManagerServiceDumpProto,perfetto.protos.WindowManagerTraceFileProto,perfetto.protos.WindowOrientationListenerProto,perfetto.protos.WindowStateAnimatorProto,perfetto.protos.WindowStateProto,perfetto.protos.WindowSurfaceControllerProto,perfetto.protos.WindowTokenProto " +
+
         "--javastream_out=$(genDir)/$(in) " +
         "-Iexternal/protobuf/src " +
         "-Iexternal/perfetto " +
