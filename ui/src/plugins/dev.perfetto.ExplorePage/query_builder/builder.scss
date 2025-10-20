@@ -14,13 +14,18 @@
 
 @import "../../../assets/theme";
 @import "./data_explorer.scss";
-@import "./graph.scss";
+@import "./graph/graph.scss";
+@import "./empty_graph.scss";
 @import "./help.scss";
-@import "./node_box.scss";
+@import "./graph/node_box.scss";
+@import "./graph/node_container.scss";
+@import "./graph/node_block.scss";
 @import "./node_explorer.scss";
 @import "./operations/operation_component.scss";
-@import "./sources/slices_source.scss";
-@import "./sources/table_source.scss";
+@import "./nodes/sources/slices_source.scss";
+@import "./nodes/sources/table_source.scss";
+@import "./nodes/aggregation_node.scss";
+@import "./nodes/modify_columns_node.scss";
 
 .pf-query-builder-layout {
   display: grid;

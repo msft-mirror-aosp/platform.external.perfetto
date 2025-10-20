@@ -40,23 +40,14 @@ import {Button} from '../../widgets/button';
 import {MenuDivider, MenuItem, PopupMenu} from '../../widgets/menu';
 import {TrackShell} from '../../widgets/track_shell';
 import {Tree, TreeNode} from '../../widgets/tree';
-import {
-  COLOR_ACCENT,
-  COLOR_BACKGROUND,
-  COLOR_BACKGROUND_SECONDARY,
-  COLOR_BORDER,
-  COLOR_BORDER_SECONDARY,
-  COLOR_NEUTRAL,
-  COLOR_TEXT,
-  COLOR_TEXT_MUTED,
-} from '../css_constants';
+import {COLOR_ACCENT} from '../css_constants';
 import {calculateResolution} from './resolution';
 import {Trace} from '../../public/trace';
-import {Anchor} from '../../widgets/anchor';
+import {Anchor, linkify} from '../../widgets/anchor';
 import {showModal} from '../../widgets/modal';
-import {copyToClipboard} from '../../base/clipboard';
 import {Popup} from '../../widgets/popup';
-import {Theme} from '../../public/theme';
+import {CanvasColors} from '../../public/canvas_colors';
+import {CodeSnippet} from '../../widgets/code_snippet';
 
 const TRACK_HEIGHT_MIN_PX = 18;
 
@@ -140,7 +131,9 @@ export class TrackView {
           renderer?.track.getTrackShellButtons?.(),
           description !== undefined &&
             this.renderHelpButton(
-              typeof description === 'function' ? description() : description,
+              typeof description === 'function'
+                ? description()
+                : linkify(description),
             ),
           (removable || node.removable) && this.renderCloseButton(),
           // We don't want summary tracks to be pinned as they rarely have
@@ -266,6 +259,7 @@ export class TrackView {
     visibleWindow: HighPrecisionTimeSpan,
     perfStatsEnabled: boolean,
     trackPerfStats: WeakMap<TrackNode, PerfStats>,
+    colors: CanvasColors,
   ) {
     // For each track we rendered in view(), render it to the canvas. We know the
     // vertical bounds, so we just need to combine it with the horizontal bounds
@@ -299,17 +293,6 @@ export class TrackView {
       return;
     }
 
-    const theme: Theme = {
-      COLOR_BORDER,
-      COLOR_BORDER_SECONDARY,
-      COLOR_BACKGROUND_SECONDARY,
-      COLOR_ACCENT,
-      COLOR_BACKGROUND,
-      COLOR_NEUTRAL,
-      COLOR_TEXT,
-      COLOR_TEXT_MUTED,
-    };
-
     const start = performance.now();
     node.uri &&
       renderer?.render({
@@ -319,7 +302,7 @@ export class TrackView {
         resolution: maybeNewResolution.value,
         ctx,
         timescale,
-        theme,
+        colors,
       });
 
     this.highlightIfTrackInAreaSelection(ctx, timescale, trackRect);
@@ -365,7 +348,7 @@ export class TrackView {
     });
   }
 
-  private renderHelpButton(helpText: m.Children): m.Children {
+  private renderHelpButton(helpText: m.Children | string): m.Children {
     return m(
       Popup,
       {
@@ -593,6 +576,7 @@ const TrackPopupMenu = {
     return [
       m(MenuItem, {
         label: 'Select track',
+        icon: 'select',
         disabled: !attrs.node.uri,
         onclick: () => {
           attrs.trace.selection.selectTrack(attrs.node.uri!);
@@ -603,13 +587,13 @@ const TrackPopupMenu = {
       }),
       m(
         MenuItem,
-        {label: 'Track details'},
+        {label: 'Track details', icon: 'info'},
         renderTrackDetailsMenu(attrs.node, attrs.descriptor),
       ),
       m(MenuDivider),
       m(
         MenuItem,
-        {label: 'Copy to workspace'},
+        {label: 'Copy to workspace', icon: 'content_copy'},
         attrs.trace.workspaces.all.map((ws) =>
           m(MenuItem, {
             label: ws.title,
@@ -620,12 +604,13 @@ const TrackPopupMenu = {
         m(MenuDivider),
         m(MenuItem, {
           label: 'New workspace...',
+          icon: 'add',
           onclick: () => copyToWorkspace(attrs.trace, attrs.node),
         }),
       ),
       m(
         MenuItem,
-        {label: 'Copy & switch to workspace'},
+        {label: 'Copy & switch to workspace', icon: 'content_copy'},
         attrs.trace.workspaces.all.map((ws) =>
           m(MenuItem, {
             label: ws.title,
@@ -639,12 +624,33 @@ const TrackPopupMenu = {
         m(MenuDivider),
         m(MenuItem, {
           label: 'New workspace...',
+          icon: 'add',
           onclick: async () => {
             const ws = copyToWorkspace(attrs.trace, attrs.node);
             attrs.trace.workspaces.switchWorkspace(ws);
           },
         }),
       ),
+      m(MenuDivider),
+      m(MenuItem, {
+        label: 'Rename',
+        icon: 'edit',
+        disabled: !attrs.node.workspace?.userEditable,
+        onclick: async () => {
+          const newName = await attrs.trace.omnibox.prompt('New name');
+          if (newName) {
+            attrs.node.name = newName;
+          }
+        },
+      }),
+      m(MenuItem, {
+        label: 'Remove',
+        icon: 'delete',
+        disabled: !attrs.node.workspace?.userEditable,
+        onclick: () => {
+          attrs.node.remove();
+        },
+      }),
     ];
   },
 };
@@ -700,13 +706,7 @@ function renderTrackDetailsMenu(node: TrackNode, descriptor?: Track) {
               onclick: () => {
                 showModal({
                   title: 'Query for track',
-                  content: m('pre', query),
-                  buttons: [
-                    {
-                      text: 'Copy to clipboard',
-                      action: () => copyToClipboard(query),
-                    },
-                  ],
+                  content: () => m(CodeSnippet, {text: query, language: 'SQL'}),
                 });
               },
             },

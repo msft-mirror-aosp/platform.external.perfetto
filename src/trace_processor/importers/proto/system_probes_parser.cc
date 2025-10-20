@@ -193,6 +193,8 @@ const char* GetProcessMemoryKey(uint32_t field_id) {
       return "locked";
     case ProcessStats::Process::kVmHwmKbFieldNumber:
       return "rss.watermark";
+    case ProcessStats::Process::kDmabufRssKbFieldNumber:
+      return "dmabuf_rss";
     default:
       return nullptr;
   }
@@ -660,8 +662,14 @@ void SystemProbesParser::ParseProcessTree(ConstBytes blob) {
       }
       joined_cmdline = base::StringView(cmdline_str);
     }
-    UniquePid upid = context_->process_tracker->SetProcessMetadata(
-        pid, ppid, argv0, joined_cmdline);
+
+    UniquePid pupid = context_->process_tracker->GetOrCreateProcess(ppid);
+    UniquePid upid = context_->process_tracker->GetOrCreateProcess(pid);
+
+    upid =
+        context_->process_tracker->UpdateProcessWithParent(upid, pupid, true);
+
+    context_->process_tracker->SetProcessMetadata(upid, argv0, joined_cmdline);
 
     if (proc.has_uid()) {
       context_->process_tracker->SetProcessUid(

@@ -16,40 +16,57 @@ import m from 'mithril';
 import {classNames} from '../../../base/classnames';
 
 import {SqlModules} from '../../dev.perfetto.SqlModules/sql_modules';
-import {QueryNode, Query, isAQuery, queryToRun} from '../query_node';
+import {QueryNode, Query, isAQuery, queryToRun, NodeType} from '../query_node';
 import {ExplorePageHelp} from './help';
 import {NodeExplorer} from './node_explorer';
-import {Graph} from './graph';
+import {Graph} from './graph/graph';
 import {Trace} from 'src/public/trace';
 import {DataExplorer} from './data_explorer';
 import {
   DataGridDataSource,
   DataGridModel,
+  FilterDefinition,
 } from '../../../components/widgets/data_grid/common';
 import {InMemoryDataSource} from '../../../components/widgets/data_grid/in_memory_data_source';
 import {QueryResponse} from '../../../components/query_table/queries';
-import {columnInfoFromSqlColumn, newColumnInfoList} from './column_info';
-import {TableSourceNode} from './sources/table_source';
-import {SqlSourceNode} from './sources/sql_source';
+import {TableSourceNode} from './nodes/sources/table_source';
+import {SqlSourceNode} from './nodes/sources/sql_source';
 import {QueryService} from './query_service';
 import {findErrors, findWarnings} from './query_builder_utils';
+import {NodeIssues} from './node_issues';
+import {NodeBoxLayout} from './graph/node_box';
 
 export interface BuilderAttrs {
   readonly trace: Trace;
-
   readonly sqlModules: SqlModules;
+
+  readonly devMode?: boolean;
+
   readonly rootNodes: QueryNode[];
   readonly selectedNode?: QueryNode;
+  readonly nodeLayouts: Map<string, NodeBoxLayout>;
+
+  readonly onDevModeChange?: (enabled: boolean) => void;
+
+  // Add nodes.
+  readonly onAddSourceNode: (id: string) => void;
+  readonly onAddDerivedNode: (id: string) => void;
 
   readonly onRootNodeCreated: (node: QueryNode) => void;
   readonly onNodeSelected: (node?: QueryNode) => void;
   readonly onDeselect: () => void;
-  readonly onAddStdlibTableSource: () => void;
-  readonly onAddSlicesSource: () => void;
-  readonly onAddSqlSource: () => void;
+  readonly onNodeLayoutChange: (nodeId: string, layout: NodeBoxLayout) => void;
+
+  readonly onDeleteNode: (node: QueryNode) => void;
   readonly onClearAllNodes: () => void;
   readonly onDuplicateNode: (node: QueryNode) => void;
-  readonly onDeleteNode: (node: QueryNode) => void;
+  readonly onRemoveFilter: (node: QueryNode, filter: FilterDefinition) => void;
+
+  // Import / Export JSON
+  readonly onImport: () => void;
+  readonly onExport: () => void;
+
+  readonly onImportWithStatement: () => void;
 }
 
 export class Builder implements m.ClassComponent<BuilderAttrs> {
@@ -72,9 +89,6 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
       rootNodes,
       onNodeSelected,
       selectedNode,
-      onAddStdlibTableSource,
-      onAddSlicesSource,
-      onAddSqlSource,
       onClearAllNodes,
       sqlModules,
     } = attrs;
@@ -85,7 +99,8 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
       } else {
         this.tablePosition = 'bottom';
       }
-      this.runQuery(selectedNode);
+      this.response = undefined;
+      this.dataSource = undefined;
     }
     this.previousSelectedNode = selectedNode;
 
@@ -105,7 +120,12 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
           key: selectedNode.nodeId,
           trace,
           node: selectedNode,
-          onQueryAnalyzed: (query: Query | Error, reexecute = true) => {
+          resolveNode: (nodeId: string) => this.resolveNode(nodeId, rootNodes),
+          onQueryAnalyzed: (
+            query: Query | Error,
+            reexecute = selectedNode.type !== NodeType.kSqlSource &&
+              selectedNode.type !== NodeType.kIntervalIntersect,
+          ) => {
             this.query = query;
             if (isAQuery(this.query) && reexecute) {
               this.queryExecuted = false;
@@ -117,11 +137,7 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
             this.runQuery(selectedNode);
             m.redraw();
           },
-          onchange: () => {
-            this.queryExecuted = false;
-            this.runQuery(selectedNode);
-            m.redraw();
-          },
+          onchange: () => {},
         })
       : m(ExplorePageHelp, {
           sqlModules,
@@ -130,20 +146,12 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
             const sqlTable = sqlModules.getTable(tableName);
             if (!sqlTable) return;
 
-            const sourceCols = sqlTable.columns.map((c) =>
-              columnInfoFromSqlColumn(c, true),
-            );
-            const groupByColumns = newColumnInfoList(sourceCols, false);
-
             onRootNodeCreated(
               new TableSourceNode({
                 trace,
                 sqlModules,
                 sqlTable,
-                sourceCols,
-                groupByColumns,
                 filters: [],
-                aggregations: [],
               }),
             );
           },
@@ -157,22 +165,25 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
           rootNodes,
           selectedNode,
           onNodeSelected,
+          nodeLayouts: attrs.nodeLayouts,
+          onNodeLayoutChange: attrs.onNodeLayoutChange,
           onDeselect: attrs.onDeselect,
-          onAddStdlibTableSource,
-          onAddSlicesSource,
-          onAddSqlSource,
+          onAddSourceNode: attrs.onAddSourceNode,
           onClearAllNodes,
           onDuplicateNode: attrs.onDuplicateNode,
+          onAddDerivedNode: attrs.onAddDerivedNode,
+          devMode: attrs.devMode,
+          onDevModeChange: attrs.onDevModeChange,
           onDeleteNode: (node: QueryNode) => {
-            if (
-              node.state.isExecuted &&
-              'graphTableName' in node &&
-              node.graphTableName
-            ) {
-              trace.engine.query(`DROP TABLE IF EXISTS ${node.graphTableName}`);
+            if (node.isMaterialised()) {
+              trace.engine.query(`DROP TABLE IF EXISTS ${node.meterialisedAs}`);
             }
             attrs.onDeleteNode(node);
           },
+          onImport: attrs.onImport,
+          onImportWithStatement: attrs.onImportWithStatement,
+          onExport: attrs.onExport,
+          onRemoveFilter: attrs.onRemoveFilter,
         }),
       ),
       m('.pf-qb-explorer', explorer),
@@ -186,11 +197,7 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
             executeQuery: !this.queryExecuted,
             response: this.response,
             dataSource: this.dataSource,
-            onchange: () => {
-              this.query = undefined;
-              this.queryExecuted = false;
-              m.redraw();
-            },
+            onchange: () => {},
             onQueryExecuted: ({
               columns,
               error,
@@ -204,9 +211,16 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
             }) => {
               this.queryExecuted = true;
 
-              selectedNode.state.queryError = error;
-              selectedNode.state.responseError = warning;
-              selectedNode.state.dataError = noDataWarning;
+              if (error || warning || noDataWarning) {
+                if (!selectedNode.state.issues) {
+                  selectedNode.state.issues = new NodeIssues();
+                }
+                selectedNode.state.issues.queryError = error;
+                selectedNode.state.issues.responseError = warning;
+                selectedNode.state.issues.dataError = noDataWarning;
+              } else {
+                selectedNode.state.issues = undefined;
+              }
 
               if (selectedNode instanceof SqlSourceNode) {
                 selectedNode.onQueryExecuted(columns);
@@ -223,6 +237,29 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
           }),
         ),
     );
+  }
+
+  private resolveNode(
+    nodeId: string,
+    rootNodes: QueryNode[],
+  ): QueryNode | undefined {
+    const queue: QueryNode[] = [...rootNodes];
+    const visited = new Set<string>();
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current.nodeId)) {
+        continue;
+      }
+      visited.add(current.nodeId);
+
+      if (current.nodeId === nodeId) {
+        return current;
+      }
+
+      queue.push(...current.nextNodes);
+    }
+    return undefined;
   }
 
   private runQuery(node: QueryNode) {
@@ -260,9 +297,16 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
           : undefined;
 
       this.queryExecuted = true;
-      node.state.queryError = error;
-      node.state.responseError = warning;
-      node.state.dataError = noDataWarning;
+      if (error || warning || noDataWarning) {
+        if (!node.state.issues) {
+          node.state.issues = new NodeIssues();
+        }
+        node.state.issues.queryError = error;
+        node.state.issues.responseError = warning;
+        node.state.issues.dataError = noDataWarning;
+      } else {
+        node.state.issues = undefined;
+      }
 
       if (node instanceof SqlSourceNode) {
         node.onQueryExecuted(this.response.columns);

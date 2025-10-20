@@ -25,10 +25,11 @@ import protos from '../../../protos';
 
 export abstract class SourceNode implements QueryNode {
   readonly nodeId: string;
-  readonly prevNode = undefined;
-  nextNode?: QueryNode;
+  prevNodes: QueryNode[] = [];
+  nextNodes: QueryNode[];
+  meterialisedAs?: string;
 
-  sourceCols: ColumnInfo[];
+  abstract readonly sourceCols: ColumnInfo[];
   finalCols: ColumnInfo[];
 
   readonly state: QueryNodeState;
@@ -36,15 +37,17 @@ export abstract class SourceNode implements QueryNode {
   constructor(state: QueryNodeState) {
     this.nodeId = nextNodeId();
     this.state = state;
-    this.sourceCols = state.sourceCols ?? [];
     this.finalCols = createFinalColumns(this);
+    this.nextNodes = [];
   }
 
   abstract get type(): NodeType;
   abstract getTitle(): string;
   abstract clone(): QueryNode;
   abstract getStructuredQuery(): protos.PerfettoSqlStructuredQuery | undefined;
-  abstract nodeSpecificModify(): m.Child;
+  abstract nodeSpecificModify(onExecute?: () => void): m.Child;
+  abstract isMaterialised(): boolean;
+  abstract serializeState(): object;
 
   validate(): boolean {
     return true;

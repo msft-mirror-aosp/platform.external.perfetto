@@ -102,6 +102,7 @@
 #include "protos/perfetto/trace/track_event/thread_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_descriptor.pbzero.h"
 #include "protos/perfetto/trace/track_event/track_event.pbzero.h"
+#include "protos/third_party/chromium/chrome_enums.pbzero.h"
 
 namespace perfetto::trace_processor {
 namespace {
@@ -116,7 +117,6 @@ using ::testing::Eq;
 using ::testing::HasSubstr;
 using ::testing::IgnoreResult;
 using ::testing::InSequence;
-using ::testing::Invoke;
 using ::testing::InvokeArgument;
 using ::testing::NiceMock;
 using ::testing::Pointwise;
@@ -185,9 +185,22 @@ class MockProcessTracker : public ProcessTracker {
       : ProcessTracker(context) {}
 
   MOCK_METHOD(UniquePid,
+              StartNewProcess,
+              (std::optional<int64_t> timestamp,
+               std::optional<UniquePid> parent_upid,
+               int64_t pid,
+               StringId process_name,
+               ThreadNamePriority priority),
+              (override));
+
+  MOCK_METHOD(UniquePid,
+              UpdateProcessWithParent,
+              (UniquePid upid, UniquePid pupid, bool associate_main_thread),
+              (override));
+
+  MOCK_METHOD(void,
               SetProcessMetadata,
-              (int64_t pid,
-               std::optional<int64_t> ppid,
+              (UniquePid upid,
                base::StringView process_name,
                base::StringView cmdline),
               (override));
@@ -201,6 +214,7 @@ class MockProcessTracker : public ProcessTracker {
   MOCK_METHOD(UniqueTid, UpdateThread, (int64_t tid, int64_t tgid), (override));
 
   MOCK_METHOD(UniquePid, GetOrCreateProcess, (int64_t pid), (override));
+
   MOCK_METHOD(void,
               SetProcessNameIfUnset,
               (UniquePid upid, StringId process_name_id),
@@ -255,7 +269,9 @@ class ProtoTraceParserTest : public ::testing::Test {
     context_.slice_tracker = std::make_unique<SliceTracker>(&context_);
     context_.slice_translation_table =
         std::make_unique<SliceTranslationTable>(storage_);
-    clock_ = new ClockTracker(&context_);
+    std::unique_ptr<ClockSynchronizerListenerImpl> clock_tracker_listener =
+        std::make_unique<ClockSynchronizerListenerImpl>(&context_);
+    clock_ = new ClockTracker(std::move(clock_tracker_listener));
     context_.clock_tracker.reset(clock_);
     context_.flow_tracker = std::make_unique<FlowTracker>(&context_);
     context_.sorter = std::make_unique<TraceSorter>(
@@ -265,6 +281,8 @@ class ProtoTraceParserTest : public ::testing::Test {
     context_.heap_graph_tracker = std::make_unique<HeapGraphTracker>(storage_);
 
     context_.track_compressor.reset(new TrackCompressor(&context_));
+    context_.track_group_idx_state =
+        std::make_unique<TrackCompressorGroupIdxState>();
 
     reader_ = std::make_unique<ProtoTraceReader>(&context_);
   }
@@ -379,7 +397,10 @@ TEST_F(ProtoTraceParserTest, LoadEventsIntoFtraceEvent) {
   static const char buf_value[] = "This is a print event";
   print->set_buf(buf_value);
 
-  EXPECT_CALL(*process_, GetOrCreateProcess(123));
+  EXPECT_CALL(
+      *process_,
+      StartNewProcess(std::optional<int64_t>{1000}, std::optional<UniquePid>{},
+                      123L, testing::_, ThreadNamePriority::kFtrace));
 
   Tokenize();
   context_.sorter->ExtractEventsForced();
@@ -758,9 +779,12 @@ TEST_F(ProtoTraceParserTest, LoadProcessPacket) {
   process->set_pid(1);
   process->set_ppid(3);
 
-  EXPECT_CALL(*process_,
-              SetProcessMetadata(1, Eq(3u), base::StringView(kProcName1),
-                                 base::StringView(kProcName1)));
+  EXPECT_CALL(*process_, GetOrCreateProcess(3)).WillOnce(testing::Return(2u));
+  EXPECT_CALL(*process_, GetOrCreateProcess(1)).WillOnce(testing::Return(4u));
+  EXPECT_CALL(*process_, UpdateProcessWithParent(4u, 2u, true))
+      .WillOnce(testing::Return(4u));
+  EXPECT_CALL(*process_, SetProcessMetadata(4u, base::StringView(kProcName1),
+                                            base::StringView(kProcName1)));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 }
@@ -776,9 +800,12 @@ TEST_F(ProtoTraceParserTest, LoadProcessPacket_FirstCmdline) {
   process->set_pid(1);
   process->set_ppid(3);
 
-  EXPECT_CALL(*process_,
-              SetProcessMetadata(1, Eq(3u), base::StringView(kProcName1),
-                                 base::StringView("proc1 proc2")));
+  EXPECT_CALL(*process_, GetOrCreateProcess(3)).WillOnce(testing::Return(2u));
+  EXPECT_CALL(*process_, GetOrCreateProcess(1)).WillOnce(testing::Return(4u));
+  EXPECT_CALL(*process_, UpdateProcessWithParent(4u, 2u, true))
+      .WillOnce(testing::Return(4u));
+  EXPECT_CALL(*process_, SetProcessMetadata(4u, base::StringView(kProcName1),
+                                            base::StringView("proc1 proc2")));
   Tokenize();
   context_.sorter->ExtractEventsForced();
 }
@@ -1397,7 +1424,7 @@ TEST_F(ProtoTraceParserTest, TrackEventWithTrackDescriptors) {
     thread_desc->set_tid(16);
     auto* chrome_thread = track_desc->set_chrome_thread();
     chrome_thread->set_thread_type(
-        protos::pbzero::ChromeThreadDescriptor::THREAD_SAMPLING_PROFILER);
+        protos::chrome_enums::pbzero::THREAD_SAMPLING_PROFILER);
   }
   {
     auto* packet = trace_->add_packet();

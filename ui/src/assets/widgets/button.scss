@@ -47,6 +47,12 @@
   white-space: nowrap;
   min-width: max-content;
 
+  &--shrink {
+    min-width: 0;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
   &--rounded {
     border-radius: 100px;
   }
@@ -85,6 +91,12 @@
 
     &.pf-compact {
       padding: 0;
+    }
+
+    &::before {
+      // Inserting a zero-width space to keep the button in flow. This allows it
+      // to stay aligned with the baseline of other text around it.
+      content: "\200B"; /* Zero-width space */
     }
   }
 

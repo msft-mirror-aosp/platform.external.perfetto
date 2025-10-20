@@ -49,7 +49,14 @@ import {TrackNode} from '../../public/workspace';
 import {VirtualOverlayCanvas} from '../../widgets/virtual_overlay_canvas';
 import {
   COLOR_ACCENT,
+  COLOR_BACKGROUND,
+  COLOR_BACKGROUND_SECONDARY,
+  COLOR_BORDER,
   COLOR_BORDER_SECONDARY,
+  COLOR_NEUTRAL,
+  COLOR_TEXT,
+  COLOR_TEXT_MUTED,
+  COLOR_TIMELINE_OVERLAY,
   TRACK_SHELL_WIDTH,
 } from '../css_constants';
 import {renderFlows} from './flow_events_renderer';
@@ -65,6 +72,7 @@ import {EmptyState} from '../../widgets/empty_state';
 import {Button, ButtonVariant} from '../../widgets/button';
 import {Intent} from '../../widgets/common';
 import {CursorTooltip} from '../../widgets/cursor_tooltip';
+import {CanvasColors} from '../../public/canvas_colors';
 
 const VIRTUAL_TRACK_SCROLLING = featureFlags.register({
   id: 'virtualTrackScrolling',
@@ -162,58 +170,61 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
       // Skip nodes that don't match the filter and have no matching children.
       if (!filterMatches(node)) return undefined;
 
+      if (node.headless) {
+        // Headless nodes are invisible, just render children.
+        return node.children.map((track) => {
+          return renderTrack(track, depth, stickyTop);
+        });
+      }
+
       const trackView = new TrackView(trace, node, top);
       renderedTracks.push(trackView);
 
-      let childDepth = depth;
-      let childStickyTop = stickyTop;
-      if (!node.headless) {
-        top += trackView.height;
-        ++childDepth;
-        childStickyTop += trackView.height;
-      }
+      // Advance the global top position.
+      top += trackView.height;
+
+      // Advance the sticky top position for our children, if we are sticky.
+      const childStickyTop = node.isSummary
+        ? stickyTop + trackView.height
+        : stickyTop;
 
       const children =
-        (node.headless || node.expanded || filtersApplied) &&
+        (node.expanded || filtersApplied) &&
         node.hasChildren &&
         node.children.map((track) =>
-          renderTrack(track, childDepth, childStickyTop),
+          renderTrack(track, depth + 1, childStickyTop),
         );
 
-      if (node.headless) {
-        return children;
-      } else {
-        const isTrackOnScreen = () => {
-          if (VIRTUAL_TRACK_SCROLLING.get()) {
-            return this.canvasRect?.overlaps({
-              left: 0,
-              right: 1,
-              ...trackView.verticalBounds,
-            });
-          } else {
-            return true;
-          }
-        };
+      const isTrackOnScreen = (() => {
+        if (VIRTUAL_TRACK_SCROLLING.get()) {
+          return this.canvasRect?.overlaps({
+            left: 0,
+            right: 1,
+            ...trackView.verticalBounds,
+          });
+        } else {
+          return true;
+        }
+      })();
 
-        return trackView.renderDOM(
-          {
-            lite: !Boolean(isTrackOnScreen()),
-            scrollToOnCreate: scrollToNewTracks,
-            reorderable: canReorderNodes,
-            removable: canRemoveNodes,
-            stickyTop,
-            depth,
-            collapsible: !filtersApplied,
-            onTrackMouseOver: () => {
-              this.hoveredTrackNode = node;
-            },
-            onTrackMouseOut: () => {
-              this.hoveredTrackNode = undefined;
-            },
+      return trackView.renderDOM(
+        {
+          lite: !Boolean(isTrackOnScreen),
+          scrollToOnCreate: scrollToNewTracks,
+          reorderable: canReorderNodes,
+          removable: canRemoveNodes,
+          stickyTop,
+          depth,
+          collapsible: !filtersApplied,
+          onTrackMouseOver: () => {
+            this.hoveredTrackNode = node;
           },
-          children,
-        );
-      }
+          onTrackMouseOut: () => {
+            this.hoveredTrackNode = undefined;
+          },
+        },
+        children,
+      );
     };
 
     const trackVnodes = rootNode.children.map((track) => renderTrack(track));
@@ -370,6 +381,18 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
 
     this.drawGridLines(ctx, timescale, timelineRect);
 
+    const colors: CanvasColors = {
+      COLOR_BORDER,
+      COLOR_BORDER_SECONDARY,
+      COLOR_BACKGROUND_SECONDARY,
+      COLOR_ACCENT,
+      COLOR_BACKGROUND,
+      COLOR_NEUTRAL,
+      COLOR_TEXT,
+      COLOR_TEXT_MUTED,
+      COLOR_TIMELINE_OVERLAY,
+    };
+
     const tracksOnCanvas = this.drawTracks(
       renderedTracks,
       floatingCanvasRect,
@@ -377,6 +400,7 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
       ctx,
       timelineRect,
       visibleWindow,
+      colors,
     );
 
     renderFlows(this.trace, ctx, size, renderedTracks, rootNode, timescale);
@@ -387,7 +411,7 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     this.updateInteractions(timelineRect, timescale, size, renderedTracks);
 
     this.trace.tracks.overlays.forEach((overlay) => {
-      overlay.render(ctx, timescale, size, renderedTracks);
+      overlay.render(ctx, timescale, size, renderedTracks, colors);
     });
 
     const renderTime = performance.now() - start;
@@ -428,6 +452,7 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
     ctx: CanvasRenderingContext2D,
     timelineRect: Rect2D,
     visibleWindow: HighPrecisionTimeSpan,
+    colors: CanvasColors,
   ) {
     let tracksOnCanvas = 0;
     for (const trackView of renderedTracks) {
@@ -445,6 +470,7 @@ export class TrackTreeView implements m.ClassComponent<TrackTreeViewAttrs> {
           visibleWindow,
           this.perfStatsEnabled,
           this.trackPerfStats,
+          colors,
         );
         ++tracksOnCanvas;
       }

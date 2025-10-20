@@ -322,13 +322,23 @@ base::Status ExportTraceToDatabase(const std::string& output_name) {
 }
 
 class ErrorPrinter : public google::protobuf::io::ErrorCollector {
+#if GOOGLE_PROTOBUF_VERSION >= 4022000
+  void RecordError(int line, int col, absl::string_view msg) override {
+    PERFETTO_ELOG("%d:%d: %.*s", line, col, static_cast<int>(msg.size()),
+                  msg.data());
+  }
+  void RecordWarning(int line, int col, absl::string_view msg) override {
+    PERFETTO_ILOG("%d:%d: %.*s", line, col, static_cast<int>(msg.size()),
+                  msg.data());
+  }
+#else
   void AddError(int line, int col, const std::string& msg) override {
     PERFETTO_ELOG("%d:%d: %s", line, col, msg.c_str());
   }
-
   void AddWarning(int line, int col, const std::string& msg) override {
     PERFETTO_ILOG("%d:%d: %s", line, col, msg.c_str());
   }
+#endif
 };
 
 // This function returns an identifier for a metric suitable for use
@@ -1269,7 +1279,7 @@ base::Status LoadTrace(const std::string& trace_file_path, double* size_mb) {
   }
 
   std::unique_ptr<profiling::Symbolizer> symbolizer =
-      profiling::LocalSymbolizerOrDie(profiling::GetPerfettoBinaryPath(),
+      profiling::MaybeLocalSymbolizer(profiling::GetPerfettoBinaryPath(), {},
                                       getenv("PERFETTO_SYMBOLIZER_MODE"));
   if (symbolizer) {
     if (is_proto_trace) {
@@ -1395,7 +1405,7 @@ base::Status ParseMetricExtensionPaths(
 base::Status IncludeSqlPackage(std::string root, bool allow_override) {
   // Remove trailing slash
   if (root.back() == '/')
-    root = root.substr(0, root.length() - 1);
+    root.resize(root.length() - 1);
 
   if (!base::FileExists(root))
     return base::ErrStatus("Directory %s does not exist.", root.c_str());
@@ -1447,7 +1457,7 @@ base::Status IncludeSqlPackage(std::string root, bool allow_override) {
 base::Status LoadOverridenStdlib(std::string root) {
   // Remove trailing slash
   if (root.back() == '/') {
-    root = root.substr(0, root.length() - 1);
+    root.resize(root.length() - 1);
   }
 
   if (!base::FileExists(root)) {
@@ -1804,7 +1814,7 @@ base::Status RegisterAllFilesInFolder(const std::string& path,
       return base::ErrStatus("Failed to mmap file: %s", file_full_path.c_str());
     }
     RETURN_IF_ERROR(tp.RegisterFileContent(
-        file_full_path, TraceBlobView(TraceBlob::FromMmap(std::move(mmap)))));
+        file_full_path, TraceBlob::FromMmap(std::move(mmap))));
   }
   return base::OkStatus();
 }

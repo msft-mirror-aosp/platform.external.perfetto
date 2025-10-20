@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <tuple>
 #include <utility>
 
 #include "perfetto/ext/base/flat_hash_map.h"
@@ -32,9 +31,11 @@
 
 namespace perfetto::trace_processor {
 
+class ClockSynchronizerListenerImpl;
 class ArgsTranslationTable;
 class ClockConverter;
-class ClockTracker;
+template <typename T>
+class ClockSynchronizer;
 class CpuTracker;
 class DescriptorPool;
 class EventTracker;
@@ -59,8 +60,10 @@ class TraceStorage;
 class TrackCompressor;
 class TrackTracker;
 struct ProtoImporterModuleContext;
+struct TrackCompressorGroupIdxState;
 
 using MachineId = tables::MachineTable::Id;
+using ClockTracker = ClockSynchronizer<ClockSynchronizerListenerImpl>;
 
 class TraceProcessorContext {
  public:
@@ -137,6 +140,7 @@ class TraceProcessorContext {
   GlobalPtr<DescriptorPool> descriptor_pool_;
   GlobalPtr<ForkedContextState> forked_context_state;
   GlobalPtr<ClockConverter> clock_converter;
+  GlobalPtr<TrackCompressorGroupIdxState> track_group_idx_state;
 
   // The registration function for additional proto modules.
   // This is populated by TraceProcessorImpl to allow for late registration of
@@ -181,6 +185,7 @@ class TraceProcessorContext {
   PerMachinePtr<MappingTracker> mapping_tracker;
   PerMachinePtr<MachineTracker> machine_tracker;
   PerMachinePtr<CpuTracker> cpu_tracker;
+  PerMachinePtr<StackProfileTracker> stack_profile_tracker;
 
   // Per-Machine, Per-Trace State
   // ==========================
@@ -197,7 +202,6 @@ class TraceProcessorContext {
   PerTraceAndMachinePtr<FlowTracker> flow_tracker;
   PerTraceAndMachinePtr<EventTracker> event_tracker;
   PerTraceAndMachinePtr<SchedEventTracker> sched_event_tracker;
-  PerTraceAndMachinePtr<StackProfileTracker> stack_profile_tracker;
 
   // These fields are stored as pointers to Destructible objects rather than
   // their actual type (a subclass of Destructible), as the concrete subclass
