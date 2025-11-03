@@ -23,6 +23,7 @@ $border-3: 2px solid var(--pf-color-border);
   flex-direction: column;
   overflow: hidden;
   height: 100%;
+  white-space: nowrap;
 
   &__main-content {
     display: flex;
@@ -67,6 +68,7 @@ $border-3: 2px solid var(--pf-color-border);
   align-items: baseline;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 
   &--padded {
     padding: 0.3em 0.5em;
@@ -104,13 +106,14 @@ $border-3: 2px solid var(--pf-color-border);
   &[active] {
     background: color_active(transparent);
   }
+
+  &--wrap {
+    white-space: normal;
+  }
 }
 
 .pf-grid {
-  display: flex;
-  flex-direction: column;
-
-  white-space: nowrap;
+  // white-space: nowrap;
   font-family: var(--pf-font-compact);
   font-size: 14px;
   overflow: auto;
@@ -131,7 +134,7 @@ $border-3: 2px solid var(--pf-color-border);
     flex-direction: column;
     background: var(--pf-color-background);
     border-bottom: $border-1;
-    min-width: 100%;
+    min-width: max-content;
     position: sticky;
     top: 0;
     z-index: 1; // Ensure header is above body rows when scrolling.
@@ -143,9 +146,7 @@ $border-3: 2px solid var(--pf-color-border);
   }
 
   &__body {
-    display: flex;
-    flex-direction: column;
-    min-width: 100%;
+    min-width: max-content;
 
     .pf-grid__row {
       &:hover {
@@ -160,6 +161,7 @@ $border-3: 2px solid var(--pf-color-border);
     align-items: stretch;
     justify-content: flex-start;
     flex-direction: row;
+    overflow: hidden;
   }
 
   &__cell-container {

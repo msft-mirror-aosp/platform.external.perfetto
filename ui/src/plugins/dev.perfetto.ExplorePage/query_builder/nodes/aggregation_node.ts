@@ -28,8 +28,11 @@ import {
   columnInfoFromName,
   newColumnInfoList,
 } from '../column_info';
-import {createFiltersProto, FilterOperation} from '../operations/filter';
-import {FilterDefinition} from '../../../../components/widgets/data_grid/common';
+import {
+  createFiltersProto,
+  FilterOperation,
+  UIFilter,
+} from '../operations/filter';
 import {MultiselectInput} from '../../../../widgets/multiselect_input';
 import {Select} from '../../../../widgets/select';
 import {TextInput} from '../../../../widgets/text_input';
@@ -46,8 +49,7 @@ export interface AggregationSerializedState {
     isValid?: boolean;
     isEditing?: boolean;
   }[];
-  filters?: FilterDefinition[];
-  customTitle?: string;
+  filters?: UIFilter[];
   comment?: string;
 }
 
@@ -132,6 +134,11 @@ export class AggregationNode implements ModificationNode {
     if (this.state.issues) {
       this.state.issues.queryError = undefined;
     }
+    if (this.prevNode === undefined) {
+      if (!this.state.issues) this.state.issues = new NodeIssues();
+      this.state.issues.queryError = new Error('No input node connected');
+      return false;
+    }
     if (!this.prevNode.validate()) {
       if (!this.state.issues) this.state.issues = new NodeIssues();
       this.state.issues.queryError = new Error('Previous node is invalid');
@@ -166,7 +173,7 @@ export class AggregationNode implements ModificationNode {
   }
 
   getTitle(): string {
-    return this.state.customTitle ?? 'Aggregation';
+    return 'Aggregation';
   }
 
   nodeDetails?(): m.Child | undefined {
@@ -206,8 +213,8 @@ export class AggregationNode implements ModificationNode {
       m(FilterOperation, {
         filters: this.state.filters,
         sourceCols: this.finalCols,
-        onFiltersChanged: (newFilters: ReadonlyArray<FilterDefinition>) => {
-          this.state.filters = newFilters as FilterDefinition[];
+        onFiltersChanged: (newFilters: ReadonlyArray<UIFilter>) => {
+          this.state.filters = [...newFilters];
           this.state.onchange?.();
         },
       }),
@@ -220,7 +227,6 @@ export class AggregationNode implements ModificationNode {
       groupByColumns: newColumnInfoList(this.state.groupByColumns),
       aggregations: this.state.aggregations.map((a) => ({...a})),
       filters: this.state.filters ? [...this.state.filters] : undefined,
-      customTitle: this.state.customTitle,
       onchange: this.state.onchange,
       issues: this.state.issues,
     };
@@ -300,7 +306,6 @@ export class AggregationNode implements ModificationNode {
         isEditing: a.isEditing,
       })),
       filters: this.state.filters,
-      customTitle: this.state.customTitle,
       comment: this.state.comment,
     };
   }
