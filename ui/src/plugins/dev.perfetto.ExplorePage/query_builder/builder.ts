@@ -54,6 +54,10 @@
 
 import m from 'mithril';
 import {classNames} from '../../../base/classnames';
+import {Button, ButtonVariant} from '../../../widgets/button';
+import {Icons} from '../../../base/semantic_icons';
+import {Intent} from '../../../widgets/common';
+import {Icon} from '../../../widgets/icon';
 
 import {SqlModules} from '../../dev.perfetto.SqlModules/sql_modules';
 import {QueryNode, Query, isAQuery, queryToRun} from '../query_node';
@@ -62,6 +66,10 @@ import {NodeExplorer} from './node_explorer';
 import {Graph} from './graph/graph';
 import {Trace} from 'src/public/trace';
 import {DataExplorer} from './data_explorer';
+import {
+  SplitPanel,
+  SplitPanelDrawerVisibility,
+} from '../../../widgets/split_panel';
 import {
   DataGridDataSource,
   DataGridModel,
@@ -74,6 +82,7 @@ import {QueryService} from './query_service';
 import {findErrors, findWarnings} from './query_builder_utils';
 import {NodeIssues} from './node_issues';
 import {UIFilter} from './operations/filter';
+import {MaterializationService} from './materialization_service';
 
 export interface BuilderAttrs {
   readonly trace: Trace;
@@ -110,20 +119,35 @@ export interface BuilderAttrs {
   readonly onExport: () => void;
 
   readonly onImportWithStatement: () => void;
+
+  // Node state change callback
+  readonly onNodeStateChange?: () => void;
+
+  // Undo / Redo
+  readonly onUndo?: () => void;
+  readonly onRedo?: () => void;
+  readonly canUndo?: boolean;
+  readonly canRedo?: boolean;
 }
 
 export class Builder implements m.ClassComponent<BuilderAttrs> {
   private queryService: QueryService;
+  private materializationService: MaterializationService;
   private query?: Query | Error;
   private queryExecuted: boolean = false;
-  private tablePosition: 'left' | 'right' | 'bottom' = 'bottom';
+  private isQueryRunning: boolean = false;
+  private isAnalyzing: boolean = false;
   private previousSelectedNode?: QueryNode;
-  private isNodeDataViewerFullScreen: boolean = false;
+  private isExplorerCollapsed: boolean = false;
   private response?: QueryResponse;
   private dataSource?: DataGridDataSource;
+  private drawerVisibility = SplitPanelDrawerVisibility.VISIBLE;
 
   constructor({attrs}: m.Vnode<BuilderAttrs>) {
     this.queryService = new QueryService(attrs.trace.engine);
+    this.materializationService = new MaterializationService(
+      attrs.trace.engine,
+    );
   }
 
   view({attrs}: m.CVnode<BuilderAttrs>) {
@@ -137,22 +161,19 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
     } = attrs;
 
     if (selectedNode && selectedNode !== this.previousSelectedNode) {
-      if (selectedNode instanceof SqlSourceNode) {
-        this.tablePosition = 'left';
-      } else {
-        this.tablePosition = 'bottom';
-      }
       this.response = undefined;
       this.dataSource = undefined;
+      this.query = undefined;
+      this.queryExecuted = false;
+      this.isQueryRunning = false;
+      this.isAnalyzing = false;
     }
     this.previousSelectedNode = selectedNode;
 
     const layoutClasses =
       classNames(
         'pf-query-builder-layout',
-        selectedNode ? 'selection' : 'no-selection',
-        selectedNode && `selection-${this.tablePosition}`,
-        this.isNodeDataViewerFullScreen && 'full-page',
+        this.isExplorerCollapsed && 'explorer-collapsed',
       ) || '';
 
     const explorer = selectedNode
@@ -172,12 +193,16 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
               this.runQuery(selectedNode);
             }
           },
-          onExecute: () => {
-            this.queryExecuted = false;
-            this.runQuery(selectedNode);
-            m.redraw();
+          onAnalysisStateChange: (isAnalyzing: boolean) => {
+            this.isAnalyzing = isAnalyzing;
           },
-          onchange: () => {},
+          onchange: () => {
+            attrs.onNodeStateChange?.();
+          },
+          isCollapsed: this.isExplorerCollapsed,
+          onToggleCollapse: () => {
+            this.isExplorerCollapsed = !this.isExplorerCollapsed;
+          },
         })
       : m(ExplorePageHelp, {
           sqlModules,
@@ -198,7 +223,48 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
         });
 
     return m(
-      `.${layoutClasses.split(' ').join('.')}`,
+      SplitPanel,
+      {
+        className: layoutClasses,
+        visibility: selectedNode
+          ? this.drawerVisibility
+          : SplitPanelDrawerVisibility.COLLAPSED,
+        onVisibilityChange: (v) => {
+          this.drawerVisibility = v;
+        },
+        startingHeight: 300,
+        drawerContent: selectedNode
+          ? m(DataExplorer, {
+              queryService: this.queryService,
+              query: this.query,
+              node: selectedNode,
+              response: this.response,
+              dataSource: this.dataSource,
+              isQueryRunning: this.isQueryRunning,
+              isAnalyzing: this.isAnalyzing,
+              onchange: () => {
+                attrs.onNodeStateChange?.();
+              },
+              isFullScreen:
+                this.drawerVisibility === SplitPanelDrawerVisibility.FULLSCREEN,
+              onFullScreenToggle: () => {
+                if (
+                  this.drawerVisibility ===
+                  SplitPanelDrawerVisibility.FULLSCREEN
+                ) {
+                  this.drawerVisibility = SplitPanelDrawerVisibility.VISIBLE;
+                } else {
+                  this.drawerVisibility = SplitPanelDrawerVisibility.FULLSCREEN;
+                }
+              },
+              onExecute: () => {
+                // Reset queryExecuted flag to allow re-execution after errors or config changes
+                this.queryExecuted = false;
+                this.runQuery(selectedNode);
+              },
+            })
+          : null,
+      },
       m(
         '.pf-qb-node-graph',
         m(Graph, {
@@ -221,28 +287,59 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
           onExport: attrs.onExport,
           onRemoveFilter: attrs.onRemoveFilter,
         }),
+        selectedNode &&
+          m(
+            '.pf-qb-floating-controls',
+            !selectedNode.validate() &&
+              m(
+                '.pf-qb-floating-warning',
+                m(Icon, {
+                  icon: Icons.Warning,
+                  filled: true,
+                  className: 'pf-qb-warning-icon',
+                  title: `Invalid node: ${selectedNode.state.issues?.getTitle() ?? ''}`,
+                }),
+              ),
+            this.isExplorerCollapsed &&
+              m(Button, {
+                icon: Icons.GoBack,
+                title: 'Expand panel',
+                onclick: () => {
+                  this.isExplorerCollapsed = false;
+                },
+                variant: ButtonVariant.Filled,
+                rounded: true,
+                iconFilled: true,
+                intent: Intent.Primary,
+              }),
+          ),
+        m(
+          '.pf-qb-floating-controls-bottom',
+          attrs.onUndo &&
+            m(Button, {
+              icon: Icons.Undo,
+              title: 'Undo (Ctrl+Z)',
+              onclick: attrs.onUndo,
+              disabled: !attrs.canUndo,
+              variant: ButtonVariant.Filled,
+              rounded: true,
+              iconFilled: true,
+              intent: Intent.Primary,
+            }),
+          attrs.onRedo &&
+            m(Button, {
+              icon: Icons.Redo,
+              title: 'Redo (Ctrl+Shift+Z)',
+              onclick: attrs.onRedo,
+              disabled: !attrs.canRedo,
+              variant: ButtonVariant.Filled,
+              rounded: true,
+              iconFilled: true,
+              intent: Intent.Primary,
+            }),
+        ),
       ),
       m('.pf-qb-explorer', explorer),
-      selectedNode &&
-        m(
-          '.pf-qb-viewer',
-          m(DataExplorer, {
-            queryService: this.queryService,
-            query: this.query,
-            node: selectedNode,
-            response: this.response,
-            dataSource: this.dataSource,
-            onchange: () => {},
-            onPositionChange: (pos: 'left' | 'right' | 'bottom') => {
-              this.tablePosition = pos;
-            },
-            isFullScreen: this.isNodeDataViewerFullScreen,
-            onFullScreenToggle: () => {
-              this.isNodeDataViewerFullScreen =
-                !this.isNodeDataViewerFullScreen;
-            },
-          }),
-        ),
     );
   }
 
@@ -269,7 +366,7 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
     return undefined;
   }
 
-  private runQuery(node: QueryNode) {
+  private async runQuery(node: QueryNode) {
     if (
       this.query === undefined ||
       this.query instanceof Error ||
@@ -278,7 +375,10 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
       return;
     }
 
-    this.queryService.runQuery(queryToRun(this.query)).then((response) => {
+    this.isQueryRunning = true;
+
+    try {
+      const response = await this.queryService.runQuery(queryToRun(this.query));
       this.response = response;
       const ds = new InMemoryDataSource(this.response.rows);
       this.dataSource = {
@@ -318,7 +418,27 @@ export class Builder implements m.ClassComponent<BuilderAttrs> {
       if (node instanceof SqlSourceNode) {
         node.onQueryExecuted(this.response.columns);
       }
+
+      // Automatically materialize the node after successful execution
+      if (isAQuery(this.query) && !error && !warning) {
+        try {
+          await this.materializationService.materializeNode(node, this.query);
+        } catch (e) {
+          console.error('Failed to materialize node:', e);
+          // Don't block the UI on materialization errors
+        }
+      }
+    } catch (e) {
+      console.error('Failed to run query:', e);
+      // Set error state on the node
+      if (!node.state.issues) {
+        node.state.issues = new NodeIssues();
+      }
+      node.state.issues.queryError =
+        e instanceof Error ? e : new Error(String(e));
+    } finally {
+      this.isQueryRunning = false;
       m.redraw();
-    });
+    }
   }
 }
