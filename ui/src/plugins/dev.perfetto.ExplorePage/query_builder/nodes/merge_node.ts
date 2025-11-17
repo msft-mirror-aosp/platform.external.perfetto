@@ -24,12 +24,15 @@ import protos from '../../../../protos';
 import {ColumnInfo} from '../column_info';
 import {Callout} from '../../../../widgets/callout';
 import {NodeIssues} from '../node_issues';
-import {UIFilter} from '../operations/filter';
 import {Card, CardStack} from '../../../../widgets/card';
 import {TextInput} from '../../../../widgets/text_input';
 import {TabStrip} from '../../../../widgets/tabs';
 import {Select} from '../../../../widgets/select';
 import {Editor} from '../../../../widgets/editor';
+import {
+  StructuredQueryBuilder,
+  JoinCondition,
+} from '../structured_query_builder';
 
 export interface MergeSerializedState {
   leftNodeId: string;
@@ -40,7 +43,6 @@ export interface MergeSerializedState {
   leftColumn?: string;
   rightColumn?: string;
   sqlExpression?: string;
-  filters?: UIFilter[];
   comment?: string;
 }
 
@@ -64,35 +66,59 @@ export class MergeNode implements MultiSourceNode {
   get finalCols(): ColumnInfo[] {
     if (this.prevNodes.length !== 2) return [];
 
-    // Combine columns from both sources, prefixed with their aliases
     const leftCols = this.prevNodes[0]?.finalCols ?? [];
     const rightCols = this.prevNodes[1]?.finalCols ?? [];
 
-    const leftAlias = this.state.leftQueryAlias || 'left';
-    const rightAlias = this.state.rightQueryAlias || 'right';
-
     const result: ColumnInfo[] = [];
+    const seenColumns = new Set<string>();
 
-    // Add left columns with prefix
-    for (const col of leftCols) {
-      result.push({
-        ...col,
-        column: {
-          ...col.column,
-          name: `${leftAlias}.${col.column.name}`,
-        },
-      });
+    // Handle equality condition: if joining on same column name (e.g., id = id),
+    // include it once. Otherwise, handle equality columns separately.
+    if (this.state.conditionType === 'equality') {
+      if (this.state.leftColumn && this.state.rightColumn) {
+        if (this.state.leftColumn === this.state.rightColumn) {
+          // Same column name on both sides (e.g., id = id)
+          // Include it once in the output
+          const equalityCol = leftCols.find(
+            (c) => c.name === this.state.leftColumn,
+          );
+          if (equalityCol) {
+            result.push({...equalityCol, checked: true});
+            seenColumns.add(this.state.leftColumn);
+          }
+        }
+        // If different column names (e.g., id = parent_id), don't add to seenColumns yet
+        // They'll be handled in the deduplication logic below
+      }
     }
 
-    // Add right columns with prefix (only for INNER join, or nullable for LEFT join)
+    // Identify which columns are duplicated across inputs
+    const columnCounts = new Map<string, number>();
+    for (const col of leftCols) {
+      if (!seenColumns.has(col.name)) {
+        columnCounts.set(col.name, (columnCounts.get(col.name) ?? 0) + 1);
+      }
+    }
     for (const col of rightCols) {
-      result.push({
-        ...col,
-        column: {
-          ...col.column,
-          name: `${rightAlias}.${col.column.name}`,
-        },
-      });
+      if (!seenColumns.has(col.name)) {
+        columnCounts.set(col.name, (columnCounts.get(col.name) ?? 0) + 1);
+      }
+    }
+
+    // Add only non-duplicated columns from left
+    for (const col of leftCols) {
+      if (!seenColumns.has(col.name) && columnCounts.get(col.name) === 1) {
+        result.push({...col, checked: true});
+        seenColumns.add(col.name);
+      }
+    }
+
+    // Add only non-duplicated columns from right
+    for (const col of rightCols) {
+      if (!seenColumns.has(col.name) && columnCounts.get(col.name) === 1) {
+        result.push({...col, checked: true});
+        seenColumns.add(col.name);
+      }
     }
 
     return result;
@@ -160,6 +186,14 @@ export class MergeNode implements MultiSourceNode {
       }
     }
 
+    // Check if there are any columns to expose after deduplication
+    if (this.finalCols.length === 0) {
+      this.setValidationError(
+        'No columns to expose. All columns are duplicated across both inputs. Use a Modify Columns node to alias columns in one of the sources.',
+      );
+      return false;
+    }
+
     return true;
   }
 
@@ -172,6 +206,27 @@ export class MergeNode implements MultiSourceNode {
 
   getTitle(): string {
     return 'Merge';
+  }
+
+  nodeInfo(): m.Children {
+    return m(
+      'div',
+      m(
+        'p',
+        'Combine two data sources by matching rows based on a condition. Connect sources to the two top ports.',
+      ),
+      m(
+        'p',
+        'Choose equality mode to join on matching column values, or custom SQL mode for complex conditions.',
+      ),
+      m(
+        'p',
+        m('strong', 'Example:'),
+        ' Join process info with thread info where ',
+        m('code', 'process.id = thread.upid'),
+        ' to see which threads belong to each process.',
+      ),
+    );
   }
 
   getInputLabels(): string[] {
@@ -345,7 +400,6 @@ export class MergeNode implements MultiSourceNode {
   clone(): QueryNode {
     const stateCopy: MergeNodeState = {
       prevNodes: [...this.state.prevNodes],
-      filters: this.state.filters ? [...this.state.filters] : undefined,
       onchange: this.state.onchange,
       leftQueryAlias: this.state.leftQueryAlias,
       rightQueryAlias: this.state.rightQueryAlias,
@@ -360,38 +414,37 @@ export class MergeNode implements MultiSourceNode {
   getStructuredQuery(): protos.PerfettoSqlStructuredQuery | undefined {
     if (!this.validate()) return;
 
-    const leftSq = this.prevNodes[0].getStructuredQuery();
-    const rightSq = this.prevNodes[1].getStructuredQuery();
+    const condition: JoinCondition =
+      this.state.conditionType === 'equality'
+        ? {
+            type: 'equality',
+            leftColumn: this.state.leftColumn,
+            rightColumn: this.state.rightColumn,
+          }
+        : {
+            type: 'freeform',
+            leftQueryAlias: this.state.leftQueryAlias,
+            rightQueryAlias: this.state.rightQueryAlias,
+            sqlExpression: this.state.sqlExpression,
+          };
 
-    if (leftSq === undefined || rightSq === undefined) return undefined;
+    const sq = StructuredQueryBuilder.withJoin(
+      this.prevNodes[0],
+      this.prevNodes[1],
+      'INNER',
+      condition,
+      this.nodeId,
+    );
 
-    const sq = new protos.PerfettoSqlStructuredQuery();
-    sq.id = this.nodeId;
+    if (!sq) return undefined;
 
-    const join = new protos.PerfettoSqlStructuredQuery.ExperimentalJoin();
-
-    join.type = protos.PerfettoSqlStructuredQuery.ExperimentalJoin.Type.INNER;
-    join.leftQuery = leftSq;
-    join.rightQuery = rightSq;
-
-    if (this.state.conditionType === 'equality') {
-      // Set equality columns condition
-      const equalityCols =
-        new protos.PerfettoSqlStructuredQuery.ExperimentalJoin.EqualityColumns();
-      equalityCols.leftColumn = this.state.leftColumn;
-      equalityCols.rightColumn = this.state.rightColumn;
-      join.equalityColumns = equalityCols;
-    } else {
-      // Set freeform condition
-      const condition =
-        new protos.PerfettoSqlStructuredQuery.ExperimentalJoin.FreeformCondition();
-      condition.leftQueryAlias = this.state.leftQueryAlias;
-      condition.rightQueryAlias = this.state.rightQueryAlias;
-      condition.sqlExpression = this.state.sqlExpression;
-      join.freeformCondition = condition;
-    }
-
-    sq.experimentalJoin = join;
+    // Add select_columns to explicitly specify which columns to return
+    // This ensures we only expose the clean, well-defined columns from finalCols
+    sq.selectColumns = this.finalCols.map((col) => {
+      const selectCol = new protos.PerfettoSqlStructuredQuery.SelectColumn();
+      selectCol.columnNameOrExpression = col.name;
+      return selectCol;
+    });
 
     return sq;
   }
@@ -406,23 +459,6 @@ export class MergeNode implements MultiSourceNode {
       leftColumn: this.state.leftColumn,
       rightColumn: this.state.rightColumn,
       sqlExpression: this.state.sqlExpression,
-      filters: this.state.filters?.map((f) => {
-        // Explicitly extract only serializable fields to avoid circular references
-        if ('value' in f) {
-          return {
-            column: f.column,
-            op: f.op,
-            value: f.value,
-            enabled: f.enabled,
-          };
-        } else {
-          return {
-            column: f.column,
-            op: f.op,
-            enabled: f.enabled,
-          };
-        }
-      }),
       comment: this.state.comment,
     };
   }
