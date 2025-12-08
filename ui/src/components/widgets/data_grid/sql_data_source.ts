@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import {AsyncLimiter} from '../../../base/async_limiter';
+import {assertUnreachable} from '../../../base/logging';
 import {Engine} from '../../../trace_processor/engine';
 import {NUM, Row, SqlValue} from '../../../trace_processor/query_result';
 import {runQueryForQueryTable} from '../../query_table/queries';
@@ -63,6 +64,7 @@ export class SQLDataSource implements DataGridDataSource {
     filters = [],
     pagination,
     aggregates,
+    distinctValuesColumns,
   }: DataGridModel): void {
     this.limiter.schedule(async () => {
       this.isLoadingFlag = true;
@@ -86,6 +88,7 @@ export class SQLDataSource implements DataGridDataSource {
             totalRows: rowCount,
             rows: [],
             aggregates: {},
+            distinctValues: new Map<string, ReadonlyArray<SqlValue>>(),
           };
         }
 
@@ -112,6 +115,30 @@ export class SQLDataSource implements DataGridDataSource {
             rowOffset: offset,
             rows,
           };
+        }
+
+        // Handle distinct values requests
+        if (distinctValuesColumns) {
+          for (const column of distinctValuesColumns) {
+            if (!this.cachedResult?.distinctValues?.has(column)) {
+              // Schedule query to fetch distinct values
+              const query = `
+                SELECT DISTINCT ${column} AS value
+                FROM (${this.baseQuery})
+                ORDER BY ${column} IS NULL, ${column}
+              `;
+              const result = await runQueryForQueryTable(query, this.engine);
+              const values = result.rows.map((r) => r['value']);
+              this.cachedResult = {
+                ...this.cachedResult!,
+                // Subsume the old distinct values map and add the new entry
+                distinctValues: new Map<string, ReadonlyArray<SqlValue>>([
+                  ...this.cachedResult!.distinctValues!,
+                  [column, values],
+                ]),
+              };
+            }
+          }
         }
       } finally {
         this.isLoadingFlag = false;
@@ -222,6 +249,8 @@ function filter2Sql(filter: DataGridFilter): string {
       return `${filter.column} ${filter.op} ${sqlValue(filter.value)}`;
     case 'glob':
       return `${filter.column} GLOB ${sqlValue(filter.value)}`;
+    case 'not glob':
+      return `${filter.column} NOT GLOB ${sqlValue(filter.value)}`;
     case 'is null':
       return `${filter.column} IS NULL`;
     case 'is not null':
@@ -231,7 +260,7 @@ function filter2Sql(filter: DataGridFilter): string {
     case 'not in':
       return `${filter.column} NOT IN (${filter.value.map(sqlValue).join(', ')})`;
     default:
-      return '1=1'; // Default to true if unknown operator
+      assertUnreachable(filter);
   }
 }
 
