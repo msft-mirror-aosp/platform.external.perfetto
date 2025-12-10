@@ -17,23 +17,8 @@ import {SqlValue} from '../../../trace_processor/query_result';
 
 export type AggregationFunction = 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX';
 
-export type FilterType = DataGridFilter['op'];
-
-export const DEFAULT_SUPPORTED_FILTERS: ReadonlyArray<FilterType> = [
-  '=',
-  '!=',
-  '<',
-  '<=',
-  '>',
-  '>=',
-  'glob',
-  'not glob',
-  'in',
-  'not in',
-  'is null',
-  'is not null',
-];
 export type CellRenderer = (value: SqlValue, row: RowDef) => m.Children;
+export type CellFormatter = (value: SqlValue, row: RowDef) => string;
 
 export interface ColumnDefinition {
   // Name/id of the column - this should match the key in the data.
@@ -44,6 +29,10 @@ export interface ColumnDefinition {
 
   // Custom renderer for this column's cells
   readonly cellRenderer?: CellRenderer;
+
+  // Optional value formatter for this column. This is used when exporting
+  // data to format the value as a string.
+  readonly cellFormatter?: CellFormatter;
 
   // An optional aggregation for data in this column displayed in the header
   // bar.
@@ -86,10 +75,6 @@ export interface ColumnDefinition {
   // - 'string': Shows text filters (contains, glob) and equals/null filters
   // - undefined: Shows all applicable filters based on other settings
   readonly filterType?: 'numeric' | 'string';
-
-  // Optional value formatter for this column. This is used when exporting
-  // data to format the value as a string.
-  readonly valueFormatter?: ValueFormatter;
 }
 
 export interface FilterValue {
@@ -163,15 +148,6 @@ export interface DataGridDataSource {
    */
   exportData(): Promise<readonly RowDef[]>;
 }
-
-/**
- * Function to format a value as a string for export/clipboard.
- */
-export type ValueFormatter = (
-  value: SqlValue,
-  columnName: string,
-  formatHint?: string,
-) => string;
 
 /**
  * Compares two arrays of AggregateSpec objects for equality.
