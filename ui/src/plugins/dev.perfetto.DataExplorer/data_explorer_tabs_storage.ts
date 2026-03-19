@@ -13,21 +13,44 @@
 // limitations under the License.
 
 import {z} from 'zod';
-import {DataExplorerTab, DataExplorerState} from './data_explorer';
+import {shortUuid} from '../../base/uuid';
+import {
+  DataExplorerTab,
+  DashboardTabState,
+  DataExplorerState,
+} from './data_explorer';
 import {serializeState} from './json_handler';
+import {
+  serializeDashboardItems,
+  parseBrushFilters,
+  validateDashboardItems,
+} from './dashboard/dashboard_registry';
 
 const DATA_EXPLORER_TABS_STORAGE_KEY = 'perfettoDataExplorerTabs';
 
+// Tab schema — unchanged from the original format.
 const PERSISTED_DATA_EXPLORER_TAB_SCHEMA = z.object({
   id: z.string(),
   title: z.string(),
   graphJson: z.string().optional(),
 });
 
+// Dashboard schema — new, flat list with a reference to the parent graph tab.
+const PERSISTED_DASHBOARD_SCHEMA = z.object({
+  id: z.string(),
+  graphTabId: z.string(),
+  items: z.array(z.unknown()).optional(),
+  brushFilters: z.record(z.string(), z.array(z.unknown())).optional(),
+});
+
 const PERSISTED_DATA_EXPLORER_TABS_STATE_SCHEMA = z.object({
   tabs: z.array(PERSISTED_DATA_EXPLORER_TAB_SCHEMA).min(1),
   activeTabId: z.string(),
+  // Optional — old data without dashboards still loads fine.
+  dashboards: z.array(PERSISTED_DASHBOARD_SCHEMA).optional(),
 });
+
+export type PersistedDashboardData = z.infer<typeof PERSISTED_DASHBOARD_SCHEMA>;
 
 export type PersistedDataExplorerTabData = z.infer<
   typeof PERSISTED_DATA_EXPLORER_TAB_SCHEMA
@@ -54,6 +77,7 @@ class DataExplorerTabsStorage {
             : undefined,
       })),
       activeTabId,
+      dashboards: serializeAllDashboards(tabs),
     };
     try {
       window.localStorage.setItem(
@@ -85,7 +109,10 @@ class DataExplorerTabsStorage {
 // Singleton instance
 export const dataExplorerTabsStorage = new DataExplorerTabsStorage();
 
-export function createNewTabName(tabs: DataExplorerTab[], prefix = 'Graph'): string {
+export function createNewTabName(
+  tabs: DataExplorerTab[],
+  prefix = 'Graph',
+): string {
   const existingNames = new Set(tabs.map((t) => t.title));
   let count = 1;
   while (existingNames.has(`${prefix} ${count}`)) {
@@ -101,4 +128,80 @@ export function createEmptyState(): DataExplorerState {
     nodeLayouts: new Map(),
     labels: [],
   };
+}
+
+/** Serialized dashboard without a graphTabId reference. */
+export interface SerializedDashboard {
+  id: string;
+  items?: unknown[];
+  brushFilters?: Record<string, unknown[]>;
+}
+
+/** Serialize all dashboards for a single tab. */
+export function serializeDashboardsForTab(
+  tab: DataExplorerTab,
+): SerializedDashboard[] | undefined {
+  const result: SerializedDashboard[] = [];
+  for (const db of tab.dashboards) {
+    const items = serializeDashboardItems(db.items);
+    let brushFilters: Record<string, unknown[]> | undefined;
+    if (db.brushFilters.size > 0) {
+      const raw: Record<string, unknown[]> = {};
+      for (const [sourceNodeId, filters] of db.brushFilters) {
+        raw[sourceNodeId] = filters;
+      }
+      brushFilters = JSON.parse(
+        JSON.stringify(raw, (_k, v) => (typeof v === 'bigint' ? Number(v) : v)),
+      );
+    }
+    result.push({
+      id: db.id,
+      items,
+      brushFilters,
+    });
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+/** Reconstruct live DashboardTabState[] from persisted dashboard data. */
+export function deserializeDashboardsForTab(
+  tabId: string,
+  allDashboards?: ReadonlyArray<PersistedDashboardData>,
+): DashboardTabState[] {
+  if (allDashboards !== undefined) {
+    const matching = allDashboards.filter((db) => db.graphTabId === tabId);
+    if (matching.length > 0) {
+      return matching.map((db) => ({
+        id: db.id,
+        items: validateDashboardItems(db.items) ?? [],
+        brushFilters:
+          db.brushFilters !== undefined
+            ? parseBrushFilters(db.brushFilters)
+            : new Map(),
+      }));
+    }
+  }
+  return [
+    {
+      id: shortUuid(),
+      items: [],
+      brushFilters: new Map(),
+    },
+  ];
+}
+
+/** Flatten all dashboards across all tabs into a single serializable list. */
+export function serializeAllDashboards(
+  tabs: DataExplorerTab[],
+): PersistedDashboardData[] | undefined {
+  const result: PersistedDashboardData[] = [];
+  for (const tab of tabs) {
+    const serialized = serializeDashboardsForTab(tab);
+    if (serialized !== undefined) {
+      for (const db of serialized) {
+        result.push({...db, graphTabId: tab.id});
+      }
+    }
+  }
+  return result.length > 0 ? result : undefined;
 }

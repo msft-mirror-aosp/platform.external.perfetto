@@ -62,6 +62,7 @@ import {
   findNodeById,
   addConnection,
   removeConnection,
+  wouldCreateCycle,
 } from '../graph_utils';
 import {RoundActionButton} from '../widgets';
 
@@ -232,10 +233,11 @@ function buildAddMenuItems(
     addCb,
     allowedChildren,
   );
+
   const exportItems = buildMenuItems('export', addCb, allowedChildren);
 
   const sections: {title: string; items: m.Children[]}[] = [
-    {title: 'Modification nodes', items: modificationItems},
+    {title: 'Modifications', items: modificationItems},
     {title: 'Operations', items: multisourceItems},
     {title: 'Export', items: exportItems},
   ].filter((s) => s.items.length > 0);
@@ -369,6 +371,8 @@ function getNodeHue(node: QueryNode): number {
       return 280; // Violet (#e1bee7)
     case NodeType.kVisualisation:
       return 30; // Orange (#ffe0b2)
+    case NodeType.kDashboard:
+      return 160; // Teal (#b2dfdb)
     default:
       return 65; // Lime (#f0f4c3)
   }
@@ -584,6 +588,13 @@ function handleConnect(conn: Connection, rootNodes: QueryNode[]): void {
     return;
   }
 
+  if (wouldCreateCycle(fromNode, toNode)) {
+    console.warn(
+      `Cannot create connection: would create a cycle (from: ${conn.fromNode}, to: ${conn.toNode})`,
+    );
+    return;
+  }
+
   const secondaryIndex = toSecondaryIndex(toNode, conn.toPort);
   addConnection(fromNode, toNode, secondaryIndex);
 
@@ -756,7 +767,7 @@ export class Graph implements m.ClassComponent<GraphAttrs> {
     const sections: {title: string; items: m.Children[]}[] = [
       {title: 'Sources', items: buildMenuItems('source', cb)},
       {title: 'Operations', items: buildMenuItems('multisource', cb)},
-      {title: 'Modification nodes', items: buildMenuItems('modification', cb)},
+      {title: 'Modifications', items: buildMenuItems('modification', cb)},
       {title: 'Export', items: buildMenuItems('export', cb)},
     ].filter((s) => s.items.length > 0);
 

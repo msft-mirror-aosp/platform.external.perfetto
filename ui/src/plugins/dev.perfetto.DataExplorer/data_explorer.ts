@@ -20,14 +20,20 @@ import {QueryNode} from './query_node';
 import {ensureAllNodeActions} from './node_actions';
 import {Trace} from '../../public/trace';
 import {getOrCreate} from '../../base/utils';
-import {Tabs, TabsTab} from '../../widgets/tabs';
+import {shortUuid} from '../../base/uuid';
 import {MenuItem} from '../../widgets/menu';
+import {Tabs, TabsTab} from '../../widgets/tabs';
+import {Button, ButtonBar} from '../../widgets/button';
+import {Icons} from '../../base/semantic_icons';
+import {showModal} from '../../widgets/modal';
 import {serializeState, deserializeState} from './json_handler';
 
 import {
   confirmAndFinalizeCurrentGraph,
   exportGraph,
+  exportTab,
   importGraph,
+  importTab,
   loadGraphFromJson,
   loadGraphFromPath,
   createDataExplorerGraph,
@@ -52,6 +58,13 @@ import {
   deleteSelectedNodes,
   removeNodeConnection,
 } from './node_crud_operations';
+import {Dashboard} from './dashboard/dashboard';
+import {isDashboardNode} from './query_builder/nodes/dashboard_node';
+import {
+  dashboardRegistry,
+  DashboardBrushFilter,
+  DashboardItem,
+} from './dashboard/dashboard_registry';
 import type {NodeCrudDeps} from './node_crud_operations';
 import {addFilter, addColumnFromJoinid} from './datagrid_node_creation';
 import {showHelp} from './help_modal';
@@ -62,10 +75,21 @@ import type {SqlModules} from '../dev.perfetto.SqlModules/sql_modules';
 
 registerCoreNodes();
 
+/** State for a single dashboard within a graph tab. */
+export interface DashboardTabState {
+  readonly id: string;
+  items: DashboardItem[];
+  brushFilters: Map<string, DashboardBrushFilter[]>;
+}
+
 export interface DataExplorerTab {
   readonly id: string;
   title: string;
   state: DataExplorerState;
+  // Each graph tab has one or more dashboards.
+  dashboards: DashboardTabState[];
+  // Which sub-tab is active: 'graph' (default) or a dashboard ID.
+  activeSubTab?: string;
 }
 
 export interface DataExplorerState {
@@ -85,7 +109,9 @@ export interface DataExplorerState {
 }
 
 type StateUpdateFn = (
-  update: DataExplorerState | ((current: DataExplorerState) => DataExplorerState),
+  update:
+    | DataExplorerState
+    | ((current: DataExplorerState) => DataExplorerState),
 ) => void;
 
 interface DataExplorerAttrs {
@@ -111,12 +137,17 @@ interface DataExplorerAttrs {
     beforeId: string | undefined,
   ) => void;
   // Creates a new tab with the given title and state, inserted after the
-  // tab identified by afterTabId.
+  // tab identified by afterTabId. Optionally accepts pre-built dashboards;
+  // when omitted a single empty dashboard is created.
   readonly onTabAddWithState: (
     title: string,
     state: DataExplorerState,
     afterTabId: string,
+    dashboards?: DashboardTabState[],
   ) => void;
+  // Notify the plugin that dashboard-local state changed (items/filters)
+  // so it can trigger debounced saves.
+  readonly onDashboardStateChange: () => void;
 }
 
 // Per-tab service instances that live for the lifetime of the tab.
@@ -319,11 +350,22 @@ export class DataExplorer implements m.ClassComponent<DataExplorerAttrs> {
     // Handle other shortcuts
     switch (event.key) {
       case 'i':
-        importGraph(graphIODeps, state);
+        importTab(graphIODeps, (title, newState, dashboards) =>
+          attrs.onTabAddWithState(
+            title,
+            newState,
+            attrs.activeTabId,
+            dashboards,
+          ),
+        );
         break;
-      case 'e':
-        exportGraph(state, attrs.trace);
+      case 'e': {
+        const activeTab = attrs.tabs.find((t) => t.id === attrs.activeTabId);
+        if (activeTab !== undefined) {
+          void exportTab(activeTab, attrs.trace);
+        }
         break;
+      }
     }
   }
 
@@ -444,23 +486,51 @@ export class DataExplorer implements m.ClassComponent<DataExplorerAttrs> {
         ),
     };
 
+    const allNodes = getAllNodes(state.rootNodes);
+
+    // Set callbacks on dashboard nodes so they can resolve table names and
+    // trigger execution even when the graph tab is not active.
+    for (const node of allNodes) {
+      if (!isDashboardNode(node)) continue;
+      // Propagate the stable tab ID so sources are namespaced by graph.
+      // Re-publish if the graphId changed so the registry has the right key.
+      const prevGraphId = node.state.graphId;
+      node.state.graphId = tab.id;
+      if (prevGraphId !== tab.id) {
+        node.onPrevNodesUpdated?.();
+      }
+      if (node.state.getTableNameForNode === undefined) {
+        node.state.getTableNameForNode = (nodeId: string) =>
+          services.queryExecutionService.getTableName(nodeId);
+      }
+      if (node.state.requestNodeExecution === undefined) {
+        node.state.requestNodeExecution = (nodeId: string) => {
+          const targetNode = allNodes.find((n) => n.nodeId === nodeId);
+          if (targetNode === undefined) return Promise.resolve();
+          return services.queryExecutionService
+            .processNode(targetNode, trace.engine, allNodes, {manual: true})
+            .then(() => {});
+        };
+      }
+    }
+
     // Only do full node processing for the active tab to avoid unnecessary work
     if (isActive) {
-      // Ensure all nodes have actions initialized
-      const allNodes = getAllNodes(state.rootNodes);
-      ensureAllNodeActions(
-        allNodes,
-        services.initializedNodes,
-        nodeCrudDeps.nodeActionHandlers,
-      );
-
-      // Provide getTableNameForNode callback
+      // Provide getTableNameForNode callback for all nodes (used by
+      // add_columns_node and others).
       for (const node of allNodes) {
         if (node.state.getTableNameForNode === undefined) {
           node.state.getTableNameForNode = (nodeId: string) =>
             services.queryExecutionService.getTableName(nodeId);
         }
       }
+
+      // Ensure all nodes have actions initialized
+      ensureAllNodeActions(
+        allNodes,
+        services.initializedNodes,
+        nodeCrudDeps.nodeActionHandlers,
+      );
 
       // Store deps for keyboard handler access
       this.activeNodeCrudDeps = nodeCrudDeps;
@@ -554,7 +624,10 @@ export class DataExplorer implements m.ClassComponent<DataExplorerAttrs> {
               isSecondaryInput,
             );
           },
-          onImport: () => importGraph(graphIODeps, state),
+          onImport: () =>
+            importGraph(graphIODeps, (title, newState) =>
+              attrs.onTabAddWithState(title, newState, tab.id),
+            ),
           onExport: () => exportGraph(state, trace),
         },
         onLoadEmptyTemplate: async () => {
@@ -604,6 +677,177 @@ export class DataExplorer implements m.ClassComponent<DataExplorerAttrs> {
   private activeNodeCrudDeps?: NodeCrudDeps;
   private activeGraphIODeps?: GraphIODeps;
 
+  /** Get exported sources for a specific graph tab. */
+  private getDashboardSources(graphTabId: string) {
+    return dashboardRegistry.getExportedSourcesForGraph(graphTabId);
+  }
+
+  /** Trigger debounced saves after dashboard state changes. */
+  private triggerSave(attrs: DataExplorerAttrs) {
+    attrs.onDashboardStateChange();
+    m.redraw();
+  }
+
+  private addDashboard(tab: DataExplorerTab, attrs: DataExplorerAttrs): void {
+    const db: DashboardTabState = {
+      id: shortUuid(),
+      items: [],
+      brushFilters: new Map(),
+    };
+    tab.dashboards.push(db);
+    tab.activeSubTab = db.id;
+    this.triggerSave(attrs);
+  }
+
+  private removeDashboard(
+    tab: DataExplorerTab,
+    attrs: DataExplorerAttrs,
+    dbId: string,
+  ): void {
+    if (tab.dashboards.length <= 1) return;
+    const idx = tab.dashboards.findIndex((d) => d.id === dbId);
+    if (idx === -1) return;
+    const itemCount = tab.dashboards[idx].items.length;
+
+    const doRemove = () => {
+      const currentIdx = tab.dashboards.findIndex((d) => d.id === dbId);
+      if (currentIdx === -1) return;
+      tab.dashboards.splice(currentIdx, 1);
+      // If the removed dashboard was active, switch to the previous one or graph.
+      if (tab.activeSubTab === dbId) {
+        if (tab.dashboards.length > 0) {
+          const newIdx = Math.min(currentIdx, tab.dashboards.length - 1);
+          tab.activeSubTab = tab.dashboards[newIdx].id;
+        } else {
+          tab.activeSubTab = 'graph';
+        }
+      }
+      this.triggerSave(attrs);
+    };
+
+    if (itemCount === 0) {
+      doRemove();
+      return;
+    }
+
+    showModal({
+      title: 'Remove dashboard?',
+      content: m(
+        'div',
+        `This dashboard contains ${itemCount} item(s). ` +
+          'Removing it will discard all its contents.',
+      ),
+      buttons: [
+        {text: 'Remove', primary: true, action: doRemove},
+        {text: 'Cancel'},
+      ],
+    });
+  }
+
+  /**
+   * Render a graph tab with nested sub-tabs (Graph | Dashboard 1 | ... | +).
+   * The graph builder is always initialized (for dashboard node execution),
+   * but we conditionally show either the builder or the dashboard view.
+   */
+  private renderDashboardButton(
+    tab: DataExplorerTab,
+    attrs: DataExplorerAttrs,
+    db: DashboardTabState,
+    index: number,
+    activeSubTab: string,
+  ): m.Children {
+    const label =
+      tab.dashboards.length === 1 ? 'Dashboard' : `Dashboard ${index + 1}`;
+    const showClose = tab.dashboards.length > 1;
+    return [
+      m(Button, {
+        label,
+        icon: 'dashboard',
+        active: activeSubTab === db.id,
+        rightIcon: showClose ? Icons.Close : undefined,
+        onclick: (e: MouseEvent) => {
+          // If the click landed on the close (right) icon, remove instead.
+          const target = e.target as HTMLElement;
+          if (showClose && target.closest('.pf-right-icon') !== null) {
+            this.removeDashboard(tab, attrs, db.id);
+            return;
+          }
+          tab.activeSubTab = db.id;
+          m.redraw();
+        },
+      }),
+    ];
+  }
+
+  private renderTabWithSubTabs(
+    attrs: DataExplorerAttrs,
+    tab: DataExplorerTab,
+    sqlModules: SqlModules,
+  ): m.Children {
+    const activeSubTab = tab.activeSubTab ?? 'graph';
+    const graphContent = this.renderTabContent(attrs, tab, sqlModules);
+
+    const subTabBar = m(
+      '.pf-data-explorer__sub-tab-bar',
+      m(
+        ButtonBar,
+        m(Button, {
+          label: 'Graph',
+          icon: 'account_tree',
+          active: activeSubTab === 'graph',
+          onclick: () => {
+            tab.activeSubTab = 'graph';
+            m.redraw();
+          },
+        }),
+        ...tab.dashboards.map((db, i) =>
+          this.renderDashboardButton(tab, attrs, db, i, activeSubTab),
+        ),
+        m(Button, {
+          icon: 'add',
+          title: 'Add dashboard',
+          onclick: () => this.addDashboard(tab, attrs),
+        }),
+        m(Button, {
+          icon: 'download',
+          title: 'Export current tab',
+          onclick: () => {
+            void exportTab(tab, attrs.trace);
+          },
+        }),
+      ),
+    );
+
+    // Find active dashboard if any.
+    const activeDashboard = tab.dashboards.find((db) => db.id === activeSubTab);
+
+    if (activeDashboard !== undefined) {
+      return m('.pf-data-explorer__tab-with-subtabs', [
+        subTabBar,
+        m(
+          '.pf-data-explorer__tab-content',
+          m(Dashboard, {
+            dashboardId: activeDashboard.id,
+            trace: attrs.trace,
+            items: activeDashboard.items,
+            sources: this.getDashboardSources(tab.id),
+            brushFilters: activeDashboard.brushFilters,
+            onItemsChange: (items) => {
+              activeDashboard.items = items;
+              this.triggerSave(attrs);
+            },
+            onBrushFiltersChange: (filters) => {
+              activeDashboard.brushFilters = filters;
+              this.triggerSave(attrs);
+            },
+          }),
+        ),
+      ]);
+    }
+
+    return m('.pf-data-explorer__tab-with-subtabs', [subTabBar, graphContent]);
+  }
+
   view({attrs}: m.CVnode<DataExplorerAttrs>) {
     const {tabs, activeTabId} = attrs;
 
@@ -625,7 +869,7 @@ export class DataExplorer implements m.ClassComponent<DataExplorerAttrs> {
       title: tab.title,
       leftIcon: 'account_tree',
       closeButton: tabs.length > 1,
-      content: this.renderTabContent(attrs, tab, sqlModules),
+      content: this.renderTabWithSubTabs(attrs, tab, sqlModules),
       menuItems: m(MenuItem, {
         label: 'Duplicate tab',
         icon: 'content_copy',
@@ -674,7 +918,32 @@ export class DataExplorer implements m.ClassComponent<DataExplorerAttrs> {
         tabs: tabEntries,
         activeTabKey: activeTabId,
         reorderable: true,
-        onNewTab: () => attrs.onTabAdd(),
+        newTabContent: m('.pf-data-explorer__tab-actions', [
+          m(Button, {
+            icon: 'add',
+            className: 'pf-tabs__new-tab-btn',
+            onclick: () => attrs.onTabAdd(),
+          }),
+          m(Button, {
+            icon: 'upload',
+            className: 'pf-tabs__new-tab-btn',
+            title: 'Import tab',
+            onclick: () => {
+              if (this.activeGraphIODeps) {
+                importTab(
+                  this.activeGraphIODeps,
+                  (title, newState, dashboards) =>
+                    attrs.onTabAddWithState(
+                      title,
+                      newState,
+                      attrs.activeTabId,
+                      dashboards,
+                    ),
+                );
+              }
+            },
+          }),
+        ]),
         onTabChange: (key) => attrs.onTabChange(key),
         onTabRename: (key, newTitle) => {
           attrs.onTabRename(key, newTitle);

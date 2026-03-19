@@ -17,7 +17,12 @@ import {assetSrc} from '../../base/assets';
 import {showModal} from '../../widgets/modal';
 import {Trace} from '../../public/trace';
 import {QueryNode} from './query_node';
-import {exportStateAsJson, deserializeState} from './json_handler';
+import {
+  serializeState,
+  exportStateAsJson,
+  deserializeState,
+  downloadJsonFile,
+} from './json_handler';
 import {nodeRegistry} from './query_builder/node_registry';
 import {SlicesSourceNode} from './query_builder/nodes/sources/slices_source';
 import {
@@ -25,7 +30,16 @@ import {
   showExportWarning,
 } from './query_builder/widgets';
 import {recentGraphsStorage} from './recent_graphs';
-import {DataExplorerState} from './data_explorer';
+import {DataExplorerState, DashboardTabState} from './data_explorer';
+import type {DataExplorerTab} from './data_explorer';
+import {
+  serializeDashboardsForTab,
+  SerializedDashboard,
+} from './data_explorer_tabs_storage';
+import {
+  validateDashboardItems,
+  parseBrushFilters,
+} from './dashboard/dashboard_registry';
 import type {SqlModules} from '../dev.perfetto.SqlModules/sql_modules';
 
 // Dependencies needed by graph I/O operations.
@@ -81,7 +95,7 @@ export async function loadGraphFromJson(
 
 export async function importGraph(
   deps: GraphIODeps,
-  state: DataExplorerState,
+  onCreateTab: (title: string, state: DataExplorerState) => void,
 ): Promise<void> {
   const input = document.createElement('input');
   input.type = 'file';
@@ -90,9 +104,6 @@ export async function importGraph(
     const files = (event.target as HTMLInputElement).files;
     if (files && files.length > 0) {
       const file = files[0];
-
-      if (!(await confirmAndFinalizeCurrentGraph(state))) return;
-
       const reader = new FileReader();
       reader.onload = async (e) => {
         const json = e.target?.result as string;
@@ -100,7 +111,9 @@ export async function importGraph(
           console.error('The selected file is empty or could not be read.');
           return;
         }
-        await loadGraphFromJson(deps, state.rootNodes, json);
+        const newState = deserializeState(json, deps.trace, deps.sqlModules);
+        const name = file.name.replace(/\.json$/i, '');
+        onCreateTab(name, newState);
       };
       reader.readAsText(file);
     }
@@ -141,22 +154,23 @@ export async function loadGraphFromPath(
   }
 }
 
-export async function createDataExplorerGraph(deps: GraphIODeps): Promise<void> {
+export async function createDataExplorerGraph(
+  deps: GraphIODeps,
+): Promise<void> {
   const {sqlModules, trace} = deps;
-  const newNodes: QueryNode[] = [];
+  const coreNodes: QueryNode[] = [];
+  const rightNodes: QueryNode[] = [];
 
-  // Create slices source node
-  const slicesNode = new SlicesSourceNode({sqlModules, trace});
-  newNodes.push(slicesNode);
-
-  // Get high-frequency tables with data
   const tableDescriptor = nodeRegistry.get('table');
-  if (tableDescriptor) {
-    const highFreqTables = sqlModules
-      .listTables()
-      .filter((table) => table.importance === 'high');
 
-    for (const sqlTable of highFreqTables) {
+  // Helper to create table nodes for a given importance level.
+  function createTableNodes(importance: string, target: QueryNode[]): void {
+    if (!tableDescriptor) return;
+    const tables = sqlModules
+      .listTables()
+      .filter((table) => table.importance === importance);
+
+    for (const sqlTable of tables) {
       try {
         const module = sqlModules.getModuleForTable(sqlTable.name);
         if (module && sqlModules.isModuleDisabled(module.includeKey)) {
@@ -165,9 +179,9 @@ export async function createDataExplorerGraph(deps: GraphIODeps): Promise<void> 
 
         const tableNode = tableDescriptor.factory(
           {sqlTable, sqlModules, trace},
-          {allNodes: newNodes},
+          {allNodes: [...coreNodes, ...rightNodes]},
         );
-        newNodes.push(tableNode);
+        target.push(tableNode);
       } catch (error) {
         console.error(
           `Failed to create table node for ${sqlTable.name}:`,
@@ -177,34 +191,223 @@ export async function createDataExplorerGraph(deps: GraphIODeps): Promise<void> 
     }
   }
 
-  if (newNodes.length > 0) {
-    const totalNodes = newNodes.length;
-    const cols = Math.ceil(Math.sqrt(totalNodes));
+  // Create core table nodes (left column)
+  createTableNodes('core', coreNodes);
 
+  // Create slices source node (right side)
+  const slicesNode = new SlicesSourceNode({sqlModules, trace});
+  rightNodes.push(slicesNode);
+
+  // Create high-importance table nodes (right side)
+  createTableNodes('high', rightNodes);
+
+  const allNodes = [...coreNodes, ...rightNodes];
+
+  if (allNodes.length > 0) {
     const newNodeLayouts = new Map<string, {x: number; y: number}>();
     const NODE_WIDTH = 300;
-    const NODE_HEIGHT = 200;
-    const GRID_PADDING_X = 10;
-    const GRID_PADDING_Y = 10;
+    const CORE_COL_WIDTH = 200;
     const START_X = 50;
     const START_Y = 50;
 
-    newNodes.forEach((node, index) => {
-      const col = index % cols;
-      const row = Math.floor(index / cols);
+    // Left column: "Core tables" label + core nodes tightly stacked.
+    // LABEL_HEIGHT accounts for the label above the first core node.
+    const CORE_GAP_Y = 55;
+    const LABEL_HEIGHT = CORE_GAP_Y;
+    const LABEL_WIDTH = 100;
+    const coreStartY = START_Y + LABEL_HEIGHT;
+    coreNodes.forEach((node, index) => {
       newNodeLayouts.set(node.nodeId, {
-        x: START_X + col * (NODE_WIDTH + GRID_PADDING_X),
-        y: START_Y + row * (NODE_HEIGHT + GRID_PADDING_Y),
+        x: START_X,
+        y: coreStartY + index * CORE_GAP_Y,
       });
     });
 
+    // Right side: slices + high-importance tables in a tight grid,
+    // vertically centered relative to the core column.
+    const GROUP_GAP = 50;
+    const RIGHT_GAP_X = 10;
+    const RIGHT_GAP_Y = 80;
+    const rightStartX = START_X + CORE_COL_WIDTH + GROUP_GAP;
+    const rightCols = Math.max(1, Math.ceil(Math.sqrt(rightNodes.length)));
+    const rightRows = Math.ceil(rightNodes.length / rightCols);
+
+    const coreColumnHeight = LABEL_HEIGHT + (coreNodes.length - 1) * CORE_GAP_Y;
+    const rightGroupHeight = (rightRows - 1) * RIGHT_GAP_Y;
+    const rightStartY =
+      START_Y + Math.max(0, (coreColumnHeight - rightGroupHeight) / 2);
+
+    rightNodes.forEach((node, index) => {
+      const col = index % rightCols;
+      const row = Math.floor(index / rightCols);
+      newNodeLayouts.set(node.nodeId, {
+        x: rightStartX + col * (NODE_WIDTH + RIGHT_GAP_X),
+        y: rightStartY + row * RIGHT_GAP_Y,
+      });
+    });
+
+    // Add labels above each group when the group has nodes.
+    const labels: Array<{
+      id: string;
+      x: number;
+      y: number;
+      width: number;
+      text: string;
+    }> = [];
+    if (coreNodes.length > 0) {
+      labels.push({
+        id: 'core-tables-label',
+        x: START_X + 30,
+        y: START_Y,
+        width: LABEL_WIDTH,
+        text: 'Core tables',
+      });
+    }
+    if (rightNodes.length > 0) {
+      labels.push({
+        id: 'right-tables-label',
+        x: rightStartX,
+        y: rightStartY - LABEL_HEIGHT,
+        width: 200,
+        text: 'Tables important for this trace',
+      });
+    }
+
     deps.onStateUpdate((currentState) => ({
       ...currentState,
-      rootNodes: newNodes,
+      rootNodes: allNodes,
       nodeLayouts: newNodeLayouts,
-      selectedNodes: new Set([newNodes[0].nodeId]),
-      labels: [],
+      selectedNodes: new Set([allNodes[0].nodeId]),
+      labels,
       loadGeneration: (currentState.loadGeneration ?? 0) + 1,
     }));
   }
+}
+
+// --- Whole-tab export/import ---
+
+export interface SerializedTabExport {
+  version: number;
+  title: string;
+  graph: string;
+  dashboards?: SerializedDashboard[];
+}
+
+export function isSerializedTabExport(
+  obj: unknown,
+): obj is SerializedTabExport {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const rec = obj as Record<string, unknown>;
+  return (
+    typeof rec.version === 'number' &&
+    typeof rec.title === 'string' &&
+    typeof rec.graph === 'string'
+  );
+}
+
+export function deserializeDashboardsFromExport(
+  serialized?: unknown,
+): DashboardTabState[] | undefined {
+  if (!Array.isArray(serialized) || serialized.length === 0) return undefined;
+  const result: DashboardTabState[] = [];
+  for (const raw of serialized) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const db = raw as Record<string, unknown>;
+    if (typeof db.id !== 'string') continue;
+    result.push({
+      id: db.id,
+      items: validateDashboardItems(db.items as unknown[] | undefined) ?? [],
+      brushFilters:
+        db.brushFilters !== undefined &&
+        typeof db.brushFilters === 'object' &&
+        !Array.isArray(db.brushFilters)
+          ? parseBrushFilters(db.brushFilters as Record<string, unknown[]>)
+          : new Map(),
+    });
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+export async function exportTab(
+  tab: DataExplorerTab,
+  trace: Trace,
+): Promise<void> {
+  const confirmed = await showExportWarning();
+  if (!confirmed) return;
+
+  const graphJson = serializeState(tab.state);
+  const dashboards = serializeDashboardsForTab(tab);
+
+  const exported: SerializedTabExport = {
+    version: 1,
+    title: tab.title,
+    graph: graphJson,
+    dashboards,
+  };
+
+  const json = JSON.stringify(exported, null, 2);
+  const traceName = trace.traceInfo.traceTitle.replace(
+    /[^a-zA-Z0-9._-]+/g,
+    '_',
+  );
+  const tabName = tab.title.replace(/[^a-zA-Z0-9._-]+/g, '_');
+  const date = new Date().toISOString().slice(0, 10);
+  downloadJsonFile(json, `${traceName}-tab-${tabName}-${date}.json`);
+}
+
+export function importTab(
+  deps: GraphIODeps,
+  onCreateTab: (
+    title: string,
+    state: DataExplorerState,
+    dashboards?: DashboardTabState[],
+  ) => void,
+): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = (event) => {
+    const files = (event.target as HTMLInputElement).files;
+    if (files === null || files.length === 0) return;
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result;
+      if (typeof text !== 'string' || text.length === 0) {
+        console.error('The selected file is empty or could not be read.');
+        return;
+      }
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (isSerializedTabExport(parsed)) {
+          const newState = deserializeState(
+            parsed.graph,
+            deps.trace,
+            deps.sqlModules,
+          );
+          const dashboards = deserializeDashboardsFromExport(parsed.dashboards);
+          const name = parsed.title ?? file.name.replace(/\.json$/i, '');
+          onCreateTab(name, newState, dashboards);
+        } else {
+          // Plain graph import (backward compat)
+          const newState = deserializeState(text, deps.trace, deps.sqlModules);
+          const name = file.name.replace(/\.json$/i, '');
+          onCreateTab(name, newState);
+        }
+      } catch (error) {
+        console.error('Failed to import tab:', error);
+        showModal({
+          title: 'Import Failed',
+          content: () =>
+            m(
+              'div',
+              `Failed to import: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          buttons: [],
+        });
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
