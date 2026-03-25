@@ -5868,7 +5868,11 @@ message AndroidAflags {
   message Flag {
     optional string flag_namespace = 1;
     optional string name = 2;
+    // The aconfig package (e.g. "com.android.foo"). These are system-level
+    // identifiers and not privacy-impacting.
     optional string pkg = 3;
+    // The container where the flag lives (e.g. "system", "vendor", or mainline
+    // module name).
     optional string container = 4;
     // The flag value as a string to support different future data types.
     optional string value = 5;
@@ -9532,6 +9536,19 @@ message DpuDispVblankIrqEnableFtraceEvent {
   optional int32 id = 1;
   optional int32 output_id = 2;
   optional int32 enable = 3;
+}
+message DpuDispFrameDoneTimeoutFtraceEvent {
+  optional int32 display_id = 1;
+  optional uint32 output_id = 2;
+  optional int32 frames_pending = 3;
+  optional int32 te_count = 4;
+  optional uint32 during_disable = 5;
+}
+message DpuDispFrameStartTimeoutFtraceEvent {
+  optional int32 display_id = 1;
+  optional uint32 output_id = 2;
+  optional int32 frames_pending = 3;
+  optional int32 te_count = 4;
 }
 
 // End of protos/perfetto/trace/ftrace/dpu.proto
@@ -13743,6 +13760,8 @@ message FtraceEvent {
     GramCollisionFtraceEvent gram_collision = 602;
     F2fsLockElapsedTimeFtraceEvent f2fs_lock_elapsed_time = 603;
     SchedGroupTrackerFtraceEvent sched_group_tracker = 604;
+    DpuDispFrameDoneTimeoutFtraceEvent dpu_disp_frame_done_timeout = 605;
+    DpuDispFrameStartTimeoutFtraceEvent dpu_disp_frame_start_timeout = 606;
   }
 }
 

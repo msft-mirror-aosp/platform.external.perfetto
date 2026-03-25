@@ -2416,6 +2416,8 @@ perfetto_filegroup(
         "src/trace_processor/importers/ftrace/iostat_tracker.h",
         "src/trace_processor/importers/ftrace/mali_gpu_event_tracker.cc",
         "src/trace_processor/importers/ftrace/mali_gpu_event_tracker.h",
+        "src/trace_processor/importers/ftrace/pixel_display_tracker.cc",
+        "src/trace_processor/importers/ftrace/pixel_display_tracker.h",
         "src/trace_processor/importers/ftrace/pixel_mm_kswapd_event_tracker.cc",
         "src/trace_processor/importers/ftrace/pixel_mm_kswapd_event_tracker.h",
         "src/trace_processor/importers/ftrace/pkvm_hyp_cpu_tracker.cc",
@@ -3291,6 +3293,8 @@ perfetto_filegroup(
     srcs = [
         "src/trace_processor/perfetto_sql/intrinsics/functions/args.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/args.h",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/art_heap_graph_functions.cc",
+        "src/trace_processor/perfetto_sql/intrinsics/functions/art_heap_graph_functions.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/base64.cc",
         "src/trace_processor/perfetto_sql/intrinsics/functions/base64.h",
         "src/trace_processor/perfetto_sql/intrinsics/functions/clock_functions.h",
