@@ -315,9 +315,14 @@ async function main() {
       tsProjects.push('ui/src/open_perfetto_trace');
     }
 
-
     for (const prj of tsProjects) {
-      transpileTsProject(prj);
+      // When in watch mode, don't error out if we get typescript errors in the 
+      // initial build. Typescript errors on subsequent incremental builds don't
+      // error out so the initial build should behave in the same way. 
+      //
+      // Note: In non-watch mode, we do still break on typescript errors,
+      // there's no change here.
+      transpileTsProject(prj, {noErrCheck: cfg.watch});
     }
 
     if (cfg.watch) {
@@ -593,9 +598,12 @@ function transpileTsProject(project, options) {
 
   if (options !== undefined && options.watch) {
     args.push('--watch', '--preserveWatchOutput');
-    addTask(execModule, ['tsc', args, {async: true}]);
+    addTask(execModule, ['tsc', args, {
+      async: true,
+      noErrCheck: options.noErrCheck,
+    }]);
   } else {
-    addTask(execModule, ['tsc', args]);
+    addTask(execModule, ['tsc', args, {noErrCheck: options.noErrCheck}]);
   }
 }
 
@@ -731,12 +739,15 @@ function startServer() {
           server.listen(port, cfg.httpServerListenHost);
         } else {
           console.error(`ERROR: Port ${port} is in use, and no free port found after 10 tries. Exiting.`);
+          process.exit(1);
         }
       } else {
         console.error(`ERROR: Port ${port} is in use, and --serve-port was explicitly set. Exiting.`);
+        process.exit(1);
       }
     } else {
       console.error('HTTP SERVER ERROR:', e);
+      process.exit(1);
     }
   });
 
